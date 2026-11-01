@@ -44,6 +44,10 @@ When a release changes the tokens, `bunx guren doctor` reports the `guren-ui-tok
 
 An app created before the markers existed has a `guren.css` without them. If you never edited it, `bunx guren upgrade` swaps it for the marked sheet. If you did, doctor leaves it alone and prints how to move your edits after the end marker of the current sheet. Broken markers (a begin with no end, an end with no begin, two blocks) are reported too, and upgrade writes nothing to the file until you fix them.
 
+## Guren UI Components
+
+The components `bunx guren add ui` copies into `resources/js/components/ui/` are upgraded the same way, judged by their whole content since there is no marked block. When a release changes a component, `bunx guren doctor` reports the `guren-ui-components` check, and `bunx guren upgrade` replaces each copy that is byte for byte a template some release shipped. A copy you edited, or one an editor reformatted on save, is reported and left alone; `bunx guren add ui <name> --diff` prints it against the current template, and `--force` takes the template as it is.
+
 ## Migration Notes
 
 ### 2.26.x → 2.27.0

@@ -1,4 +1,5 @@
 import Layout from '../../components/Layout.js'
+import { Alert } from '@/resources/js/components/ui/Alert'
 
 interface Props {
   user?: { id: number; name: string; email: string } | null
@@ -22,10 +23,7 @@ export default function Dashboard({ user }: Props) {
             <p className="mt-2 text-sm text-g-text-2">Email: {user.email}</p>
           </div>
         ) : (
-          <p className="flex gap-3 border-y border-g-line py-2.5 text-sm">
-            <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 text-g-danger">error</span>
-            <span className="text-g-text">You are not signed in.</span>
-          </p>
+          <Alert tone="danger">You are not signed in.</Alert>
         )}
       </section>
     </Layout>

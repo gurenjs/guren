@@ -37,6 +37,7 @@ bunx guren add prototype
 bunx guren add ai --provider anthropic
 bunx guren add oauth
 bunx guren add browser-tests
+bunx guren add ui
 ```
 
 Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
@@ -119,6 +120,19 @@ the rest: scopes, conversations, streaming and queueing.
 
 Apps scaffolded by `create-guren-app` 1.12 or later already carry this setup; `add lint` is for apps created before that. It touches no application code: it writes `.oxlintrc.json` (oxlint with the Guren rules from `@guren/cli/oxlint`: `guren/await-async-assertion` as an error, `guren/no-unvalidated-env-read` as an error in `app/`, `config/`, `routes/`, `src/` and `modules/`, `guren/no-raw-color` as an error in `resources/js/` once the app has `resources/css/guren.css`, the `guren/comment-*` rules as warnings), adds `lint` and `lint:fix` scripts, and adds `oxlint` as a dev dependency on a tilde range (patch updates only: oxlint's JS plugin API is alpha); run `bun install` afterwards. `bunx oxlint` runs under Bun, so no Node install is needed. In an app created before `config/env.ts`, the rule also reports the `process.env` reads in its own `config/database.ts` and `src/app.ts` until they move to a schema or carry a disable.
 
+### `add ui`
+
+`add ui` copies the token-styled React components into `resources/js/components/ui/`: `Button`, `Label`, `Input`, `Textarea`, `Select`, `Checkbox`, `Card` and `Alert`. Each one is a single file built from native elements and the `g-` utilities, and a `className` you pass is appended. The files are yours from then on, so a design change is an edit to one of them rather than to every page.
+
+```bash
+bunx guren add ui                 # every component
+bunx guren add ui button card     # only these
+bunx guren add ui button --diff   # print your copy against the current template; writes nothing
+bunx guren add ui button --force  # replace your copy with the current template
+```
+
+A re-run writes only the components that are missing and lists the ones it left alone. Import each component from its own file (`import { Button } from '@/resources/js/components/ui/Button'`); there is no index file. `Button.tsx` also exports `buttonClass()`, for a `<Link>` or `<a>` styled as a button. `make:feature` and `make:auth` import these components in the pages they write and copy any that are missing, without touching one you already have. New apps from `create-guren-app` ship with all of them.
+
 ### `add browser-tests`
 
 `add browser-tests` sets up Playwright browser tests. They start your app through `bunx guren browser:serve`, which refuses production and any database it cannot show is local. The command writes `playwright.browser.config.ts`, which starts the app on `127.0.0.1:4317`, and `tests/browser/support.ts`, then runs `bunx guren browser:map`, which from then on keeps two kinds of spec under `tests/browser/generated/`:
@@ -148,6 +162,7 @@ An app scaffolded from the `api` blueprint has no `@guren/inertia-client` depend
 | `make:view` | Refuses: a page has no JSON shape to adapt to |
 | `add prototype` | Refuses: prototype mode answers Inertia visits |
 | `add browser-tests` | Refuses: the specs drive Inertia pages. Test the routes over HTTP with `TestApp` |
+| `add ui` | Refuses: the components are for Inertia pages |
 | `make:controller` | Adapts: the controller returns `this.json(...)` and can be wired into `routes/api.ts` as written |
 
 When the signals cannot confirm an API-only app, every command behaves as on a fullstack one. Installing `@guren/inertia-client` is enough to switch back. `guren codegen` leaves page components out of `.guren/pages.gen.ts` on an API-only app, because that file imports `@guren/inertia-client`; `make:view`'s refusal exists to say so at the command that caused it.

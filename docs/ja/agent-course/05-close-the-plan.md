@@ -14,7 +14,7 @@
 bunx guren plan:close docs/plans/meetups/plan.json
 ```
 
-`plan:close` は、計画が承認済みで、すべての要素が検証済み (`verified`) か免除 (`waived`) になっていないと実行を拒否します (免除は第 7 章で説明します)。この計画は条件を満たしているので、次の 2 つのファイルが書き出されます。
+`plan:close` は、計画が承認済みで、すべての要素が検証済み (`verified`) か免除 (`waived`) になっていないと実行を拒否します (免除は第 7 章で説明します)。全ステップの検証が通ると、Dev Center の計画ページに **Check plan:close** が表示され、何も書き込まない `--dry-run` 付きの実行で同じ条件を確かめられます。この計画は条件を満たしているので、コマンドを実行すると次の 2 つのファイルが書き出されます。
 
 ```mermaid
 flowchart LR

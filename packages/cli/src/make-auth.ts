@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
-import { assertCwdUnsupported, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
+import { assertCwdUnsupported, writeRoot, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 import { assertNotApiOnly } from './app-surface'
 import {
   addCreateAppOption,
@@ -21,7 +21,7 @@ import { addSession, appConfiguresSessions } from './add-session'
 import { appendOAuthStateTable } from './oauth-state-table'
 import { registerConsoleCommand } from './console-registrar'
 import { generateSchemaMigration } from './make-migration'
-import { FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
+import { ensureUiComponents, uiComponentsImportedBy } from './guren-css'
 import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
 import { KNOWN_OAUTH_PROVIDERS, OAUTH_PROVIDER_LABELS, oauthEnvEntries } from './oauth-scaffold'
 import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
@@ -42,17 +42,6 @@ function tickHeading(title: string, indent: string): string {
 ${indent}  <span aria-hidden className="h-6 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
 ${indent}  ${title}
 ${indent}</h1>`
-}
-
-/** A flash/error message as a diagnostic row: mono key in a fixed gutter, a
-    hairline, ordinary body text — the shape of `guren check` output, no
-    tinted box. The tone doubles as the printed key. */
-function calloutRow(tone: 'ok' | 'error', body: string, indent: string, { flush = false } = {}): string {
-  const color = tone === 'ok' ? 'text-g-ok' : 'text-g-danger'
-  return `<p className="${flush ? '' : 'mt-4 '}flex gap-3 border-y border-g-line py-2.5 text-sm">
-${indent}  <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 ${color}">${tone}</span>
-${indent}  <span className="text-g-text">${body}</span>
-${indent}</p>`
 }
 
 // A passwordless app keeps show() and destroy() but registers no POST /login,
@@ -651,7 +640,7 @@ function buildOAuthButtonLinks(providers: string[]): string {
     .map(
       (provider) => `          <a
             href="/auth/${provider}"
-            className="flex w-full items-center justify-center rounded-g-ctl border border-g-line-strong bg-g-panel px-4 py-2 text-sm font-bold text-g-text transition hover:border-g-muted"
+            className={buttonClass({ variant: 'secondary', block: true, className: 'flex items-center justify-center' })}
           >
             Continue with ${OAUTH_PROVIDER_LABELS[provider]}
           </a>`,
@@ -692,6 +681,8 @@ ${buildOAuthButtonLinks(providers)}
 function buildOAuthOnlyLoginViewTemplate(providers: string[]): string {
   return `import { Head } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
+import { Alert } from '@/resources/js/components/ui/Alert'
+import { buttonClass } from '@/resources/js/components/ui/Button'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -709,7 +700,7 @@ export default function Login({ errors = {} }: Props) {
         </p>
 
         {errors.message && (
-          ${calloutRow('error', '{errors.message}', '          ')}
+          <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 ${buildOAuthButtonsTemplate(providers, { divider: false })}
       </section>
@@ -745,6 +736,11 @@ export function buildLoginViewTemplate(includeRegister: boolean, includeReset: b
   return `import { Head, Link, useForm } from '@inertiajs/react'
 import { useId } from 'react'
 import Layout from '../../components/Layout.js'
+import { Alert } from '@/resources/js/components/ui/Alert'
+${oauthProviders.length > 0 ? "import { Button, buttonClass } from '@/resources/js/components/ui/Button'" : "import { Button } from '@/resources/js/components/ui/Button'"}
+import { Checkbox } from '@/resources/js/components/ui/Checkbox'
+import { Input } from '@/resources/js/components/ui/Input'
+import { Label } from '@/resources/js/components/ui/Label'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -778,7 +774,7 @@ export default function Login({ email = '', errors = {} }: Props) {
         </p>
 
         {errors.message && (
-          ${calloutRow('error', '{errors.message}', '          ')}
+          <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
         <form
@@ -789,52 +785,49 @@ export default function Login({ email = '', errors = {} }: Props) {
           }}
         >
           <div>
-            <label htmlFor={emailId} className="${FIELD_LABEL_CLASS}">
+            <Label htmlFor={emailId}>
               Email
-            </label>
-            <input
+            </Label>
+            <Input
               id={emailId}
               type="email"
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
               required
-              className="mt-1 ${FORM_INPUT_CLASS}"
+              className="mt-1"
             />
             {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordId} className="${FIELD_LABEL_CLASS}">
+            <Label htmlFor={passwordId}>
               Password
-            </label>
-            <input
+            </Label>
+            <Input
               id={passwordId}
               type="password"
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
               required
-              className="mt-1 ${FORM_INPUT_CLASS}"
+              className="mt-1"
             />
             {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-g-text">
-            <input
-              type="checkbox"
-              checked={form.data.remember}
-              onChange={(event) => form.setData('remember', event.target.checked)}
-              className="h-4 w-4 rounded accent-g-accent"
-            />
-            Remember me
-          </label>
+          <Checkbox
+            label="Remember me"
+            checked={form.data.remember}
+            onChange={(event) => form.setData('remember', event.target.checked)}
+            className="text-sm text-g-text"
+          />
 
-            <button
+            <Button
               type="submit"
               disabled={form.processing}
-              className="${PRIMARY_SUBMIT_CLASS}"
+              block
             >
               Sign in
-          </button>
+          </Button>
         </form>
 ${buildOAuthButtonsTemplate(oauthProviders)}
 ${forgotPasswordText}${signUpLink}
@@ -849,6 +842,10 @@ function buildRegisterViewTemplate(oauthProviders: string[] = []): string {
   return `import { Head, Link, useForm } from '@inertiajs/react'
 import { useId } from 'react'
 import Layout from '../../components/Layout.js'
+import { Alert } from '@/resources/js/components/ui/Alert'
+${oauthProviders.length > 0 ? "import { Button, buttonClass } from '@/resources/js/components/ui/Button'" : "import { Button } from '@/resources/js/components/ui/Button'"}
+import { Input } from '@/resources/js/components/ui/Input'
+import { Label } from '@/resources/js/components/ui/Label'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -885,7 +882,7 @@ export default function Register({ errors = {} }: Props) {
         </p>
 
         {errors.message && (
-          ${calloutRow('error', '{errors.message}', '          ')}
+          <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
         <form
@@ -896,74 +893,74 @@ export default function Register({ errors = {} }: Props) {
           }}
         >
           <div>
-            <label htmlFor={nameId} className="${FIELD_LABEL_CLASS}">
+            <Label htmlFor={nameId}>
               Name
-            </label>
-            <input
+            </Label>
+            <Input
               id={nameId}
               type="text"
               value={form.data.name}
               onChange={(event) => form.setData('name', event.target.value)}
               required
-              className="mt-1 ${FORM_INPUT_CLASS}"
+              className="mt-1"
             />
             {errors.name && <p className="mt-1 text-sm text-g-danger">{errors.name}</p>}
           </div>
 
           <div>
-            <label htmlFor={emailId} className="${FIELD_LABEL_CLASS}">
+            <Label htmlFor={emailId}>
               Email
-            </label>
-            <input
+            </Label>
+            <Input
               id={emailId}
               type="email"
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
               required
-              className="mt-1 ${FORM_INPUT_CLASS}"
+              className="mt-1"
             />
             {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordId} className="${FIELD_LABEL_CLASS}">
+            <Label htmlFor={passwordId}>
               Password
-            </label>
-            <input
+            </Label>
+            <Input
               id={passwordId}
               type="password"
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
               required
-              className="mt-1 ${FORM_INPUT_CLASS}"
+              className="mt-1"
             />
             {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordConfirmationId} className="${FIELD_LABEL_CLASS}">
+            <Label htmlFor={passwordConfirmationId}>
               Confirm password
-            </label>
-            <input
+            </Label>
+            <Input
               id={passwordConfirmationId}
               type="password"
               value={form.data.passwordConfirmation}
               onChange={(event) => form.setData('passwordConfirmation', event.target.value)}
               required
-              className="mt-1 ${FORM_INPUT_CLASS}"
+              className="mt-1"
             />
             {errors.passwordConfirmation && (
               <p className="mt-1 text-sm text-g-danger">{errors.passwordConfirmation}</p>
             )}
           </div>
 
-          <button
+          <Button
             type="submit"
             disabled={form.processing}
-            className="${PRIMARY_SUBMIT_CLASS}"
+            block
           >
             Create account
-          </button>
+          </Button>
         </form>
 ${buildOAuthButtonsTemplate(oauthProviders)}
         <p className="mt-6 text-center text-sm text-g-text-2">
@@ -998,7 +995,7 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
   const emailInput = providerOwnedEmail
     ? `
           <div>
-            <p className="${FIELD_LABEL_CLASS}">Email</p>
+            <p className="block text-sm font-bold text-g-heading">Email</p>
             <p className="mt-1 w-full rounded-g-ctl border border-g-line bg-g-raised px-3 py-2 text-g-text-2">
               {profile.email}
             </p>
@@ -1006,15 +1003,15 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
           </div>`
     : `
           <div>
-            <label htmlFor={emailId} className="${FIELD_LABEL_CLASS}">
+            <Label htmlFor={emailId}>
               Email
-            </label>
-            <input
+            </Label>
+            <Input
               id={emailId}
               type="email"
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
-              className="mt-1 ${FORM_INPUT_CLASS}"
+              className="mt-1"
             />
             {form.errors.email ? <p className="mt-1 text-sm text-g-danger">{form.errors.email}</p> : null}
           </div>`
@@ -1034,29 +1031,29 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
   const passwordInput = includePassword
     ? `
           <div>
-            <label htmlFor={passwordId} className="${FIELD_LABEL_CLASS}">
+            <Label htmlFor={passwordId}>
               New password
-            </label>
-            <input
+            </Label>
+            <Input
               id={passwordId}
               type="password"
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
-              className="mt-1 ${FORM_INPUT_CLASS}"
+              className="mt-1"
             />
             {form.errors.password ? <p className="mt-1 text-sm text-g-danger">{form.errors.password}</p> : null}
           </div>
 
           <div>
-            <label htmlFor={currentPasswordId} className="${FIELD_LABEL_CLASS}">
+            <Label htmlFor={currentPasswordId}>
               Current password
-            </label>
-            <input
+            </Label>
+            <Input
               id={currentPasswordId}
               type="password"
               value={form.data.currentPassword}
               onChange={(event) => form.setData('currentPassword', event.target.value)}
-              className="mt-1 ${FORM_INPUT_CLASS}"
+              className="mt-1"
             />
             <p className="mt-1 text-xs text-g-text-2">${currentPasswordHint}</p>
             {form.errors.currentPassword ? <p className="mt-1 text-sm text-g-danger">{form.errors.currentPassword}</p> : null}
@@ -1079,6 +1076,10 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
   return `import { Head, useForm } from '@inertiajs/react'
 import { useId, type FormEvent } from 'react'
 import Layout from '../../components/Layout.js'
+import { Alert } from '@/resources/js/components/ui/Alert'
+import { Button } from '@/resources/js/components/ui/Button'
+import { Input } from '@/resources/js/components/ui/Input'
+import { Label } from '@/resources/js/components/ui/Label'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -1113,32 +1114,32 @@ export default function ProfileEdit({ profile, status }: Props) {
         </header>
 
         {status ? (
-          ${calloutRow('ok', '{status}', '          ', { flush: true })}
+          <Alert>{status}</Alert>
         ) : null}
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div>
-            <label htmlFor={nameId} className="${FIELD_LABEL_CLASS}">
+            <Label htmlFor={nameId}>
               Name
-            </label>
-            <input
+            </Label>
+            <Input
               id={nameId}
               type="text"
               value={form.data.name}
               onChange={(event) => form.setData('name', event.target.value)}
-              className="mt-1 ${FORM_INPUT_CLASS}"
+              className="mt-1"
             />
             {form.errors.name ? <p className="mt-1 text-sm text-g-danger">{form.errors.name}</p> : null}
           </div>
 ${emailInput}
 ${passwordInput}
-          <button
+          <Button
             type="submit"
             disabled={form.processing}
-            className="${PRIMARY_SUBMIT_CLASS}"
+            block
           >
             Save changes
-          </button>
+          </Button>
         </form>
       </section>
     </Layout>
@@ -1743,6 +1744,8 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   }
 
   const created = await writeScaffoldFiles(files, options)
+  // A separate batch: the auth batch refuses an existing file, and a component the app already has is no conflict.
+  await ensureUiComponents(writeRoot(options), uiComponentsImportedBy(files))
   if (existingMail.length > 0) {
     await reportKeptMail(existingMail, 'no mail config or provider was written; the password reset mail sends through it')
   }

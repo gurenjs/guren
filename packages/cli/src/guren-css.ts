@@ -5,20 +5,12 @@ import { consola } from 'consola'
 import { readIfExists } from './discovery'
 import { writeFileAtomic } from './plan/beside'
 import { loadScaffoldTemplate, scaffoldTemplatePath } from './scaffold-templates'
+import { writeScaffoldFiles, type ScaffoldFileEntry } from './utils'
 
 export const TOKENS_PATH = 'resources/css/guren.css'
 const SHIPPED_SHEET = 'guren-ui/resources/css/guren.css'
 const APP_CSS_PATH = 'resources/css/app.css'
 const IMPORT_LINE = "@import './guren.css';"
-
-/* The Guren UI class vocabulary shared by every generator that emits styled
-   pages. One definition, or make:auth and make:feature drift apart. */
-export const FORM_INPUT_CLASS =
-  'w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent'
-export const FIELD_LABEL_CLASS = 'block text-sm font-bold text-g-heading'
-export const PRIMARY_BUTTON_CLASS =
-  'rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down'
-export const PRIMARY_SUBMIT_CLASS = `w-full ${PRIMARY_BUTTON_CLASS} disabled:cursor-not-allowed disabled:opacity-45`
 
 /** Same-length blanking of block comments, so indices found on the masked text
     address the original. A commented-out import is neither an active one nor a
@@ -221,4 +213,113 @@ export function shippedTokenSheetLocation(cwd: string): string {
 export async function updateTokenSheet(cwd: string): Promise<void> {
   const plan = await planAppTokenSheet(cwd)
   if (plan?.kind === 'update' || plan?.kind === 'adopt') await writeFileAtomic(resolve(cwd, TOKENS_PATH), plan.next)
+}
+
+export const UI_COMPONENTS_DIR = 'resources/js/components/ui'
+
+/** The components `guren add ui` copies, one file each under {@link UI_COMPONENTS_DIR}. */
+export const UI_COMPONENTS = ['Alert', 'Button', 'Card', 'Checkbox', 'Input', 'Label', 'Select', 'Textarea'] as const
+export type UiComponentName = (typeof UI_COMPONENTS)[number]
+
+/**
+ * sha256 of every template version a release shipped per component, the current one included, read
+ * with LF line ends. A copy matching one is unedited, so `guren upgrade` may replace it. Append the
+ * hash of each new template and bump its header's `vN`; `tests/ui-components.test.ts` fails until both agree.
+ */
+export const SHIPPED_UI_COMPONENTS: Readonly<Record<UiComponentName, ReadonlySet<string>>> = {
+  Alert: new Set(['fcacd69a956fdc4b381a846393ec65a922e79b9351cd48bda2870d58d23ed2bb']),
+  Button: new Set(['52b772daee828464bd1708e92995fe6c3f7227776aa50da49950857cc5a6f1f9']),
+  Card: new Set(['0b399883734e631bbaf9de5daebd87eb345f968fca503b81a113ab1a49c9015f']),
+  Checkbox: new Set(['b42805cd83473ebadca103a75fa6ca90d7b134dcb495410c7c3d92a249c88b5a']),
+  Input: new Set(['ea7215126e14061445ba343f52e010eae0eb1b634e76c601d86b6aa009b386b7']),
+  Label: new Set(['f6230461533783175f577743b33e3824e0a4dad8cbc5f939bdf315e56ad5cb53']),
+  Select: new Set(['e8d24f137fc1f9a197522589ba6f54de547a9f00b64de31389f59b6a35ff2dea']),
+  Textarea: new Set(['d56e8e8b3e8dc5e686326a44bd877879e9de638dce56f7d829be2585158adcf0']),
+}
+
+export function uiComponentPath(name: UiComponentName): string {
+  return `${UI_COMPONENTS_DIR}/${name}.tsx`
+}
+
+/** The template this CLI ships for one component. */
+export function uiComponentTemplate(name: UiComponentName): string {
+  return loadScaffoldTemplate(`ui/${uiComponentPath(name)}`)
+}
+
+export function uiComponentEntry(name: UiComponentName): ScaffoldFileEntry {
+  return { path: uiComponentPath(name), contents: uiComponentTemplate(name) }
+}
+
+/** `undefined` when no shipped component carries that name, compared without case. */
+export function findUiComponent(name: string): UiComponentName | undefined {
+  return UI_COMPONENTS.find((component) => component.toLowerCase() === name.toLowerCase())
+}
+
+export const uiComponentHash = (text: string): string => sha256(text.replace(/\r\n/gu, '\n'))
+
+const UI_HEADER = /^\/\/ guren-ui: (\w+ v\d+)\b/u
+
+export type UiComponentPlan =
+  | { kind: 'current' }
+  /** Byte-identical, up to line ends, to a template an earlier release shipped. */
+  | { kind: 'update'; next: string }
+  /** Matches no released template; `claimed` is the version its header names, when it has one. */
+  | { kind: 'edited'; claimed?: string }
+
+/** What `guren upgrade` may do to one copied component. */
+export function planUiComponent(current: string, template: string, released: ReadonlySet<string>): UiComponentPlan {
+  const hash = uiComponentHash(current)
+  if (hash === uiComponentHash(template)) return { kind: 'current' }
+  if (released.has(hash)) return { kind: 'update', next: template }
+  const claimed = UI_HEADER.exec(current)?.[1]
+  return claimed ? { kind: 'edited', claimed } : { kind: 'edited' }
+}
+
+export interface AppUiComponentPlan {
+  name: UiComponentName
+  path: string
+  plan: UiComponentPlan
+}
+
+/** The plan for each shipped component the app has a copy of. Throws when a copy cannot be read. */
+export async function planAppUiComponents(cwd: string): Promise<AppUiComponentPlan[]> {
+  const plans: AppUiComponentPlan[] = []
+  for (const name of UI_COMPONENTS) {
+    const path = uiComponentPath(name)
+    const current = await readIfExists(cwd, path)
+    if (current === null) continue
+    plans.push({ name, path, plan: planUiComponent(current, uiComponentTemplate(name), SHIPPED_UI_COMPONENTS[name]) })
+  }
+  return plans
+}
+
+/** Replace every copy {@link planUiComponent} calls unedited with the current template. */
+export async function updateUiComponents(cwd: string): Promise<void> {
+  for (const { path, plan } of await planAppUiComponents(cwd)) {
+    if (plan.kind === 'update') await writeFileAtomic(resolve(cwd, path), plan.next)
+  }
+}
+
+const UI_COMPONENT_IMPORT = /from '@\/resources\/js\/components\/ui\/(\w+)'/gu
+
+/** The shipped components the files import, in {@link UI_COMPONENTS} order. */
+export function uiComponentsImportedBy(entries: readonly ScaffoldFileEntry[]): UiComponentName[] {
+  const imported = new Set(entries.flatMap((entry) => [...entry.contents.matchAll(UI_COMPONENT_IMPORT)].map((match) => match[1])))
+  return UI_COMPONENTS.filter((name) => imported.has(name))
+}
+
+/**
+ * Write the components a generated page imports that the app lacks, so the page never imports a
+ * missing file. An existing copy is never touched, whatever the generator's `force`. Announces each
+ * write itself, as {@link ensureGurenUiTokens} does, and returns the absolute paths written.
+ */
+export async function ensureUiComponents(cwd: string, names: readonly UiComponentName[]): Promise<string[]> {
+  const missing: ScaffoldFileEntry[] = []
+  for (const name of new Set(names)) {
+    if ((await readIfExists(cwd, uiComponentPath(name))) === null) missing.push(uiComponentEntry(name))
+  }
+  if (missing.length === 0) return []
+  const written = await writeScaffoldFiles(missing, { cwd, skipExisting: true })
+  for (const path of written) consola.success(`Created ${relative(cwd, path)}`)
+  return written
 }

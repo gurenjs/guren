@@ -23,6 +23,9 @@
       "templates/scaffold/mail/definition"
     ],
     "paths": {
+      "@/resources/js/components/ui/*": [
+        "./templates/scaffold/ui/resources/js/components/ui/*"
+      ],
       "@/.guren/pages.gen": [
         "./tests/fixtures/scaffold-typecheck/auth/.guren/pages.gen.ts"
       ],

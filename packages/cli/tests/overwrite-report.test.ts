@@ -4,6 +4,7 @@ import { listBlueprints, runBlueprint } from '../src/blueprints'
 import { builtinSubCommands } from '../src/commands'
 import { makeFeature } from '../src/make-feature'
 import { APP_FIXTURE, captureSuccesses, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, PG_SCHEMA_FIXTURE, seedInertiaApp, writeWorkspaceFiles, type TempWorkspace } from './helpers'
+import { UI_COMPONENTS, uiComponentPath } from '../src/guren-css'
 
 const STALE = '// written before the --force run\n'
 
@@ -134,8 +135,9 @@ describe('--force reports the files it overwrote', () => {
     await writeWorkspaceFiles(workspace.dir, {
       'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
       'app/Models/Post.ts': STALE,
-      // Present, so ensureGurenUiTokens stays quiet: it announces its own write.
+      // Present, so ensureGurenUiTokens and ensureUiComponents stay quiet: each announces its own write.
       'resources/css/guren.css': '',
+      ...Object.fromEntries(UI_COMPONENTS.map((name) => [uiComponentPath(name), ''])),
     })
     const overwritten: string[] = []
 

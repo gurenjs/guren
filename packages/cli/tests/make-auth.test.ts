@@ -1422,7 +1422,7 @@ export default app
       expect(view).not.toContain("ValidationErrors<'name' | 'email' | 'password'>")
       // The read-only email has no control to label.
       expect(view).not.toContain('emailId')
-      expect(view).not.toMatch(/<label[^>]*>\s*Email/)
+      expect(view).not.toMatch(/<label[^>]*>\s*Email/i)
       expect(view).toContain('id={nameId}')
       expect(view).toContain('id={passwordId}')
       expect(view).toContain('id={currentPasswordId}')
@@ -1488,10 +1488,10 @@ export default app
       expect(view).toContain("form.setData('email'")
       // getByLabel() and screen readers find a field only through this pairing.
       for (const id of ['nameId', 'emailId', 'passwordId', 'currentPasswordId']) {
-        expect(view).toContain(`<label htmlFor={${id}}`)
+        expect(view).toContain(`<Label htmlFor={${id}}`)
         expect(view).toContain(`id={${id}}`)
       }
-      expect(view).not.toMatch(/<label className=/)
+      expect(view).not.toMatch(/<label className=/i)
     } finally {
       await workspace.cleanup()
     }

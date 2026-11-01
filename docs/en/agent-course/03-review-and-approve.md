@@ -123,6 +123,8 @@ git commit -m "docs: apply the review to the meetups plan"
 
 ## 5. Approve
 
+To see first whether approval would go through, press **Check plan:approve** on the plan's page in the Dev Center. It runs the command with `--dry-run`, which writes nothing, and shows either that it would pass or the refusal it would print, such as a dirty tree. Either way it gives you the command to copy. The page never approves for you: approving happens in your terminal.
+
 ```bash run
 bunx guren plan:approve docs/plans/meetups/plan.json
 ```
