@@ -168,6 +168,11 @@ marked step and its stall, and the waivers, so they decide from the records
 rather than from your summary. It reads the records only: a held step is in
 `plan:next`'s output, not on the page.
 
+On that page the person checks an approval, a close, or a waiver of a stalled
+step's element: each check is a dry run that writes nothing, and the page then
+copies the command for their own terminal. Point them at the check, and leave
+the command to them, as with every decision above.
+
 ## The Stop hook
 
 While a step is marked, the `Stop` hook verifies it whenever you end a turn and

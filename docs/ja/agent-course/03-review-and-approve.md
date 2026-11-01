@@ -125,6 +125,8 @@ git commit -m "docs: apply the review to the meetups plan"
 
 ## 5. 承認する
 
+承認が通るかを先に確かめたいときは、Dev Center の計画ページで **Check plan:approve** を押します。`--dry-run` 付きでコマンドを実行するので何も書き込まれず、通るかどうかと、通らない場合は作業ツリーに未コミットの変更があるといった拒否の理由が表示されます。どちらの場合もコマンドをコピーできます。ページが承認まで行うことはないので、承認はターミナルで実行します。
+
 ```bash run
 bunx guren plan:approve docs/plans/meetups/plan.json
 ```
