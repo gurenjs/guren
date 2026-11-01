@@ -7,8 +7,10 @@ import { UI_COMPONENTS, uiComponentPath, uiComponentTemplate, type UiComponentNa
 import {
   bundleUiCatalogClient,
   readUiCatalog,
+  UI_CATALOG_COMPONENT_PREFIX,
   UI_CATALOG_ENTRY_ID,
   UI_CATALOG_PREVIEW_PATH,
+  UI_CATALOG_STYLESHEET_ID,
   uiCatalogEntrySource,
   uiCatalogHtml,
   uiCatalogPreviewOrigin,
@@ -65,15 +67,16 @@ describe('the preview entry', () => {
     copy('Button')
     copy('Field')
     const source = uiCatalogEntrySource(root)
-    expect(source).toContain("import '/resources/css/app.css'")
-    expect(source).toContain("Button: () => import('/resources/js/components/ui/Button.tsx')")
-    expect(source).toContain("Field: () => import('/resources/js/components/ui/Field.tsx')")
+    expect(source).toContain(`import '${UI_CATALOG_STYLESHEET_ID}'`)
+    expect(source).toContain("stylesheet: 'resources/css/app.css'")
+    expect(source).toContain(`Button: () => import('${UI_CATALOG_COMPONENT_PREFIX}Button')`)
+    expect(source).toContain(`Field: () => import('${UI_CATALOG_COMPONENT_PREFIX}Field')`)
     expect(source).not.toContain('Card:')
   })
 
   it('falls back to guren.css, then to no stylesheet', () => {
     write('resources/css/guren.css', ':root {}\n')
-    expect(uiCatalogEntrySource(root)).toContain("import '/resources/css/guren.css'")
+    expect(uiCatalogEntrySource(root)).toContain("stylesheet: 'resources/css/guren.css'")
     rmSync(join(root, 'resources'), { recursive: true })
     expect(uiCatalogEntrySource(root)).toContain('stylesheet: null')
   })
@@ -86,6 +89,16 @@ describe('the preview entry', () => {
     expect(hooks.load(entry!)).toBe(uiCatalogEntrySource(root))
     expect(hooks.resolveId('react')).toBeUndefined()
     expect(uiCatalogHtml()).toContain(`import '${UI_CATALOG_ENTRY_ID}'`)
+  })
+
+  // `routeTypesPlugin({ appRoot })` may name a root apart from Vite's, which a root-relative import would miss.
+  it('resolves copies and the stylesheet to absolute files under the app root', () => {
+    copy('Button')
+    write('resources/css/app.css', '')
+    const hooks = uiCatalogHooks(() => root)
+    expect(hooks.resolveId(`${UI_CATALOG_COMPONENT_PREFIX}Button`)).toBe(join(root, uiComponentPath('Button')))
+    expect(hooks.resolveId(UI_CATALOG_STYLESHEET_ID)).toBe(join(root, 'resources/css/app.css'))
+    expect(hooks.resolveId(`${UI_CATALOG_COMPONENT_PREFIX}../../secret`)).toBeUndefined()
   })
 
   it('answers the preview path with the HTML Vite transformed', async () => {

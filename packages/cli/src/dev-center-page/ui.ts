@@ -48,15 +48,17 @@ function componentRow(component: UiCatalogComponent): HTMLElement {
   return row
 }
 
-let listening: string | undefined
-function sizeFrameFrom(frame: HTMLIFrameElement, origin: string): void {
-  if (listening === origin) return
-  listening = origin
-  window.addEventListener('message', (event: MessageEvent<unknown>) => {
-    if (event.origin !== origin || event.source !== frame.contentWindow) return
-    const data = event.data as { type?: unknown; height?: unknown } | null
-    if (data?.type === UI_CATALOG_HEIGHT_MESSAGE && typeof data.height === 'number') frame.style.height = `${Math.ceil(data.height)}px`
-  })
+// A refresh replaces the frame, so the one listener reads whichever frame is on the page now.
+let shown: { frame: HTMLIFrameElement; origin: string } | undefined
+function sizeToContent(frame: HTMLIFrameElement, origin: string): void {
+  if (!shown) {
+    window.addEventListener('message', (event: MessageEvent<unknown>) => {
+      if (!shown || event.origin !== shown.origin || event.source !== shown.frame.contentWindow) return
+      const data = event.data as { type?: unknown; height?: unknown } | null
+      if (data?.type === UI_CATALOG_HEIGHT_MESSAGE && typeof data.height === 'number') shown.frame.style.height = `${Math.ceil(data.height)}px`
+    })
+  }
+  shown = { frame, origin }
 }
 
 function preview(catalog: UiCatalog): HTMLElement[] {
@@ -65,7 +67,7 @@ function preview(catalog: UiCatalog): HTMLElement[] {
   const frame = el('iframe', 'ui-preview')
   frame.title = 'Copied components rendered by the app'
   frame.src = url
-  sizeFrameFrom(frame, new URL(url).origin)
+  sizeToContent(frame, new URL(url).origin)
   const reload = el('button', 'g-btn g-btn-secondary', 'Reload preview')
   reload.type = 'button'
   reload.onclick = () => { frame.src = url }

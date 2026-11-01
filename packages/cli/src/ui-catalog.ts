@@ -11,6 +11,9 @@ import { bundlePageScript } from './page-bundle'
 export const UI_CATALOG_PREVIEW_PATH = '/__guren/ui-catalog'
 export const UI_CATALOG_ENTRY_ID = 'virtual:guren/ui-catalog'
 export const UI_CATALOG_CLIENT_ID = 'virtual:guren/ui-catalog-client'
+/** Resolved to the app root's files by the Vite plugin, so the entry names no path Vite would read against its own root. */
+export const UI_CATALOG_COMPONENT_PREFIX = 'virtual:guren/ui-catalog/component/'
+export const UI_CATALOG_STYLESHEET_ID = 'virtual:guren/ui-catalog/stylesheet'
 export const UI_CATALOG_ASSET = 'assets/ui-catalog/catalog.js'
 /** The client imports these, resolved from the app so the catalog shares its React and Inertia. */
 export const UI_CATALOG_EXTERNALS = ['react', '@inertiajs/react'] as const
@@ -88,17 +91,17 @@ export function uiCatalogStylesheet(root: string): string | undefined {
 }
 
 /**
- * The entry module: the stylesheet, one loader per copied component, and the client's render call. Every
- * path it writes comes from the closed lists above, never from the app, so each is quoted as it stands.
+ * The entry module: the stylesheet, one loader per copied component, and the client's render call. It writes
+ * only ids and names from the closed lists above, never a path from the app, so each is quoted as it stands.
  */
 export function uiCatalogEntrySource(root: string): string {
   const stylesheet = uiCatalogStylesheet(root)
   const loaders = UI_COMPONENTS.filter((name) => existsSync(join(root, uiComponentPath(name))))
-    .map((name) => `  ${name}: () => import('/${uiComponentPath(name)}'),`)
+    .map((name) => `  ${name}: () => import('${UI_CATALOG_COMPONENT_PREFIX}${name}'),`)
   return [
     `import { createRoot } from 'react-dom/client'`,
     `import { renderUiCatalog } from '${UI_CATALOG_CLIENT_ID}'`,
-    ...(stylesheet ? [`import '/${stylesheet}'`] : []),
+    ...(stylesheet ? [`import '${UI_CATALOG_STYLESHEET_ID}'`] : []),
     '',
     `renderUiCatalog(document.getElementById('guren-ui-catalog'), createRoot, {`,
     `  stylesheet: ${stylesheet ? `'${stylesheet}'` : 'null'},`,

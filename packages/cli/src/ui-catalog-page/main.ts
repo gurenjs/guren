@@ -5,6 +5,7 @@
 import { App } from '@inertiajs/react'
 import { Component, createElement as h, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import { UI_CATALOG_HEIGHT_MESSAGE } from '../dev-center-links'
+import type { UiComponentName } from '../guren-css'
 import { UI_CATALOG_VARIANTS } from '../ui-catalog-variants'
 
 type Module = Record<string, unknown>
@@ -53,7 +54,7 @@ const ALERT_TEXT: Record<string, string> = { ok: 'The post was saved.', warn: 'T
 
 const prevent = (event: { preventDefault(): void }) => event.preventDefault()
 
-const DEMOS: Record<string, (module: Module) => ReactNode> = {
+const DEMOS: Record<UiComponentName, (module: Module) => ReactNode> = {
   Alert(module) {
     const Alert = exported(module, 'Alert')
     if (!Alert) return missingExport('Alert.tsx', 'Alert')
@@ -156,7 +157,7 @@ function catalog(modules: Map<string, Module | Error>, stylesheet: string | null
   return function UiCatalog() {
     const sections = [...modules].map(([name, module]) => section(name, module instanceof Error
       ? h('p', { style: note }, `${name}.tsx could not be loaded: ${module.message}`)
-      : (DEMOS[name] ?? (() => null))(module)))
+      : DEMOS[name as UiComponentName](module)))
     return h('main', { style: { padding: '8px 24px 24px', background: 'var(--g-page)', color: 'var(--g-text)', fontFamily: 'var(--g-font-sans, sans-serif)' } },
       stylesheet ? null : h('p', { style: note }, 'The app has no resources/css/app.css or guren.css, so the copies render unstyled.'),
       sections.length ? sections : h('p', { style: { color: 'var(--g-text-2)' } }, 'No copied components. Run `bunx guren add ui` to copy them.'))

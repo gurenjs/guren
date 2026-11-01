@@ -1,7 +1,17 @@
 import { resolve } from 'node:path'
 import type { ViteDevServer } from 'vite'
-import { UI_COMPONENTS_DIR } from '../guren-css'
-import { UI_CATALOG_CLIENT_ID, UI_CATALOG_ENTRY_ID, UI_CATALOG_PREVIEW_PATH, uiCatalogClientSource, uiCatalogEntrySource, uiCatalogHtml } from '../ui-catalog'
+import { UI_COMPONENTS, UI_COMPONENTS_DIR, uiComponentPath } from '../guren-css'
+import {
+  UI_CATALOG_CLIENT_ID,
+  UI_CATALOG_COMPONENT_PREFIX,
+  UI_CATALOG_ENTRY_ID,
+  UI_CATALOG_PREVIEW_PATH,
+  UI_CATALOG_STYLESHEET_ID,
+  uiCatalogClientSource,
+  uiCatalogEntrySource,
+  uiCatalogHtml,
+  uiCatalogStylesheet,
+} from '../ui-catalog'
 
 const RESOLVED_ENTRY = `\0${UI_CATALOG_ENTRY_ID}`
 const RESOLVED_CLIENT = `\0${UI_CATALOG_CLIENT_ID}`
@@ -15,7 +25,13 @@ export function uiCatalogHooks(appRoot: () => string) {
     resolveId(id: string): string | undefined {
       if (id === UI_CATALOG_ENTRY_ID) return RESOLVED_ENTRY
       if (id === UI_CATALOG_CLIENT_ID) return RESOLVED_CLIENT
-      return undefined
+      // Absolute files under the app root, which `routeTypesPlugin({ appRoot })` may set apart from Vite's root.
+      if (id === UI_CATALOG_STYLESHEET_ID) {
+        const stylesheet = uiCatalogStylesheet(appRoot())
+        return stylesheet ? resolve(appRoot(), stylesheet) : undefined
+      }
+      const component = UI_COMPONENTS.find((name) => id === `${UI_CATALOG_COMPONENT_PREFIX}${name}`)
+      return component ? resolve(appRoot(), uiComponentPath(component)) : undefined
     },
     load(id: string): string | undefined {
       if (id === RESOLVED_ENTRY) return uiCatalogEntrySource(appRoot())
