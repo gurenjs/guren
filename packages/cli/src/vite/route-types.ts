@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process'
-import { resolve } from 'node:path'
+import { basename, dirname, extname, resolve } from 'node:path'
 import type { HmrContext, Logger, Plugin, ResolvedConfig, ViteDevServer } from 'vite'
-import { MODELS_DIR, RESOURCES_DIR, toPosixRelative } from '../discovery'
+import { IMPORTABLE_EXTENSIONS, MODELS_DIR, RESOURCES_DIR, toPosixRelative, VALIDATORS_DIR } from '../discovery'
+import { MODULE_ENTRY_FILE, MODULE_ROUTES_FILE } from '../import-resolution'
 import { escapeRegExp } from '../utils'
 import { cliEntry } from '../cli-entry'
 
@@ -51,6 +52,16 @@ const DEFAULT_LANG_DIR = 'lang'
 // Models feed attachments.gen.ts: an edited Attachable(...) must regenerate the
 // map, root and module models alike. Matched POSIX-relative, so also Windows-safe.
 const MODELS_PATTERN = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(MODELS_DIR)}(?:/|$)`, 'u')
+// A route's body/params/query schema renders into api-client.gen.ts, and generators write it here.
+const VALIDATORS_PATTERN = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(VALIDATORS_DIR)}(?:/|$)`, 'u')
+const SOURCE_EXTENSION = `(?:${[...IMPORTABLE_EXTENSIONS].map((extension) => escapeRegExp(extension)).join('|')})`
+// Codegen reads a module's routes through its entry's defineModule({ routes }), which
+// imports `./routes` (a file or a directory): moduleEntryFile() and moduleRoutesEntryFile().
+const MODULE_ROUTES_PATTERN = new RegExp(
+  `^modules/[^/]+/(?:${basename(MODULE_ENTRY_FILE, extname(MODULE_ENTRY_FILE))}${SOURCE_EXTENSION}$`
+    + `|${basename(MODULE_ROUTES_FILE, extname(MODULE_ROUTES_FILE))}(?:${SOURCE_EXTENSION}$|/))`,
+  'u',
+)
 
 /**
  * The one place path options are defaulted: `shouldRegenerate` (what to watch) and
@@ -169,10 +180,14 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     // Matched by shape, so a module created mid-session needs no restart.
     const moduleResources = new RegExp(`^modules/[^/]+/${escapeRegExp(paths.resourcesDir)}(?:/|$)`, 'u')
     const langDir = resolve(root, DEFAULT_LANG_DIR)
+    // The entry's siblings (routes/auth.ts) are the registrars it imports. A routes
+    // file at the app root has no such directory to watch.
+    const routesDir = dirname(watchFile)
     const changedFile = resolve(file)
 
     if (
       changedFile === watchFile ||
+      (routesDir !== root && changedFile.startsWith(`${routesDir}/`) && IMPORTABLE_EXTENSIONS.has(extname(changedFile))) ||
       changedFile.startsWith(`${pagesDir}/`) || changedFile === pagesDir ||
       changedFile.startsWith(`${resourcesDir}/`) || changedFile === resourcesDir ||
       // Codegen only reads lang/<locale>/*.json; other files under lang/ never affect the union.
@@ -183,7 +198,10 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
 
     // Relativized only when the cheap prefix checks above miss: this runs on every watcher event.
     const relativeFile = toPosixRelative(root, changedFile)
-    return moduleResources.test(relativeFile) || MODELS_PATTERN.test(relativeFile)
+    return moduleResources.test(relativeFile)
+      || MODELS_PATTERN.test(relativeFile)
+      || VALIDATORS_PATTERN.test(relativeFile)
+      || MODULE_ROUTES_PATTERN.test(relativeFile)
   }
 
   return {
