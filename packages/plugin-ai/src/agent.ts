@@ -4,6 +4,7 @@
  * `appTools()` resolve from the application and principal the call belongs to.
  */
 import { type AgentPrincipal, type ServiceBindings } from '@guren/core'
+import { redactQueryParams } from '@guren/core/internal/redact-query-params'
 import {
   ToolLoopAgent,
   stepCountIs,
@@ -417,7 +418,7 @@ export function bindAgent<T extends Agent>(
           try {
             await persistTurn(event.responseMessages)
           } catch (error) {
-            console.error(`[@guren/plugin-ai] ${agentName} could not store its turn in conversation "${history?.id}".`, error)
+            console.error(`[@guren/plugin-ai] ${agentName} could not store its turn in conversation "${history?.id}".`, redactQueryParams(error))
           }
         },
       })
