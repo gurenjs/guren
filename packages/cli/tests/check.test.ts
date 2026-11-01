@@ -208,7 +208,11 @@ test('lists tasks', async () => {
       expect(agentManifest?.status).toBe('pass')
       expect(agentManifest?.message).toContain('not applicable')
       expect(agentManifest?.fix).toBeUndefined()
-      const unconditional = manifestChecks.filter(c => c !== agentManifest)
+      // So is the form manifest (RFC 0036): no route binds a body here.
+      const formsManifest = manifestChecks.find(c => c.key === 'manifest:.guren/forms.gen.ts')
+      expect(formsManifest?.status).toBe('pass')
+      expect(formsManifest?.message).toContain('not applicable')
+      const unconditional = manifestChecks.filter(c => c !== agentManifest && c !== formsManifest)
       expect(unconditional.length).toBeGreaterThan(0)
       expect(unconditional.every(c => c.status === 'warn')).toBe(true)
       expect(unconditional.every(c => c.fix?.args.join(' ') === 'codegen')).toBe(true)

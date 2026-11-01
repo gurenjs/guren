@@ -53,6 +53,9 @@ export type FormsManifestPlan =
   | { kind: 'skip'; reason: 'no-client' | 'no-routes' }
   | { kind: 'skip'; reason: 'client-without-forms'; hint: string }
 
+// The methods an Inertia form submits with; a body-bound QUERY route takes no form.
+const FORM_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
 const FIELD_TYPES = new Set<FieldContract['type']>(['string', 'number', 'integer', 'boolean', 'array', 'object'])
 
 /** Whether the client the app installs exports `./forms`: `null` when none resolves from the app root. */
@@ -156,7 +159,7 @@ export function buildFormContracts(definitions: readonly RouteDefinitionLike[], 
   for (const definition of [...definitions].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))) {
     const name = definition.name
     const body = definition.schemas?.body
-    if (!name || seen.has(name) || !isZodSchema(body)) continue
+    if (!name || seen.has(name) || !FORM_METHODS.has(definition.method.toUpperCase()) || !isZodSchema(body)) continue
     seen.add(name)
     const object = objectNode(body)
     const shape = object ? objectShape(object) : undefined

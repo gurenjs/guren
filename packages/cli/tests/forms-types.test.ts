@@ -62,13 +62,14 @@ describe('readFieldContract', () => {
 })
 
 describe('buildFormContracts', () => {
-  it('writes one contract per named route with an object body, sorted by name', () => {
+  it('writes one contract per named route an Inertia form submits to with an object body, sorted by name', () => {
     const contracts = buildFormContracts([
       route('posts.store', z.object({ title: z.string() })),
       route('posts.index', undefined, 'GET'),
       { method: 'POST', path: '/unnamed', schemas: { body: z.object({ a: z.string() }) } },
       route('comments.store', z.object({ body: z.string() })),
       route('raw.store', z.string()),
+      route('posts.search', z.object({ q: z.string() }), 'QUERY'),
     ], [])
     expect(contracts.map((contract) => contract.identifier)).toEqual(['commentsStoreForm', 'postsStoreForm'])
   })
