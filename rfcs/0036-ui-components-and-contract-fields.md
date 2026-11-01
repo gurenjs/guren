@@ -157,8 +157,8 @@ block to mark, and a copy is judged by its content alone.
 
 - A new doctor check, `guren-ui-components`, reads each file under
   `resources/js/components/ui/` whose name is a shipped component and hashes
-  it: sha256 over the bytes with line endings turned to LF, trailing
-  whitespace removed from each line, and one final newline. Nothing else is
+  it: sha256 over the text with CRLF turned to LF, the normalization
+  `SHIPPED_UNMARKED_SHEETS` is read with (`guren-css.ts`). Nothing else is
   normalized.
 - The CLI carries, per component, the hashes of every template version it has
   released (`SHIPPED_UI_COMPONENTS`, closed like `SHIPPED_UNMARKED_SHEETS`;
@@ -423,7 +423,8 @@ serializes it, an ISO string in UTC (`2026-11-01T03:22:55.000Z`).
    milliseconds the minute-wide control cannot show, so saving an Edit page
    unchanged would move every timestamp.
 
-When the initial value has seconds, `step` is `1`, so the control shows them.
+When the initial value has non-zero seconds or milliseconds, `step` is `1`, so
+the control shows the seconds.
 A local time that falls in a daylight-saving gap is resolved by the browser's
 `Date`. A `date` field
 (`format: 'date'`) involves no zone: its value is the first ten characters,
@@ -432,8 +433,9 @@ sent back as typed.
 **`required` and blank values.** JSON Schema's `required` says the key must be
 present; an HTML `required` says the control must be non-empty. They differ for
 `z.string()` with no `min(1)`, which accepts `''`. `useField` sets HTML
-`required` only when the key is required, the field is not nullable, and the
-field is not a string or has `minLength >= 1`.
+`required` on a field that is not nullable, is not a string without a
+`minLength >= 1`, and either has a required key or starts with a value (the
+second case is explained below the table).
 
 On submit, `useRouteForm` normalizes a control that is blank (`''`), by what
 the field is and by the value it held when the form was created:
@@ -451,10 +453,10 @@ sends the `''` and the server's schema decides: a `.min(1)` answers 422 with
 its message under the field, and a plain `z.string()` stores the empty string.
 The one schema that reads `''` as something else is an optional, non-nullable
 `z.coerce.number()` (or `z.coerce.date()`), which coerces it to `0` (or an
-invalid date). So `useField` sets HTML `required` on an optional,
-non-nullable field that starts with a value, unless it is a string with no
-`minLength`: the browser then stops a submission the server would reject or
-misread, since such a schema has no way to say "cleared". A field meant to be clearable is declared nullable, as
+invalid date). That is why an optional, non-nullable field that starts with a
+value gets HTML `required` too: such a schema has no way to say "cleared", and
+the browser stops a submission the server would reject or misread. A field
+meant to be clearable is declared nullable, as
 `make:validator` already writes every nullable column
 (`.nullable().optional()`), so its cleared value is `null`. PATCH-style
 dirty-field submission is out of scope.
@@ -869,6 +871,8 @@ the template change and that release, as `common-pitfalls.md` describes.
   `.oxlintrc.json` with `--fix` over each component template and fails on any
   change it makes.
 - `tests/scaffold-blog-sync.test.ts` pins the auth templates the blog shares.
+- `tests/make-feature.test.ts` imports `FIELD_LABEL_CLASS` and asserts the
+  label markup built from it, so M1 rewrites that assertion against `Label`.
 - The agent harness's UI rule (`templates/agent/core/rules/ui.md`, PR #1241)
   lists the shared class strings, and `tests/agent-ui-rule.test.ts` requires
   each to appear in `guren-css.ts`, `make-feature.ts` or `make-auth.ts`, and
