@@ -140,6 +140,15 @@ function loadServer(): Promise<ServerModule> {
   return serverModulePromise
 }
 
+/** Mirrors the server's `support/default-headers.ts`: the caller's header wins whatever its case. */
+function withDefaultHeaders(init: HeadersInit | undefined, defaults: Record<string, string>): Headers {
+  const headers = new Headers(init)
+  for (const [name, value] of Object.entries(defaults)) {
+    if (!headers.has(name)) headers.set(name, value)
+  }
+  return headers
+}
+
 /**
  * The Inertia response without a booted app: no shared props, root document, asset
  * version or SSR, which is why the mock keeps it. The page object (prop
@@ -164,12 +173,11 @@ async function renderInertia(
     prefersJson ? serialized : `${initialPageElement(serialized)}<div id="app"></div>`,
     {
       status: options.status ?? 200,
-      headers: {
+      headers: withDefaultHeaders(options.headers, {
         'Content-Type': prefersJson ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
         'X-Inertia': 'true',
         Vary: INERTIA_VARY,
-        ...options.headers,
-      },
+      }),
     },
   )
 
@@ -203,10 +211,7 @@ export function createGurenControllerModule() {
     text(body: string, init: ResponseInit = {}): Response {
       return new Response(body, {
         ...init,
-        headers: {
-          'Content-Type': 'text/plain; charset=utf-8',
-          ...init.headers,
-        },
+        headers: withDefaultHeaders(init.headers, { 'Content-Type': 'text/plain; charset=utf-8' }),
       })
     }
 

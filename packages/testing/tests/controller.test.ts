@@ -212,6 +212,22 @@ describe('createGurenControllerModule', () => {
     expect(payload.url).toBe('/posts?page=2&sort=desc')
   })
 
+  it('Controller.inertia and text let a lowercase header replace the default', async () => {
+    const { Controller } = createGurenControllerModule()
+    const ctx = createControllerContext('http://example.com/feed', {
+      headers: { 'X-Inertia': 'true' },
+    })
+    const controller = new Controller()
+    controller.setContext(ctx)
+
+    const page = await controller.inertia('Feed', {}, { headers: { 'content-type': 'application/vnd.feed+json' } })
+    expect(page.headers.get('content-type')).toBe('application/vnd.feed+json')
+    expect(page.headers.get('x-inertia')).toBe('true')
+
+    const text = controller.text('a,b', { headers: new Headers({ 'content-type': 'text/csv' }) })
+    expect(text.headers.get('content-type')).toBe('text/csv')
+  })
+
   // The mock resolves props through the engine's own rule, so a controller test
   // sees the prop set a partial reload or an initial visit would actually send.
   describe('Controller.inertia partial reloads and deferred props', () => {
