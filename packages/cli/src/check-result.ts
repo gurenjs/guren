@@ -1,3 +1,5 @@
+import { gurenCommandLine } from './shell-quote'
+
 export type CheckStatus = 'pass' | 'warn' | 'fail'
 
 /**
@@ -115,8 +117,7 @@ export function routesCommandFix(command: string, routesFile?: string): CheckFix
 
 /** The fix as a copy-pasteable command line; an argument is quoted only when a shell would split it. */
 export function formatFixCommand(fix: CheckFix): string {
-  const words = fix.args.map((arg) => (/^[\w./@:=-]+$/u.test(arg) ? arg : `'${arg.replace(/'/gu, `'\\''`)}'`))
-  return ['bunx', 'guren', ...words].join(' ')
+  return gurenCommandLine(fix.args)
 }
 
 /**

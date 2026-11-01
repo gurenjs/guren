@@ -21,10 +21,10 @@ export function byId<T extends Element = HTMLElement>(id: string): T {
 }
 
 /** A command to copy, never run; the Dev Center's plan page shares it. Where the clipboard is refused, it selects the text. */
-export function commandRow(text: string): HTMLElement {
+export function commandRow(text: string, label = 'copy'): HTMLElement {
   const row = el('div', 'command')
   const code = el('code', '', text)
-  const button = el('button', '', 'copy')
+  const button = el('button', '', label)
   button.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(text)
@@ -34,7 +34,7 @@ export function commandRow(text: string): HTMLElement {
       button.textContent = 'selected'
     }
     setTimeout(() => {
-      button.textContent = 'copy'
+      button.textContent = label
     }, 1600)
   })
   row.append(code, button)

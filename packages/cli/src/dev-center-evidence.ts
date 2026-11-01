@@ -42,6 +42,8 @@ export interface StepBrowserEvidence {
 
 export interface StepEvidence {
   id: string
+  /** The elements the step completes, which a stalled step offers to waive. */
+  elements: string[]
   routes: StepEvidenceRoute[]
   /** Browser-map features (RFC 0033 §2) of the pages the step's views and routes render. */
   features: string[]
@@ -122,6 +124,7 @@ export async function readPlanEvidence(appRoot: string, slug: string): Promise<P
     }
     return {
       id: step.id,
+      elements: step.elementIds,
       routes: routes.map(({ id, method, path, name }) => ({ id, method, path, name })),
       features,
       ...(record ? { record: { outcome: record.outcome, ranAt: record.ranAt, current: record.planDigest === located.digest, files: Object.keys(record.fingerprint.files).sort(), ...(record.work ? { work: record.work } : {}) } } : {}),

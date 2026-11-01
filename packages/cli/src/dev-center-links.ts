@@ -5,6 +5,7 @@ const PLAN_PAGE = /^\/_guren\/plans\/([^/]+)$/
 const REVIEW_PATH = /^\/_guren\/plans\/([^/]+)\/(review|feedback)$/
 
 const EVIDENCE_PATH = /^\/_guren\/plans\/([^/]+)\/evidence$/
+const READINESS_PATH = /^\/_guren\/plans\/([^/]+)\/readiness\/(approve|close|waive)$/
 const SCREENSHOT_PATH = /^\/_guren\/browser\/([^/]+)\/screenshots\/([0-9a-f]{64})$/
 
 export interface ReviewRoute {
@@ -39,6 +40,21 @@ export function planEvidenceSlug(pathname: string): string | undefined {
   const match = EVIDENCE_PATH.exec(pathname)
   if (!match) return undefined
   try { return decodeURIComponent(match[1]!) } catch { return undefined }
+}
+
+/** The person's three decisions on a plan (RFC 0030 §8), each checked by a dry run and copied, never run. */
+export type PlanDecision = 'approve' | 'close' | 'waive'
+
+/** Whether a decision's command would go through now; `waive` names one element. */
+export function planReadinessPath(slug: string, decision: PlanDecision, element?: string): string {
+  const query = element === undefined ? '' : `?element=${encodeURIComponent(element)}`
+  return `${planPagePath(slug)}/readiness/${decision}${query}`
+}
+
+export function planReadinessRoute(pathname: string): { slug: string; decision: PlanDecision } | undefined {
+  const match = READINESS_PATH.exec(pathname)
+  if (!match) return undefined
+  try { return { slug: decodeURIComponent(match[1]!), decision: match[2] as PlanDecision } } catch { return undefined }
 }
 
 /** A `browser:record` screenshot, named by its run and the digest `run.json` records for it. */

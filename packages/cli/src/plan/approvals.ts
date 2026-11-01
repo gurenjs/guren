@@ -79,9 +79,12 @@ export async function recordPlanApproval(
   planPath: string,
   approvals: PlanApprovals,
   approval: PlanApproval,
+  options: { dryRun?: boolean } = {},
 ): Promise<{ existing?: PlanApproval; readingsAdded: PlanPropertyReading[] }> {
   const path = planApprovalsPath(planPath)
-  const write = (entries: PlanApproval[]) => writeFileAtomic(path, `${JSON.stringify({ ...approvals, approvals: entries }, null, 2)}\n`)
+  const write = async (entries: PlanApproval[]) => {
+    if (!options.dryRun) await writeFileAtomic(path, `${JSON.stringify({ ...approvals, approvals: entries }, null, 2)}\n`)
+  }
   const existing = approvalAt(approvals, approval.hash)
   if (!existing) {
     await write([...approvals.approvals, approval])

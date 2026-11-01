@@ -1,10 +1,12 @@
 import type { GraphNode, GurenApplicationGraph, GraphResult } from '../application-graph'
 import type { PlanEvidence, StepBrowserEvidence, StepEvidence } from '../dev-center-evidence'
-import { browserScreenshotPath, planEvidencePath, planPagePath, planReviewPath, planSlugFromPath, savedReviewPrompt } from '../dev-center-links'
+import type { PlanReadiness } from '../dev-center-readiness'
+import { browserScreenshotPath, planEvidencePath, planPagePath, planReadinessPath, planReviewPath, planSlugFromPath, savedReviewPrompt, type PlanDecision } from '../dev-center-links'
 import type { PlanOverview } from '../docs-viewer-plans'
 import { commandRow } from '../docs-viewer-page/dom'
 import type { RuntimeErrorResult } from '../runtime-errors'
-import { planAttention, sortPlans, STEP_TONE, stepRuntimeErrors, stepsByTask, verifiedCount, type DevCenterPlan, type PlanAttention } from './plans'
+import { gurenCommandLine } from '../shell-quote'
+import { attentionDecision, planAttention, sortPlans, STEP_TONE, stepRuntimeErrors, stepsByTask, verifiedCount, type DevCenterPlan, type PlanAttention } from './plans'
 
 function element<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id)
@@ -309,7 +311,85 @@ function evidenceBlock(stepId: string, read: PlanEvidenceRead): HTMLElement {
   else block.append(text('p', `No browser:record step names ${evidence.features.length ? `this step's acceptance ids or the ${evidence.features.join(', ')} feature` : "this step's acceptance ids"}.`, 'meta'))
   return block
 }
-function stepRow(step: DevCenterPlan['steps'][number], read: PlanEvidenceRead): HTMLElement {
+async function readReadiness(slug: string, decision: PlanDecision, elementId?: string): Promise<PlanReadiness> {
+  const response = await fetch(planReadinessPath(slug, decision, elementId), { cache: 'no-store', redirect: 'error' })
+  const body = await response.json().catch(() => undefined) as PlanReadiness | { error?: { message?: string } } | undefined
+  if (response.status === 404 && !body) throw new Error('this dev server predates the decision checks; update @guren/core')
+  if (!response.ok) throw new Error(body && 'error' in body && body.error?.message ? body.error.message : `HTTP ${response.status}`)
+  if (!body || !('schemaVersion' in body) || body.schemaVersion !== 1 || !['ready', 'refused', 'unavailable'].includes(body.status) || !Array.isArray(body.args)) {
+    throw new Error('Unsupported readiness payload')
+  }
+  return body
+}
+/** The CLI's answer and the command to paste; with no `command` (a waiver with no reason yet), the answer alone. */
+function readinessBlock(readiness: PlanReadiness, command: string | undefined): HTMLElement[] {
+  const when = `checked ${readiness.checkedAt}`
+  const copy = (label: string) => (command === undefined ? [] : [commandRow(command, label)])
+  if (readiness.status === 'ready') return [text('p', `Would go through (${when}).${command === undefined ? '' : ' Run it in your terminal:'}`, 'meta'), ...copy('copy')]
+  if (readiness.status === 'refused') return [text('p', `Would be refused (${when}):`, 'meta warning'), text('pre', readiness.message ?? '', 'refusal'), ...copy('copy anyway')]
+  return [text('p', `Could not check (${when}): ${readiness.message ?? 'no answer'}`, 'meta warning'), ...copy('copy anyway')]
+}
+/** A check, never the command: the Dev Center cannot tell the person from an agent's browser (RFC 0030 §8). */
+function checkButton(label: string, check: () => Promise<void>): HTMLButtonElement {
+  const button = text('button', label, 'g-btn g-btn-secondary') as HTMLButtonElement
+  button.onclick = async () => {
+    button.disabled = true
+    try { await check() } finally { button.disabled = false; button.textContent = 'Check again' }
+  }
+  return button
+}
+function checkFailed(error: unknown): HTMLElement {
+  return text('p', `Check unavailable: ${error instanceof Error ? error.message : 'Read failed'}.`, 'meta warning')
+}
+function decisionCard(plan: DevCenterPlan, decision: Exclude<PlanDecision, 'waive'>): HTMLElement {
+  const result = text('div', '')
+  const button = checkButton(`Check plan:${decision}`, async () => {
+    result.replaceChildren(text('p', 'Checking…', 'meta'))
+    try {
+      const readiness = await readReadiness(plan.slug, decision)
+      result.replaceChildren(...readinessBlock(readiness, gurenCommandLine(readiness.args)))
+    } catch (error) { result.replaceChildren(checkFailed(error)) }
+  })
+  const intro = text('p', `Checks whether plan:${decision} would go through now without running it, then gives you the command for your terminal. The Dev Center never runs it.`, 'meta')
+  return card(decision === 'approve' ? 'Approve' : 'Close', intro, button, result)
+}
+function waiveRow(slug: string, elementId: string): HTMLElement {
+  const row = text('div', '', 'waive')
+  const reason = document.createElement('input')
+  reason.type = 'text'
+  reason.className = 'g-input'
+  reason.placeholder = 'Why it is accepted incomplete'
+  reason.setAttribute('aria-label', `Reason for waiving ${elementId}`)
+  const result = text('div', '')
+  let checked: PlanReadiness | undefined
+  const render = () => {
+    if (!checked) return
+    const why = reason.value.trim()
+    // The reason stays in the page: it is quoted into the command here and never sent to the server.
+    const command = why ? gurenCommandLine([...checked.args, '--reason', why]) : undefined
+    result.replaceChildren(...readinessBlock(checked, command), ...(why ? [] : [text('p', 'Type a reason to get the command.', 'meta')]))
+  }
+  reason.oninput = render
+  const button = checkButton('Check', async () => {
+    result.replaceChildren(text('p', 'Checking…', 'meta'))
+    try {
+      checked = await readReadiness(slug, 'waive', elementId)
+      render()
+    } catch (error) { result.replaceChildren(checkFailed(error)) }
+  })
+  row.append(text('div', elementId, 'id mono'), reason, button, result)
+  return row
+}
+function waiveBlock(slug: string, stepId: string, read: PlanEvidenceRead): HTMLElement {
+  const block = text('details', '', 'evidence')
+  block.append(text('summary', 'Waive an element'), text('p', 'A waiver accepts an element incomplete, with your reason, in the decision log beside the plan. Check an element, then run the command in your terminal.', 'meta'))
+  const evidence = 'error' in read.evidence ? undefined : read.evidence.steps.find((entry) => entry.id === stepId)
+  if (!evidence) block.append(text('p', 'The step\'s elements could not be read with its evidence. Refresh the plan.', 'meta warning'))
+  else if (!evidence.elements.length) block.append(text('p', 'This step completes no element, so there is nothing to waive.', 'meta'))
+  else block.append(...evidence.elements.map((id) => waiveRow(slug, id)))
+  return block
+}
+function stepRow(slug: string, step: DevCenterPlan['steps'][number], read: PlanEvidenceRead): HTMLElement {
   const row = text('div', '', 'step')
   const badge = text('div', '')
   badge.append(text('span', step.state, `g-badge g-badge-${STEP_TONE[step.state]}`))
@@ -320,6 +400,7 @@ function stepRow(step: DevCenterPlan['steps'][number], read: PlanEvidenceRead): 
   if (step.stall) body.append(text('div', `Stalled ${step.stall.at}: ${step.stall.reason}`, 'meta error'))
   if (step.changed?.length) body.append(text('div', `Changed since verified: ${step.changed.join(', ')}`, 'meta mono'))
   body.append(evidenceBlock(step.id, read))
+  if (step.stall) body.append(waiveBlock(slug, step.id, read))
   row.append(badge, body)
   return row
 }
@@ -374,15 +455,17 @@ async function loadPlan(slug: string): Promise<void> {
       const standing = plan.approval ? `approved ${byline(plan.approval.at, plan.approval.by)}` : plan.standing
       const meta = [plan.file, standing, plan.entities.join(', ')].filter(Boolean).join(' · ')
       body.append(text('p', meta, 'lede mono'), attentionBox(planAttention(plan)))
+      const decision = attentionDecision(plan)
+      if (decision) body.append(decisionCard(plan, decision))
       // Shown apart from the attention box, which a draft's or an edited plan's approval outranks.
       if (plan.unreadable?.length) body.append(card('Records', ...plan.unreadable.map((reason) => text('p', reason, 'warning'))))
       body.append(reviewCard(plan))
-      const steps = stepsByTask(plan).flatMap((group) => [text('h3', group.task), ...group.steps.map((step) => stepRow(step, read))])
+      const steps = stepsByTask(plan).flatMap((group) => [text('h3', group.task), ...group.steps.map((step) => stepRow(plan.slug, step, read))])
       body.append(card('Steps', ...progress(plan), ...evidenceNotes(read), ...(steps.length ? steps : [empty('No steps', 'The plan derives no steps.')])))
       if (plan.waivers.length) {
         body.append(card('Waivers', ...plan.waivers.map((waiver) => text('p', `${waiver.elementId}: ${waiver.reason} (${byline(waiver.at, waiver.by)})`, 'meta'))))
       }
-      body.append(card('Commands', text('p', 'What the records say comes next, then the full status:', 'meta'), ...[...plan.next, plan.status].map(commandRow)))
+      body.append(card('Commands', text('p', 'What the records say comes next, then the full status:', 'meta'), ...[...plan.next, plan.status].map((command) => commandRow(command))))
     }
   } catch (error) {
     status.textContent = `Plan unavailable: ${error instanceof Error ? error.message : 'Read failed'}. Refresh to retry.`
