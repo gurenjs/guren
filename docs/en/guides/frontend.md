@@ -350,7 +350,7 @@ Running `bun run dev` automatically launches the Vite dev server from the Bun pr
 
 Backend files reload too: `dev:server` runs `NODE_ENV=development bun --hot bin/serve.ts`, so edits to controllers, routes, and models take effect on the next request without a restart. Adding a route re-runs codegen and reloads once more, then settles. State held in the process does not survive a reload: the memory-backed session and cache stores are rebuilt empty, and module-level variables are reinitialized. External stores (Redis, your database) are unaffected, so you stay signed in as long as sessions live outside the process.
 
-If your project predates this default, add the flag yourself:
+If your project predates these defaults, set the script yourself. `NODE_ENV=development` is what keeps boot-time seeding on (see [Database](./database.md)):
 
 ```json
 "dev:server": "NODE_ENV=development bun --hot bin/serve.ts"

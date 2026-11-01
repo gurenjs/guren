@@ -42,7 +42,7 @@ import { commandFix, type CheckEvidence, type CheckFix, type CheckFixRun } from 
 import { hasPendingRepair, repairDoctorReport } from './doctor-fix'
 import { summarizeDoctorReport, type DoctorStatus } from './doctor-report'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
-import { hasLegacySeedOnBoot, rewriteLegacySeedOnBoot, SEED_ON_BOOT_EXPRESSION, SEED_ON_BOOT_OPTION, withDevelopmentNodeEnv } from './seed-on-boot'
+import { planSeedOnBootUpgrade, SEED_ON_BOOT_EXPRESSION, SEED_ON_BOOT_OPTION, type SeedOnBootPlan } from './seed-on-boot'
 import {
   planAppTokenSheet,
   planAppUiComponents,
@@ -1164,59 +1164,62 @@ async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorC
   )
 }
 
+async function readSeedOnBootPlan(cwd: string): Promise<{ configFile: string; plan: SeedOnBootPlan } | null> {
+  const configFile = await findFirstExisting(cwd, DATABASE_CONFIG_CANDIDATES)
+  const source = configFile ? await readIfExists(cwd, configFile) : null
+  if (!configFile || source === null) return null
+  const manifest = await readJsonIfExists<PackageJsonShape>(cwd, 'package.json')
+  return { configFile, plan: planSeedOnBootUpgrade(source, manifest.value?.scripts) }
+}
+
+function seedOnBootSummary(configFile: string, plan: Extract<SeedOnBootPlan, { kind: 'rewrite' }>): string {
+  const rewrite = `Rewrite seedOnBoot in ${configFile} to \`${SEED_ON_BOOT_EXPRESSION}\``
+  return plan.script
+    ? `${rewrite}, and prefix the \`${plan.script.name}\` script with NODE_ENV=development so \`bun run dev\` still seeds.`
+    : `${rewrite}; the dev script already runs under NODE_ENV=development.`
+}
+
 async function detectSeedOnBoot(context: DoctorRuleContext): Promise<DoctorCheck> {
-  const configFile = await findFirstExisting(context.cwd, DATABASE_CONFIG_CANDIDATES)
-  const source = configFile ? await readIfExists(context.cwd, configFile) : null
-  if (!configFile || source === null || !hasLegacySeedOnBoot(source)) {
-    return createCheck('seed-on-boot', 'Seeding On Boot', 'pass', 'Boot-time seeding does not run under an unset NODE_ENV.')
+  const read = await readSeedOnBootPlan(context.cwd)
+  if (!read || read.plan.kind === 'none') {
+    return createCheck('seed-on-boot', 'Seeding On Boot', 'pass', 'No legacy seedOnBoot expression found.')
   }
 
+  const { configFile, plan } = read
+  const manualFix = `In ${configFile}, pass \`${SEED_ON_BOOT_OPTION}\` to defineDatabaseConfig(), and set NODE_ENV=development in the script \`bun run dev\` starts the server with, so it still seeds.`
   return createCheck(
     'seed-on-boot',
     'Seeding On Boot',
     'warn',
-    `${configFile} seeds on boot whenever NODE_ENV is not "production", so a server started without NODE_ENV runs every seeder, demo accounts included.`,
+    `${configFile} seeds on boot whenever NODE_ENV is not "production", so a server started without NODE_ENV runs every seeder, demo accounts included.`
+      + (plan.kind === 'manual' ? ` \`guren upgrade\` leaves it alone: ${plan.reason}.` : ''),
     {
-      fix: `Set \`seedOnBoot: ${SEED_ON_BOOT_EXPRESSION}\`, and NODE_ENV=development in the dev script.`,
-      canAutofix: true,
-      manualFix: `In ${configFile}, pass \`${SEED_ON_BOOT_OPTION}\` to defineDatabaseConfig(), and prefix the \`bun --hot bin/serve.ts\` dev script with NODE_ENV=development so \`bun run dev\` still seeds.`,
+      fix: plan.kind === 'rewrite' ? seedOnBootSummary(configFile, plan) : manualFix,
+      canAutofix: plan.kind === 'rewrite',
+      manualFix,
     },
   )
 }
 
-async function createSeedOnBootAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
-  if (check.status === 'pass' || !check.canAutofix) {
+async function createSeedOnBootAutofix(context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
+  const read = check.canAutofix ? await readSeedOnBootPlan(context.cwd) : null
+  if (check.status === 'pass' || read?.plan.kind !== 'rewrite') {
     return null
   }
 
   return {
     key: check.key,
     title: check.title,
-    summary: 'Seed on boot only under NODE_ENV=development or test, and set NODE_ENV=development in the `bun --hot` dev script.',
+    summary: seedOnBootSummary(read.configFile, read.plan),
     async apply(cwd: string) {
-      const configFile = await findFirstExisting(cwd, DATABASE_CONFIG_CANDIDATES)
-      const source = configFile ? await readIfExists(cwd, configFile) : null
-      if (!configFile || source === null || !hasLegacySeedOnBoot(source)) {
-        return
+      const current = await readSeedOnBootPlan(cwd)
+      if (current?.plan.kind !== 'rewrite') return
+      const { script } = current.plan
+      if (script) {
+        const manifest = await readJsonIfExists<PackageJsonShape>(cwd, 'package.json')
+        await writeJsonFile(cwd, 'package.json', { ...manifest.value, scripts: { ...manifest.value?.scripts, [script.name]: script.command } })
       }
-      await writeFile(resolve(cwd, configFile), rewriteLegacySeedOnBoot(source), 'utf8')
-
-      const manifest = await readJsonIfExists<PackageJsonShape>(cwd, 'package.json')
-      if (!manifest.exists || manifest.parseError || !manifest.value?.scripts) {
-        return
-      }
-      const scripts = { ...manifest.value.scripts }
-      let changed = false
-      for (const name of ['dev:server', 'dev']) {
-        const next = scripts[name] === undefined ? null : withDevelopmentNodeEnv(scripts[name])
-        if (next !== null) {
-          scripts[name] = next
-          changed = true
-        }
-      }
-      if (changed) {
-        await writeJsonFile(cwd, 'package.json', { ...manifest.value, scripts })
-      }
+      await writeFile(resolve(cwd, current.configFile), current.plan.config, 'utf8')
     },
   }
 }
