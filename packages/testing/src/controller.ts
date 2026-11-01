@@ -30,8 +30,9 @@ import {
   definePlugin,
   formatValidationErrors,
   buildInertiaPage,
-  INERTIA_VARY,
+  mergeInertiaVary,
   serializePage,
+  withDefaultHeaders,
 } from '@guren/server/internal/testing'
 
 export interface ControllerContext {
@@ -164,12 +165,10 @@ async function renderInertia(
     prefersJson ? serialized : `${initialPageElement(serialized)}<div id="app"></div>`,
     {
       status: options.status ?? 200,
-      headers: {
+      headers: mergeInertiaVary(withDefaultHeaders(options.headers, {
         'Content-Type': prefersJson ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
         'X-Inertia': 'true',
-        Vary: INERTIA_VARY,
-        ...options.headers,
-      },
+      })),
     },
   )
 
@@ -203,10 +202,7 @@ export function createGurenControllerModule() {
     text(body: string, init: ResponseInit = {}): Response {
       return new Response(body, {
         ...init,
-        headers: {
-          'Content-Type': 'text/plain; charset=utf-8',
-          ...init.headers,
-        },
+        headers: withDefaultHeaders(init.headers, { 'Content-Type': 'text/plain; charset=utf-8' }),
       })
     }
 

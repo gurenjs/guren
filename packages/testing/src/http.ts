@@ -1,5 +1,7 @@
 import type { Authenticatable } from '@guren/server'
 
+import { testingHeaderValue } from './testing-header'
+
 /**
  * Test response wrapper with assertion methods.
  */
@@ -401,10 +403,10 @@ export class TestRequestBuilder {
       const userData = typeof this._user.getAuthIdentifier === 'function'
         ? { ...this._user, __authId: this._user.getAuthIdentifier() }
         : this._user
-      this._headers['X-Testing-User'] = JSON.stringify(userData)
+      this._headers['X-Testing-User'] = testingHeaderValue(userData)
     }
     if (Object.keys(this._session).length > 0) {
-      this._headers['X-Testing-Session'] = JSON.stringify(this._session)
+      this._headers['X-Testing-Session'] = testingHeaderValue(this._session)
     }
 
     const request = new Request(this.url, {

@@ -174,7 +174,7 @@ const post = await Post.findOrFail(id)
 // Pass [ModelClass, record] for ORM records
 const canUpdate = await gate.allows('update', [Post, post])
 
-// Abilities without a record take the bare class
+// Abilities without a record take the bare class, or [Post]
 const canCreate = await gate.allows('create', Post)
 
 // String keys work the same way
@@ -190,7 +190,7 @@ Class instances (objects created with `new`) resolve their policy automatically 
 const canView = await gate.allows('view', somePostInstance)
 ```
 
-A plain record passed without the tuple resolves no policy. When no gate is defined for the ability either, the check throws an `Error` that names the ability and the `[Model, record]` fix, so the mistake surfaces as a 500 instead of a 403 for the record's own owner. A `before()` callback and a gate defined for the ability still receive the plain record. A class instance whose class has no policy, and a tuple whose model has none, are denied.
+A plain record passed without the tuple resolves no policy. When no gate is defined for the ability either, the check throws an `Error` that names the ability and the `[Model, record]` fix, so the mistake surfaces as a 500 instead of a 403 for the record's own owner. A `before()` callback and a gate defined for the ability still receive the plain record. A class instance whose class has no policy, and a tuple whose model has none, are denied. Any other array (a record alone in brackets, three elements, a list of records) names no policy either, and throws in the same way unless a gate defined for the ability takes it.
 
 `gate.any()` and `authorizeMiddleware()` given an array check the abilities in order, so a plain record throws at the first ability that resolves nothing, even when a later one would allow. Pass the tuple there too, and have a `modelResolver` given to `authorizeMiddleware()` or `authorizeResourceMiddleware()` return `[Model, record]` rather than the record.
 
