@@ -300,7 +300,7 @@ STORAGE_DISK=local
 
       if (!kernelFeedsProvider) {
         consola.warn(`${SCHEDULE_KERNEL_PATH} exports no ${SCHEDULE_KERNEL_EXPORT}() — app/Providers/SchedulingProvider.ts was not written.`)
-        consola.info('Feed your own kernel to the scheduler from a provider of your own, or its tasks reach no scheduler: https://guren.dev/en/guides/scheduling')
+        consola.info('Feed your own kernel to the scheduler from a provider of your own, or its tasks reach no scheduler: https://guren.dev/docs/guides/scheduling')
       }
 
       // Order matters: the app provider registers after core's and rebinds

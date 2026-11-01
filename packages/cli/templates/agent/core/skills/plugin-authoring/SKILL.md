@@ -7,7 +7,7 @@ description: Install or author a Guren plugin, an npm package that registers ser
 
 You help with two distinct tasks: **installing** an existing plugin into this app, and **authoring** a new plugin package. Figure out which one the user wants before acting — they are different workflows.
 
-> Full reference: `docs/en/guides/plugins.md` (or `docs/ja/guides/plugins.md`) and `contributing/plugin-contract.md` in the Guren framework repo. This skill is a condensed, task-oriented version for AI agents.
+> Full reference: https://guren.dev/docs/guides/plugins and https://github.com/gurenjs/guren/blob/main/contributing/plugin-contract.md. This skill is a condensed, task-oriented version for AI agents.
 
 ## Installing an Existing Plugin
 

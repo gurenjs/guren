@@ -27,6 +27,12 @@ bunx guren make:feature <Name> --fields "title:string,body:text,published:boolea
 
 Add `--module <name>` to scaffold the feature inside an existing `modules/<name>/` directory instead of the project root — app/ files move under `modules/<name>/`, but pages stay top-level, namespaced by module name (`resources/js/pages/<name>/...`), not colocated.
 
+When the person wants clickable screens before any backend, use prototype mode:
+`bunx guren add prototype` once, then `make:feature <Name> --fields "…" --prototype`
+writes the pages and fixture entries with no controller or table, and
+`bun run dev:prototype` serves them. Re-running `make:feature` without the flag
+promotes the feature. Guide: https://guren.dev/docs/guides/prototype-first
+
 This generates Validator, Resource, Controller, Views (Index/Show/New/Edit), and Model in one step with:
 - Typed page props (no `any`)
 - `route()` helper for all URLs

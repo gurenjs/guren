@@ -20,6 +20,21 @@ Follow the prompt it prints. When it has you ask the person, ask in whatever
 way your client offers and wait for the answers before you write the JSON. If
 the change needs no plan, make it the usual way.
 
+**References are element ids, never names or paths.** A field that points at
+another part of the plan holds that element's `id`, and the element must be
+declared in the plan. A page path such as `posts/Show` fails the id pattern
+(letters, digits, `_.:-`), and a class name such as `User` names no element.
+
+- `expect.inertia`, `response.view`: a view id (`view.posts.show`, whose
+  `page` is `posts/Show`)
+- `relationships[].target`, `references.model`, `bind[].model`,
+  `resource.model`, `policy.model`: a model id (`model.user`)
+- `acceptance[].route`, `form.submitsTo`, `actions[].route`: a route id;
+  `form.validator`, `body`, `params`, `query`: a validator id
+- Code that already exists is declared too, with `"change": { "kind":
+  "existing" }`: a `model.user` with only the columns the plan references,
+  so `"target": "model.user"` has an element to land on.
+
 ## 2. Check it until nothing fails
 
 ```bash

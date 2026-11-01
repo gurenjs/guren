@@ -323,10 +323,19 @@ describe('GUREN_API_DIGEST', () => {
       'userOrFail',
       'bind: { id: Post }',
       "await this.authorize('update', [Post, post])",
+      "await this.authorize('create', Post)",
+      "this.container.make('gate').policy(Post, PostPolicy)",
     ],
     'skills/guren-api/reference/controllers-http.md': ["bind: { slug: [Post, 'slug'] }"],
     'skills/guren-api/reference/routes-codegen.md': ['.agent({ description })', 'One declaration per route'],
-    'rules/testing.md': ['actingAs', 'withCsrf', 'assertUnprocessable', 'assertInertia', 'query(path, body?)'],
+    'rules/testing.md': [
+      'actingAs',
+      'withCsrf',
+      'assertUnprocessable',
+      'assertInertia',
+      'query(path, body?)',
+      '.json().get(url).assertInertia(component, props?)',
+    ],
   }
 
   for (const [file, tokens] of Object.entries(tokensByFile)) {
