@@ -26,6 +26,8 @@ export default function NewPost() {
         </h1>
 
         <form
+          method="post"
+          action={route('posts.store')}
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault()

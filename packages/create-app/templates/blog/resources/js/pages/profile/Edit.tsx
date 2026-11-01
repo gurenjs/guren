@@ -32,7 +32,7 @@ export default function ProfileEdit({ profile, status }: Props) {
           <Alert>{status}</Alert>
         ) : null}
 
-        <form className="space-y-4" onSubmit={form.handleSubmit}>
+        <form method="post" action={profileUpdateForm.path} className="space-y-4" onSubmit={form.handleSubmit}>
           <Field form={form} name="name" />
           <Field form={form} name="email" />
           <Field form={form} name="password" as="password" label="New password" />

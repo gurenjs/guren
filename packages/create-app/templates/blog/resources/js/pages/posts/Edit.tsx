@@ -34,6 +34,8 @@ export default function EditPost({ post }: Props) {
         </h1>
 
         <form
+          method="post"
+          action={route('posts.update', { id: post.id })}
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault()

@@ -35,7 +35,7 @@ export default function ResetPassword({ token, email, errors = {} }: Props) {
           <Alert tone="danger" className="mt-4">{errors.token}</Alert>
         )}
 
-        <form className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
+        <form method="post" action={resetPasswordStoreForm.path} className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
           <Field form={form} name="password" as="password" label="New password" />
           <Field form={form} name="passwordConfirmation" as="password" label="Confirm new password" />
           <Button type="submit" disabled={form.processing} block>

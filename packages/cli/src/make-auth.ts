@@ -758,7 +758,7 @@ export default function Login({ email = '', errors = {} }: Props) {
           <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
-        <form className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
+        <form method="post" action={${formIdentifier('login.store')}.path} className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
           <Field form={form} name="email" />
           <Field form={form} name="password" as="password" />
           <Field form={form} name="remember" label="Remember me" />
@@ -805,7 +805,7 @@ export default function Register({ errors = {} }: Props) {
           <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
-        <form className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
+        <form method="post" action={${formIdentifier('register.store')}.path} className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
           <Field form={form} name="name" />
           <Field form={form} name="email" />
           <Field form={form} name="password" as="password" />
@@ -887,7 +887,7 @@ export default function ProfileEdit({ profile, status }: Props) {
           <Alert>{status}</Alert>
         ) : null}
 
-        <form className="space-y-4" onSubmit={form.handleSubmit}>
+        <form method="post" action={${formIdentifier('profile.update')}.path} className="space-y-4" onSubmit={form.handleSubmit}>
           <Field form={form} name="name" />${emailField}${passwordFields}
           <Button type="submit" disabled={form.processing} block>
             Save changes
