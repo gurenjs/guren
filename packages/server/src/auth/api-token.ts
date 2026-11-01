@@ -398,6 +398,12 @@ export interface BearerTokenMiddlewareOptions {
   updateLastUsed?: boolean
 }
 
+// The middleware has no handle on the app, so it reaches the declared paths through the request's container.
+function appAgentEndpoints(ctx: Context): AgentEndpointPaths | undefined {
+  const app = tryGetRequestContainer(ctx)?.makeOptional<{ getAgentEndpointPaths?: AgentEndpointPaths }>('app')
+  return app?.getAgentEndpointPaths ? () => app.getAgentEndpointPaths!() : undefined
+}
+
 /**
  * Create middleware that authenticates requests using Bearer tokens.
  * @example
@@ -405,12 +411,6 @@ export interface BearerTokenMiddlewareOptions {
  * app.use('/api/*', createBearerTokenMiddleware({ store, abilities: ['posts:delete'] }))
  * ```
  */
-// The middleware has no handle on the app, so it reaches the declared paths through the request's container.
-function appAgentEndpoints(ctx: Context): AgentEndpointPaths | undefined {
-  const app = tryGetRequestContainer(ctx)?.makeOptional<{ getCookielessAuthPaths?: AgentEndpointPaths }>('app')
-  return app?.getCookielessAuthPaths ? () => app.getCookielessAuthPaths!() : undefined
-}
-
 export function createBearerTokenMiddleware(
   options: BearerTokenMiddlewareOptions
 ): MiddlewareHandler {

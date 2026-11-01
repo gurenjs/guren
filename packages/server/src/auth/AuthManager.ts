@@ -282,12 +282,7 @@ export class AuthManager implements AuthManagerContract {
     this.setDefaultGuard(guardName)
   }
 
-  /**
-   * Where a token granting only agent tools is accepted besides a pipeline
-   * dispatch: endpoints that judge its scopes themselves. `Application` passes
-   * its cookieless-auth paths, which only plugin-mcp declares, and which refuse
-   * a path an app route already answers, so only the declaring endpoint is there.
-   */
+  /** Where a tools-only token is accepted besides a pipeline dispatch; `Application` passes its {@link Application.declareAgentEndpoint} paths. */
   setAgentEndpoints(endpoints: AgentEndpointPaths): void {
     this.agentEndpoints = endpoints
   }
