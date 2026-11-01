@@ -11,7 +11,7 @@ import { writeFile } from 'node:fs/promises'
 import { z } from 'zod'
 
 import { CliError } from '../cli-error'
-import { planSiblingPath, readBesideRecord } from './beside'
+import { planSiblingPath, readBesideRecord, refuseWriteInDryRun } from './beside'
 import { planHash } from './identity'
 import { hasBaseline } from './render'
 import type { Plan, PlanDraft } from './schema'
@@ -66,7 +66,7 @@ export async function readPlanDecisions(planPath: string): Promise<PlanDecisions
  * took, and a run that overwrites it destroys them where a state file would only lose a result
  * it can redo.
  */
-async function updatePlanDecisions(planPath: string, mutate: (decisions: PlanDecisions) => void): Promise<boolean> {
+async function updatePlanDecisions(planPath: string, mutate: (decisions: PlanDecisions) => void, dryRun = false): Promise<boolean> {
   const read = await readPlanDecisions(planPath)
   if (read.unreadable) {
     throw new CliError(`${read.unreadable}\nThe decision log is a committed record, so this command will not replace it. Fix the file, then run this again.`)
@@ -79,6 +79,8 @@ async function updatePlanDecisions(planPath: string, mutate: (decisions: PlanDec
   mutate(decisions)
   decisions.waivers = sortWaivers(decisions.waivers)
   if (JSON.stringify(decisions.waivers) === before) return false
+  if (dryRun) return true
+  refuseWriteInDryRun(planDecisionsPath(planPath))
   await writeFile(planDecisionsPath(planPath), `${JSON.stringify(decisions, null, 2)}\n`, 'utf8')
   return true
 }
@@ -88,21 +90,21 @@ function sortWaivers(waivers: readonly PlanWaiver[]): PlanWaiver[] {
 }
 
 /** One waiver per element: a second one replaces it, and the replaced one is returned. */
-export async function writePlanWaiver(planPath: string, waiver: PlanWaiver): Promise<{ written: boolean; replaced?: PlanWaiver }> {
+export async function writePlanWaiver(planPath: string, waiver: PlanWaiver, options: { dryRun?: boolean } = {}): Promise<{ written: boolean; replaced?: PlanWaiver }> {
   let replaced: PlanWaiver | undefined
   const written = await updatePlanDecisions(planPath, (decisions) => {
     replaced = decisions.waivers.find((candidate) => candidate.elementId === waiver.elementId)
     decisions.waivers = [...decisions.waivers.filter((candidate) => candidate.elementId !== waiver.elementId), waiver]
-  })
+  }, options.dryRun)
   return { written, ...(replaced ? { replaced } : {}) }
 }
 
 /** Removes the waiver of one element, whatever hash it names; absent is not an error. */
-export async function removePlanWaiver(planPath: string, elementId: string): Promise<{ written: boolean; removed?: PlanWaiver }> {
+export async function removePlanWaiver(planPath: string, elementId: string, options: { dryRun?: boolean } = {}): Promise<{ written: boolean; removed?: PlanWaiver }> {
   let removed: PlanWaiver | undefined
   const written = await updatePlanDecisions(planPath, (decisions) => {
     removed = decisions.waivers.find((candidate) => candidate.elementId === elementId)
     decisions.waivers = decisions.waivers.filter((candidate) => candidate.elementId !== elementId)
-  })
+  }, options.dryRun)
   return { written, ...(removed ? { removed } : {}) }
 }

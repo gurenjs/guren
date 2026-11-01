@@ -305,6 +305,11 @@ export const planApproveCommand = defineCommand({
       description: 'Approve although a section of the application could not be read, leaving its elements without a context hash.',
       default: false,
     },
+    'dry-run': {
+      type: 'boolean',
+      description: 'Run every refusal and print what would be recorded, writing nothing: no baseline, no approval.',
+      default: false,
+    },
     json: {
       type: 'boolean',
       description: 'Print the report as JSON.',
@@ -317,6 +322,7 @@ export const planApproveCommand = defineCommand({
       app: (plan) => loadPlanAppState(appRoot, { detail: planHasAlter(plan) }),
       appRoot,
       allowUnstamped: args['allow-unstamped'],
+      dryRun: args['dry-run'],
     })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanApprove(report))
   },
@@ -351,6 +357,11 @@ export const planWaiveCommand = defineCommand({
       description: 'Delete the waivers of the named elements instead of writing them. Asks nothing of the plan, so a revision can withdraw a waiver of an element it dropped.',
       default: false,
     },
+    'dry-run': {
+      type: 'boolean',
+      description: 'Judge the elements and write nothing; --reason is not required.',
+      default: false,
+    },
     app: {
       type: 'string',
       description: 'Application root directory: what the reported decision-log path is relative to. The plan is read from its own path either way.',
@@ -364,7 +375,7 @@ export const planWaiveCommand = defineCommand({
   async run({ args }) {
     // citty collects the trailing positionals in `_`, with the first two bound above.
     const ids = [args.elements, ...args._.slice(2)].filter((id) => id.length > 0)
-    const report = await planWaiveFile(args.plan, { elementIds: ids, reason: args.reason, remove: args.remove, app: args.app })
+    const report = await planWaiveFile(args.plan, { elementIds: ids, reason: args.reason, remove: args.remove, app: args.app, dryRun: args['dry-run'] })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanWaive(report))
   },
 })

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { DevCenterPlan } from '../src/dev-center-page/plans'
-import { planAttention, sortPlans, stepRuntimeErrors, stepsByTask } from '../src/dev-center-page/plans'
+import { attentionDecision, planAttention, sortPlans, stepRuntimeErrors, stepsByTask } from '../src/dev-center-page/plans'
 import { devCenterPlanLine, planPagePath, planSlugFromPath } from '../src/dev-center-links'
 
 function plan(overrides: Partial<DevCenterPlan> = {}): DevCenterPlan {
@@ -38,6 +38,18 @@ describe('planAttention', () => {
     const working = plan({ steps: [step('a', 'verified'), step('b', 'failed', { active: true }), step('c', 'not-run')] })
     expect(planAttention(working)).toEqual({ who: 'agent', title: 'In progress', detail: 'Marked by plan:next: b.' })
   })
+})
+
+test('attentionDecision should offer approve for a draft or an edited plan, close for a finished one, and nothing mid-way', () => {
+  expect(attentionDecision(plan({ standing: 'draft' }))).toBe('approve')
+  expect(attentionDecision(plan({ standing: 'unapproved' }))).toBe('approve')
+  expect(attentionDecision(plan({ steps: [step('a', 'verified')] }))).toBe('close')
+  expect(attentionDecision(plan({ steps: [] }))).toBe('close')
+  expect(attentionDecision(plan({ steps: [step('a', 'verified'), step('b', 'not-run')] }))).toBeUndefined()
+  // A stalled step offers a waiver on the step itself, and records that would not read leave nothing to judge.
+  expect(attentionDecision(plan({ steps: [step('a', 'failed', { stall: { at: '2026-10-31T00:00:00Z', reason: 'Three continuations.' } })] }))).toBeUndefined()
+  expect(attentionDecision(plan({ steps: [step('a', 'verified')], unreadable: ['bad JSON'] }))).toBeUndefined()
+  expect(attentionDecision(plan({ standing: 'unreadable' }))).toBeUndefined()
 })
 
 test('sortPlans should put the plans waiting on a person first', () => {

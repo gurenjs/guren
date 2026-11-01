@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import { freshApplicationGraph } from './application-graph-fresh'
 import type { GraphResult } from './application-graph'
 import { handleEvidenceRequest, serveBrowserScreenshot } from './dev-center-evidence'
-import { browserScreenshotRoute, planEvidenceSlug, planSlugFromPath, reviewRoute } from './dev-center-links'
+import { browserScreenshotRoute, planEvidenceSlug, planReadinessRoute, planSlugFromPath, reviewRoute } from './dev-center-links'
+import { handleReadinessRequest, type ReadinessRunner } from './dev-center-readiness'
 import { handleReviewRequest } from './dev-center-review'
 import { devCenterShell } from './dev-center-shell'
 import { readPlanOverview, type PlanOverview } from './docs-viewer-plans'
@@ -12,6 +13,7 @@ export function createDevCenterHandler(options: {
   cwd: string
   graph?: (cwd: string) => Promise<GraphResult>
   plans?: (cwd: string) => Promise<PlanOverview>
+  readiness?: ReadinessRunner
 }): { fetch(request: Request): Promise<Response> } {
   const load = options.graph ?? freshApplicationGraph
   // Plan files and .guren/plans/ only, as `guren_get_plans` reads them, so no child process is needed.
@@ -39,9 +41,11 @@ export function createDevCenterHandler(options: {
     async fetch(request) {
       const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
       const path = new URL(request.url).pathname
-      // Only a review path waits on its handler: a graph read has to start its scan in the tick it arrived.
+      // Only a review or readiness path waits on its handler: a graph read has to start its scan in the tick it arrived.
       const review = reviewRoute(path)
       if (review) return handleReviewRequest(options.cwd, request, review)
+      const readiness = planReadinessRoute(path)
+      if (readiness) return handleReadinessRequest(options.cwd, request, readiness, options.readiness)
       if (request.method !== 'GET') return new Response('Method not allowed', { status: 405, headers: { ...headers, Allow: 'GET' } })
       if (path === '/_guren/graph.json') {
         try { return Response.json(await scanAfterArrival(), { headers }) }
