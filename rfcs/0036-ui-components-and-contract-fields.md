@@ -20,8 +20,9 @@
 A Guren app gets its look from `resources/css/guren.css`: the `--g-*` custom
 properties and the Tailwind `g-` utilities mapped onto them in `@theme inline`.
 The file is copied into the app by `create-guren-app`, and by
-`ensureGurenUiTokens()` in `packages/cli/src/guren-css.ts` when a generator
-needs it. Three byte-identical copies are pinned by
+`writeScaffoldFiles()` (`packages/cli/src/utils.ts`), which calls
+`ensureGurenUiTokens()` for any batch holding a file under `resources/` that
+uses a `g-` utility. Three byte-identical copies are pinned by
 `packages/cli/tests/guren-css-sync.test.ts`; upstream is `gurenjs/guren-ui`.
 
 The tokens stop at colours, radii and shadows. How a text input, a label or a
@@ -92,6 +93,7 @@ re-copy.
 bunx guren add ui                 # every component
 bunx guren add ui button field    # only these (and what they import)
 bunx guren add ui field --diff    # print an existing copy against the current template; writes nothing
+bunx guren add ui field --force   # replace an existing copy with the current template
 ```
 
 It is a blueprint under `add`, beside `add session` and `add browser-tests`,
@@ -125,10 +127,16 @@ parse-gates them, as with the other static scaffold templates.
 
 **Ownership rules.**
 
-- An existing file is never overwritten, by the rule `ensureGurenUiTokens()`
-  already follows for `guren.css` (`writeFile(…, { flag: 'wx' })`). A re-run
-  writes only what is missing and lists what it left alone.
-- `guren.css` is written first if absent, through `ensureGurenUiTokens()`.
+- An existing file is never overwritten except by `add ui --force`, the rule
+  `ensureGurenUiTokens()` already follows for `guren.css`
+  (`writeFile(…, { flag: 'wx' })`). A re-run writes only what is missing and
+  lists what it left alone. A generator's `--force` overwrites its own pages
+  and never reaches the components.
+- The components are written through `writeScaffoldFiles()` with its
+  skip-existing option, so the shared writer adds `guren.css` when it is
+  absent, as it does for generated pages. They also fall under the parse gate's
+  `guren/no-raw-color` lint, which already covers every file a generator
+  writes under `resources/js/`.
 - An API-only app is refused through `packages/cli/src/app-surface.ts`, the
   rule the page-emitting scaffolders already share.
 - `add ui` checks that the installed `@guren/inertia-client` exports the
@@ -149,7 +157,9 @@ block to mark, and a copy is judged by its content alone.
 
 - A new doctor check, `guren-ui-components`, reads each file under
   `resources/js/components/ui/` whose name is a shipped component and hashes
-  it (sha256 over LF-normalized bytes).
+  it: sha256 over the text with CRLF turned to LF, the normalization
+  `SHIPPED_UNMARKED_SHEETS` is read with (`guren-css.ts`). Nothing else is
+  normalized.
 - The CLI carries, per component, the hashes of every template version it has
   released (`SHIPPED_UI_COMPONENTS`, closed like `SHIPPED_UNMARKED_SHEETS`;
   the current template is hashed at run time, not listed).
@@ -160,6 +170,19 @@ block to mark, and a copy is judged by its content alone.
 | identical to the current template | pass | nothing |
 | identical to an earlier released version | warn | the autofix replaces the file with the current template |
 | matches no released version (edited) | warn, naming the component and the template version its header claims | nothing; the message points at `guren add ui <name> --diff`, which prints the edited copy against the current template |
+
+**Formatters.** A copy an editor reformats on save reads as edited. The check
+does not try to see through formatting: undoing quote style, semicolons,
+trailing commas and line wrapping needs a parse and a canonical printer, and a
+wrong "unedited" verdict overwrites the app's work, while a wrong "edited" one
+only skips an upgrade. Instead the templates are written in the form the app's
+own tooling leaves alone. A scaffolded app ships `oxlint` with `lint:fix`
+(`oxlint --fix`) and no formatter, so a test runs the shipped `.oxlintrc.json`
+with `--fix` over each component template and requires it to change nothing.
+A developer whose personal formatter rewrites the copy gets the "edited"
+warning; `add ui <name> --diff` then shows the formatting-only difference, and
+`add ui <name> --force` takes the current template when the developer decides
+to drop the local form.
 
 Because it is a doctor autofix, `guren upgrade --dry-run` previews it,
 `--no-autofix` leaves it as a warning, and the first `guren upgrade` after the
@@ -219,8 +242,10 @@ export const postsUpdateForm: RouteFormContract<'posts.update', 'PUT', '/posts/:
 - **One export per route, not one map.** A page imports only the contract it
   submits to, so a bundler drops the rest. The identifier is the route name in
   camel case plus `Form` (`posts.store` → `postsStoreForm`). Two route names
-  that camel-case alike fail codegen with both names in the message
-  (Open Question 4).
+  that camel-case alike (`posts.store` and `posts-store`) fail codegen with
+  both names in the message. A deterministic suffix was the alternative, but
+  it hands one of the two pages a name that changes when a route is added or
+  removed, and the fix, renaming one route, is the author's to choose.
 - **Literal method and path.** The contract's type keeps both as literals, so
   `useRouteForm` can require `params` exactly when the path has parameters,
   with the `PathParamsOf` helpers `components.tsx` already mirrors.
@@ -257,7 +282,9 @@ export const postsUpdateForm: RouteFormContract<'posts.update', 'PUT', '/posts/:
   (`vite/route-types.ts`). That already leaves `ApiRoutes` body types stale
   after a validator edit; `forms.gen.ts` inherits the gap unless the watcher
   learns the validator directories (root and `modules/*/`) and the routes
-  entry's local imports. This RFC adds both. `guren check` today only checks
+  entry's local imports. The gap exists without this RFC, so the fix is a
+  prerequisite that lands on its own first (P1 in Milestones), and M2 relies
+  on it. `guren check` today only checks
   that a manifest exists (`check.ts`); for `forms.gen.ts` it renders the
   expected content in memory and reports a difference with the `codegen` fix,
   as `check --spec` does for the spec views.
@@ -383,22 +410,64 @@ and neither can a type the walker could not see through (a pipe, a union). The
 caller states them with `as`. A file input reads `event.target.files` (the
 first file, or the list when `multiple` is set) and never sets `value`.
 
+**Date-time round trip.** An Edit page receives a timestamp the way a Resource
+serializes it, an ISO string in UTC (`2026-11-01T03:22:55.000Z`).
+
+1. `useField` parses it with `new Date()` and shows it with the local getters
+   as `YYYY-MM-DDTHH:mm`, the only form `datetime-local` accepts, so the user
+   sees the time in the browser's zone.
+2. A control the user changed is sent as `new Date(local).toISOString()`: the
+   same instant, in UTC.
+3. A control the user did not touch is sent as the value the form was created
+   with, byte for byte. Converting it back would drop the seconds and
+   milliseconds the minute-wide control cannot show, so saving an Edit page
+   unchanged would move every timestamp.
+
+When the initial value has non-zero seconds or milliseconds, `step` is `1`, so
+the control shows the seconds.
+A local time that falls in a daylight-saving gap is resolved by the browser's
+`Date`. A `date` field
+(`format: 'date'`) involves no zone: its value is the first ten characters,
+sent back as typed.
+
 **`required` and blank values.** JSON Schema's `required` says the key must be
 present; an HTML `required` says the control must be non-empty. They differ for
 `z.string()` with no `min(1)`, which accepts `''`. `useField` sets HTML
-`required` only when the key is required, the field is not nullable, and the
-field is not a string or has `minLength >= 1`. On submit, `useRouteForm`
-normalizes a blank control: `''` becomes `null` for a nullable field, and the
-key is left out for an optional field that is not nullable. This is what makes
-a `.nullable().optional()` column from `make:validator` submit `null` rather
-than an empty string that `.min(1)` rejects, or a `z.coerce.number()` turns
-into `0`. PATCH-style dirty-field submission is out of scope.
+`required` on a field that is not nullable, is not a string without a
+`minLength >= 1`, and either has a required key or starts with a value (the
+second case is explained below the table).
+
+On submit, `useRouteForm` normalizes a control that is blank (`''`), by what
+the field is and by the value it held when the form was created:
+
+| Field | Blank from the start | Cleared by the user |
+|-------|----------------------|---------------------|
+| nullable | `null` | `null` |
+| optional, not nullable | key left out | `''` sent |
+| required | `''` sent | `''` sent |
+
+A blank that was always blank means "not provided", which an optional key
+expresses by its absence. A value the user cleared is a change, and leaving
+the key out would tell an update route to keep the old value, so the form
+sends the `''` and the server's schema decides: a `.min(1)` answers 422 with
+its message under the field, and a plain `z.string()` stores the empty string.
+The one schema that reads `''` as something else is an optional, non-nullable
+`z.coerce.number()` (or `z.coerce.date()`), which coerces it to `0` (or an
+invalid date). That is why an optional, non-nullable field that starts with a
+value gets HTML `required` too: such a schema has no way to say "cleared", and
+the browser stops a submission the server would reject or misread. A field
+meant to be clearable is declared nullable, as
+`make:validator` already writes every nullable column
+(`.nullable().optional()`), so its cleared value is `null`. PATCH-style
+dirty-field submission is out of scope.
 
 **Edit pages.** A page submits to one route and binds that route's contract.
 `make:feature`'s Edit page types its data with the `.store` body today and
-submits to `.update`; it moves to `postsUpdateForm`. When an app's update
-schema is a `.partial()` of the store schema, `required` disappears on the edit
-form. That is correct: the server accepts the omission.
+submits to `.update`; it moves to `postsUpdateForm`. `make:feature` binds the
+same payload schema to both routes, so its own Edit page keeps every
+`required`. An app whose update schema is a `.partial()` of the store schema
+loses `required` on fields that start blank; a field that starts with a value
+follows the "cleared" column above, so clearing it never reads as "unchanged".
 
 #### 2.3 The styled half: the copied `Field`
 
@@ -481,9 +550,11 @@ export default function NewPost() {
   `@/resources/js/components/ui/`, which resolves from the project root
   whatever the page's depth.
 - Before writing pages, a generator calls `ensureUiComponents(appRoot, names)`
-  (in `guren-css.ts`, beside `ensureGurenUiTokens()`), which writes the
-  components the page imports when they are missing and never touches one that
-  exists. A generated page therefore never imports a file that is not there.
+  (in `guren-css.ts`), which passes the components the page imports to
+  `writeScaffoldFiles()` with `skipExisting` and without the generator's
+  `force`: a missing one is written, one that exists is never touched, and the
+  writer adds `guren.css` as for any styled batch. A generated page therefore
+  never imports a file that is not there.
 - A generator passes `as` wherever its own knowledge decides an input the
   contract cannot: `textarea` for a `text` column, `date` for a `date` column
   (the walker renders `z.coerce.date()`, the shape `make:validator` writes, as
@@ -503,10 +574,41 @@ validates with its own schema (`make-auth.ts`, and the blog template's
 `routes/auth.ts`). Under the rule in 2.1 they would get no contracts. The
 generator therefore binds each validator it already writes to its route
 (`{ body: LoginSchema }` and so on, for login, register, forgot and reset
-password, and profile, across every flag combination). A bound body is
-enforced by the router before the action (`Router.ts`), with the same schema
-and the same 422 shape; the action reads the parsed body with
-`this.validated()` instead of validating it again. The pages use `Field`,
+password, and profile, across every flag combination). The action reads the
+parsed body with `this.validated()` instead of validating it again.
+
+Binding moves validation from the action to the router's contract middleware,
+and the request path around it stays as it is (read from `Router.mount()`,
+`AuthThrottle.ts` and the error providers):
+
+- **Order.** `mount()` builds each chain as named middleware (`guest`,
+  `auth`), then the route's inline middleware (`throttleLogin` and the other
+  throttles, `requireGuest()`), then the contract middleware, then the action.
+  The throttles still run first, so an over-limit request gets the throttle's
+  answer before its body is judged, and an invalid body still counts towards
+  the limit, as it does today when the action rejects it. The profile
+  throttle's `skip` reads the raw body, which the contract middleware does not
+  change.
+- **Body.** The throttles read the body through Hono's cached `req.json()` /
+  `req.parseBody()`, and the contract middleware through `parseRequestBody()`
+  over the same cache, so both see one parse.
+- **Failure.** The contract middleware throws
+  `ValidationException.fromZodError()`, the call `validateBody()` makes, so
+  the error bag has the same keys and messages. The exception reaches the same
+  `onError` renderer whether a middleware or the action threw it, and for an
+  Inertia request that renderer redirects back with the errors in the session,
+  which is the flow the login page shows them through today.
+- **What does not move.** Checks that need the database or the session stay in
+  the action: wrong credentials (`ValidationException.withMessages()` after
+  `auth.attempt()`), the current password on profile update, a used reset
+  token.
+
+`tests/make-auth.test.ts` gains requests that pin each point on a rendered
+app: an invalid Inertia login is a redirect back with the field's message, a
+request over the limit with an invalid body gets the throttle's response, and
+wrong credentials still report under `message`.
+
+The pages use `Field`,
 `Button` and `Alert`, and pass `as` where the schema cannot say: `email` (the
 email schema is a pipe), `password`, and `checkbox` for "remember me" (a
 union). The login page sets `adoptPageErrors`. `calloutRow()` goes. An app
@@ -587,7 +689,10 @@ cookie. The config template sets `locale` to the app's default locale and
 clears a locale cookie from the storage state, and the generated spec checks
 `window.__INERTIA_PAGE__.props._i18n.locale` (when shared) before asserting
 labels. Where a lang file then renames a field, the spec fails until the plan
-or the lang file agrees, which is the drift the spec exists to report.
+or the lang file agrees, which is the drift the spec exists to report. The
+pinning is a change to RFC 0033's `add browser-tests` output, true of any
+translated page whether or not it uses `Field`, so it lands on its own before
+translated labels do (P2 in Milestones).
 
 **Plan views map onto `Field` one to one.** A plan view's
 `form.fields[].input` (RFC 0030, `packages/cli/src/plan/schema.ts`) uses the
@@ -609,7 +714,7 @@ default setup calls `createRoot()` (`app.tsx`), so an SSR app's first render
 replaces the server DOM, ids included. That is an existing limitation of the
 SSR bootstrap, not one this RFC adds: ids stay consistent within the client
 tree, which is all `htmlFor` needs. Moving the default setup to `hydrateRoot()`
-for server-rendered pages is separate work (Open Question 7); until then the
+for server-rendered pages is separate work (Open Question 6); until then the
 SSR template's smoke checks labels after hydration, not in the server HTML.
 
 ### 6. Non-goals
@@ -623,6 +728,33 @@ SSR template's smoke checks labels after hydration, not in the server HTML.
 - PATCH-style submission of dirty fields only.
 - A component for every UI need. The set covers what the generators write and
   what plan views name.
+
+## Milestones
+
+Two fixes come first. Each is true without this RFC and lands as its own PR:
+
+- **P1, the codegen watcher.** The Vite plugin regenerates on validator
+  directories (root and `modules/*/`) and on the routes entry's local imports
+  (section 2.1). It fixes stale `ApiRoutes` body types today and is what M2's
+  `forms.gen.ts` relies on.
+- **P2, the browser-test locale.** `add browser-tests` pins the Playwright
+  locale and clears a stored locale cookie, and the generated spec checks the
+  page's locale before asserting labels (section 5). It is RFC 0033's output,
+  and M4 relies on it.
+
+The RFC then lands in four milestones. Each one is a release that works on
+its own; none leaves a generator emitting an import a published package lacks.
+
+| | Scope | Packages | Depends on |
+|-|-------|----------|------------|
+| M1 | `guren add ui` with `Button`, `Label`, `Input`, `Textarea`, `Select`, `Checkbox`, `Card` and `Alert`; the `guren-ui-components` doctor check; `make:feature`, `make:auth` and the `create-guren-app` templates emit those components with today's wiring (`useForm`, the `fieldIds` hook, the raw identifier as label); the class constants go | `@guren/cli`, `create-guren-app` | |
+| M2 | `@guren/inertia-client/forms` (`useRouteForm`, `useField`, `RouteFormContract`, `FieldInput`, `humanizeFieldName`); `forms-types.ts` and `.guren/forms.gen.ts` with the version floor and the `check` comparison; `Field.tsx` joins `add ui`; `make:feature` pages move to `Field`, so labels become `humanizeFieldName()`; `browser:map` predicts those labels | `@guren/inertia-client`, then `@guren/cli`, `create-guren-app` | P1, M1 |
+| M3 | `make:auth` binds each body schema to its route; the auth pages and the blog template's move to `Field` and `Alert`; the request tests in section 3 | `@guren/cli`, `create-guren-app` | M2 |
+| M4 | The translation step of label resolution and `hasTranslation()` (section 4) | `@guren/inertia-client`, then `@guren/cli` | P2, M2 |
+
+M1 imports nothing from `@guren/inertia-client`, so it needs no client
+release and no version floor. The floor and the release order in Migration
+Path apply from M2.
 
 ## Alternatives Considered
 
@@ -717,10 +849,10 @@ touching a page. So:
   it does for the other `@guren/*` packages, and `sync:template-deps` raises the
   starters' range in the release that ships the subpath.
 
-**Release order.** `@guren/inertia-client` (minor: the `forms` subpath,
-`hasTranslation()`) publishes first; `@guren/cli` (minor: `add ui`,
-`forms-types.ts`, the watcher and check changes, the generator changes) and
-`create-guren-app` (minor: the templates) follow. Generated pages and copied
+**Release order.** Within M2 and again within M4, `@guren/inertia-client`
+(minor: the `forms` subpath in M2, `hasTranslation()` in M4) publishes first;
+`@guren/cli` (minor: `forms-types.ts`, the check changes, the generator
+changes) and `create-guren-app` (minor: the templates) follow. Generated pages and copied
 components resolve the client from npm, so `smoke:starter:npm` is red between
 the template change and that release, as `common-pitfalls.md` describes.
 
@@ -735,8 +867,28 @@ the template change and that release, as `common-pitfalls.md` describes.
 - `tests/plan-command-allowlist.test.ts` fails until `add ui` is classified.
 - The `guren-ui-components` doctor check gets the case table above as tests,
   and a test fails when a component template changes without its previous
-  hash joining `SHIPPED_UI_COMPONENTS`.
+  hash joining `SHIPPED_UI_COMPONENTS`. Another runs the scaffolded
+  `.oxlintrc.json` with `--fix` over each component template and fails on any
+  change it makes.
 - `tests/scaffold-blog-sync.test.ts` pins the auth templates the blog shares.
+- `tests/make-feature.test.ts` imports `FIELD_LABEL_CLASS` and asserts the
+  label markup built from it, so M1 rewrites that assertion against `Label`.
+- The agent harness's UI rule (`templates/agent/core/rules/ui.md`, PR #1241)
+  lists the shared class strings, and `tests/agent-ui-rule.test.ts` requires
+  each to appear in `guren-css.ts`, `make-feature.ts` or `make-auth.ts`, and
+  rebuilds `PRIMARY_SUBMIT_CLASS` from its row. Removing the constants breaks
+  both. M1 moves the strings into the component templates unchanged, adds
+  `templates/scaffold/ui/` to the files the test reads, and rewrites the
+  submit row against `Button`'s `block` variant, so the rule stays true without
+  yet naming the components (Future Work).
+- PR #1249's parse gate (`expectPagesUseTokens()` in
+  `tests/scaffold-output.test.ts`) lints every file a generator writes under
+  `resources/js/` with `guren/no-raw-color` and requires `guren.css` beside a
+  styled one. Generated pages shrink to layout classes and the copied
+  components carry the styling, so `add ui` joins the generators the gate's
+  coverage test requires a case from (`make:auth`, `make:feature`,
+  `make:view`, `add admin` today), and the component templates must pass
+  `no-raw-color` as written.
 - A new test pins `FieldInput` to the plan schema's `input` enum, and the CLI's
   copy of `humanizeFieldName()` to the package's.
 - Smokes: `smoke:starter`, `smoke:starter:blog` (its auth pages change),
@@ -758,17 +910,15 @@ the template change and that release, as `common-pitfalls.md` describes.
    validation messages that do not interpolate attribute names today.
 3. **`description` as hint.** Should `.describe()` fill `hint` when no
    translation exists? It is written for agents and may read badly to people.
-4. **Identifier collisions.** Fail codegen on two route names that camel-case
-   alike, or suffix one deterministically?
-5. **Format through a pipe.** Should `forms-types.ts` take `format` from a
+4. **Format through a pipe.** Should `forms-types.ts` take `format` from a
    pipe's output stage when its input stage is a plain string, so
    `.trim().toLowerCase().pipe(z.email())` derives `email` without an `as`? The
    output stage sees the normalized value, so the browser's check is slightly
    stricter than the server's.
-6. **A check for the copied components.** Generators emit against the props
+5. **A check for the copied components.** Generators emit against the props
    listed above. Should `guren check` warn when a copied component no longer
    exports what generated pages import, or is `typecheck` enough?
-7. **SSR hydration.** Should `startInertiaClient()`'s default setup hydrate a
+6. **SSR hydration.** Should `startInertiaClient()`'s default setup hydrate a
    server-rendered page (`hydrateRoot()`) instead of `createRoot()`, in this
    RFC's release or separately?
 
