@@ -10,6 +10,7 @@ import type { FormDataErrors, FormDataKeys, FormDataType, Method } from '@inerti
 import { useForm, usePage } from '@inertiajs/react'
 import type { InertiaFormProps, InertiaPrecognitiveFormProps } from '@inertiajs/react'
 import { substituteRouteParams, type RoutePathParams } from './components'
+import { findTranslation, type I18nPageProps } from './i18n'
 
 export type { FormDataType } from '@inertiajs/core'
 
@@ -170,6 +171,31 @@ export function humanizeFieldName(name: string): string {
   return sentence.charAt(0).toUpperCase() + sentence.slice(1)
 }
 
+/** A key the translator can reach as one segment: it splits on `.` and stops at a string. */
+function isKeySegment(segment: string): boolean {
+  return segment !== '' && !segment.includes('.')
+}
+
+/**
+ * A field's label when the caller passes none (RFC 0036 §4): `fields.<route>.<name>.label`, then
+ * `fields.<name>.label`, both in the current locale before the fallback, then
+ * `humanizeFieldName(name)`. An empty translation is skipped: it would leave the control unnamed.
+ */
+export function resolveFieldLabel(name: string, i18n?: I18nPageProps, route?: string): string {
+  const keys = isKeySegment(name) ? [...(route ? [`fields.${route}.${name}.label`] : []), `fields.${name}.label`] : []
+  return findTranslation(i18n, keys) ?? humanizeFieldName(name)
+}
+
+/**
+ * An enum member's option label: `fields.<name>.options.<value>`, then `humanizeFieldName()`. A
+ * value with a dot (`1.5`) has no translation key, so it reads humanized unless the caller passes options.
+ */
+export function resolveOptionLabel(name: string, value: string | number, i18n?: I18nPageProps): string {
+  const segment = String(value)
+  const keys = isKeySegment(name) && isKeySegment(segment) ? [`fields.${name}.options.${segment}`] : []
+  return findTranslation(i18n, keys) ?? humanizeFieldName(segment)
+}
+
 /**
  * The input kind a contract field derives when the caller passes no `as`. `textarea`,
  * `password`, `file` and `hidden` cannot be read off a schema; nor can a type the walker
@@ -322,7 +348,8 @@ export type FieldForm<TBody extends FormDataType<TBody>> = RouteForm<TBody> | In
 /**
  * One body key's label, control props and error state. A plain Inertia form works too: with no
  * contract nothing is derived, the input comes from `as` (default `text`) and the label from
- * `label` or the field name.
+ * `label`, a `fields.<name>.label` translation, or the field name. Translations come from the
+ * `_i18n` page prop, read without `useTranslation()`'s warning since most apps share none.
  */
 export function useField<TBody extends FormDataType<TBody>, K extends keyof TBody & string>(
   form: FieldForm<TBody>,
@@ -333,6 +360,7 @@ export function useField<TBody extends FormDataType<TBody>, K extends keyof TBod
   const routeForm = 'handleSubmit' in form ? form : undefined
   const contract = routeForm?.contract?.fields[name]
   const initialValue = routeForm ? (routeForm.initialData as Record<string, unknown>)[name] : undefined
+  const i18n = usePage().props._i18n as I18nPageProps | undefined
   return describeField({
     id,
     name,
@@ -341,6 +369,8 @@ export function useField<TBody extends FormDataType<TBody>, K extends keyof TBod
     contract,
     initialValue,
     overrides,
+    i18n,
+    ...(routeForm?.contract ? { route: routeForm.contract.route } : {}),
     setValue: (value) => form.setData(name as FormDataKeys<TBody>, value as never),
   })
 }
@@ -353,12 +383,16 @@ export interface DescribeFieldInput<TValue> {
   contract?: FieldContract
   initialValue?: unknown
   overrides?: FieldOverrides<TValue>
+  /** The `_i18n` page prop, for translated labels. */
+  i18n?: I18nPageProps
+  /** The contract's route name, for `fields.<route>.<name>.label`. */
+  route?: string
   setValue: (value: unknown) => void
 }
 
 /** `useField` without the hooks: everything it returns is computed here. */
 export function describeField<TValue>(input: DescribeFieldInput<TValue>): FieldState<TValue> {
-  const { id, name, value, error, contract, initialValue, overrides = {}, setValue } = input
+  const { id, name, value, error, contract, initialValue, overrides = {}, i18n, route, setValue } = input
   const kind = overrides.as ?? deriveFieldInput(contract)
   const errorId = `${id}-error`
   const hintId = `${id}-hint`
@@ -371,7 +405,7 @@ export function describeField<TValue>(input: DescribeFieldInput<TValue>): FieldS
   const base: FieldStateBase = {
     id,
     name,
-    label: overrides.label ?? humanizeFieldName(name),
+    label: overrides.label ?? resolveFieldLabel(name, i18n, route),
     required,
     ...(error ? { error } : {}),
     errorId,
@@ -393,7 +427,7 @@ export function describeField<TValue>(input: DescribeFieldInput<TValue>): FieldS
       }
     case 'select': {
       const options = overrides.options
-        ?? (contract?.enum ?? []).map((member) => ({ value: member as TValue, label: humanizeFieldName(String(member)) }))
+        ?? (contract?.enum ?? []).map((member) => ({ value: member as TValue, label: resolveOptionLabel(name, member, i18n) }))
       const index = options.findIndex((option) => option.value === value)
       return {
         ...base,

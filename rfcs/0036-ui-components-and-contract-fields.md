@@ -640,7 +640,11 @@ what `getByLabel()` finds. Its resolution order is:
 2. the translation `fields.<route>.<name>.label`
    (`fields.posts.store.title.label`), then `fields.<name>.label`, when the app
    shares `_i18n` and the key exists in the current locale or its fallback, in
-   that order;
+   that order; **Amended in implementation:** both keys are tried in the
+   current locale before either is tried in the fallback, so a route-scoped
+   label that exists only in the fallback never replaces a field label the
+   current locale has, and an empty translation counts as missing, since it
+   would leave the control without an accessible name;
 3. `humanizeFieldName(name)`.
 
 Labels live under a `.label` leaf so that option labels can sit beside them

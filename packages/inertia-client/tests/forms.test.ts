@@ -7,6 +7,8 @@ import {
   normalizeBlankFields,
   numberAttributes,
   requiresValue,
+  resolveFieldLabel,
+  resolveOptionLabel,
   resolveRouteUrl,
   selectErrorBag,
   toDateTimeLocal,
@@ -16,6 +18,7 @@ import {
   type FieldState,
   type RouteFormContract,
 } from '../src/forms'
+import type { I18nPageProps } from '../src/i18n'
 
 const text = (overrides: Partial<FieldContract> = {}): FieldContract => ({ type: 'string', required: true, ...overrides })
 
@@ -204,6 +207,92 @@ describe('describeField', () => {
     const { state } = field(undefined, '')
     expect(state.input).toBe('text')
     expect(state.required).toBe(false)
+  })
+})
+
+describe('translated labels', () => {
+  const i18n = (locale: string, messages: I18nPageProps['messages']): I18nPageProps => ({ locale, fallbackLocale: 'en', messages })
+  const catalogs: I18nPageProps['messages'] = {
+    en: {
+      fields: {
+        title: { label: 'Headline' },
+        category: { label: 'Section', options: { news: 'News desk' } },
+        posts: { store: { title: { label: 'Post headline' } } },
+      },
+    },
+    ja: {
+      fields: {
+        title: { label: '見出し' },
+        category: { options: { news: 'ニュース' } },
+        posts: { update: { title: { label: '見出しの変更' } } },
+        empty: { label: '' },
+      },
+    },
+  }
+
+  it('lets the label prop win over a translation', () => {
+    const { state } = field(text(), 'x', { name: 'title', i18n: i18n('en', catalogs), route: 'posts.store', overrides: { label: 'Title' } })
+    expect(state.label).toBe('Title')
+  })
+
+  it('reads the route-scoped key before the field key', () => {
+    expect(resolveFieldLabel('title', i18n('en', catalogs), 'posts.store')).toBe('Post headline')
+    expect(resolveFieldLabel('title', i18n('ja', catalogs), 'posts.update')).toBe('見出しの変更')
+  })
+
+  it('reads the field key when the route has none, or the form has no route', () => {
+    expect(resolveFieldLabel('title', i18n('ja', catalogs))).toBe('見出し')
+  })
+
+  it('prefers any key in the current locale over the fallback locale', () => {
+    // ja has only the field key, en the route-scoped one: the page stays in Japanese.
+    expect(resolveFieldLabel('title', i18n('ja', catalogs), 'posts.store')).toBe('見出し')
+  })
+
+  it('falls back to the fallback locale, the route-scoped key first', () => {
+    expect(resolveFieldLabel('category', i18n('ja', catalogs), 'posts.store')).toBe('Section')
+    expect(resolveFieldLabel('title', i18n('fr', catalogs), 'posts.store')).toBe('Post headline')
+  })
+
+  it('humanizes the name without _i18n, on a miss, or on an empty translation', () => {
+    expect(resolveFieldLabel('startsAt')).toBe('Starts at')
+    expect(resolveFieldLabel('startsAt', i18n('ja', catalogs), 'posts.store')).toBe('Starts at')
+    expect(resolveFieldLabel('empty', i18n('ja', catalogs))).toBe('Empty')
+  })
+
+  it('never looks up a name with a dot, which the translator would split', () => {
+    const dotted = i18n('en', { en: { fields: { meta: { title: { label: 'Wrong' } } } } })
+    expect(resolveFieldLabel('meta.title', dotted)).toBe('Meta title')
+  })
+
+  it('passes the shared props through describeField', () => {
+    const { state } = field(text(), 'x', { name: 'title', i18n: i18n('en', catalogs), route: 'posts.store' })
+    expect(state.label).toBe('Post headline')
+  })
+
+  it('translates enum options by value, in the current locale or its fallback', () => {
+    const shared = i18n('ja', catalogs)
+    expect(resolveOptionLabel('category', 'news', shared)).toBe('ニュース')
+    expect(resolveOptionLabel('category', 'howTo', shared)).toBe('How to')
+    const { state } = field({ type: 'string', required: true, enum: ['news', 'howTo'] }, 'news', { name: 'category', i18n: shared })
+    if (state.input !== 'select') throw new Error('expected a select')
+    expect(state.options.map((option) => option.label)).toEqual(['ニュース', 'How to'])
+  })
+
+  it('humanizes an option value that is not a key segment', () => {
+    const shared = i18n('en', { en: { fields: { rate: { options: { 1: 'One', 5: 'Half' } } } } })
+    expect(resolveOptionLabel('rate', 1, shared)).toBe('One')
+    expect(resolveOptionLabel('rate', 1.5, shared)).toBe('1 5')
+  })
+
+  it('lets caller options win over translations', () => {
+    const { state } = field({ type: 'string', required: true, enum: ['news'] }, 'news', {
+      name: 'category',
+      i18n: i18n('ja', catalogs),
+      overrides: { options: [{ value: 'news', label: 'Press' }] },
+    })
+    if (state.input !== 'select') throw new Error('expected a select')
+    expect(state.options[0]!.label).toBe('Press')
   })
 })
 
