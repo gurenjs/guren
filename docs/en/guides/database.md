@@ -50,7 +50,7 @@ export default defineDatabaseConfig(database, {
 
 With `seedOnBoot` true, the app runs the seeders at boot once the migrations folder holds migrations. Scaffolds turn it on only under `NODE_ENV=development` (which `bun run dev` sets) and `NODE_ENV=test` (which `bun test` sets). Any other value, an unset `NODE_ENV` included, skips it, so a server started without `NODE_ENV` never creates the seeders' demo accounts; run `bunx guren db:seed` explicitly there. Tests use a separate file; see [Testing](./testing.md#test-database-isolation).
 
-Apps scaffolded earlier pass `seedOnBoot: process.env.NODE_ENV !== 'production'`, which also seeds when `NODE_ENV` is unset. `bunx guren doctor` warns about it. `bunx guren upgrade` rewrites it when it can keep `bun run dev` seeding: when a `dev` or `dev:server` script already sets `NODE_ENV=development`, or when the one that starts `bin/serve.ts` is a single command it can prefix with `NODE_ENV=development`. Otherwise it changes nothing, and the doctor warning says what to edit.
+Apps scaffolded earlier pass `seedOnBoot: process.env.NODE_ENV !== 'production'`, which also seeds when `NODE_ENV` is unset. `bunx guren doctor` warns about it and says what to edit; nothing rewrites the file for you. Replace the comparison with `(process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test')`, keeping the rest of the expression, and run `bin/serve.ts` under `NODE_ENV=development` in the script `bun run dev` starts it with (`"dev:server": "NODE_ENV=development bun --hot bin/serve.ts"`), or `bun run dev` stops seeding.
 
 > [!TIP]
 > Use SQLite for development and testing, then switch to PostgreSQL for production. Your models and queries work unchanged.
