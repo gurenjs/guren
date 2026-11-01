@@ -11,6 +11,7 @@ import { ENV_SCHEMA_FILE } from './app-env'
 import { memberKeyName, objectLiteral, topLevelDeclaration, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 import { callsDefineConfig, discoverProviderFiles, readIfExists, toPosixRelative } from './discovery'
 import { parseSourceFile } from './parse-cache'
+import { SEED_ON_BOOT_OPTION } from './seed-on-boot'
 import { sessionConfigsIn } from './session-config'
 import { escapeSingleQuoted } from './utils'
 
@@ -171,7 +172,7 @@ async function databaseMigration(cwd: string, providers: readonly SourceFile[]):
   if (!source || !/export\s+(?:async\s+)?function\s+bootModels\b/.test(source)) return null
   if (callsDefineConfig((await readIfExists(cwd, 'config/database.ts')) ?? '', 'database')) return null
 
-  const options = source.includes('seedDatabase(') ? ", { seedOnBoot: process.env.NODE_ENV !== 'production' }" : ''
+  const options = source.includes('seedDatabase(') ? `, ${SEED_ON_BOOT_OPTION}` : ''
   return {
     key: 'database',
     legacyFiles: ['config/app.ts', ...providersContaining(cwd, providers, 'bootModels')],

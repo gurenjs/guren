@@ -262,7 +262,7 @@ const app = createApp({
 
 ### Migrations & Seeding
 
-The scaffolded `config/database.ts` seeds the database on boot as a local development convenience (`seedOnBoot: process.env.NODE_ENV !== 'production'`) and skips it in production. Keep that guard. Lambda boots the app on every cold start, so boot-time seeding would re-run against production data.
+The scaffolded `config/database.ts` seeds the database on boot as a local development convenience, only under `NODE_ENV=development` or `test` (`seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test'`), and skips it everywhere else, an unset `NODE_ENV` included. Keep that guard. Lambda boots the app on every cold start, so boot-time seeding would re-run against production data.
 
 **Migrations** ship with the function: `lambda:build` copies `db/migrations/` next to the bundle, so a `db:migrate` console command can apply them in place. See [Console — `createConsoleHandler(kernel)`](#console-createconsolehandlerkernel) for the command and how to invoke it.
 

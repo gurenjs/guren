@@ -43,10 +43,14 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 
 export type AppSeederContext = SqliteSeederContext
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
-With `seedOnBoot` true, the app runs the seeders at boot once the migrations folder holds migrations. Scaffolds turn it off in production, where you run `bunx guren db:seed` explicitly. Tests use a separate file; see [Testing](./testing.md#test-database-isolation).
+With `seedOnBoot` true, the app runs the seeders at boot once the migrations folder holds migrations. Scaffolds turn it on only under `NODE_ENV=development` (which `bun run dev` sets) and `NODE_ENV=test` (which `bun test` sets). Any other value, an unset `NODE_ENV` included, skips it, so a server started without `NODE_ENV` never creates the seeders' demo accounts; run `bunx guren db:seed` explicitly there. Tests use a separate file; see [Testing](./testing.md#test-database-isolation).
+
+Apps scaffolded earlier pass `seedOnBoot: process.env.NODE_ENV !== 'production'`, which also seeds when `NODE_ENV` is unset. `bunx guren doctor` warns about it, and `bunx guren upgrade` rewrites it and adds `NODE_ENV=development` to a `bun --hot bin/serve.ts` dev script, so `bun run dev` keeps seeding.
 
 > [!TIP]
 > Use SQLite for development and testing, then switch to PostgreSQL for production. Your models and queries work unchanged.
@@ -71,7 +75,9 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 
 export type AppSeederContext = PostgresSeederContext
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
 Tables are declared with `pgTable`:
@@ -113,7 +119,9 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 
 export type AppSeederContext = MySqlSeederContext
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
 
@@ -140,7 +148,9 @@ const database = createAwsDataApiDatabase({
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
 Declare the three keys in `config/env.ts` (see [Configuration](./configuration.md#declaring-the-environment)), for example as `Env.string().optional()`.

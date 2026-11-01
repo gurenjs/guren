@@ -45,10 +45,14 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 
 export type AppSeederContext = SqliteSeederContext
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
-`seedOnBoot` が true のときは、マイグレーションフォルダにマイグレーションがあれば、起動時にシーダーが実行されます。雛形では本番環境でこの設定を無効にしているので、本番では `bunx guren db:seed` を明示的に実行してください。テストでは別のファイルを使います（[テストガイド](./testing.md#テストデータベースの分離)を参照）。
+`seedOnBoot` が true のときは、マイグレーションフォルダにマイグレーションがあれば、起動時にシーダーが実行されます。雛形で有効になるのは、`bun run dev` が設定する `NODE_ENV=development` と、`bun test` が設定する `NODE_ENV=test` のときだけです。`NODE_ENV` が未設定の場合を含め、それ以外の値ではシードしないので、`NODE_ENV` を付けずに起動したサーバーがシーダーのデモ用アカウントを作ることはありません。その環境では `bunx guren db:seed` を明示的に実行してください。テストでは別のファイルを使います（[テストガイド](./testing.md#テストデータベースの分離)を参照）。
+
+以前に作ったアプリは `seedOnBoot: process.env.NODE_ENV !== 'production'` を渡していて、`NODE_ENV` が未設定のときにもシードします。`bunx guren doctor` はこれを警告します。`bunx guren upgrade` を実行すると、この式が書き換わり、`bun --hot bin/serve.ts` を実行する dev スクリプトに `NODE_ENV=development` が付くので、`bun run dev` では引き続きシードされます。
 
 > [!TIP]
 > 開発とテストでは SQLite を使い、本番では PostgreSQL に切り替える構成がおすすめです。モデルやクエリはそのまま動きます。
@@ -73,7 +77,9 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 
 export type AppSeederContext = PostgresSeederContext
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
 テーブルは `pgTable` で宣言します。
@@ -117,7 +123,9 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 
 export type AppSeederContext = MySqlSeederContext
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
 ### Aurora Serverless（AWS Data API）
@@ -143,7 +151,9 @@ const database = createAwsDataApiDatabase({
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
 3 つのキーは `config/env.ts` に宣言してください(例: `Env.string().optional()`。[設定](./configuration.md#環境変数を宣言する)を参照)。

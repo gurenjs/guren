@@ -135,7 +135,7 @@ describe('guren doctor --next config migration (RFC 0027 Migration Path)', () =>
     const migrations = await detectConfigMigrations(workspace.dir)
     expect(migrations.map((migration) => [migration.key, migration.content === null])).toEqual([['cache', true], ['database', false]])
     expect(migrations[1]?.legacyFiles).toEqual(['config/app.ts', 'app/Providers/DatabaseProvider.ts'])
-    expect(migrations[1]?.content).toContain("export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })")
+    expect(migrations[1]?.content).toContain("export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test' })")
 
     const steps = await suggestNextSteps({ cwd: workspace.dir })
     expect(steps.find((step) => step.filePath === 'config/cache.ts')?.description).toContain('could not be read')

@@ -27,8 +27,11 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 export type AppSeederContext = SqliteSeederContext
 
 /**
- * Seeding is one-shot provisioning, not part of booting: production boots
- * repeatedly on serverless cold starts, and a bundle has no resolver for the
- * raw db/seeders/*.ts files. Run `bunx guren db:seed` explicitly instead.
+ * Seeding on boot is a local convenience, allowed by name: `bun run dev` sets
+ * NODE_ENV=development and `bun test` sets test. Anything else, an unset NODE_ENV
+ * included, never seeds, since seeders write demo accounts and production boots
+ * repeatedly on serverless cold starts. Run `bunx guren db:seed` explicitly there.
  */
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})

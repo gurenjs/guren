@@ -71,6 +71,7 @@ import { generateGuidelines } from './guidelines'
 import { installAgentHarness, type AgentHarnessResult } from './agent-harness'
 import { AGENT_TARGETS, parseTargetList, type AgentTarget } from './agent-targets'
 import { generateKeyValue, writeKeyToEnv } from './key-generate'
+import { SEED_ON_BOOT_OPTION } from './seed-on-boot'
 
 const specGenerateCommand = defineCommand({
   meta: {
@@ -750,6 +751,8 @@ const devCommand = keepsProcessAlive(defineCommand({
     description: 'Start the Guren application in development mode using Bun.',
   },
   async run() {
+    // Before the entry loads: config/database.ts seeds on boot only under a named NODE_ENV.
+    process.env.NODE_ENV ||= 'development'
     const { app } = await loadApplication()
 
     // `PORT=0` means "any free port", so this tests for a number, not truthiness.
@@ -1464,7 +1467,7 @@ const addBrowserTestsCommand = defineCommand({
     if (result.mapped.held) consola.warn(`browser:map wrote no specs: ${result.mapped.held}. Run bunx guren browser:map once it reads the whole app.`)
     if (!result.map.complete) consola.warn(`The browser map is incomplete (${result.map.gaps.map((gap) => gap.section).join(', ')}), so the specs may miss features; run bunx guren browser:map --check for the reasons.`)
     if (result.signIn) {
-      if (!result.seedsOnBoot) consola.warn('config/database.ts does not set seedOnBoot, so browser:serve never seeds the browser account and the setup project cannot sign in. Pass { seedOnBoot: process.env.NODE_ENV !== \'production\' } to defineDatabaseConfig().')
+      if (!result.seedsOnBoot) consola.warn(`config/database.ts does not set seedOnBoot, so browser:serve never seeds the browser account and the setup project cannot sign in. Pass ${SEED_ON_BOOT_OPTION} to defineDatabaseConfig().`)
       consola.info('Set BROWSER_TEST_PASSWORD in .env: the browser account is seeded with it.')
     }
     consola.info('Next: bunx playwright install chromium, then bun run test:browser. After approving a plan, run bunx guren browser:map to regenerate the specs.')

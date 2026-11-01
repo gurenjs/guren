@@ -211,7 +211,9 @@ const database = createPostgresDatabase({
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
 `mode: 'report'` を指定すると、例外を投げずに検証できた値だけを返します。これで、本番で `guren db:migrate` を実行するときに、データベースへ接続したいだけなのに `APP_KEY` を求められる、ということがなくなります。

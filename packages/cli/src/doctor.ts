@@ -42,6 +42,7 @@ import { commandFix, type CheckEvidence, type CheckFix, type CheckFixRun } from 
 import { hasPendingRepair, repairDoctorReport } from './doctor-fix'
 import { summarizeDoctorReport, type DoctorStatus } from './doctor-report'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
+import { hasLegacySeedOnBoot, rewriteLegacySeedOnBoot, SEED_ON_BOOT_EXPRESSION, SEED_ON_BOOT_OPTION, withDevelopmentNodeEnv } from './seed-on-boot'
 import {
   planAppTokenSheet,
   planAppUiComponents,
@@ -261,8 +262,9 @@ function createAgentManifestRule(): DoctorRule {
 export const CANONICAL_APP_SCRIPTS = {
   dev: 'bun run codegen && bun run dev:server',
   // `dev` delegates here, so the pair has to be added together. `--hot` is what
-  // makes backend edits take effect without restarting the server.
-  'dev:server': 'bun --hot bin/serve.ts',
+  // makes backend edits take effect without restarting the server; NODE_ENV is
+  // the value config/database.ts seeds on boot for (`seed-on-boot.ts`).
+  'dev:server': 'NODE_ENV=development bun --hot bin/serve.ts',
   build: 'bun run codegen && bunx vite build',
   typecheck: 'tsc --noEmit',
   codegen: 'bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts --force',
@@ -1162,6 +1164,63 @@ async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorC
   )
 }
 
+async function detectSeedOnBoot(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const configFile = await findFirstExisting(context.cwd, DATABASE_CONFIG_CANDIDATES)
+  const source = configFile ? await readIfExists(context.cwd, configFile) : null
+  if (!configFile || source === null || !hasLegacySeedOnBoot(source)) {
+    return createCheck('seed-on-boot', 'Seeding On Boot', 'pass', 'Boot-time seeding does not run under an unset NODE_ENV.')
+  }
+
+  return createCheck(
+    'seed-on-boot',
+    'Seeding On Boot',
+    'warn',
+    `${configFile} seeds on boot whenever NODE_ENV is not "production", so a server started without NODE_ENV runs every seeder, demo accounts included.`,
+    {
+      fix: `Set \`seedOnBoot: ${SEED_ON_BOOT_EXPRESSION}\`, and NODE_ENV=development in the dev script.`,
+      canAutofix: true,
+      manualFix: `In ${configFile}, pass \`${SEED_ON_BOOT_OPTION}\` to defineDatabaseConfig(), and prefix the \`bun --hot bin/serve.ts\` dev script with NODE_ENV=development so \`bun run dev\` still seeds.`,
+    },
+  )
+}
+
+async function createSeedOnBootAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
+  if (check.status === 'pass' || !check.canAutofix) {
+    return null
+  }
+
+  return {
+    key: check.key,
+    title: check.title,
+    summary: 'Seed on boot only under NODE_ENV=development or test, and set NODE_ENV=development in the `bun --hot` dev script.',
+    async apply(cwd: string) {
+      const configFile = await findFirstExisting(cwd, DATABASE_CONFIG_CANDIDATES)
+      const source = configFile ? await readIfExists(cwd, configFile) : null
+      if (!configFile || source === null || !hasLegacySeedOnBoot(source)) {
+        return
+      }
+      await writeFile(resolve(cwd, configFile), rewriteLegacySeedOnBoot(source), 'utf8')
+
+      const manifest = await readJsonIfExists<PackageJsonShape>(cwd, 'package.json')
+      if (!manifest.exists || manifest.parseError || !manifest.value?.scripts) {
+        return
+      }
+      const scripts = { ...manifest.value.scripts }
+      let changed = false
+      for (const name of ['dev:server', 'dev']) {
+        const next = scripts[name] === undefined ? null : withDevelopmentNodeEnv(scripts[name])
+        if (next !== null) {
+          scripts[name] = next
+          changed = true
+        }
+      }
+      if (changed) {
+        await writeJsonFile(cwd, 'package.json', { ...manifest.value, scripts })
+      }
+    },
+  }
+}
+
 /**
  * Whether the project has any test foundation: `@guren/testing` installed, or
  * at least one test file under `tests/`. Older scaffolds and hand-rolled
@@ -1397,6 +1456,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'config-drift', title: 'App Wiring', detect: detectConfigDrift },
   { key: 'scripts', title: 'App Scripts', detect: detectScripts, autofix: createScriptsAutofix },
   { key: 'database-config', title: 'Database Configuration', detect: detectDatabaseConfig },
+  { key: 'seed-on-boot', title: 'Seeding On Boot', detect: detectSeedOnBoot, autofix: createSeedOnBootAutofix },
   { key: 'test-infrastructure', title: 'Test Infrastructure', detect: detectTestInfrastructure },
   { key: 'plugin-compatibility', title: 'Plugin Compatibility', detect: detectPluginCompatibility },
   { key: 'guren-ui-tokens', title: 'Guren UI Tokens', detect: detectGurenUiTokens, autofix: createGurenUiTokensAutofix },

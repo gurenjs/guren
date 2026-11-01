@@ -268,7 +268,7 @@ const app = createApp({
 
 ### マイグレーションとシード
 
-雛形の `config/database.ts` は、ローカル開発の手間を省くために起動時にシードを実行し（`seedOnBoot: process.env.NODE_ENV !== 'production'`）、本番ではスキップします。このガードは外さないでください。Lambda はコールドスタートのたびにアプリを起動するので、起動時のシードが本番データに対して何度も実行されてしまいます。
+雛形の `config/database.ts` は、ローカル開発の手間を省くために、`NODE_ENV` が `development` か `test` のときだけ起動時にシードを実行し（`seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test'`）、未設定の場合を含め、それ以外ではスキップします。このガードは外さないでください。Lambda はコールドスタートのたびにアプリを起動するので、起動時のシードが本番データに対して何度も実行されてしまいます。
 
 **マイグレーションは関数に同梱されます。** `lambda:build` が `db/migrations/` をバンドルの隣にコピーするので、`db:migrate` のコンソールコマンドを使えばその場で適用できます。コマンドの定義と呼び出し方は [コンソールハンドラ `createConsoleHandler(kernel)`](#コンソール-createconsolehandlerkernel) を参照してください。
 
