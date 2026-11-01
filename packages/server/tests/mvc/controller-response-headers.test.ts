@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import { Hono } from 'hono'
 import { Controller } from '../../src/mvc/Controller'
+import { INERTIA_VARY } from '../../src/mvc/inertia/InertiaEngine'
 
 class HeadersController extends Controller {
   feed(headers: HeadersInit) {
@@ -37,6 +38,11 @@ async function respond(action: Action, headers: HeadersInit, requestHeaders: Hea
 }
 
 const INERTIA_VISIT = { 'X-Inertia': 'true', Accept: 'application/json' }
+
+function varyTokens(source: Response | string): string[] {
+  const vary = typeof source === 'string' ? source : source.headers.get('vary') ?? ''
+  return vary.split(',').map((token) => token.trim().toLowerCase()).filter(Boolean)
+}
 
 const RSS = 'application/rss+xml; charset=utf-8'
 
@@ -86,7 +92,22 @@ describe('Controller response helpers merge headers case-insensitively', () => {
     test(`inertia() keeps other headers passed as ${label}`, async () => {
       const res = await respond('page', build('Cache-Control', 'no-store'), INERTIA_VISIT)
       expect(res.headers.get('cache-control')).toBe('no-store')
-      expect(res.headers.get('vary')).not.toBeNull()
+      expect(res.headers.get('vary')).toBe(INERTIA_VARY)
+    })
+
+    test(`inertia() adds every engine Vary token to a Vary passed as ${label}`, async () => {
+      const res = await respond('page', build('Vary', 'Cookie, accept'), INERTIA_VISIT)
+      const tokens = varyTokens(res)
+      expect(tokens).toContain('cookie')
+      for (const token of varyTokens(INERTIA_VARY)) {
+        expect(tokens).toContain(token)
+      }
+      expect(tokens.filter((token) => token === 'accept')).toHaveLength(1)
+    })
+
+    test(`inertia() leaves a Vary of * passed as ${label} alone`, async () => {
+      const res = await respond('page', build('Vary', '*'), INERTIA_VISIT)
+      expect(res.headers.get('vary')).toBe('*')
     })
 
     test(`text() keeps other headers passed as ${label}`, async () => {
@@ -95,6 +116,11 @@ describe('Controller response helpers merge headers case-insensitively', () => {
       expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8')
     })
   }
+
+  test('inertia() extends an exact-case Vary key rather than replacing the engine tokens', async () => {
+    const res = await respond('page', { Vary: 'Cookie' }, INERTIA_VISIT)
+    expect(res.headers.get('vary')).toBe(`Cookie, ${INERTIA_VARY}`)
+  })
 
   test('json() keeps its default content type when the caller sets none', async () => {
     const res = await respond('report', {})

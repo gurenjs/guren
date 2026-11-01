@@ -30,8 +30,9 @@ import {
   definePlugin,
   formatValidationErrors,
   buildInertiaPage,
-  INERTIA_VARY,
+  mergeInertiaVary,
   serializePage,
+  withDefaultHeaders,
 } from '@guren/server/internal/testing'
 
 export interface ControllerContext {
@@ -140,15 +141,6 @@ function loadServer(): Promise<ServerModule> {
   return serverModulePromise
 }
 
-/** Mirrors the server's `support/default-headers.ts`: the caller's header wins whatever its case. */
-function withDefaultHeaders(init: HeadersInit | undefined, defaults: Record<string, string>): Headers {
-  const headers = new Headers(init)
-  for (const [name, value] of Object.entries(defaults)) {
-    if (!headers.has(name)) headers.set(name, value)
-  }
-  return headers
-}
-
 /**
  * The Inertia response without a booted app: no shared props, root document, asset
  * version or SSR, which is why the mock keeps it. The page object (prop
@@ -173,11 +165,10 @@ async function renderInertia(
     prefersJson ? serialized : `${initialPageElement(serialized)}<div id="app"></div>`,
     {
       status: options.status ?? 200,
-      headers: withDefaultHeaders(options.headers, {
+      headers: mergeInertiaVary(withDefaultHeaders(options.headers, {
         'Content-Type': prefersJson ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
         'X-Inertia': 'true',
-        Vary: INERTIA_VARY,
-      }),
+      })),
     },
   )
 

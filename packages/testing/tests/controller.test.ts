@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { defer } from '@guren/server'
+import { INERTIA_VARY } from '@guren/server/internal/testing'
 import {
   createControllerContext,
   createGurenControllerModule,
@@ -220,9 +221,12 @@ describe('createGurenControllerModule', () => {
     const controller = new Controller()
     controller.setContext(ctx)
 
-    const page = await controller.inertia('Feed', {}, { headers: { 'content-type': 'application/vnd.feed+json' } })
+    const page = await controller.inertia('Feed', {}, {
+      headers: { 'content-type': 'application/vnd.feed+json', vary: 'Cookie' },
+    })
     expect(page.headers.get('content-type')).toBe('application/vnd.feed+json')
     expect(page.headers.get('x-inertia')).toBe('true')
+    expect(page.headers.get('vary')).toBe(`Cookie, ${INERTIA_VARY}`)
 
     const text = controller.text('a,b', { headers: new Headers({ 'content-type': 'text/csv' }) })
     expect(text.headers.get('content-type')).toBe('text/csv')

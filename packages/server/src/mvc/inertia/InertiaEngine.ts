@@ -183,6 +183,29 @@ export const INERTIA_VARY =
   "Accept, X-Inertia, X-Inertia-Partial-Component, X-Inertia-Partial-Data, X-Inertia-Partial-Except";
 
 /**
+ * Adds each {@link INERTIA_VARY} token the response's `Vary` does not list yet, so a
+ * caller's own `Vary` extends the engine's rather than replacing it. `*` already
+ * varies on everything and is left alone.
+ */
+export function mergeInertiaVary(headers: Headers): Headers {
+  const current = headers.get("Vary")?.trim() ?? "";
+  const listed = current
+    .split(",")
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean);
+  if (listed.includes("*")) {
+    return headers;
+  }
+  const missing = INERTIA_VARY.split(", ").filter(
+    (token) => !listed.includes(token.toLowerCase())
+  );
+  if (missing.length > 0) {
+    headers.set("Vary", [...(current ? [current] : []), ...missing].join(", "));
+  }
+  return headers;
+}
+
+/**
  * {@link inertia} plus the page it sent, for a caller that records the props
  * actually resolved (`Controller.inertia()`'s response marker). The version
  * check runs before any prop resolves: a 409 must not run a lazy prop's query.
@@ -234,14 +257,15 @@ export async function renderInertia(
     page,
     response: new Response(body, {
       status: options.status ?? 200,
-      headers: withDefaultHeaders(options.headers, {
-        "Content-Type": wantsJson
-          ? "application/json; charset=utf-8"
-          : "text/html; charset=utf-8",
-        "X-Inertia": "true",
-        Vary: INERTIA_VARY,
-        ...versionHeader,
-      }),
+      headers: mergeInertiaVary(
+        withDefaultHeaders(options.headers, {
+          "Content-Type": wantsJson
+            ? "application/json; charset=utf-8"
+            : "text/html; charset=utf-8",
+          "X-Inertia": "true",
+          ...versionHeader,
+        })
+      ),
     }),
   };
 }

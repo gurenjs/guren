@@ -7,7 +7,8 @@
  */
 export { Controller } from '../mvc/Controller'
 export type { InertiaPageContractLike, InertiaResponseOptions } from '../mvc/Controller'
-export { acceptsJson, buildInertiaPage, INERTIA_VARY, serializePage } from '../mvc/inertia/InertiaEngine'
+export { acceptsJson, buildInertiaPage, INERTIA_VARY, mergeInertiaVary, serializePage } from '../mvc/inertia/InertiaEngine'
+export { withDefaultHeaders } from '../support/default-headers'
 export { Resource, JsonResource, collect } from '../http/resources/Resource'
 export { ValidationException } from '../errors/exceptions/ValidationException'
 export { AuthenticationException } from '../errors/exceptions/AuthenticationException'
