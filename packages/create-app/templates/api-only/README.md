@@ -1,6 +1,6 @@
 # __APP_NAME__
 
-API-only application built with [Guren](https://github.com/user/guren).
+API-only application built with [Guren](https://guren.dev).
 
 ## Getting Started
 
