@@ -186,7 +186,8 @@ function zodToType(z: ZodSchemaLike, options: SchemaTypeOptions): string {
     // `z.discriminatedUnion()` produces this same node.
     case 'union': {
       const opts = def.options as ZodSchemaLike[] | undefined
-      if (opts) return opts.map((o) => zodToType(o, options)).join(' | ')
+      // Distinct members only: two options can render alike (a boolean beside a string piped to one).
+      if (opts) return [...new Set(opts.map((o) => zodToType(o, options)))].join(' | ')
       return 'unknown'
     }
 

@@ -147,7 +147,7 @@ function appendQueryString(path: string, query?: RouteQuery): string {
 declare module '@guren/core' {
   interface GurenRouteContracts {
     routes: {
-      'login.store': { body: { email: string; password: string; remember: boolean | boolean } }
+      'login.store': { body: { email: string; password: string; remember: boolean } }
       'posts.search': { body: { keywords: string[]; limit: number } }
       'posts.store': { body: { title: string; excerpt: string; body: string } }
       'posts.update': { body: { title: string; excerpt: string; body: string } }

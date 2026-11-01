@@ -20,6 +20,7 @@ import {
 import { parseSourceFile } from '../src/parse-cache'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
+import { buildFormContracts } from '../src/forms-types'
 import { TOKENS_PATH } from '../src/guren-css'
 import { buildOAuthConfigTemplate, buildOAuthProviderTemplate, makeAuth, type MakeAuthOptions } from '../src/make-auth'
 import { KNOWN_OAUTH_PROVIDERS } from '../src/oauth-scaffold'
@@ -358,6 +359,21 @@ describe('scaffold-typecheck fixture stays pinned to the builders', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  it('forms.gen holds the contracts codegen derives for the static auth pages', async () => {
+    const { ForgotPasswordSchema } = await import('../templates/scaffold/auth/app/Http/Validators/ForgotPasswordValidator')
+    const { ResetPasswordSchema } = await import('../templates/scaffold/auth/app/Http/Validators/ResetPasswordValidator')
+    const fixture = await import('./fixtures/scaffold-typecheck/auth/.guren/forms.gen')
+    const contracts = buildFormContracts([
+      { name: 'forgot-password.store', method: 'POST', path: '/forgot-password', schemas: { body: ForgotPasswordSchema } },
+      { name: 'reset-password.store', method: 'POST', path: '/reset-password', schemas: { body: ResetPasswordSchema } },
+    ], [])
+
+    expect<unknown>(Object.fromEntries(contracts.map(({ identifier, ...contract }) => [identifier, contract]))).toEqual({
+      forgotPasswordStoreForm: fixture.forgotPasswordStoreForm,
+      resetPasswordStoreForm: fixture.resetPasswordStoreForm,
+    })
   })
 })
 
