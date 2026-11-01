@@ -123,7 +123,7 @@ export class NotificationManager {
         } catch (error) {
           console.error(
             `Failed to send notification via ${channelName}:`,
-            error instanceof Error ? redactQueryParams(error) : error
+            redactQueryParams(error)
           )
           throw error
         }

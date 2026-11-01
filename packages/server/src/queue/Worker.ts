@@ -133,7 +133,7 @@ export class Worker {
     thrown: Error,
     JobClass: JobClass
   ): Promise<void> {
-    // What the driver stores and the logs print; the job's own failed() hook gets the original.
+    // What the logs and the jobFailed listener print; the job's own failed() hook gets the original.
     const error = redactQueryParams(thrown)
     const willRetry = job.attempts < job.maxAttempts
 
@@ -152,7 +152,7 @@ export class Worker {
           await instance.failed(job.payload, thrown)
         }
       } catch (failedError) {
-        console.error(`Error in job.failed() handler:`, failedError instanceof Error ? redactQueryParams(failedError) : failedError)
+        console.error(`Error in job.failed() handler:`, redactQueryParams(failedError))
       }
     }
 

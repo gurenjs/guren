@@ -8,6 +8,7 @@ import type {
   HealthStatus,
 } from './types'
 import type { HealthCheck } from './HealthCheck'
+import { redactedMessage } from '../errors/redact-query-params'
 
 interface RegisteredCheck {
   check: HealthCheck
@@ -148,8 +149,7 @@ export class HealthManager {
       return {
         name: check.name,
         status: 'unhealthy',
-        message:
-          error instanceof Error ? error.message : 'Check failed with error',
+        message: redactedMessage(error) ?? 'Check failed with error',
         duration,
       }
     } finally {

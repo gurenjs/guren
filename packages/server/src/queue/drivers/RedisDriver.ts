@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Redis } from 'ioredis'
 import type { QueueDriver, QueuedJob, FailedJob } from '../types'
+import { redactQueryParams } from '../../errors/redact-query-params'
 import { QUEUE_SCRIPTS, type QueueScriptName } from './redis-queue-scripts'
 
 type ScriptRunner = (...args: Array<string | number>) => Promise<unknown>
@@ -104,8 +105,9 @@ export class RedisDriver implements QueueDriver {
   }
 
   async fail(job: QueuedJob, error: Error): Promise<void> {
+    const { message, stack } = redactQueryParams(error)
     await this.run('gurenQueueFail', this.jobKey(job.id), this.pendingKey(job.queue), this.reservedKey(job.queue), this.failedKey(job.queue),
-      job.id, job.reservationToken ?? '', new Date().toISOString(), error.message, error.stack ?? '', job.attempts)
+      job.id, job.reservationToken ?? '', new Date().toISOString(), message, stack ?? '', job.attempts)
   }
 
   async size(queue: string): Promise<number> {

@@ -471,7 +471,7 @@ export class BroadcastManager {
     }
 
     const result = await this.authorizeAndAttach(channel, user, clientId).catch((error: unknown) => {
-      console.error(`Error authorizing broadcast channel "${channel}":`, error instanceof Error ? redactQueryParams(error) : error)
+      console.error(`Error authorizing broadcast channel "${channel}":`, redactQueryParams(error))
       return { authorized: false } as const
     })
     await client.send('subscription', { channel, ...result })

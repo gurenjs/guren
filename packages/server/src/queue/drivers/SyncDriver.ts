@@ -1,5 +1,6 @@
 import type { QueueDriver, QueuedJob, FailedJob } from '../types'
 import { getJob } from '../Job'
+import { redactQueryParams } from '../../errors/redact-query-params'
 
 /**
  * Runs jobs inline in the dispatching process, no worker required: the
@@ -45,11 +46,12 @@ export class SyncDriver implements QueueDriver {
   async delete(): Promise<void> {}
 
   async fail(job: QueuedJob, error: Error): Promise<void> {
+    const { message, stack } = redactQueryParams(error)
     this.failedJobs.set(job.id, {
       ...job,
       failedAt: new Date(),
-      error: error.message,
-      stack: error.stack,
+      error: message,
+      stack,
     })
   }
 

@@ -83,17 +83,14 @@ export class ExceptionHandler {
     // rejected request. Not `shouldNotReport()` — a *registered* reporter
     // still receives 4xx.
     if (this.reporters.length === 0 && resolveExceptionStatus(error) >= 500) {
-      console.error('Unhandled exception:', redactQueryParams(error))
+      console.error('Unhandled exception:', error)
     }
 
     for (const reporter of this.reporters) {
       try {
         await reporter(error)
       } catch (reporterError) {
-        console.error(
-          'Exception reporter failed:',
-          reporterError instanceof Error ? redactQueryParams(reporterError) : reporterError,
-        )
+        console.error('Exception reporter failed:', redactQueryParams(reporterError))
       }
     }
   }
@@ -124,8 +121,7 @@ export class ExceptionHandler {
     return this.renderDefaultException(error, ctx)
   }
 
-  protected renderDefaultException(thrown: Error, ctx: Context): Response {
-    const error = redactQueryParams(thrown)
+  protected renderDefaultException(error: Error, ctx: Context): Response {
     const debug = this.shouldShowDetails()
     // Resolved before the branch so this renders with the same number
     // `reportException` judged it by; `toResponse()` supplies only the body.

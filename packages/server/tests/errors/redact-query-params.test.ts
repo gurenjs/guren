@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import { createApp, createExceptionHandler, ExceptionHandler, FailedJobReporter, renderDebugPage, ServiceProvider } from '../../src'
 import { redactQueryParams, redactedMessage } from '../../src/errors/redact-query-params'
+import { HealthCheck, HealthManager, type CheckResult } from '../../src/health'
+import { clearJobRegistry, Job, registerJob, SyncDriver, type QueuedJob } from '../../src/queue'
+import { Scheduler } from '../../src/scheduling'
 
 // Joined at runtime: Bun prints the source lines around a throw site when it
 // inspects an error, and a literal here would show up in that snippet.
@@ -132,6 +135,20 @@ describe('redactQueryParams', () => {
     expect(Bun.inspect(redacted)).not.toContain(HASH)
   })
 
+  it('keeps non-enumerable own properties such as statusCode', () => {
+    class RegistrationFailed extends Error {
+      constructor(cause: Error) {
+        super('Could not register', { cause })
+        Object.defineProperty(this, 'statusCode', { value: 409, enumerable: false })
+      }
+    }
+    const redacted = redactQueryParams(new RegistrationFailed(failedInsert()))
+
+    expect(redacted).toBeInstanceOf(RegistrationFailed)
+    expect(Object.getOwnPropertyDescriptor(redacted, 'statusCode')).toMatchObject({ value: 409, enumerable: false })
+    expect(Bun.inspect(redacted)).not.toContain(HASH)
+  })
+
   it('survives a cyclic cause', () => {
     const error = failedInsert()
     ;(error.cause as Error).cause = error
@@ -249,5 +266,60 @@ describe('FailedJobReporter default log', () => {
     const printed = captured.printed()
     expect(printed).toContain('[redacted 2 values]')
     expect(printed).not.toContain(HASH)
+  })
+})
+
+describe('other failure sinks', () => {
+  it('stores a sync-driver job failure without the params', async () => {
+    class RegisterUserJob extends Job<Record<string, never>> {
+      async handle(): Promise<void> {
+        throw failedInsert()
+      }
+    }
+    registerJob(RegisterUserJob)
+    const driver = new SyncDriver()
+    const job: QueuedJob = {
+      id: 'job-1', name: 'RegisterUserJob', payload: {}, queue: 'default',
+      attempts: 0, maxAttempts: 1, availableAt: new Date(), createdAt: new Date(), reservedAt: null,
+    }
+    try {
+      await expect(driver.push(job)).rejects.toThrow('Failed query')
+    } finally {
+      clearJobRegistry()
+    }
+
+    const [failed] = await driver.getFailedJobs()
+    expect(failed?.error).toBe(`Failed query: ${SQL}\nparams: [redacted 2 values]`)
+    expect(failed?.stack).toContain('[redacted 2 values]')
+    expect(failed?.stack).not.toContain(HASH)
+  })
+
+  it('keeps the params out of the scheduler log', async () => {
+    const logged: string[] = []
+    const scheduler = new Scheduler({ logger: (message) => logged.push(message) })
+    scheduler.schedule((schedule) => {
+      schedule.call(async () => {
+        throw failedInsert()
+      }).everyMinute().name('import-users')
+    })
+
+    await scheduler.runDueTasks(new Date())
+
+    expect(logged).toContain(`Task failed: import-users - Failed query: ${SQL}\nparams: [redacted 2 values]`)
+    expect(logged.join('\n')).not.toContain(HASH)
+  })
+
+  it('keeps the params out of the /health report', async () => {
+    class DatabaseCheck extends HealthCheck {
+      readonly name = 'database'
+      async check(): Promise<CheckResult> {
+        throw failedInsert()
+      }
+    }
+
+    const report = JSON.stringify(await new HealthManager().register(new DatabaseCheck()).check())
+
+    expect(report).toContain('[redacted 2 values]')
+    expect(report).not.toContain(HASH)
   })
 })
