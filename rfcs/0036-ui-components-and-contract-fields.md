@@ -281,11 +281,14 @@ export const postsUpdateForm: RouteFormContract<'posts.update', 'PUT', '/posts/:
   `app/Http/Validators/` or the route modules the entry imports
   (`vite/route-types.ts`). That already leaves `ApiRoutes` body types stale
   after a validator edit; `forms.gen.ts` inherits the gap unless the watcher
-  learns the validator directories (root and `modules/*/`) and the routes
-  entry's local imports. The gap exists without this RFC, so the fix is a
-  prerequisite that lands on its own first (P1 in Milestones), and M2 relies
-  on it. `guren check` today only checks
-  that a manifest exists (`check.ts`); for `forms.gen.ts` it renders the
+  learns the validator directories (root and `modules/*/`) and ~~the routes
+  entry's local imports~~ **Amended in implementation:** the source files
+  beside the routes entry and each module's entry and routes, matched by
+  path like the Resources and Models directories. Following the entry's
+  imports reaches its controllers and most of `app/` one hop later. The gap
+  exists without this RFC, so the fix is a prerequisite that lands on its own
+  first (P1 in Milestones), and M2 relies on it. `guren check` today only
+  checks that a manifest exists (`check.ts`); for `forms.gen.ts` it renders the
   expected content in memory and reports a difference with the `codegen` fix,
   as `check --spec` does for the spec views.
 
@@ -734,9 +737,9 @@ SSR template's smoke checks labels after hydration, not in the server HTML.
 Two fixes come first. Each is true without this RFC and lands as its own PR:
 
 - **P1, the codegen watcher.** The Vite plugin regenerates on validator
-  directories (root and `modules/*/`) and on the routes entry's local imports
-  (section 2.1). It fixes stale `ApiRoutes` body types today and is what M2's
-  `forms.gen.ts` relies on.
+  directories (root and `modules/*/`), the registrars beside the routes
+  entry, and module routes (section 2.1). It fixes stale `ApiRoutes` body
+  types today and is what M2's `forms.gen.ts` relies on.
 - **P2, the browser-test locale.** `add browser-tests` pins the Playwright
   locale and clears a stored locale cookie, and the generated spec checks the
   page's locale before asserting labels (section 5). It is RFC 0033's output,

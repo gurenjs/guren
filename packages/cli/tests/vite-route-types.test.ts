@@ -159,3 +159,68 @@ describe('routeTypesPlugin watches module Resources', () => {
     expect(await touchedBy('modules/billing/app/Http/Controllers/InvoiceController.ts')).toBe(false)
   })
 })
+
+/**
+ * A route's body, params and query schemas render into api-client.gen.ts, and live in
+ * validator files and in the registrars the routes entry imports, none of which is the entry.
+ */
+describe('routeTypesPlugin watches route schemas', () => {
+  let root: string
+  let markerPath: string
+  let originalCi: string | undefined
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'guren-route-types-schemas-'))
+    markerPath = join(root, 'codegen-ran')
+    originalCi = process.env.CI
+    delete process.env.CI
+  })
+
+  afterEach(async () => {
+    if (originalCi === undefined) delete process.env.CI
+    else process.env.CI = originalCi
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function touchedBy(relativePath: string, options: { watchFile?: string } = {}): Promise<boolean> {
+    const plugin = routeTypesPlugin({ executable: 'touch', args: [markerPath], ...options }) as unknown as PluginHooks
+    await plugin.handleHotUpdate({
+      file: join(root, relativePath),
+      server: { config: { root } },
+      modules: [],
+    })
+    return existsSync(markerPath)
+  }
+
+  it('regenerates for a validator at the project root', async () => {
+    expect(await touchedBy('app/Http/Validators/PostValidator.ts')).toBe(true)
+  })
+
+  it('regenerates for a validator inside a module', async () => {
+    expect(await touchedBy('modules/billing/app/Http/Validators/InvoiceValidator.ts')).toBe(true)
+  })
+
+  it('regenerates for a registrar beside the routes entry', async () => {
+    expect(await touchedBy('routes/auth.ts')).toBe(true)
+  })
+
+  it('regenerates for a module routes file, routes directory and entry', async () => {
+    expect(await touchedBy('modules/billing/routes.ts')).toBe(true)
+    await rm(markerPath, { force: true })
+    expect(await touchedBy('modules/billing/routes/invoices.ts')).toBe(true)
+    await rm(markerPath, { force: true })
+    expect(await touchedBy('modules/billing/index.ts')).toBe(true)
+  })
+
+  it('ignores a non-source file beside the routes entry', async () => {
+    expect(await touchedBy('routes/README.md')).toBe(false)
+  })
+
+  it('ignores other application files', async () => {
+    expect(await touchedBy('app/Http/Middleware/AuthThrottle.ts')).toBe(false)
+  })
+
+  it('watches no directory for a routes entry at the app root', async () => {
+    expect(await touchedBy('src/app.ts', { watchFile: 'web.ts' })).toBe(false)
+  })
+})
