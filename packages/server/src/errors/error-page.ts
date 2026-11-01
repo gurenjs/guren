@@ -28,7 +28,7 @@ export function renderErrorPage(statusCode: number, message?: string): string {
       --g-accent: #db1b1b; --g-accent-down: #b91c1c; --g-on-accent: #fff5f5;
     }
     @media (prefers-color-scheme: dark) {
-      :root { color-scheme: dark; --g-page: #1a1a2e; --g-heading: #e0def4; --g-text-2: #908caa; --g-line-strong: #3d3d5c; }
+      :root { color-scheme: dark; --g-page: #1a1a2e; --g-heading: #e0def4; --g-text-2: #aeabc9; --g-line-strong: #3d3d5c; }
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {

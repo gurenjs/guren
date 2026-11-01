@@ -27,6 +27,8 @@ export default function VerifyEmail({ status }: Props) {
         ) : null}
 
         <form
+          method="post"
+          action="/verify-email"
           className="mt-6"
           onSubmit={(event) => {
             event.preventDefault()

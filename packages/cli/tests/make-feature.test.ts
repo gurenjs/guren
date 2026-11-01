@@ -558,11 +558,16 @@ describe('makeFeature', () => {
       expect(newPage).toContain("import { postsStoreForm } from '@/.guren/forms.gen'")
       expect(newPage).toContain("const form = useRouteForm(postsStoreForm, { title: '', subtitle: null })")
       expect(newPage).toContain('onSubmit={form.handleSubmit}')
+      expect(newPage).toContain('<form method="post" action={postsStoreForm.path} ')
 
       const editPage = await readFile(join(workspace.dir, 'resources/js/pages/posts/Edit.tsx'), 'utf8')
       expect(editPage).toContain("import { postsUpdateForm } from '@/.guren/forms.gen'")
       expect(editPage).toContain("post: RouteBody<ApiRoutes, 'posts.update'> & { id: number }")
       expect(editPage).toContain('const form = useRouteForm(postsUpdateForm, { title: post.title, subtitle: (post.subtitle ?? null) }, { params: { id: post.id } })')
+      expect(editPage).toContain('<form method="post" action={resolveRouteUrl(postsUpdateForm.path, { id: post.id })} ')
+      expect(editPage).toContain("import { resolveRouteUrl, useRouteForm } from '@guren/inertia-client/forms'")
+      // An entity named Route destructures a `route` prop, which a routes.gen import would collide with.
+      expect(editPage).not.toContain("'@/.guren/routes.gen'")
       for (const source of [newPage, editPage]) {
         expect(source).toContain("from '@guren/inertia-client/forms'")
         // No json field, so nothing on the page needs state.

@@ -81,6 +81,7 @@ describe('policy authorization on mutating routes', () => {
     expect(authorization?.message).toContain('app/Http/Controllers/PostController.ts:5')
     expect(authorization?.suggestion).toContain("this.authorize('<ability>', [Post, post])")
     expect(authorization?.suggestion).toContain('PostPolicy declares update, delete')
+    expect(authorization?.suggestion).toContain("takes the class: this.authorize('create', Post)")
     expect(authorization?.filePath).toBe('app/Http/Controllers/PostController.ts')
     // Route-level: no line, so config/audit.ts is the structured suppression.
     expect(authorization?.line).toBeUndefined()
@@ -536,6 +537,7 @@ ${editBody}
     expect(edit?.message).toContain("only checks the 'view' ability")
     expect(edit?.suggestion).toContain("this.authorize('update', [Post, post])")
     expect(edit?.suggestion).toContain('before rendering the form')
+    expect(edit?.suggestion).not.toContain('an ability with no record')
   })
 
   it('leaves every other GET action alone', async () => {

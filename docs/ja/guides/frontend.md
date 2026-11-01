@@ -107,12 +107,14 @@ import { Field } from '@/resources/js/components/ui/Field'
 
 const form = useRouteForm(postsStoreForm, { title: '', body: '' })
 
-<form onSubmit={form.handleSubmit}>
+<form method="post" action={postsStoreForm.path} onSubmit={form.handleSubmit}>
   <Field form={form} name="title" />
   <Field form={form} name="body" as="textarea" />
   <Button type="submit" disabled={form.processing}>Create</Button>
 </form>
 ```
+
+`method="post"` と `action` は、ページのハイドレーションが終わる前の送信に備えるものです。その間に送信するとブラウザは素の POST を送り、CSRF トークンが無いのでサーバーは受け付けませんが、パスワードを含むフィールドの値が GET の URL に載ることはありません。HTML のフォームは GET と POST しか送れないため、PUT や PATCH のフォームでも `post` と書きます。パスにパラメータがあるときは、`@guren/inertia-client/forms` の `resolveRouteUrl(postsUpdateForm.path, { id: post.id })` で action を組み立てます。
 
 ラベルは、アプリに[翻訳](./i18n.md#フォームのラベル)があればその翻訳、無ければフィールド名を単語に分けたものになります(`startsAt` なら「Starts at」)。変えるときは `label` を、スキーマから決まらない入力欄(`textarea`、`password`、`file`)には `as` を渡します。`Field` と `useRouteForm` を使うには、`/forms` を export している `@guren/inertia-client` が必要です。
 
@@ -356,14 +358,14 @@ codegen がインポートパスを書き換えるので、`pages.gen.ts` から
 ## ホットリロード
 `bun run dev` を実行すると Bun が Vite dev サーバーを自動で起動するので、TSX を変更するとすぐにリロードされます。
 
-バックエンドもリロードされます。`dev:server` は `bun --hot bin/serve.ts` を実行するので、コントローラー・ルート・モデルへの変更は、再起動しなくても次のリクエストから反映されます。ルートを追加したときは codegen が走ってもう一度リロードが入り、そこで落ち着きます。
+バックエンドもリロードされます。`dev:server` は `NODE_ENV=development bun --hot bin/serve.ts` を実行するので、コントローラー・ルート・モデルへの変更は、再起動しなくても次のリクエストから反映されます。ルートを追加したときは codegen が走ってもう一度リロードが入り、そこで落ち着きます。
 
 ただし、プロセスの中に持っている状態はリロードで引き継がれません。メモリドライバーのセッションとキャッシュは空の状態から作り直され、モジュールレベルの変数も初期化されます。Redis やデータベースなどプロセスの外にあるストアは影響を受けないので、セッションをプロセスの外に置いていればサインインしたままです。
 
-この既定の設定が入る前に作ったプロジェクトでは、自分でフラグを追加してください。
+この既定の設定が入る前に作ったプロジェクトでは、`dev:server` を次のように書き換えてください。`NODE_ENV=development` を付けておくと、起動時のシードが引き続き実行されます（[データベースガイド](./database.md)を参照）。
 
 ```json
-"dev:server": "bun --hot bin/serve.ts"
+"dev:server": "NODE_ENV=development bun --hot bin/serve.ts"
 ```
 
 その場合は `@guren/cli` も最新版にしてください。古いバージョンは、codegen のたびに `.guren/` の下の生成ファイルを、内容が変わらなくても書き直します。コントローラーはそのファイルを import しているので、書き直しが次のリロードを引き起こし、リロードが止まらなくなります。

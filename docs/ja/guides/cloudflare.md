@@ -84,7 +84,9 @@ const database = isWorkersRuntime()
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
 `config/env.ts` に `SQLITE_DATABASE_PATH: Env.string().default('./data/guren.db')` を宣言し、`database` を `createApp({ config })` に加えてください。リゾルバについては [設定ガイド](./configuration.md#データベース接続) で詳しく説明しています。
@@ -117,7 +119,7 @@ wrangler はフォルダにあるものをそのまま適用するので、こ�
 > [!WARNING]
 > 必ず先にビルドしてください。`migrations_dir` は生成ディレクトリの中を指しているので、ビルドする前は空です。`wrangler` は空のフォルダを見つけると「適用するマイグレーションはありません」と報告し、**エラーにならずに正常終了します**。ビルド前に適用すると、失敗しているのに成功したように見えます。
 
-ワーカーが自分でシードを実行することもありません。`defineDatabaseConfig` がシードするのは、`seedOnBoot` が true で、しかもデータベースがマイグレーションありと報告したときだけです。`cloudflare:build` は `NODE_ENV` を `production` に固定しますし、D1 のハンドルには調べるファイルシステムがないので、マイグレーションなしと報告します。ローカルの `bun run dev` では SQLite 側が使われ、マイグレーションがあればブート時にシードします。
+ワーカーが自分でシードを実行することもありません。`defineDatabaseConfig` がシードするのは、`seedOnBoot` が true で、しかもデータベースがマイグレーションありと報告したときだけです。`cloudflare:build` は `NODE_ENV` を `production` に固定しますし、D1 のハンドルには調べるファイルシステムがないので、マイグレーションなしと報告します。ローカルの `bun run dev` は `NODE_ENV=development` を設定するので、SQLite 側が使われ、マイグレーションがあればブート時にシードします。
 
 ### 1 つのコマンドでデプロイする（wrangler.jsonc）
 

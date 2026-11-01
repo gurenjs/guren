@@ -35,7 +35,7 @@ export default function ForgotPassword({ errors = {}, status }: Props) {
           <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
-        <form className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
+        <form method="post" action={forgotPasswordStoreForm.path} className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
           <Field form={form} name="email" />
           <Button type="submit" disabled={form.processing} block>
             Send reset link

@@ -50,6 +50,11 @@ at runtime. Pass everything a page needs through `this.inertia(page, { … })`.
 `await this.authorize('update', [Post, post])` (throws 403) ·
 `await this.can('update', [Post, post])` → boolean ·
 `this.apiToken()` → `{ userId, abilities }` or throws 401.
+An ability with no record (`create`, `viewAny`) takes the bare class:
+`await this.authorize('create', Post)`. The policy must be registered, or
+every check is denied: `bunx guren make:policy Post`, then in a provider's `boot()`
+`this.container.make('gate').policy(Post, PostPolicy)`, with that provider
+listed in `createApp({ providers })`.
 
 ## Exceptions
 

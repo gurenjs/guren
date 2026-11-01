@@ -13,6 +13,7 @@ import type {
 import { HttpException } from './HttpException'
 import { renderErrorPage } from './error-page'
 import { renderDebugPage } from './debug-page'
+import { redactQueryParams } from './redact-query-params'
 import { ambientBinding, bindAmbient } from '../http/default-application'
 import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
@@ -62,7 +63,9 @@ export class ExceptionHandler {
     return process.env.NODE_ENV !== 'production'
   }
 
-  async handle(error: Error, ctx: Context): Promise<Response> {
+  /** Reporters and renderers receive the error with SQL bound parameters redacted. */
+  async handle(thrown: Error, ctx: Context): Promise<Response> {
+    const error = redactQueryParams(thrown)
     if (!this.shouldNotReport(error)) captureRuntimeError(error, ctx, resolveExceptionStatus(error))
     await this.reportException(error)
 
@@ -87,7 +90,7 @@ export class ExceptionHandler {
       try {
         await reporter(error)
       } catch (reporterError) {
-        console.error('Exception reporter failed:', reporterError)
+        console.error('Exception reporter failed:', redactQueryParams(reporterError))
       }
     }
   }

@@ -20,6 +20,9 @@ Follow the prompt it prints. When it has you ask the person, ask in whatever
 way your client offers and wait for the answers before you write the JSON. If
 the change needs no plan, make it the usual way.
 
+A schema error on a reference field (a regex mismatch) means it holds a name
+or path where the prompt's "Ids and changes" rules ask for an element id.
+
 ## 2. Check it until nothing fails
 
 ```bash

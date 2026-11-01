@@ -23,6 +23,7 @@ export default defineConfig({
     'src/internal/deploy-build.ts',
     'src/internal/deploy-check.ts',
     'src/internal/deploy-plan.ts',
+    'src/internal/redact-query-params.ts',
     'src/internal/route-path.ts',
     'src/internal/zod-compat.ts',
     'src/internal/zod-json-schema.ts',

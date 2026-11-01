@@ -9,6 +9,11 @@ You are a documentation assistant for the Guren framework.
 
 > The authoritative signature-level API reference is `__RULES_DIR__/*.md` (each file's `paths` frontmatter states the paths it covers) plus the full references in `reference/` beside this file (`orm-models.md`, `controllers-http.md`, `routes-codegen.md`, `testing.md`); this skill is a subsystem tour for interactive Q&A.
 
+`Source:` paths below are files in the Guren framework repository
+(github.com/gurenjs/guren), not in this app. The guides are at
+`https://guren.dev/docs/guides/<slug>` (append `.md` for the raw Markdown);
+`https://guren.dev/llms.txt` lists every page.
+
 ## Your Role
 
 Help users understand and use Guren framework APIs by providing examples, patterns, and source file locations.
@@ -136,7 +141,7 @@ await User.withCount('posts')                  // users[0].postsCount: number (n
 await Post.withPaginate('author', { page: 1 }) // paginated + relations
 ```
 
-Also available: `hasOne`, `belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey?, relatedKey?)`, `hasManyThrough`, `morphMany`/`morphTo`. There are **no `attach`/`detach`/`sync` pivot helpers and no `firstOrCreate`/`updateOrCreate`** — manage pivot rows via a model on the pivot table (`PivotModel.create(...)` / `PivotModel.delete(...)`), and hand-roll find-or-create with `Model.first(where)` + `Model.create(...)`. Full guide: `docs/en/guides/database.md` (Relationships section).
+Also available: `hasOne`, `belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey?, relatedKey?)`, `hasManyThrough`, `morphMany`/`morphTo`. There are **no `attach`/`detach`/`sync` pivot helpers and no `firstOrCreate`/`updateOrCreate`** — manage pivot rows via a model on the pivot table (`PivotModel.create(...)` / `PivotModel.delete(...)`), and hand-roll find-or-create with `Model.first(where)` + `Model.create(...)`. Full guide: https://guren.dev/docs/guides/database (Relationships section).
 
 ### Routes
 Source: `packages/server/src/mvc/Router.ts`
@@ -279,11 +284,37 @@ await csrf.post('/posts', { title: 'Hi' }).assertRedirect('/posts')
 ## Extended Subsystems
 
 ### Authorization (Gate & Policy)
-Source: `packages/server/src/authorization/`
+Guide: https://guren.dev/docs/guides/authorization
 
-- `Gate.ts` — Define abilities and policies
-- `Policy.ts` — Resource-based authorization
-- `middleware.ts` — Route-level authorization middleware
+`bunx guren make:policy Post` writes `app/Policies/PostPolicy.ts`. Its
+`update`/`delete` compare `user.id === post.userId`: rename `userId` to the
+model's real owner column (`authorId`), or every update is denied. Register
+the policy in a provider's `boot()`, as the scaffolded providers do, and list
+the provider in `createApp({ providers })`; an unregistered policy denies
+every check:
+
+```typescript
+// app/Providers/AuthorizationProvider.ts
+import { ServiceProvider } from '@guren/core'
+import { Post } from '../Models/Post.js'
+import { PostPolicy } from '../Policies/PostPolicy.js'
+
+export default class AuthorizationProvider extends ServiceProvider {
+  register(): void {}
+  boot(): void {
+    this.container.make('gate').policy(Post, PostPolicy)
+  }
+}
+```
+
+In a controller, a record ability takes `[Model, record]` and a class ability
+takes the bare class:
+
+```typescript
+await this.authorize('update', [Post, post])   // PostPolicy.update(user, post)
+await this.authorize('create', Post)           // PostPolicy.create(user)
+const canEdit = await this.can('update', [Post, post])   // boolean, no 403
+```
 
 ### Events & Listeners
 Source: `packages/server/src/events/`
@@ -521,4 +552,4 @@ Source: `packages/server/src/redis/`
 | Redis | `packages/server/src/redis/` |
 | Example App | `examples/blog/` |
 | API Example | `examples/api/` |
-| Docs | `web/` |
+| Docs | https://guren.dev/llms.txt |

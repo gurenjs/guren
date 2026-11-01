@@ -18,6 +18,7 @@ import {
   writeWorkspaceFiles,
 } from './helpers'
 import { parseSourceFile } from '../src/parse-cache'
+import { formTagProblems } from './form-tags'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
 import { buildFormContracts } from '../src/forms-types'
@@ -109,6 +110,7 @@ const casesWithPages = new Set<string>()
  * The shipped .oxlintrc.json turns `guren/no-raw-color` on for resources/js/**, so a
  * generated page has to pass it; and a page styled with `g-` utilities is unstyled
  * unless the run also left resources/css/guren.css behind (the seeds carry none).
+ * Every `<form>` must also say `method="post"` with an action (`formTagProblems`).
  */
 async function expectPagesUseTokens(dir: string, prefix: string): Promise<void> {
   const pages = (await collectFiles(join(dir, 'resources/js'), IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES))
@@ -118,9 +120,13 @@ async function expectPagesUseTokens(dir: string, prefix: string): Promise<void> 
   expect(lintFiles({ config: NO_RAW_COLOR_CONFIG, files: pages, cwd: dir })).toBe('')
 
   const styled: string[] = []
+  const formProblems: string[] = []
   for (const page of pages) {
-    if (GUREN_UI_CLASS.test(await readFile(join(dir, page), 'utf8'))) styled.push(page)
+    const source = await readFile(join(dir, page), 'utf8')
+    if (GUREN_UI_CLASS.test(source)) styled.push(page)
+    formProblems.push(...formTagProblems(source, page))
   }
+  expect(formProblems).toEqual([])
   if (styled.length > 0) expect(existsSync(join(dir, TOKENS_PATH)), `${TOKENS_PATH} for ${styled.join(', ')}`).toBe(true)
 }
 

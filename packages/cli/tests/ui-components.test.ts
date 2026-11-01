@@ -128,7 +128,7 @@ describe('the guren-ui-components doctor rule', () => {
     await writeFile(copy('Input'), `${uiComponentTemplate('Input')}// mine\n`, 'utf8')
     const { check, autofix } = await componentsCheck()
     expect(check.status).toBe('warn')
-    expect(check.message).toContain('its header names Input v1')
+    expect(check.message).toContain('its header names Input v2')
     expect(check.manualFix).toContain('`guren add ui input --diff`')
     expect(autofix).toBeNull()
   })

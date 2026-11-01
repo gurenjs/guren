@@ -1,9 +1,11 @@
 import type { MiddlewareHandler } from 'hono'
 import { matchingOpenParen } from '../support/stack-frames'
 import { warnDeprecated } from '../support/deprecate'
+import { redactQueryParams } from './redact-query-params'
 
 /** Development-only error page: exposes the stack trace and request details. */
-export function renderDebugPage(error: Error, request?: Request): string {
+export function renderDebugPage(thrown: Error, request?: Request): string {
+  const error = redactQueryParams(thrown)
   const errorName = error.name || 'Error'
   const errorMessage = escapeHtml(error.message || 'An unknown error occurred')
   const stackFrames = parseStackTrace(error.stack ?? '')
@@ -26,7 +28,7 @@ export function renderDebugPage(error: Error, request?: Request): string {
     --g-font-sans: 'Noto Sans JP', ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     --g-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --g-page: #ffffff; --g-panel: #ffffff; --g-raised: #fffafa; --g-line: #e5e7eb; --g-line-strong: #d1d5db;
-    --g-heading: #111827; --g-text: #1f2937; --g-text-2: #4b5563; --g-muted: #9ca3af;
+    --g-heading: #111827; --g-text: #1f2937; --g-text-2: #4b5563; --g-muted: #6b7280;
     --g-danger: #b91c1c; --g-danger-chip: #f23a3a; --g-danger-tint: #fff1f2; --g-accent: #db1b1b;
     --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
   }
@@ -34,7 +36,7 @@ export function renderDebugPage(error: Error, request?: Request): string {
     :root {
       color-scheme: dark;
       --g-page: #1a1a2e; --g-panel: #1e1e34; --g-raised: #232340; --g-line: #2e2e4a; --g-line-strong: #3d3d5c;
-      --g-heading: #e0def4; --g-text: #e0def4; --g-text-2: #908caa; --g-muted: #6e6a86;
+      --g-heading: #e0def4; --g-text: #e0def4; --g-text-2: #aeabc9; --g-muted: #8d89a7;
       --g-danger: #ffa5a5; --g-danger-tint: rgba(242, 58, 58, 0.12);
       --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
     }

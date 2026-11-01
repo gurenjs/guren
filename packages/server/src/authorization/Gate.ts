@@ -66,6 +66,12 @@ function isPlainRecord(value: unknown): boolean {
   return prototype === Object.prototype || prototype === null
 }
 
+/** `[Model]` or `[Model, record]`, the model given as its class or a `gate.policy()` string key. */
+function isPolicyTuple(value: unknown[]): boolean {
+  return (value.length === 1 || value.length === 2)
+    && (typeof value[0] === 'function' || typeof value[0] === 'string')
+}
+
 /** Honours `denyWithStatus()` / `denyAsNotFound()` so a policy can hide a record as a 404. */
 export function denialToException(response: AuthorizationResponse): Error {
   const message = response.message ?? 'This action is unauthorized.'
@@ -236,6 +242,12 @@ export class Gate {
       )
     }
 
+    if (Array.isArray(model) && !isPolicyTuple(model)) {
+      throw new Error(
+        `The "${ability}" check was given an array of ${model.length} that names no policy; pass [Model, record] for a record, Model or [Model] for an ability with no record, or define a gate for "${ability}".`
+      )
+    }
+
     return this.settle(user, ability, Response.deny(), args)
   }
 
@@ -250,10 +262,11 @@ export class Gate {
   }
 
   /**
-   * The subject may be a class instance (policy resolved via its constructor)
-   * or a `[ModelClass, record]` / `['key', record]` tuple. ORM records are plain
-   * objects with no constructor information, so they need the tuple: a plain
-   * record reaching no policy and no gate throws in `checkResponse()`.
+   * The subject may be a class instance (policy resolved via its constructor),
+   * a `[ModelClass, record]` / `['key', record]` tuple, or the bare class or
+   * `[ModelClass]` for an ability with no record. ORM records are plain objects,
+   * so they need the tuple: a plain record or any other array reaching no policy
+   * and no gate throws in `checkResponse()`.
    */
   protected async checkPolicy(
     ability: string,
@@ -265,13 +278,14 @@ export class Gate {
     let subject: unknown = model
     let hasSubject = true
 
-    if (
-      Array.isArray(model)
-      && model.length === 2
-      && (typeof model[0] === 'function' || typeof model[0] === 'string')
-    ) {
+    if (Array.isArray(model)) {
+      if (!isPolicyTuple(model)) {
+        return undefined
+      }
       policyKey = model[0]
       subject = model[1]
+      // `[Post]` asks a record-less ability, exactly as the bare class does.
+      hasSubject = model.length === 2
     } else if (typeof model === 'function') {
       // Bare model class — abilities without a record, e.g. can('create', Post)
       policyKey = model

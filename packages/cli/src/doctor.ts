@@ -42,6 +42,7 @@ import { commandFix, type CheckEvidence, type CheckFix, type CheckFixRun } from 
 import { hasPendingRepair, repairDoctorReport } from './doctor-fix'
 import { summarizeDoctorReport, type DoctorStatus } from './doctor-report'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
+import { findLegacySeedOnBoot, SEED_ON_BOOT_EXPRESSION } from './seed-on-boot'
 import {
   planAppTokenSheet,
   planAppUiComponents,
@@ -261,8 +262,9 @@ function createAgentManifestRule(): DoctorRule {
 export const CANONICAL_APP_SCRIPTS = {
   dev: 'bun run codegen && bun run dev:server',
   // `dev` delegates here, so the pair has to be added together. `--hot` is what
-  // makes backend edits take effect without restarting the server.
-  'dev:server': 'bun --hot bin/serve.ts',
+  // makes backend edits take effect without restarting the server; NODE_ENV is
+  // the value config/database.ts seeds on boot for (`seed-on-boot.ts`).
+  'dev:server': 'NODE_ENV=development bun --hot bin/serve.ts',
   build: 'bun run codegen && bunx vite build',
   typecheck: 'tsc --noEmit',
   codegen: 'bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts --force',
@@ -1162,6 +1164,27 @@ async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorC
   )
 }
 
+async function detectSeedOnBoot(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const configFile = await findFirstExisting(context.cwd, DATABASE_CONFIG_CANDIDATES)
+  const source = configFile ? await readIfExists(context.cwd, configFile) : null
+  const lines = configFile && source !== null ? findLegacySeedOnBoot(source, configFile) : []
+  const manualFix = `In ${configFile}, replace \`process.env.NODE_ENV !== 'production'\` in seedOnBoot with \`(${SEED_ON_BOOT_EXPRESSION})\`, keeping the rest of the expression, and run the command \`bun run dev\` starts bin/serve.ts with under NODE_ENV=development (\`"dev:server": "NODE_ENV=development bun --hot bin/serve.ts"\`) so it still seeds.`
+
+  if (lines === null) {
+    return createCheck('seed-on-boot', 'Seeding On Boot', 'warn', `${configFile} could not be parsed, so its seedOnBoot was not checked.`, { fix: manualFix, manualFix })
+  }
+  if (lines.length === 0) {
+    return createCheck('seed-on-boot', 'Seeding On Boot', 'pass', 'No legacy seedOnBoot expression found.')
+  }
+  return createCheck(
+    'seed-on-boot',
+    'Seeding On Boot',
+    'warn',
+    `${configFile}:${lines.join(', ')} seeds on boot whenever NODE_ENV is not "production", so a server started without NODE_ENV runs every seeder, demo accounts included.`,
+    { fix: manualFix, manualFix },
+  )
+}
+
 /**
  * Whether the project has any test foundation: `@guren/testing` installed, or
  * at least one test file under `tests/`. Older scaffolds and hand-rolled
@@ -1397,6 +1420,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'config-drift', title: 'App Wiring', detect: detectConfigDrift },
   { key: 'scripts', title: 'App Scripts', detect: detectScripts, autofix: createScriptsAutofix },
   { key: 'database-config', title: 'Database Configuration', detect: detectDatabaseConfig },
+  { key: 'seed-on-boot', title: 'Seeding On Boot', detect: detectSeedOnBoot },
   { key: 'test-infrastructure', title: 'Test Infrastructure', detect: detectTestInfrastructure },
   { key: 'plugin-compatibility', title: 'Plugin Compatibility', detect: detectPluginCompatibility },
   { key: 'guren-ui-tokens', title: 'Guren UI Tokens', detect: detectGurenUiTokens, autofix: createGurenUiTokensAutofix },

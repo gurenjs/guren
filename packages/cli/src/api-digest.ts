@@ -49,7 +49,9 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
   + \`this.model(Post)\` (already resolved, 404 on miss). Router-level \`router.bind(param, Post | [Post, 'slug'] | resolverFn)\`
   binds every route with that param; its value arrives as a positional arg after the context (models also via \`this.model()\`) —
   never on \`this.ctx.get()\`
-- \`await this.authorize('update', [Post, post])\` (throws → 403)
+- \`await this.authorize('update', [Post, post])\` (throws → 403); an ability with no record takes the bare class,
+  \`await this.authorize('create', Post)\`. Register the policy in a provider's
+  \`boot()\`: \`this.container.make('gate').policy(Post, PostPolicy)\`, or every check is denied
 
 ### Routes (@guren/core)
 - Agent tools: \`.agent({ description })\` (or \`agent:\` in the route options) exposes a route as an MCP tool —
@@ -63,7 +65,7 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
 - \`new DatabaseCheck(db, { name?, query? })\` (defaults \`'database'\`, \`'SELECT 1'\`) — \`db\` is any
   \`{ query(sql): Promise<unknown> }\`, not a raw Drizzle instance (\`.query\` there is the relational-query
   namespace, not a function): wrap it, e.g. \`{ query: (sql) => db.execute(sql) }\` on the Postgres/MySQL
-  drivers; bun:sqlite has no \`.execute\`, see \`docs/en/guides/health-checks.md\`
+  drivers; bun:sqlite has no \`.execute\`, see \`https://guren.dev/docs/guides/health-checks\`
 - \`router.get('/health', health.middleware({ checks?, detailed? }))\` — \`checks\` runs only those names,
   \`detailed\` (default \`true\`) includes per-check results; responds 200 for \`healthy\`/\`degraded\`, 503 for \`unhealthy\`
 
@@ -108,8 +110,9 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
 - HTTP helpers: \`get(path)\` · \`post/put/patch/delete/query(path, body?)\` (\`query\` = HTTP QUERY, RFC 10008)
 - \`await app.get('/posts').assertOk()\` · assertions: \`assertStatus / assertCreated / assertRedirect(url?) /
   assertUnprocessable / assertJson / assertJsonPath(path, value) / assertInertia(component, props?)\`
+- A page is asserted as JSON: \`await app.json().get(url).assertInertia(component, props?)\`; a plain GET returns HTML
 
 Rules and gotchas: \`.claude/rules/orm-models.md\`, \`controllers-http.md\`, \`routes-codegen.md\`, \`testing.md\`
-(attached by path); the full reference behind each: the \`guren-api\` skill's \`reference/\` directory;
-health checks, redirect safety, API tokens, rate limiting: \`docs/en/guides/health-checks.md\`, \`authentication.md\`,
-\`api-tokens.md\`, \`rate-limiting.md\` in the Guren framework repo.`
+(attached by path); the full reference behind each: the \`guren-api\` skill's \`reference/\` directory.
+Guides: \`https://guren.dev/docs/guides/<slug>\` (append \`.md\` for raw Markdown; index at \`https://guren.dev/llms.txt\`),
+e.g. \`health-checks\`, \`authentication\`, \`authorization\`, \`api-tokens\`, \`rate-limiting\`, \`testing\`.`

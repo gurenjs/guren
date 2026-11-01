@@ -82,7 +82,9 @@ const database = isWorkersRuntime()
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
 Declare `SQLITE_DATABASE_PATH: Env.string().default('./data/guren.db')` in `config/env.ts` and list `database` in `createApp({ config })`; the [Configuration guide](./configuration.md#the-database-connection) covers the resolver. Import `isWorkersRuntime` from `@guren/plugin-cloudflare/env`: the package root also carries the build tooling, which has no place in the worker bundle.
@@ -125,7 +127,7 @@ though it copies every column.
 > [!WARNING]
 > Build first. `migrations_dir` points inside the generated directory, and `wrangler` reports "no migrations to apply" — successfully, with no error — when it finds an empty folder. Applying before building is the one failure here that looks like success.
 
-The worker never seeds itself either. `defineDatabaseConfig` seeds only when `seedOnBoot` is true and the database reports migrations; `cloudflare:build` pins `NODE_ENV` to `production`, and a D1 handle reports none, since it has no filesystem to look in. Locally, `bun run dev` takes the SQLite branch and seeds on boot once migrations exist.
+The worker never seeds itself either. `defineDatabaseConfig` seeds only when `seedOnBoot` is true and the database reports migrations; `cloudflare:build` pins `NODE_ENV` to `production`, and a D1 handle reports none, since it has no filesystem to look in. Locally, `bun run dev` sets `NODE_ENV=development`, takes the SQLite branch and seeds on boot once migrations exist.
 
 ### Deploying in one command
 

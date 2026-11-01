@@ -15,6 +15,7 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 import { getApiTokenOrFail } from '../auth/api-token'
 import { resolveGate, type Gate } from '../authorization/Gate'
 import { resolveOptional } from '../container/resolve-optional'
+import { withDefaultHeaders } from '../support/default-headers'
 import type { AuthUser } from '../authorization/types'
 import {
   getValidatedInput,
@@ -215,11 +216,11 @@ export class Controller {
   }
 
   /**
-   * Authorize the current user (or guest) for an ability; throws
-   * AuthorizationException (403) when denied. ORM records are plain objects
-   * with no constructor information, so pass the model class alongside the
-   * record: `await this.authorize('update', [Post, post])`. A bare record that
-   * resolves no policy and no gate throws an Error rather than denying.
+   * Authorize the current user (or guest) for an ability; throws AuthorizationException
+   * (403) when denied. An ORM record is a plain object, so pass its class beside it:
+   * `this.authorize('update', [Post, post])`; an ability with no record takes `Post`
+   * or `[Post]`. A bare record or another array that resolves no policy and no gate
+   * throws an Error rather than denying.
    */
   protected async authorize(ability: string, ...args: unknown[]): Promise<void> {
     await this.#resolveGate().forUser(await this.gateUser()).authorize(ability, ...args)
@@ -361,20 +362,14 @@ export class Controller {
   protected json<T>(data: T, init: ResponseInit = {}): Response {
     return new Response(JSON.stringify(data), {
       ...init,
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        ...init.headers,
-      },
+      headers: withDefaultHeaders(init.headers, { 'Content-Type': 'application/json; charset=utf-8' }),
     })
   }
 
   protected text(body: string, init: ResponseInit = {}): Response {
     return new Response(body, {
       ...init,
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        ...init.headers,
-      },
+      headers: withDefaultHeaders(init.headers, { 'Content-Type': 'text/plain; charset=utf-8' }),
     })
   }
 
@@ -384,10 +379,7 @@ export class Controller {
     const { status = defaultStatus, headers } = options
     return new Response(null, {
       status,
-      headers: {
-        Location: url,
-        ...headers,
-      },
+      headers: withDefaultHeaders(headers, { Location: url }),
     })
   }
 
@@ -410,10 +402,7 @@ export class Controller {
     return new Response(JSON.stringify(data), {
       status,
       ...init,
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        ...init.headers,
-      },
+      headers: withDefaultHeaders(init.headers, { 'Content-Type': 'application/json; charset=utf-8' }),
     })
   }
 

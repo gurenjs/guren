@@ -3,6 +3,7 @@ import { Schedule } from './Schedule'
 import { ScheduledTask } from './ScheduledTask'
 import { MemorySchedulerLock } from './MemorySchedulerLock'
 import { warnOnce } from '../support/warn-once'
+import { redactedMessage } from '../errors/redact-query-params'
 import { claimHotDisposable, isHotReloadRuntime, type HotDisposableClaim } from '../hot-reload/hot-disposables'
 
 /**
@@ -287,5 +288,5 @@ export function createScheduler(options?: SchedulerOptions): Scheduler {
 }
 
 function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return redactedMessage(error) ?? String(error)
 }

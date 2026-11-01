@@ -107,12 +107,14 @@ import { Field } from '@/resources/js/components/ui/Field'
 
 const form = useRouteForm(postsStoreForm, { title: '', body: '' })
 
-<form onSubmit={form.handleSubmit}>
+<form method="post" action={postsStoreForm.path} onSubmit={form.handleSubmit}>
   <Field form={form} name="title" />
   <Field form={form} name="body" as="textarea" />
   <Button type="submit" disabled={form.processing}>Create</Button>
 </form>
 ```
+
+`method="post"` and `action` cover a submit made before the page hydrates. The browser then sends a plain POST, which the server refuses since it carries no CSRF token, but the fields, the password included, stay out of the URL instead of riding in a GET query string. HTML forms send only GET and POST, so a PUT or PATCH form still says `post`. For a path with parameters, build the action with `resolveRouteUrl(postsUpdateForm.path, { id: post.id })` from `@guren/inertia-client/forms`.
 
 The label defaults to a [translation](./i18n.md#form-labels) when the app has one, else the field name as words (`startsAt` reads "Starts at"). Pass `label` to change it, and `as` for an input the schema cannot express (`textarea`, `password`, `file`). `Field` and `useRouteForm` need an `@guren/inertia-client` that exports `/forms`.
 
@@ -348,12 +350,12 @@ Codegen rewrites the import path so `pages.gen.ts` can reference the same type.
 ## Hot Reloading
 Running `bun run dev` automatically launches the Vite dev server from the Bun process, so changes to TSX files trigger instant reloads without extra commands.
 
-Backend files reload too: `dev:server` runs `bun --hot bin/serve.ts`, so edits to controllers, routes, and models take effect on the next request without a restart. Adding a route re-runs codegen and reloads once more, then settles. State held in the process does not survive a reload: the memory-backed session and cache stores are rebuilt empty, and module-level variables are reinitialized. External stores (Redis, your database) are unaffected, so you stay signed in as long as sessions live outside the process.
+Backend files reload too: `dev:server` runs `NODE_ENV=development bun --hot bin/serve.ts`, so edits to controllers, routes, and models take effect on the next request without a restart. Adding a route re-runs codegen and reloads once more, then settles. State held in the process does not survive a reload: the memory-backed session and cache stores are rebuilt empty, and module-level variables are reinitialized. External stores (Redis, your database) are unaffected, so you stay signed in as long as sessions live outside the process.
 
-If your project predates this default, add the flag yourself:
+If your project predates these defaults, set the script yourself. `NODE_ENV=development` is what keeps boot-time seeding on (see [Database](./database.md)):
 
 ```json
-"dev:server": "bun --hot bin/serve.ts"
+"dev:server": "NODE_ENV=development bun --hot bin/serve.ts"
 ```
 
 Keep `@guren/cli` current when you do. Older versions rewrote the generated files under `.guren/` on every codegen run even when the output was unchanged, and since your controllers import those files, the rewrite triggers another reload — an endless loop.

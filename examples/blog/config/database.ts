@@ -14,8 +14,11 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 export type BlogDatabase = Awaited<ReturnType<typeof getDatabase>>
 
 /**
- * Seeding is one-shot provisioning, not part of booting: production boots again
- * on every serverless cold start, and a bundle cannot resolve db/seeders/*.ts.
- * Run `bun run db:seed` explicitly instead.
+ * Seeding on boot is allowed by name: `bun run dev` sets NODE_ENV=development and
+ * the test runner sets test. Anything else, an unset NODE_ENV included, never
+ * seeds; production boots again on every serverless cold start, and a bundle
+ * cannot resolve db/seeders/*.ts. Run `bun run db:seed` explicitly there.
  */
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})

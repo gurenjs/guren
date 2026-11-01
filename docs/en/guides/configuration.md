@@ -209,7 +209,9 @@ const database = createPostgresDatabase({
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
 
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+export default defineDatabaseConfig(database, {
+  seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',
+})
 ```
 
 `mode: 'report'` returns the values it could validate instead of throwing, so `guren db:migrate` in production does not demand `APP_KEY` just to reach the database.

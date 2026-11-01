@@ -116,6 +116,8 @@ function describeBindings(bindings: PolicyBinding[]): string {
   return bindings.map((binding) => `${binding.model} (${binding.policy})`).join(', ')
 }
 
+const ABILITY_PLACEHOLDER = '<ability>'
+
 async function authorizeSuggestion(
   controllerKey: string,
   { model, policy, policyFile }: PolicyBinding,
@@ -127,9 +129,12 @@ async function authorizeSuggestion(
   const declared = abilities && !('unreadable' in abilities)
     ? `${policy} declares ${abilities.declared.join(', ') || 'no ability yet'}`
     : `${policy} could not be read as a policy`
+  const recordless = target.ability === ABILITY_PLACEHOLDER
+    ? `; an ability with no record, such as create, takes the class: this.authorize('create', ${model})`
+    : ''
   return (
     `Call await this.authorize('${target.ability}', [${model}, ${camelCase(model)}]) in ${controllerKey} ${target.when} `
-    + `(${declared}), or attach authorize()/authorizeResource() middleware to the route. A helper the action `
+    + `(${declared}${recordless}), or attach authorize()/authorizeResource() middleware to the route. A helper the action `
     + 'calls is not read: if it authorizes there, say so in a // guren-audit-ignore comment above the action.'
   )
 }
@@ -162,7 +167,7 @@ export async function auditAuthorization(
     if ((describeMethod(method).safe && !editForm) || !route.controller || GUEST_PATH_PATTERN.test(route.path)) continue
     const target = editForm
       ? { ability: 'update', when: 'before rendering the form', subject: "a record's edit form" }
-      : { ability: '<ability>', when: 'before the write', subject: 'a mutating route' }
+      : { ability: ABILITY_PLACEHOLDER, when: 'before the write', subject: 'a mutating route' }
 
     const routeLabel = `${method} ${route.path}`
     const push = (status: AuditFinding['status'], message: string, rest: Partial<AuditFinding> = {}) =>

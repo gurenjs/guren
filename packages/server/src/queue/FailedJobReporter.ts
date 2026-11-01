@@ -1,3 +1,5 @@
+import { redactedMessage } from '../errors/redact-query-params'
+
 export interface FailedJobInfo {
   jobName: string
   queue: string
@@ -19,7 +21,7 @@ function defaultLogHandler(info: FailedJobInfo): void {
     attempt: info.attempt,
     maxAttempts: info.maxAttempts,
     willRetry: info.willRetry,
-    error: info.error.message,
+    error: redactedMessage(info.error),
     failedAt: info.failedAt.toISOString(),
   }))
 }

@@ -2,6 +2,7 @@ import type { Session } from '../http/middleware'
 import type { AuthCredentials, Authenticatable, Guard, UserProvider } from './types'
 import { generateToken, secureStringCompare } from './utils'
 import { sanitizeUser } from './providers/UserProvider'
+import { redactQueryParams } from '../errors/redact-query-params'
 
 export interface SessionGuardOptions {
   provider: UserProvider
@@ -192,7 +193,7 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
     try {
       await this.provider.rehashPasswordIfRequired?.(user, credentials)
     } catch (error) {
-      console.warn(`[guren] Rehashing the password for user ${this.describeUser(user)} failed; the login continues.`, error)
+      console.warn(`[guren] Rehashing the password for user ${this.describeUser(user)} failed; the login continues.`, redactQueryParams(error))
     }
     return user
   }
