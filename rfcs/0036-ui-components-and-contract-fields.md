@@ -235,7 +235,7 @@ export const postsUpdateForm: RouteFormContract<'posts.update', 'PUT', '/posts/:
   An API-only app gets no `forms.gen.ts`, since its `tsconfig.json` includes
   `.guren/**/*` and the import would not resolve. When the last eligible route
   goes, codegen removes the file rather than leaving a stale one.
-- **Which routes.** Every named route whose `body` schema is an object.
+- **Which routes.** Every named route whose `body` schema is an object. **Amended in implementation:** and whose method an Inertia form submits with (POST, PUT, PATCH, DELETE); a body-bound `QUERY` route, such as the blog template's search, gets no export.
   `io: 'input'`, because the form describes what the browser sends, the side
   `ApiRoutes.body` already renders. A route with no body schema, or one that is
   not an object, gets no export.

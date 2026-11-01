@@ -114,6 +114,7 @@ function createMockApi(overrides: Partial<DevMcpApi> = {}): DevMcpApi {
     generateChannelTypes: async () => ({ outputPath: '.guren/channels.gen.ts' }),
     generateAgentTypes: async () => ({ outputPath: '.guren/agents.gen.ts' }),
     generateApiClientTypes: async () => ({ outputPath: '.guren/api-client.gen.ts' }),
+    generateFormTypes: async () => ({ outputPath: '' }),
     buildDocsGraphReport: async () => ({ nodes: [], edges: [], focus: [] }),
     renderDocsGraphMarkdown: () => '# Docs graph',
     readPlanOverview: async () => ({ schemaVersion: 1, plans: [], active: [], unreadable: [] }),

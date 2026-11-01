@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { resolve, relative } from 'node:path'
 import { consola } from 'consola'
 import type { Statement } from '@babel/types'
@@ -56,6 +57,7 @@ import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { describePageManifestSuppression, PAGES_MANIFEST_FILE, planPageManifest } from './pages-types'
 import { AGENTS_MANIFEST_FILE, planAgentManifest, STALE_AGENT_MANIFEST_MESSAGE } from './agents-types'
+import { buildFormsContent, FORMS_MANIFEST_FILE, planFormsManifest } from './forms-types'
 import { checkDestructiveMigrations } from './migrations-check'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
@@ -202,6 +204,54 @@ async function checkAgentManifest(
       AGENTS_MANIFEST_FILE,
       'warn',
       `${AGENTS_MANIFEST_FILE} is missing; ${plan.toolCount} ${plan.toolCount === 1 ? 'route derives' : 'routes derive'} an agent tool.`,
+      `Run: ${codegen}`,
+    ),
+    fix,
+  }
+}
+
+/**
+ * `.guren/forms.gen.ts` against what codegen would write now (RFC 0036 §2.1): rendered in memory
+ * from the same definitions, so a validator edit codegen has not seen reads as stale rather than
+ * as a manifest that merely exists.
+ */
+async function checkFormsManifest(
+  cwd: string,
+  routesFile?: string,
+  definitions?: RouteDefinition[],
+): Promise<CheckResult> {
+  const key = `manifest:${FORMS_MANIFEST_FILE}`
+  const fix = codegenFix(routesFile)
+  const codegen = formatFixCommand(fix)
+
+  let plan: Awaited<ReturnType<typeof planFormsManifest>>
+  try {
+    plan = await planFormsManifest(cwd, definitions ?? [])
+  } catch (error) {
+    return check(key, FORMS_MANIFEST_FILE, 'warn', error instanceof Error ? error.message : String(error))
+  }
+
+  const current = await readFile(resolve(cwd, FORMS_MANIFEST_FILE), 'utf8').catch(() => null)
+  if (plan.kind === 'skip') {
+    if (current !== null) {
+      return {
+        ...check(key, FORMS_MANIFEST_FILE, 'warn', `${FORMS_MANIFEST_FILE} is stale: codegen no longer writes it.`, `Run: ${codegen} (it removes ${FORMS_MANIFEST_FILE})`),
+        fix,
+      }
+    }
+    const why = plan.reason === 'client-without-forms' ? plan.hint : `No route binds an object body schema in an app using @guren/inertia-client; ${FORMS_MANIFEST_FILE} is not applicable.`
+    return check(key, FORMS_MANIFEST_FILE, plan.reason === 'client-without-forms' ? 'warn' : 'pass', why)
+  }
+
+  if (current === buildFormsContent(plan.contracts)) {
+    return check(key, FORMS_MANIFEST_FILE, 'pass', `${FORMS_MANIFEST_FILE} is current (${plan.contracts.length} ${plan.contracts.length === 1 ? 'form' : 'forms'}).`)
+  }
+  return {
+    ...check(
+      key,
+      FORMS_MANIFEST_FILE,
+      'warn',
+      current === null ? `${FORMS_MANIFEST_FILE} is missing.` : `${FORMS_MANIFEST_FILE} differs from the route body schemas it is generated from.`,
       `Run: ${codegen}`,
     ),
     fix,
@@ -549,6 +599,7 @@ async function collectCheckReport(options: RunCheckOptions): Promise<CheckReport
         )
       } else {
         checks.push(await checkAgentManifest(cwd, codegenRoutes, graph.definitions))
+        checks.push(await checkFormsManifest(cwd, codegenRoutes, graph.definitions))
       }
     }
 

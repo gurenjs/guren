@@ -4,6 +4,7 @@ import { generateDataTypes } from './data-types'
 import { generateAttachmentTypes } from './attachments-types'
 import { generateApiClientTypes } from './api-client-types'
 import { generateAgentTypes } from './agents-types'
+import { generateFormTypes } from './forms-types'
 import { generateChannelTypes } from './channel-types'
 import { generatePageTypes } from './pages-types'
 import type { WriterOptions } from './utils'
@@ -99,6 +100,11 @@ export async function* runCodegen(options: CodegenOptions) {
     definitions,
     { appRoot: options.appRoot, resources: resourceDefinitions, ...writerOptions },
   )
+  // After the API client: each contract's type names an `ApiRoutes` body.
+  const { outputPath: formsOutputPath, warnings: formsWarnings } = await generateFormTypes(definitions, {
+    appRoot: options.appRoot,
+    ...writerOptions,
+  })
   yield {
     stage: 'complete' as const,
     apiClientWarnings,
@@ -109,5 +115,7 @@ export async function* runCodegen(options: CodegenOptions) {
     agentsOutputPath,
     agentTools,
     apiClientOutputPath,
+    formsOutputPath,
+    formsWarnings,
   }
 }
