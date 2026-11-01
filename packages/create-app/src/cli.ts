@@ -266,6 +266,25 @@ async function installDependencies(cwd: string): Promise<boolean> {
   }
 }
 
+/**
+ * The shipped `.guren/*.gen.ts` match the bare template, but `add auth` and
+ * `add prototype` add pages and routes they do not list: without this the
+ * initial commit holds stale files and a boot before codegen 500s on /login.
+ * Under `--no-install` no generator ran, so the shipped files still hold.
+ */
+async function runCodegen(cwd: string): Promise<boolean> {
+  consola.start('Generating route and page types...')
+  const { spawnSync } = await import('node:child_process')
+  // The app's own script, which carries per-blueprint flags (the api one's --routes).
+  const result = spawnSync('bun', ['run', 'codegen'], { cwd, stdio: 'inherit' })
+  if (result.status !== 0) {
+    consola.warn('`bun run codegen` failed (see the output above), so .guren/ may not match the app. Run it inside the app once that is fixed.')
+    return false
+  }
+  consola.success('Generated route and page types')
+  return true
+}
+
 const command = defineCommand({
   meta: {
     name: 'create-guren-app',
@@ -425,7 +444,9 @@ const command = defineCommand({
       }
     }
 
-    // Last, so the harness and auth scaffolding land in the initial commit.
+    const codegenRan = installed && await runCodegen(targetDir)
+
+    // Last, so the harness, auth scaffolding and generated types land in the initial commit.
     if (shouldInitGit) {
       reportGitInit(targetDir)
     }
@@ -456,8 +477,10 @@ const command = defineCommand({
       consola.log(`  bunx guren add resource ${example.name} --fields "${example.fields}"`)
     }
     consola.log('')
-    consola.info('Generate types and set up database:')
-    consola.log('  bun run codegen')
+    consola.info(codegenRan ? 'Set up the database:' : 'Generate types and set up database:')
+    if (!codegenRan) {
+      consola.log('  bun run codegen')
+    }
     consola.log('  bun run db:make')
     consola.log('  bun run db:migrate')
     consola.log('  bun run db:seed')
