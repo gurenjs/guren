@@ -218,7 +218,7 @@ export async function updateTokenSheet(cwd: string): Promise<void> {
 export const UI_COMPONENTS_DIR = 'resources/js/components/ui'
 
 /** The components `guren add ui` copies, one file each under {@link UI_COMPONENTS_DIR}. */
-export const UI_COMPONENTS = ['Alert', 'Button', 'Card', 'Checkbox', 'Input', 'Label', 'Select', 'Textarea'] as const
+export const UI_COMPONENTS = ['Alert', 'Button', 'Card', 'Checkbox', 'Field', 'Input', 'Label', 'Select', 'Textarea'] as const
 export type UiComponentName = (typeof UI_COMPONENTS)[number]
 
 /**
@@ -231,10 +231,22 @@ export const SHIPPED_UI_COMPONENTS: Readonly<Record<UiComponentName, ReadonlySet
   Button: new Set(['52b772daee828464bd1708e92995fe6c3f7227776aa50da49950857cc5a6f1f9']),
   Card: new Set(['0b399883734e631bbaf9de5daebd87eb345f968fca503b81a113ab1a49c9015f']),
   Checkbox: new Set(['b42805cd83473ebadca103a75fa6ca90d7b134dcb495410c7c3d92a249c88b5a']),
+  Field: new Set(['83c3463479f5c483d9d3278b3829c2111b45e6b73b40d5ec4f61be99cc5cfbdc']),
   Input: new Set(['ea7215126e14061445ba343f52e010eae0eb1b634e76c601d86b6aa009b386b7']),
   Label: new Set(['f6230461533783175f577743b33e3824e0a4dad8cbc5f939bdf315e56ad5cb53']),
   Select: new Set(['e8d24f137fc1f9a197522589ba6f54de547a9f00b64de31389f59b6a35ff2dea']),
   Textarea: new Set(['d56e8e8b3e8dc5e686326a44bd877879e9de638dce56f7d829be2585158adcf0']),
+}
+
+/** The shipped components each one imports, which are copied with it so no copy imports a missing file. */
+export const UI_COMPONENT_DEPENDENCIES: Readonly<Partial<Record<UiComponentName, readonly UiComponentName[]>>> = {
+  Field: ['Checkbox', 'Input', 'Label', 'Select', 'Textarea'],
+}
+
+/** The names with everything they import, in {@link UI_COMPONENTS} order. */
+export function withUiDependencies(names: readonly UiComponentName[]): UiComponentName[] {
+  const wanted = new Set(names.flatMap((name) => [name, ...(UI_COMPONENT_DEPENDENCIES[name] ?? [])]))
+  return UI_COMPONENTS.filter((name) => wanted.has(name))
 }
 
 export function uiComponentPath(name: UiComponentName): string {
@@ -315,7 +327,7 @@ export function uiComponentsImportedBy(entries: readonly ScaffoldFileEntry[]): U
  */
 export async function ensureUiComponents(cwd: string, names: readonly UiComponentName[]): Promise<string[]> {
   const missing: ScaffoldFileEntry[] = []
-  for (const name of new Set(names)) {
+  for (const name of withUiDependencies(names)) {
     if ((await readIfExists(cwd, uiComponentPath(name))) === null) missing.push(uiComponentEntry(name))
   }
   if (missing.length === 0) return []

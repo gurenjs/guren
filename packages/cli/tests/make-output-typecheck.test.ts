@@ -25,6 +25,7 @@ import { generateApiClientTypes } from '../src/api-client-types'
 import { generateDataTypes } from '../src/data-types'
 import { generatePageTypes } from '../src/pages-types'
 import { generateRouteTypes } from '../src/routes-types'
+import { generateFormTypes } from '../src/forms-types'
 import { buildRouteRegistrationHint, makeFeature, type MakeFeatureOptions } from '../src/make-feature'
 import { makeChannel } from '../src/make-channel'
 import { makeCommand } from '../src/make-command'
@@ -72,6 +73,9 @@ const ALL_FIELDS = 'title:string,count:number,published:boolean,body:text,posted
  */
 async function prepareRenderedApp(dir: string): Promise<void> {
   await writeFile(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { paths: { '@/*': ['./*'] } } }))
+  // Codegen writes forms.gen.ts only for an app depending on a client that exports ./forms.
+  await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'rendered-app', dependencies: { '@guren/inertia-client': 'workspace:*' } }))
+  await linkWorkspacePackage('inertia-client', dir)
   await linkWorkspacePackage('core', dir)
   await linkWorkspacePackage('orm', dir)
   await symlink(join(cliRoot, 'node_modules/zod'), join(dir, 'node_modules/zod'), 'dir')
@@ -147,6 +151,7 @@ async function runCodegen(appRoot: string): Promise<void> {
   const { definitions } = await generateRouteTypes({ appRoot, routesFile: 'routes/web.ts', force: true })
   const { definitions: resources } = await generateDataTypes({ appRoot, force: true })
   await generateApiClientTypes(definitions, { appRoot, resources, force: true })
+  await generateFormTypes(definitions, { appRoot, force: true })
 }
 
 async function typecheckRenderedApp(dir: string, created: string[]): Promise<void> {

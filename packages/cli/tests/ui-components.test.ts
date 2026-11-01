@@ -207,8 +207,26 @@ describe('guren add ui', () => {
   })
 
   it('refuses an unknown component name, naming the available ones', () => {
-    expect(() => resolveUiComponentNames(['button', 'field'])).toThrow(CliError)
-    expect(() => resolveUiComponentNames(['field'])).toThrow('Available: alert, button, card')
+    expect(() => resolveUiComponentNames(['button', 'tabs'])).toThrow(CliError)
+    expect(() => resolveUiComponentNames(['tabs'])).toThrow('Available: alert, button, card')
+  })
+
+  it('writes the components Field imports along with it', async () => {
+    await seedInertiaApp(workspace.dir)
+    await addUi({ names: ['field'] })
+    const written = (await readdir(join(workspace.dir, 'resources/js/components/ui'))).sort()
+    expect(written).toEqual(['Checkbox.tsx', 'Field.tsx', 'Input.tsx', 'Label.tsx', 'Select.tsx', 'Textarea.tsx'])
+  })
+
+  it('refuses Field before writing when the installed client predates the forms subpath', async () => {
+    await seedInertiaApp(workspace.dir)
+    const client = join(workspace.dir, 'node_modules/@guren/inertia-client')
+    await mkdir(client, { recursive: true })
+    await writeFile(join(client, 'package.json'), JSON.stringify({ name: '@guren/inertia-client', exports: { './package.json': './package.json' } }))
+    await expect(addUi({ names: ['field'] })).rejects.toThrow('bun add @guren/inertia-client@latest')
+    expect(await readFile(join(workspace.dir, uiComponentPath('Field')), 'utf8').catch(() => null)).toBeNull()
+    await addUi({ names: ['button'] })
+    expect(await readFile(join(workspace.dir, uiComponentPath('Button')), 'utf8')).toBe(uiComponentTemplate('Button'))
   })
 
   it('refuses an API-only app', async () => {

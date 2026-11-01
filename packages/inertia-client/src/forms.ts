@@ -316,7 +316,8 @@ export interface FieldOverrides<TValue> {
   multiple?: boolean
 }
 
-type AnyForm<TBody extends FormDataType<TBody>> = RouteForm<TBody> | InertiaFormProps<TBody>
+/** What `useField` reads a key from: a route form, or a plain Inertia form that derives nothing. */
+export type FieldForm<TBody extends FormDataType<TBody>> = RouteForm<TBody> | InertiaFormProps<TBody>
 
 /**
  * One body key's label, control props and error state. A plain Inertia form works too: with no
@@ -324,7 +325,7 @@ type AnyForm<TBody extends FormDataType<TBody>> = RouteForm<TBody> | InertiaForm
  * `label` or the field name.
  */
 export function useField<TBody extends FormDataType<TBody>, K extends keyof TBody & string>(
-  form: AnyForm<TBody>,
+  form: FieldForm<TBody>,
   name: K,
   overrides: FieldOverrides<TBody[K]> = {},
 ): FieldState<TBody[K]> {

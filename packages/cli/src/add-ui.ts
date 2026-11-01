@@ -8,8 +8,10 @@ import {
   uiComponentEntry,
   uiComponentPath,
   uiComponentTemplate,
+  withUiDependencies,
   type UiComponentName,
 } from './guren-css'
+import { assertClientExportsForms } from './forms-types'
 import { unifiedDiff } from './text-diff'
 import { writeRoot, writeScaffoldFiles, type WriterOptions } from './utils'
 
@@ -63,7 +65,9 @@ export async function addUi(options: AddUiOptions = {}): Promise<AddUiResult> {
     return { created: [], diffs }
   }
 
-  const created = await writeScaffoldFiles(names.map(uiComponentEntry), { ...options, cwd: appRoot, skipExisting: true })
+  const toWrite = withUiDependencies(names)
+  if (toWrite.includes('Field')) await assertClientExportsForms(appRoot, 'Field.tsx imports')
+  const created = await writeScaffoldFiles(toWrite.map(uiComponentEntry), { ...options, cwd: appRoot, skipExisting: true })
   if (created.length === 0) consola.info('Every requested component is already in the app.')
   return { created, diffs: [] }
 }

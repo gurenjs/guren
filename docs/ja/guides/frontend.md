@@ -85,7 +85,7 @@ export default function Index({ posts }: Props) {
 
 ### UI コンポーネント
 
-`bunx guren add ui` は、トークンでスタイルを付けた少数のコンポーネント(`Button`、`Label`、`Input`、`Textarea`、`Select`、`Checkbox`、`Card`、`Alert`)を `resources/js/components/ui/` にコピーします。`make:feature` と `make:auth` が書き出すページも、これらを import します。ファイルはアプリのものなので、`Input.tsx` のフォーカスリングや `Button.tsx` の余白を変えれば、import しているすべてのページに反映されます。
+`bunx guren add ui` は、トークンでスタイルを付けた少数のコンポーネント(`Button`、`Label`、`Input`、`Textarea`、`Select`、`Checkbox`、`Field`、`Card`、`Alert`)を `resources/js/components/ui/` にコピーします。`make:feature` と `make:auth` が書き出すページも、これらを import します。ファイルはアプリのものなので、`Input.tsx` のフォーカスリングや `Button.tsx` の余白を変えれば、import しているすべてのページに反映されます。
 
 ```tsx
 import { Button } from '@/resources/js/components/ui/Button'
@@ -96,6 +96,25 @@ import { Label } from '@/resources/js/components/ui/Label'
 <Input id={emailId} type="email" className="mt-1" aria-invalid={form.errors.email ? true : undefined} />
 <Button type="submit" block disabled={form.processing}>Sign in</Button>
 ```
+
+`Field` は、フォームの 1 つのキーを配線します。`guren codegen` は、body スキーマが object の名前付き POST・PUT・PATCH・DELETE ルートごとに、フォームの contract を `.guren/forms.gen.ts` に書き出します。`Field` はこの contract を読み、ラベル、バリデータが宣言した `required` や長さと範囲の制限を付けた入力欄、その下のサーバーのエラーを描画します。`make:feature` が書き出す New と Edit のページもこれを使います。
+
+```tsx
+import { useRouteForm } from '@guren/inertia-client/forms'
+import { postsStoreForm } from '@/.guren/forms.gen'
+import { Button } from '@/resources/js/components/ui/Button'
+import { Field } from '@/resources/js/components/ui/Field'
+
+const form = useRouteForm(postsStoreForm, { title: '', body: '' })
+
+<form onSubmit={form.handleSubmit}>
+  <Field form={form} name="title" />
+  <Field form={form} name="body" as="textarea" />
+  <Button type="submit" disabled={form.processing}>Create</Button>
+</form>
+```
+
+ラベルは既定でフィールド名を単語に分けたものになります(`startsAt` なら「Starts at」)。変えるときは `label` を、スキーマから決まらない入力欄(`textarea`、`password`、`file`)には `as` を渡します。`Field` と `useRouteForm` を使うには、`/forms` を export している `@guren/inertia-client` が必要です。
 
 再実行、`--diff`、`--force` については [`add ui`](./cli.md#add-ui) を参照してください。
 
