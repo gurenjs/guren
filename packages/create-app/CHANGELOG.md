@@ -1,5 +1,21 @@
 # create-guren-app
 
+## 1.20.0
+
+### Minor Changes
+
+- 7e3c02b: Add `guren add ui`, which copies token-styled React components into `resources/js/components/ui/`: `Button` (with `buttonClass()` for a link styled as a button), `Label`, `Input`, `Textarea`, `Select`, `Checkbox`, `Card` and `Alert`. The app owns the copies, so a design change edits one file instead of every page. A re-run writes only the missing components; `--diff` prints a copy against the current template and `--force` replaces it.
+
+  `make:feature` and `make:auth` now render their pages with these components and copy any the app lacks, never touching one it has. The wiring is unchanged (`useForm`, the `useId()` field ids, the raw field name as label). New apps from `create-guren-app` ship the components, and the default home page and the blog template's auth and profile pages use them.
+
+  A new `guren-ui-components` doctor check reports a copy that an earlier release wrote and `guren upgrade` replaces it with the current template. A copy that matches no released template (edited, or reformatted) is reported with the `guren add ui <name> --diff` command and left alone.
+
+- 980e422: `@guren/cli/oxlint` adds `guren/no-raw-color`, which reports a raw color where a Guren UI token belongs: a Tailwind palette utility (`bg-red-500`, `text-zinc-500`, `border-white/10`) or an arbitrary color value (`bg-[#db1b1b]`, `[color:#fff]`) in any string but a non-class JSX attribute such as `title`, and a hex, color-function or named-color value in a JSX `style` prop or an SVG `fill`/`stroke`. The `.oxlintrc.json` that `create-guren-app` and `guren add lint` write enables it as an error on `resources/js/**`, so a page that styles with `bg-white` instead of `bg-g-panel` fails `bun run lint` and `guren gate`. `guren add lint` leaves the rule out for an app with no `resources/css/guren.css`, which has no tokens to switch to. An app that already has a config keeps it; add the override by hand to opt in. The `guren add admin` dashboard now styles with the tokens too, and writes `resources/css/guren.css` when the app has none.
+
+### Patch Changes
+
+- abfa7a2: `guren upgrade` now keeps the Guren UI tokens in `resources/css/guren.css` current. The sheet's framework-owned part sits between `/* guren:tokens begin … */` and `/* guren:tokens end */` markers, and a new `guren-ui-tokens` doctor check reports when that block differs from the sheet the CLI ships; `guren upgrade` replaces a block some release shipped and keeps every line outside it. A block no release shipped (edited, or written by a newer Guren than the installed CLI) is reported and left alone. A sheet with no markers is replaced only when it is byte-identical to one an earlier release wrote; an edited one is left alone, and doctor prints how to move its edits after the end marker. Broken markers (an open with no close, a close with no open, two blocks) are reported and nothing is written. New apps and `make:auth` / `make:feature` write the marked sheet.
+
 ## 1.19.1
 
 ### Patch Changes
