@@ -11,7 +11,7 @@ import { ENV_SCHEMA_FILE } from './app-env'
 import { memberKeyName, objectLiteral, topLevelDeclaration, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 import { callsDefineConfig, discoverProviderFiles, readIfExists, toPosixRelative } from './discovery'
 import { parseSourceFile } from './parse-cache'
-import { SEED_ON_BOOT_OPTION } from './seed-on-boot'
+import { SEED_ON_BOOT_DEV_SCRIPT_NOTE, SEED_ON_BOOT_OPTION } from './seed-on-boot'
 import { sessionConfigsIn } from './session-config'
 import { escapeSingleQuoted } from './utils'
 
@@ -172,14 +172,18 @@ async function databaseMigration(cwd: string, providers: readonly SourceFile[]):
   if (!source || !/export\s+(?:async\s+)?function\s+bootModels\b/.test(source)) return null
   if (callsDefineConfig((await readIfExists(cwd, 'config/database.ts')) ?? '', 'database')) return null
 
-  const options = source.includes('seedDatabase(') ? `, ${SEED_ON_BOOT_OPTION}` : ''
+  const seeds = source.includes('seedDatabase(')
+  const options = seeds ? `, ${SEED_ON_BOOT_OPTION}` : ''
   return {
     key: 'database',
     legacyFiles: ['config/app.ts', ...providersContaining(cwd, providers, 'bootModels')],
     target: 'config/database.ts',
     content: `import { defineDatabaseConfig } from '@guren/core'\n\n// Name the dialect factory's result \`database\`, keep its named exports, and add:\nexport default defineDatabaseConfig(database${options})\n`,
     env: [],
-    notes: ['defineDatabaseConfig() always connects the ORM at boot; bootModels() logic beyond that (a skipped or caught connection) does not carry over.'],
+    notes: [
+      'defineDatabaseConfig() always connects the ORM at boot; bootModels() logic beyond that (a skipped or caught connection) does not carry over.',
+      ...(seeds ? [SEED_ON_BOOT_DEV_SCRIPT_NOTE] : []),
+    ],
   }
 }
 

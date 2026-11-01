@@ -12,6 +12,8 @@ export const SEED_ON_BOOT_EXPRESSION = "process.env.NODE_ENV === 'development' |
 
 export const SEED_ON_BOOT_OPTION = `{ seedOnBoot: ${SEED_ON_BOOT_EXPRESSION} }`
 
+export const SEED_ON_BOOT_DEV_SCRIPT_NOTE = 'Start bin/serve.ts under NODE_ENV=development in the dev script (`"dev:server": "NODE_ENV=development bun --hot bin/serve.ts"`), or `bun run dev` stops seeding on boot.'
+
 function isNodeEnv(node: Node): boolean {
   if (node.type !== 'MemberExpression' || node.object.type !== 'MemberExpression') return false
   const env = node.object
