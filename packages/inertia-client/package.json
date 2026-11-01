@@ -65,6 +65,11 @@
       "import": "./dist/components.js",
       "default": "./dist/components.js"
     },
+    "./forms": {
+      "types": "./dist/forms.d.ts",
+      "import": "./dist/forms.js",
+      "default": "./dist/forms.js"
+    },
     "./prototype": {
       "types": "./dist/prototype.d.ts",
       "import": "./dist/prototype.js",

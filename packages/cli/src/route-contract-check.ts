@@ -38,7 +38,7 @@ const REQUEST_SIDE = 'input'
  * which keys exist. Undefined means unreadable (a union of objects, say), not passing:
  * {@link readParamKeys} turns it into a reported skip.
  */
-function objectNode(schema: ZodSchemaLike): ZodSchemaLike | undefined {
+export function objectNode(schema: ZodSchemaLike): ZodSchemaLike | undefined {
   if (typeOf(schema) === 'object') {
     return schema
   }
@@ -54,7 +54,7 @@ function objectNode(schema: ZodSchemaLike): ZodSchemaLike | undefined {
  * `tests/route-introspect.test.ts` pins the two equal, so a fix aimed at an OpenAPI
  * document fails there rather than silently reclassifying a finding.
  */
-function permitsOmission(schema: ZodSchemaLike): boolean {
+export function permitsOmission(schema: ZodSchemaLike): boolean {
   const def = schema._def ?? {}
 
   switch (typeOf(schema)) {

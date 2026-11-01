@@ -140,8 +140,13 @@ export const codegenCommand = defineCommand({
             agentsOutputPath,
             agentTools,
             apiClientOutputPath,
+            formsOutputPath,
+            formsWarnings,
           } = result
           for (const warning of apiClientWarnings) {
+            consola.warn(warning)
+          }
+          for (const warning of formsWarnings) {
             consola.warn(warning)
           }
           consola.success(`Route types generated at ${outputPath}`)
@@ -154,6 +159,7 @@ export const codegenCommand = defineCommand({
             )
           }
           consola.success(`API client generated at ${apiClientOutputPath}`)
+          if (formsOutputPath) consola.success(`Form contracts generated at ${formsOutputPath}`)
           break
         }
         case 'missing-routes':
