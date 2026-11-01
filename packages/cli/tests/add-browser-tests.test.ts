@@ -2,13 +2,13 @@ import { describe, expect, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { addBrowserTests, BROWSER_TEST_SCRIPT } from '../src/add-browser-tests'
+import { addBrowserTests, BROWSER_TEST_SCRIPT, CONFIG_LOCALE_LINE, pinConfigLocale } from '../src/add-browser-tests'
 import { isParameterless, type BrowserFeature, type BrowserMap, type BrowserMapRoute, type BrowserMapView } from '../src/browser-map'
 import { runBrowserMap } from '../src/browser-map-files'
 import { BROWSER_RUN_NAME } from '../src/browser-record'
 import {
   A11Y_OPTIONS_FILE, A11Y_SPEC_FILE, BROWSER_ACCOUNT_EMAIL, BROWSER_SEEDER_FILE, BROWSER_TESTS_CONFIG, buildA11ySpec, buildBrowserSeeder, buildPlanSpecs,
-  buildSmokeSpec, GENERATED_HEADER, SMOKE_SPEC_FILE,
+  buildSmokeSpec, GENERATED_HEADER, LOCALE_COOKIE, SMOKE_SPEC_FILE,
 } from '../src/browser-specs'
 import { buildLoginViewTemplate } from '../src/make-auth'
 import type { PlanView } from '../src/plan/schema'
@@ -104,6 +104,46 @@ describe('the plan specs', () => {
     expect(spec!.contents).toContain("from '../../support'")
     expect(() => transpiler.transformSync(spec!.contents)).not.toThrow()
   })
+
+  test('checks the page rendered in the app\'s default locale before it looks for a label', () => {
+    const map = mapOf([feature('comments', [newComment], [{ plan, view: create, routes: [newComment] }])])
+    const contents = buildPlanSpecs(map, { signIn: false }, new Map())[0]!.contents
+    expect(contents).toContain("import { expect, test, type Page } from '@playwright/test'")
+    expect(contents).toContain('const shared = initial?.props?._i18n')
+    expect(contents).toContain('.toBe(i18n.fallbackLocale)')
+    const body = contents.slice(contents.indexOf("test('view comments.create"))
+    expect(body.indexOf('await expectDefaultLocale(page)')).toBeGreaterThan(0)
+    expect(body.indexOf('await expectDefaultLocale(page)')).toBeLessThan(body.indexOf('getByLabel('))
+  })
+
+  test('leaves the locale check out of a file with nothing to open', () => {
+    const views: BrowserMapView[] = [{ plan, view: view('comments.edit', 'comments/Edit'), routes: [] }]
+    const contents = buildPlanSpecs(mapOf([], views), { signIn: false }, new Map())[0]!.contents
+    expect(contents).not.toContain('expectDefaultLocale')
+    expect(contents).toContain("import { test } from '@playwright/test'")
+  })
+
+  test('typechecks against Playwright beside the support template it imports', async () => {
+    const workspace = await createTempWorkspace('guren-plan-spec-types-')
+    try {
+      const map = mapOf([feature('comments', [newComment], [{ plan, view: create, routes: [newComment] }]), DASHBOARD], [
+        { plan, view: view('comments.mine', 'Dashboard', { actions: [{ label: 'Mine', route: 'route.comments.store' }] }), routes: [route('GET', '/dashboard', ['Dashboard'], 'required')] },
+      ])
+      const [spec] = buildPlanSpecs(map, { signIn: true }, new Map())
+      const files = {
+        [spec!.path]: spec!.contents,
+        'tests/browser/support.ts': await template('tests/browser/support.ts'),
+      }
+      await writeWorkspaceFiles(workspace.dir, files)
+      const diagnostics = checkTypes(Object.keys(files).map((file) => join(workspace.dir, file)), {
+        ...templateCompilerOptions({ '@playwright/test': [join(CLI_ROOT, 'node_modules/@playwright/test')] }),
+        types: ['bun-types', 'node'],
+      })
+      expect(diagnostics).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  }, TSC_TIMEOUT)
 
   test('carries no bracketed acceptance id, so plan:verify never reads it as a behaviour test', () => {
     const map = mapOf([feature('comments', [newComment], [{ plan, view: { ...create, id: 'AC-comments-1' }, routes: [newComment] }])])
@@ -230,6 +270,26 @@ describe('what the templates restate', () => {
     expect(await template('tests/browser/support.ts')).toContain(`export const BROWSER_ACCOUNT_EMAIL = '${BROWSER_ACCOUNT_EMAIL}'`)
   })
 
+  test('the config sends the locale add browser-tests writes, on one line', async () => {
+    const config = await template(BROWSER_TESTS_CONFIG)
+    expect(config.split(CONFIG_LOCALE_LINE)).toHaveLength(2)
+    expect(config).toContain('    locale: LOCALE,\n')
+  })
+
+  test('the setup project clears the locale cookie the server reads by default', async () => {
+    expect(await template('tests/browser/auth.setup.ts')).toContain(`await page.context().clearCookies({ name: '${LOCALE_COOKIE}' })`)
+    expect(await readFile(join(CLI_ROOT, '../server/src/http/middleware/detect-locale.ts'), 'utf8')).toContain(`const cookieName = options.cookieName ?? '${LOCALE_COOKIE}'`)
+  })
+
+  test('the plan spec reads the initial page from the element support.ts falls back to', async () => {
+    const selector = `document.querySelector('script[data-page="app"][type="application/json"]')`
+    expect(await template('tests/browser/support.ts')).toContain(selector)
+    const create = view('posts.create', 'posts/Create', { actions: [{ label: 'Save', route: 'route.posts.store' }] })
+    const newPost = route('GET', '/posts/new', ['posts/Create'])
+    const map = mapOf([feature('posts', [newPost], [{ plan: 'posts.plan.json', view: create, routes: [newPost] }])])
+    expect(buildPlanSpecs(map, { signIn: false }, new Map())[0]!.contents).toContain(selector)
+  })
+
   test('the setup project signs in through the labels make:auth writes', async () => {
     const setup = await template('tests/browser/auth.setup.ts')
     const page = buildLoginViewTemplate(true, true)
@@ -301,6 +361,27 @@ describe('guren add browser-tests', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  test('writes the app\'s default locale into the config, and keeps en where it cannot read one', async () => {
+    const workspace = await createTempWorkspace('guren-add-browser-tests-locale-')
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, {
+        'package.json': INERTIA_MANIFEST,
+        'src/app.ts': "import { createApp } from '@guren/core'\nimport registerWebRoutes from '../routes/web.js'\n\nexport default createApp({ routes: registerWebRoutes, i18n: { supported: ['ja', 'en'] } })\n",
+      })
+      await addBrowserTests({ install: false, loadMap: async () => mapOf([POSTS]) })
+      const config = await readFile(join(workspace.dir, BROWSER_TESTS_CONFIG), 'utf8')
+      expect(config).toBe((await template(BROWSER_TESTS_CONFIG)).replace(CONFIG_LOCALE_LINE, "const LOCALE = 'ja'\n"))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('refuses a config template that lost its locale line rather than writing en', () => {
+    expect(() => pinConfigLocale({ path: BROWSER_TESTS_CONFIG, contents: 'export default {}\n' }, 'ja')).toThrow('no single const LOCALE')
+    expect(pinConfigLocale({ path: BROWSER_TESTS_CONFIG, contents: CONFIG_LOCALE_LINE }, "pt-'BR")).toEqual({ path: BROWSER_TESTS_CONFIG, contents: "const LOCALE = 'pt-\\'BR'\n" })
   })
 
   test('refuses a test:browser script running something else, writing nothing', async () => {
