@@ -51,6 +51,7 @@ import { makeValidator } from '../src/make-validator'
 import { makeView } from '../src/make-view'
 import { FIELD_TYPES, parseFieldsString } from '../src/fields'
 import { generatePageTypes } from '../src/pages-types'
+import { addUi } from '../src/add-ui'
 
 /**
  * The syntax gate for every generator: render representative outputs and require
@@ -266,6 +267,11 @@ describe('generated sources parse', () => {
     await expectAllOutputsParse('guren-parse-add-admin-', () => runBlueprint('admin', {}), seedInertiaApp)
   })
 
+  // The components the generated pages import, written on their own.
+  it('add ui', async () => {
+    await expectAllOutputsParse('guren-parse-add-ui-', () => addUi(), seedInertiaApp)
+  })
+
   // Runs after the cases above: a generator whose pages moved out of resources/js
   // would leave the raw-color and token checks above with nothing to judge.
   it('the page checks saw pages from every page-writing generator', () => {
@@ -274,6 +280,7 @@ describe('generated sources parse', () => {
       'make:feature': 'guren-parse-feature-',
       'make:view': 'guren-parse-make-view-',
       'add admin': 'guren-parse-add-admin-',
+      'add ui': 'guren-parse-add-ui-',
     }
     const seen = (prefix: string) => [...casesWithPages].some((key) => key.startsWith(prefix))
     expect(Object.entries(prefixes).filter(([, prefix]) => !seen(prefix)).map(([name]) => name)).toEqual([])

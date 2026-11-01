@@ -15,7 +15,7 @@ import { authAliasLine, routeCall } from './make-route'
 import { testFile } from './make-test'
 import { validatorFile } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
-import { FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
+import { ensureUiComponents, uiComponentsImportedBy, type UiComponentName } from './guren-css'
 import { ParseCache } from './parse-cache'
 import { findDeclaredTable, moduleSchemaAggregateName, schemaPathFor } from './schema-parser'
 import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
@@ -181,6 +181,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
       ...pageFiles,
     ]
     const created = await writeScaffoldFiles(files, { ...writerOptions, subject: singular })
+    await ensureUiComponents(appRoot, uiComponentsImportedBy(pageFiles))
     const appended = await appendPrototypeEntries(appRoot, { singular, collection: routeVar, routeName, variableName, fields })
     // `guren add prototype` created the fixture; this run only appended to it.
     const patchedFixture = appended === 'patched' ? resolve(appRoot, PROTOTYPE_FIXTURE_PATH) : undefined
@@ -216,6 +217,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const keptFiles = promoting && !options.force ? await existingFiles(appRoot, [validator, ...pageFiles]) : []
   const files = [...backendFiles, ...pageFiles, ...modelFiles].filter((file) => !keptFiles.includes(file))
   const created = await writeScaffoldFiles(files, { ...writerOptions, subject: singular })
+  // A separate batch: the page batch refuses an existing file, and a component the app already has is no conflict.
+  await ensureUiComponents(appRoot, uiComponentsImportedBy(pageFiles))
   const kept = keptFiles.map((file) => resolve(appRoot, file.path))
   options.kept?.push(...kept)
 
@@ -581,7 +584,7 @@ function generateIndexPage(
 import type { PaginatedPageProps } from '@guren/core'
 ${resourceImport}
 import { route } from '@/.guren/routes.gen'
-
+${uiImports(['Button', 'Card'], { Button: 'buttonClass' })}
 interface Props extends PaginatedPageProps<${singular}ResourceData> {}
 
 export default function ${collection}Index({ data, pagination }: Props) {
@@ -593,14 +596,14 @@ export default function ${collection}Index({ data, pagination }: Props) {
             <span aria-hidden className="h-7 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
             ${collection}
           </h1>
-          <Link href={route('${routeName}.create')} className="${PRIMARY_BUTTON_CLASS}">New ${singular}</Link>
+          <Link href={route('${routeName}.create')} className={buttonClass()}>New ${singular}</Link>
         </div>
         <div className="space-y-4">
           {data.map((${variableName}) => (
-            <article key={${variableName}.id} className="rounded-g-card border border-g-line bg-g-panel p-4 shadow-g-card">
+            <Card as="article" key={${variableName}.id}>
               <Link href={route('${routeName}.show', { id: ${variableName}.id })} className="text-xl font-bold text-g-heading transition hover:text-g-accent-text">{${variableName}.${titleField}}</Link>
 ${summaryField ? `              <p className="mt-2 text-sm text-g-text-2">{${variableName}.${summaryField} ?? ''}</p>` : ''}
-            </article>
+            </Card>
           ))}
         </div>
         {pagination?.links?.pages && (
@@ -640,7 +643,7 @@ function generateShowPage(
   return `import { Link } from '@inertiajs/react'
 ${resourceImport}
 import { route } from '@/.guren/routes.gen'
-
+${uiImports(['Button'], { Button: 'buttonClass' })}
 interface Props {
   ${variableName}: ${singular}ResourceData
 }
@@ -658,7 +661,7 @@ ${fieldRenders}
             method="delete"
             as="button"
             onBefore={() => window.confirm('Delete this ${variableName}?')}
-            className="rounded-g-ctl border border-g-danger-chip px-3 py-1 text-sm font-bold text-g-danger transition hover:bg-g-danger-tint"
+            className={buttonClass({ variant: 'danger', size: 'sm' })}
           >
             Delete
           </Link>
@@ -684,7 +687,7 @@ function generateNewPage(
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { RouteBody } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
-
+${uiImports(formComponents(fields))}
 type ${singular}FormData = RouteBody<ApiRoutes, '${routeName}.store'>
 
 export default function New${singular}() {
@@ -694,7 +697,7 @@ ${state.hooks}  return (
       <div className="mx-auto max-w-3xl px-6 py-12">
         <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.post(route('${routeName}.store')) }}>
 ${formFields}
-          <button type="submit" className="${PRIMARY_BUTTON_CLASS}">Create</button>
+          <Button type="submit">Create</Button>
         </form>
       </div>
     </main>
@@ -720,7 +723,7 @@ function generateEditPage(
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { RouteBody } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
-
+${uiImports(formComponents(fields))}
 type ${singular}FormData = RouteBody<ApiRoutes, '${routeName}.store'>
 
 interface Props {
@@ -734,13 +737,33 @@ ${state.hooks}  return (
       <div className="mx-auto max-w-3xl px-6 py-12">
         <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.put(route('${routeName}.update', { id: ${variableName}.id })) }}>
 ${formFields}
-          <button type="submit" className="${PRIMARY_BUTTON_CLASS}">Save</button>
+          <Button type="submit">Save</Button>
         </form>
       </div>
     </main>
   )
 }
 `
+}
+
+/** The components a New or Edit page renders its fields and submit with. */
+function formComponents(fields: readonly FieldDefinition[]): UiComponentName[] {
+  const names: UiComponentName[] = ['Button']
+  if (fields.some((field) => !wrapsItsLabel(field))) names.push('Label')
+  if (fields.some((field) => field.type !== 'boolean' && field.type !== 'text' && field.type !== 'json')) names.push('Input')
+  if (fields.some((field) => field.type === 'text' || field.type === 'json')) names.push('Textarea')
+  if (fields.some(wrapsItsLabel)) names.push('Checkbox')
+  return names
+}
+
+/**
+ * One import line per component, from its own file (there is no barrel).
+ * `exports` names what a page takes from a file when it is not the component itself.
+ */
+function uiImports(names: readonly UiComponentName[], exports: Partial<Record<UiComponentName, string>> = {}): string {
+  return names
+    .map((name) => `import { ${exports[name] ?? name} } from '@/resources/js/components/ui/${name}'\n`)
+    .join('')
 }
 
 /** A checkbox is wrapped in its label, so its `fieldIds` entry only names its error message. */
@@ -801,11 +824,8 @@ function errorLines(messages: FieldMessage[]): string {
 function generateFormField(field: FieldDefinition, formVar: string): string {
   const messages = fieldMessages(field, formVar)
   const control = wrapsItsLabel(field)
-    ? `            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={${formValue(field, formVar)}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} ${errorAttributes(messages).join(' ')} className="h-4 w-4 rounded accent-g-accent" />
-              ${field.name}
-            </label>`
-    : `            <label htmlFor={fieldIds.${field.name}} className="${FIELD_LABEL_CLASS}">${field.name}</label>
+    ? `            <Checkbox label="${field.name}" checked={${formValue(field, formVar)}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} ${errorAttributes(messages).join(' ')} />`
+    : `            <Label htmlFor={fieldIds.${field.name}}>${field.name}</Label>
 ${labelledControl(field, formVar, errorAttributes(messages))}`
   return `          <div>
 ${control}
@@ -817,23 +837,22 @@ function labelledControl(field: FieldDefinition, formVar: string, ariaAttributes
   const id = `fieldIds.${field.name}`
   const errorAttrs = ariaAttributes.join(' ')
   const value = formValue(field, formVar)
-  const controlClass = `mt-1 ${FORM_INPUT_CLASS}`
   if (field.type === 'text') {
-    return `            <textarea id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="${controlClass}" />`
+    return `            <Textarea id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="mt-1" />`
   }
   if (field.type === 'number') {
-    return `            <input id={${id}} type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} ${errorAttrs} className="${controlClass}" />`
+    return `            <Input id={${id}} type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} ${errorAttrs} className="mt-1" />`
   }
   if (field.type === 'date') {
     // The value arrives as an ISO timestamp but `type="date"` only renders a
     // bare `YYYY-MM-DD`, and shows nothing at all for anything longer.
-    return `            <input id={${id}} type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="${controlClass}" />`
+    return `            <Input id={${id}} type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="mt-1" />`
   }
   if (field.type === 'json') {
     // Uncontrolled: a controlled textarea driven by the parsed object would
     // reject every keystroke that leaves the JSON temporarily invalid. The
     // flag stops half-typed JSON silently submitting the last value parsed.
-    return `            <textarea
+    return `            <Textarea
               id={${id}}
               defaultValue={jsonText.${field.name}}
               onChange={(event) => {
@@ -845,10 +864,10 @@ function labelledControl(field: FieldDefinition, formVar: string, ariaAttributes
                 }
               }}
               ${ariaAttributes.join('\n              ')}
-              className="${controlClass} font-mono text-sm"
+              className="mt-1 font-mono text-sm"
             />`
   }
-  return `            <input id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="${controlClass}" />`
+  return `            <Input id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="mt-1" />`
 }
 
 /**

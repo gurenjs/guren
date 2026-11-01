@@ -58,8 +58,9 @@ of its own in `app.css`.
 
 ## The shared class strings
 
-The scaffolded pages (`make:feature`, `make:auth`) use these strings. Reuse
-them for the same element rather than writing a new input or button style:
+The scaffolded pages (`make:feature`, `make:auth`) and the components they
+import use these strings. Reuse them for the same element rather than writing
+a new input or button style:
 
 | Element | Classes |
 |---------|---------|

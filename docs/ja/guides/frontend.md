@@ -83,6 +83,22 @@ export default function Index({ posts }: Props) {
 }
 ```
 
+### UI コンポーネント
+
+`bunx guren add ui` は、トークンでスタイルを付けた少数のコンポーネント(`Button`、`Label`、`Input`、`Textarea`、`Select`、`Checkbox`、`Card`、`Alert`)を `resources/js/components/ui/` にコピーします。`make:feature` と `make:auth` が書き出すページも、これらを import します。ファイルはアプリのものなので、`Input.tsx` のフォーカスリングや `Button.tsx` の余白を変えれば、import しているすべてのページに反映されます。
+
+```tsx
+import { Button } from '@/resources/js/components/ui/Button'
+import { Input } from '@/resources/js/components/ui/Input'
+import { Label } from '@/resources/js/components/ui/Label'
+
+<Label htmlFor={emailId}>Email</Label>
+<Input id={emailId} type="email" className="mt-1" aria-invalid={form.errors.email ? true : undefined} />
+<Button type="submit" block disabled={form.processing}>Sign in</Button>
+```
+
+再実行、`--diff`、`--force` については [`add ui`](./cli.md#add-ui) を参照してください。
+
 ## フォームとナビゲーション
 クライアント側の画面遷移とフォーム送信には、Inertia のヘルパーを使います。
 

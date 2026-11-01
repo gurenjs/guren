@@ -37,6 +37,7 @@ bunx guren add prototype
 bunx guren add ai --provider anthropic
 bunx guren add oauth
 bunx guren add browser-tests
+bunx guren add ui
 ```
 
 まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリが育つのに合わせてほかの機能を足していってください。
@@ -101,6 +102,19 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 
 実行したら `bun install` してください。`bunx oxlint` は Bun 上で動くので、Node は要りません。`config/env.ts` が導入される前に作ったアプリでは、自前の `config/database.ts` や `src/app.ts` にある `process.env` の読み取りも、スキーマに移すか無効化のコメントを付けるまで、このルールに報告されます。
 
+### `add ui`
+
+`add ui` は、トークンでスタイルを付けた React コンポーネントを `resources/js/components/ui/` にコピーします。対象は `Button`、`Label`、`Input`、`Textarea`、`Select`、`Checkbox`、`Card`、`Alert` です。どれもネイティブの要素と `g-` ユーティリティだけでできた 1 ファイルで、渡した `className` は既定のクラスの後ろに追加されます。コピーした後のファイルはアプリのものなので、デザインを変えるときは全ページではなく、該当するファイルを 1 つ編集します。
+
+```bash
+bunx guren add ui                 # すべてのコンポーネント
+bunx guren add ui button card     # 指定したものだけ
+bunx guren add ui button --diff   # 手元のコピーと現在のテンプレートの差分を表示する(何も書き込まない)
+bunx guren add ui button --force  # 手元のコピーを現在のテンプレートで置き換える
+```
+
+もう一度実行すると、足りないコンポーネントだけを書き出し、残したファイルを一覧で表示します。コンポーネントはそれぞれのファイルから import します(`import { Button } from '@/resources/js/components/ui/Button'`)。index ファイルはありません。`Button.tsx` は `buttonClass()` も export しているので、`<Link>` や `<a>` をボタンの見た目にするときに使えます。`make:feature` と `make:auth` が書き出すページもこれらのコンポーネントを import し、足りないものがあればコピーします。すでにあるファイルには手を付けません。`create-guren-app` で作った新しいアプリには、最初から全部入っています。
+
 ### `add browser-tests`
 
 `add browser-tests` は、Playwright のブラウザテストを導入します。テストはアプリを `bunx guren browser:serve` 経由で起動するので、本番環境や、ローカルだと確かめられないデータベースでは起動しません。このコマンドは `playwright.browser.config.ts`(アプリを `127.0.0.1:4317` で起動する設定)と `tests/browser/support.ts` を書き出してから `bunx guren browser:map` を実行します。以後は `browser:map` が、`tests/browser/generated/` の下に次の 2 種類の spec を保ちます。
@@ -128,6 +142,7 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 | `make:view` | 中断する。ページには代わりになる JSON の形がない |
 | `add prototype` | 中断する。プロトタイプモードは Inertia の visit に応答するもの |
 | `add browser-tests` | 中断する。spec は Inertia のページを操作するので、ルートは `TestApp` を使って HTTP でテストする |
+| `add ui` | 中断する。コンポーネントは Inertia のページ用 |
 | `make:controller` | 合わせて生成する。`this.json(...)` を返すコントローラーになり、そのまま `routes/api.ts` につなげる |
 
 手がかりから API 専用だと確認できなければ、どのコマンドもフルスタックのアプリと同じように動きます。`@guren/inertia-client` をインストールすれば、通常の動きに戻ります。`guren codegen` は、API 専用アプリではページコンポーネントを `.guren/pages.gen.ts` から外します。このファイルが `@guren/inertia-client` を import するためで、`make:view` の中断は、それを原因となったコマンドの時点で知らせるためのものです。

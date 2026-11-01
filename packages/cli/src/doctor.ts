@@ -42,7 +42,17 @@ import { commandFix, type CheckEvidence, type CheckFix, type CheckFixRun } from 
 import { hasPendingRepair, repairDoctorReport } from './doctor-fix'
 import { summarizeDoctorReport, type DoctorStatus } from './doctor-report'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
-import { planAppTokenSheet, shippedTokenSheetLocation, TOKENS_PATH, updateTokenSheet, type TokenSheetPlan } from './guren-css'
+import {
+  planAppTokenSheet,
+  planAppUiComponents,
+  shippedTokenSheetLocation,
+  TOKENS_PATH,
+  UI_COMPONENTS_DIR,
+  updateTokenSheet,
+  updateUiComponents,
+  type AppUiComponentPlan,
+  type TokenSheetPlan,
+} from './guren-css'
 
 export type { DoctorStatus } from './doctor-report'
 export { DOCTOR_RECOMMENDED_COMMANDS, DOCTOR_STATUSES, summarizeDoctorReport } from './doctor-report'
@@ -1314,6 +1324,61 @@ async function createGurenUiTokensAutofix(_context: DoctorRuleContext, check: Do
   }
 }
 
+async function detectGurenUiComponents(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const check = (status: DoctorStatus, message: string, options?: Parameters<typeof createCheck>[4]): DoctorCheck =>
+    createCheck('guren-ui-components', 'Guren UI Components', status, message, options)
+
+  let plans: AppUiComponentPlan[]
+  try {
+    plans = await planAppUiComponents(context.cwd)
+  } catch (error) {
+    const steps = `Make the files under ${UI_COMPONENTS_DIR} readable.`
+    return check('warn', `A component under ${UI_COMPONENTS_DIR} could not be read: ${error instanceof Error ? error.message : String(error)}`, { fix: steps, manualFix: steps })
+  }
+  if (plans.length === 0) return check('pass', `No copied components under ${UI_COMPONENTS_DIR}.`)
+
+  const outdated = plans.filter(({ plan }) => plan.kind === 'update')
+  const edited = plans.filter(({ plan }) => plan.kind === 'edited')
+  if (outdated.length === 0 && edited.length === 0) {
+    return check('pass', `${plans.length} copied component(s) match the templates this CLI ships.`)
+  }
+
+  const messages: string[] = []
+  if (outdated.length > 0) {
+    messages.push(`${outdated.map(({ path }) => path).join(', ')} ${outdated.length === 1 ? 'is an unedited copy' : 'are unedited copies'} of an earlier release's template.`)
+  }
+  for (const { name, path, plan } of edited) {
+    const claimed = plan.kind === 'edited' && plan.claimed ? ` (its header names ${plan.claimed})` : ''
+    messages.push(`${path} matches no released ${name} template${claimed}, so upgrades leave it as it is.`)
+  }
+  const diffs = edited.map(({ name }) => `\`guren add ui ${name.toLowerCase()} --diff\``)
+  const manual = diffs.length > 0
+    ? `Compare each edited copy with the current template (${diffs.join(', ')}) and carry over what you need; \`--force\` takes the template as it is.`
+    : undefined
+  return check('warn', messages.join(' '), {
+    fix: outdated.length > 0
+      ? `Run \`guren upgrade\` to replace the unedited copies with the current templates.${manual ? ` ${manual}` : ''}`
+      : manual!,
+    ...(outdated.length > 0 ? { canAutofix: true } : {}),
+    ...(manual ? { manualFix: manual } : {}),
+  })
+}
+
+async function createGurenUiComponentsAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
+  if (check.status === 'pass' || !check.canAutofix) {
+    return null
+  }
+
+  return {
+    key: check.key,
+    title: check.title,
+    summary: `Replace the unedited copies under ${UI_COMPONENTS_DIR} with the templates this CLI ships.`,
+    async apply(cwd: string) {
+      await updateUiComponents(cwd)
+    },
+  }
+}
+
 const doctorRules: DoctorRule[] = [
   { key: 'runtime', title: 'Runtime Environment', detect: detectRuntime },
   { key: 'bun-version', title: 'Bun Version', detect: detectBunVersion },
@@ -1335,6 +1400,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'test-infrastructure', title: 'Test Infrastructure', detect: detectTestInfrastructure },
   { key: 'plugin-compatibility', title: 'Plugin Compatibility', detect: detectPluginCompatibility },
   { key: 'guren-ui-tokens', title: 'Guren UI Tokens', detect: detectGurenUiTokens, autofix: createGurenUiTokensAutofix },
+  { key: 'guren-ui-components', title: 'Guren UI Components', detect: detectGurenUiComponents, autofix: createGurenUiComponentsAutofix },
 ]
 
 /**

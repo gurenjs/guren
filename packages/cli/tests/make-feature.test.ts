@@ -10,7 +10,6 @@ import { hasControllerTest } from '../src/discovery'
 import { findMigrationCreatingTable } from '../src/make-migration'
 import { generateDataTypes } from '../src/data-types'
 import { parseAttachString, parseFieldsString } from '../src/fields'
-import { FIELD_LABEL_CLASS } from '../src/guren-css'
 import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, captureConsolaLines, captureInfos, captureSuccesses, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig, snapshotTree, writeWorkspaceFiles } from './helpers'
 
 describe('parseFieldsString', () => {
@@ -494,12 +493,12 @@ describe('makeFeature', () => {
         expect(source).toContain("import { useId, useState } from 'react'")
         expect(source).toContain('const fieldIds = { title: useId(), body: useId(), meta: useId(), seats: useId(), startsAt: useId(), pinned: useId() }')
         for (const name of ['title', 'body', 'meta', 'seats', 'startsAt']) {
-          expect(source).toContain(`<label htmlFor={fieldIds.${name}} className="${FIELD_LABEL_CLASS}">${name}</label>`)
+          expect(source).toContain(`<Label htmlFor={fieldIds.${name}}>${name}</Label>`)
           expect(source.match(new RegExp(`id=\\{fieldIds\\.${name}\\}`, 'g'))).toHaveLength(1)
         }
         // The checkbox is named by the label wrapping it; its id only names its error.
         expect(source).not.toContain('id={fieldIds.pinned}')
-        expect(source).toMatch(/<label className="flex items-center gap-2">\s*<input type="checkbox"/)
+        expect(source).toMatch(/<Checkbox label="pinned" checked=/)
         expect(source).not.toContain('placeholder=')
       }
     } finally {
@@ -532,7 +531,7 @@ describe('makeFeature', () => {
       // The aria attributes belong on the control itself, not on a wrapping label.
       const controlOf = (source: string, name: string): string => {
         const start = name === 'pinned'
-          ? source.indexOf('<input type="checkbox"')
+          ? source.indexOf('<Checkbox label="pinned"')
           : source.lastIndexOf('<', source.indexOf(`id={fieldIds.${name}}`))
         expect(start).toBeGreaterThanOrEqual(0)
         return source.slice(start, source.indexOf('/>', start))
@@ -552,7 +551,7 @@ describe('makeFeature', () => {
         // A json field describes itself by whichever of its two messages shows.
         expect(source).toContain('{form.errors.meta && <p id={`${fieldIds.meta}-error`}')
         const meta = controlOf(source, 'meta')
-        expect(meta).toStartWith('<textarea')
+        expect(meta).toStartWith('<Textarea')
         expect(meta).toContain('aria-invalid={jsonErrors.meta || form.errors.meta ? true : undefined}')
         expect(meta).toContain(
           "aria-describedby={[jsonErrors.meta && `${fieldIds.meta}-json-error`, form.errors.meta && `${fieldIds.meta}-error`].filter(Boolean).join(' ') || undefined}",

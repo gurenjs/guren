@@ -83,6 +83,22 @@ export default function Index({ posts }: Props) {
 }
 ```
 
+### UI components
+
+`bunx guren add ui` copies a small set of token-styled components into `resources/js/components/ui/` (`Button`, `Label`, `Input`, `Textarea`, `Select`, `Checkbox`, `Card`, `Alert`), and the pages `make:feature` and `make:auth` write import them. The files belong to the app: change the focus ring in `Input.tsx` or the padding in `Button.tsx`, and every page that imports them follows.
+
+```tsx
+import { Button } from '@/resources/js/components/ui/Button'
+import { Input } from '@/resources/js/components/ui/Input'
+import { Label } from '@/resources/js/components/ui/Label'
+
+<Label htmlFor={emailId}>Email</Label>
+<Input id={emailId} type="email" className="mt-1" aria-invalid={form.errors.email ? true : undefined} />
+<Button type="submit" block disabled={form.processing}>Sign in</Button>
+```
+
+See [`add ui`](./cli.md#add-ui) for re-running, `--diff` and `--force`.
+
 ## Forms and Navigation
 Inertia provides helpers for client-side navigation and form submissions:
 

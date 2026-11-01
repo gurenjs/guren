@@ -235,10 +235,10 @@ describe('what the templates restate', () => {
     const page = buildLoginViewTemplate(true, true)
     for (const label of ['Email', 'Password']) {
       expect(setup).toContain(`getByLabel('${label}')`)
-      expect(page).toMatch(new RegExp(`<label[^>]*>\\s*${label}\\s*</label>`, 'u'))
+      expect(page).toMatch(new RegExp(`<Label[^>]*>\\s*${label}\\s*</Label>`, 'u'))
     }
     expect(setup).toContain("getByRole('button', { name: 'Sign in', exact: true })")
-    expect(page).toMatch(/<button[^>]*>\s*Sign in\s*<\/button>/u)
+    expect(page).toMatch(/<Button[^>]*>\s*Sign in\s*<\/Button>/u)
   })
 })
 

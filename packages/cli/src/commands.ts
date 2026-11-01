@@ -1471,6 +1471,44 @@ const addBrowserTestsCommand = defineCommand({
   },
 })
 
+const addUiCommand = defineCommand({
+  meta: {
+    name: 'ui',
+    description: 'Copy the token-styled React components (RFC 0036) into resources/js/components/ui: button, label, input, textarea, select, checkbox, card, alert.',
+  },
+  args: {
+    components: {
+      type: 'positional',
+      required: false,
+      description: 'Components to copy (default: all of them)',
+    },
+    diff: {
+      type: 'boolean',
+      description: 'Print each existing copy against the current template; writes nothing.',
+    },
+    force: {
+      type: 'boolean',
+      description: 'Replace an existing copy with the current template.',
+      alias: 'f',
+    },
+  },
+  async run({ args }) {
+    const { addUi } = await import('./add-ui')
+    const overwritten: string[] = []
+    const result = await addUi({
+      names: args._.map(String),
+      diff: Boolean(args.diff),
+      force: Boolean(args.force),
+      overwritten,
+    })
+    for (const entry of result.diffs) {
+      if (entry.note) consola.info(entry.note)
+      if (entry.diff) process.stdout.write(entry.diff)
+    }
+    announceWrittenFiles(result.created, overwritten)
+  },
+})
+
 const addSubCommands = {
   admin: addAdminCommand,
   ai: addAiCommand,
@@ -1491,6 +1529,7 @@ const addSubCommands = {
   session: createAddBlueprintCommand('session', 'Install database-backed sessions: the schema table and migration, config/session.ts, and sessions:prune.'),
   schedule: createAddBlueprintCommand('schedule', 'Install a schedule kernel with a sample recurring task.'),
   storage: createAddBlueprintCommand('storage', 'Install storage scaffolding with local/public disks and a sample storage service.'),
+  ui: addUiCommand,
 }
 
 const addCommand = defineCommand({
