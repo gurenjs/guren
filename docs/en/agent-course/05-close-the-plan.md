@@ -14,7 +14,7 @@ Once a plan is built, `plan.json` goes quiet: nobody edits an approved plan to d
 bunx guren plan:close docs/plans/meetups/plan.json
 ```
 
-It refuses unless the plan is approved and every element is verified, or waived (chapter 7 explains waivers). This one is, so it writes two files:
+It refuses unless the plan is approved and every element is verified, or waived (chapter 7 explains waivers). Once every step is verified, the plan's page in the Dev Center offers **Check plan:close**, which answers the same question with a dry run that writes nothing. This plan passes, so the command writes two files:
 
 ```mermaid
 flowchart LR

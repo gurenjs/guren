@@ -472,6 +472,8 @@ Sometimes an element should not be finished: the plan promised a notification, a
 bunx guren plan:waive docs/plans/<slug>/plan.json <element-id> --reason "Ships with the mail plan next month"
 ```
 
+When the Stop hook stalls a step, the plan's page in the Dev Center lists the step's elements under **Waive an element**. Type your reason beside one and press **Check**: the page checks the waiver with a dry run and builds this command with the reason quoted for your shell. You run it yourself.
+
 The waiver goes to `decisions.json` beside the plan and is committed. It names the plan hash, so a later revision inherits none of them. `plan:close` then prints a `make:adr` command for each waiver, so the decision also lands where the architecture decisions live. You did not need one in this course; a waiver is a decision a person makes, like approval.
 
 ## Where you are

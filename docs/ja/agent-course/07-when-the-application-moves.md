@@ -472,6 +472,8 @@ git commit -m "docs: close the registrations plan"
 bunx guren plan:waive docs/plans/<slug>/plan.json <element-id> --reason "Ships with the mail plan next month"
 ```
 
+Stop hook がステップを行き詰まりとして止めると、Dev Center の計画ページでは、そのステップの要素が **Waive an element**（要素の免除）の下に並びます。要素の横に理由を入力して **Check** を押すと、ページが `--dry-run` 付きの実行で免除を確かめ、理由をシェル向けに引用符で囲んだこのコマンドを組み立てます。コマンドは手元のターミナルで実行します。
+
 免除の記録は計画と同じディレクトリの `decisions.json` に書き込まれ、コミットされます。記録には計画のハッシュが入っているので、後の改訂版には引き継がれません。また `plan:close` は免除ごとに `make:adr` のコマンドを表示するので、判断はアーキテクチャの決定を記録する場所にも残ります。この講座では免除を使いませんでしたが、免除も承認と同じく人が下す判断です。
 
 ## ここまでの状態
