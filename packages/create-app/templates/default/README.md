@@ -53,10 +53,11 @@ This app uses __DATABASE_LABEL__. `config/database.ts` creates the connection, a
 
 To switch to another driver:
 
-- install its client: `bun add postgres` for PostgreSQL, `bun add mysql2` for MySQL (SQLite needs none);
-- change the factory in `config/database.ts` (`createSqliteDatabase`, `createPostgresDatabase` or `createMySqlDatabase`), the `dialect` in `drizzle.config.ts`, and the table builders in `db/schema.ts`;
-- empty `db/migrations/` and regenerate it with `bun run db:make`, since a migration is written in one dialect's SQL;
-- for PostgreSQL or MySQL, run a server and point `DATABASE_URL` at it. `docker-compose.yml` is written only when the app is created with one of them.
+1. Scaffold a reference app with `bunx create-guren-app ../reference --db <driver> --no-install`, and copy its `config/database.ts` and `drizzle.config.ts` over yours. Rewrite `db/schema.ts` in that dialect, following the reference's `users` table.
+2. Add the client: `bun add postgres` for PostgreSQL, `bun add mysql2` for MySQL. SQLite needs none.
+3. Set `DATABASE_URL` in `.env` in the new driver's form: a connection string such as `postgres://user:pass@localhost:5432/app` or `mysql://user:pass@localhost:3306/app`, or a file path such as `./data/guren.db` for SQLite.
+4. Empty `db/migrations/` and run `bun run db:make`, since a migration is written in one dialect's SQL.
+5. For PostgreSQL or MySQL, start a server that `DATABASE_URL` reaches. The reference app's `docker-compose.yml` runs one; an app gets that file only when it is created with PostgreSQL or MySQL.
 
 See the [database guide](https://guren.dev/docs/guides/database) for details.
 
