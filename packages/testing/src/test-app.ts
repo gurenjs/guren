@@ -8,6 +8,7 @@ import type {
   ServiceProviderConstructor,
 } from '@guren/server'
 import { TestResponse } from './http'
+import { testingHeaderValue } from './testing-header'
 import { TestAgent, type AgentTestBridge } from './agent'
 import { createFakeAi, preloadFakeAiRuntime, type FakeAi } from './ai'
 
@@ -728,7 +729,7 @@ export class TestApp {
         typeof (user as { getAuthIdentifier?: unknown }).getAuthIdentifier === 'function'
           ? (user as { getAuthIdentifier(): unknown }).getAuthIdentifier()
           : user.id ?? null
-      headers['X-Testing-User'] = JSON.stringify({ ...user, __authId: authId })
+      headers['X-Testing-User'] = testingHeaderValue({ ...user, __authId: authId })
     }
 
     return headers

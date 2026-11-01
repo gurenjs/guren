@@ -32,6 +32,39 @@ describe('attachAuthContext', () => {
   })
 })
 
+describe('attachAuthContext X-Testing-User', () => {
+  async function actingUser(header: string): Promise<unknown> {
+    const original = process.env.GUREN_TESTING
+    process.env.GUREN_TESTING = '1'
+    try {
+      const app = new Hono()
+      app.use(attachAuthContext(() => createMockAuthContext({ isAuthenticated: false })))
+      app.get('/me', async (c) => {
+        const auth = (c as unknown as { get: (key: string) => AuthContext }).get(AUTH_CONTEXT_KEY)
+        const user = (await auth.user()) as Record<string, unknown> | null
+        return c.json({ name: user?.name ?? null, id: await auth.id() })
+      })
+      const res = await app.request('/me', { headers: { 'X-Testing-User': header } })
+      return res.json()
+    } finally {
+      if (original === undefined) {
+        delete process.env.GUREN_TESTING
+      } else {
+        process.env.GUREN_TESTING = original
+      }
+    }
+  }
+
+  it('reads a user whose non-ASCII fields @guren/testing sends as \\u escapes', async () => {
+    const header = '{"id":7,"name":"\\u6d66\\u7530 \\u5927\\u8cb4","__authId":7}'
+    expect(await actingUser(header)).toEqual({ name: '浦田 大貴', id: 7 })
+  })
+
+  it('reads the plain JSON an older @guren/testing sends', async () => {
+    expect(await actingUser('{"id":3,"name":"Ada","__authId":3}')).toEqual({ name: 'Ada', id: 3 })
+  })
+})
+
 describe('requireAuthenticated', () => {
   it('accepts a context that implements only the method it calls', async () => {
     // Pins getAuthContext's contract: it does not probe for members its callers

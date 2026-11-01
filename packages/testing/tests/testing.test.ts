@@ -21,7 +21,9 @@ import {
   requireAuthenticated,
   createSessionMiddleware,
   getSessionFromContext,
+  AUTH_CONTEXT_KEY,
 } from '@guren/server'
+import type { AuthContext } from '@guren/server'
 import { Hono } from 'hono'
 
 describe('TestResponse', () => {
@@ -423,6 +425,57 @@ describe('TestApp', () => {
     expect(response.status).toBe(200)
   })
 
+  it('actingAs carries a user whose fields are not Latin-1 to the server', async () => {
+    const originalTesting = process.env.GUREN_TESTING
+    process.env.GUREN_TESTING = '1'
+    try {
+      const app = new Hono()
+      app.use('*', attachAuthContext(() => ({
+        check: async () => false,
+        guest: async () => true,
+        user: async () => null,
+        userOrFail: async () => { throw new Error('Unauthenticated.') },
+        id: async () => null,
+        login: async () => {},
+        attempt: async () => false,
+        logout: async () => {},
+        guard: () => {
+          throw new Error('not used in test')
+        },
+        session: () => undefined,
+      })))
+      app.get('/me', async (c) => {
+        const auth = (c as unknown as { get: (key: string) => AuthContext }).get(AUTH_CONTEXT_KEY)
+        const user = await auth.user<{ name: string }>()
+        return c.json({ name: user?.name ?? null, id: await auth.id() })
+      })
+
+      const testApp = TestApp.fromFetch((request) => app.fetch(request))
+      await testApp
+        .actingAs({ id: 7, name: '浦田 大貴', note: 'café 😀' })
+        .get('/me')
+        .assertJson({ name: '浦田 大貴', id: 7 })
+    } finally {
+      if (originalTesting === undefined) {
+        delete process.env.GUREN_TESTING
+      } else {
+        process.env.GUREN_TESTING = originalTesting
+      }
+    }
+  })
+
+  it('sends the X-Testing-User header as ASCII JSON that a plain JSON.parse reads', async () => {
+    const app = new Hono()
+    app.get('/raw', (c) => c.json({ raw: c.req.header('X-Testing-User') ?? '' }))
+
+    const testApp = TestApp.fromFetch((request) => app.fetch(request))
+    const response = await testApp.actingAs({ id: 1, name: '浦田é' }).get('/raw')
+    const { raw } = (await response.json()) as { raw: string }
+
+    expect(/^[\x20-\x7e]*$/.test(raw)).toBe(true)
+    expect(JSON.parse(raw)).toEqual({ id: 1, name: '浦田é', __authId: 1 })
+  })
+
   it('withHeaders sends custom headers on every request', async () => {
     const app = new Hono()
     app.get('/echo', (c) => c.json({
@@ -452,6 +505,30 @@ describe('TestApp', () => {
       .send()
 
     expect(await response.json()).toEqual({ step: 2, wizard: 'shipping' })
+  })
+
+  it('withSession and actingAs carry values that are not Latin-1', async () => {
+    process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+    process.env.GUREN_TESTING = '1'
+    const app = new Hono()
+    app.use('*', createSessionMiddleware({ cookieSecure: false }))
+    app.get('/session', (c) => c.json({
+      session: getSessionFromContext(c)?.all() ?? {},
+      user: JSON.parse(c.req.header('X-Testing-User') ?? 'null'),
+    }))
+
+    const user = { id: 3, name: '浦田', getAuthIdentifier: () => 3, getAuthPassword: () => null }
+    const client = createTestClient((request) => Promise.resolve(app.fetch(request)))
+    const response = await client
+      .get('/session')
+      .withSession({ city: '東京' })
+      .actingAs(user)
+      .send()
+
+    const body = (await response.json()) as { session: unknown; user: { name: string; __authId: number } }
+    expect(body.session).toEqual({ city: '東京' })
+    expect(body.user.name).toBe('浦田')
+    expect(body.user.__authId).toBe(3)
   })
 
   it('withHeader composes with actingAs', async () => {
