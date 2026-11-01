@@ -1872,8 +1872,8 @@ describe('make:auth routes judge the body through their contracts', () => {
     validateCredentials: async () => false,
     getId: () => undefined,
   }
-  let workspace: Awaited<ReturnType<typeof createTempWorkspace>>
-  let app: Application
+  let workspace: Awaited<ReturnType<typeof createTempWorkspace>> | undefined
+  let app: Application | undefined
 
   beforeAll(async () => {
     workspace = await createTempWorkspace('guren-cli-make-auth-requests-')
@@ -1896,17 +1896,19 @@ export default createApp({ routes: registerAuthRoutes })
     await symlink(WORKSPACE_ZOD, join(workspace.dir, 'node_modules/zod'), 'dir')
     process.chdir(workspace.originalCwd)
 
-    app = ((await import(join(workspace.dir, 'src/requests-app.ts'))) as { default: Application }).default
-    app.auth.registerProvider('users', () => nobody)
-    await app.boot()
+    const booting = ((await import(join(workspace.dir, 'src/requests-app.ts'))) as { default: Application }).default
+    booting.auth.registerProvider('users', () => nobody)
+    await booting.boot()
+    app = booting
   }, 60_000)
 
   afterAll(async () => {
     await app?.stop()
-    await rm(workspace.dir, { recursive: true, force: true })
+    if (workspace) await rm(workspace.dir, { recursive: true, force: true })
   })
 
   function login(body: Record<string, unknown>, headers: Record<string, string> = {}): Promise<Response> {
+    if (!app) throw new Error('the app did not boot')
     return Promise.resolve(app.fetch(new Request('http://localhost/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...headers },
