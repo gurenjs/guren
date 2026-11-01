@@ -20,6 +20,7 @@ import {
 import { parseSourceFile } from '../src/parse-cache'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
+import { TOKENS_PATH } from '../src/guren-css'
 import { buildOAuthConfigTemplate, buildOAuthProviderTemplate, makeAuth, type MakeAuthOptions } from '../src/make-auth'
 import { KNOWN_OAUTH_PROVIDERS } from '../src/oauth-scaffold'
 import { runBlueprint } from '../src/blueprints'
@@ -99,8 +100,8 @@ async function unparseableSources(dir: string): Promise<string[]> {
 /** A Guren UI utility or token variable, spelled independently of `usesGurenUiTokens`. */
 const GUREN_UI_CLASS = /-g-[a-z]/
 
-/** Pages and components each case wrote under resources/js, by test prefix; read by the coverage gate. */
-const writtenPagesByCase = new Map<string, number>()
+/** Test prefixes of the cases that wrote a page or component under resources/js; read by the coverage gate. */
+const casesWithPages = new Set<string>()
 
 /**
  * The shipped .oxlintrc.json turns `guren/no-raw-color` on for resources/js/**, so a
@@ -110,17 +111,15 @@ const writtenPagesByCase = new Map<string, number>()
 async function expectPagesUseTokens(dir: string, prefix: string): Promise<void> {
   const pages = (await collectFiles(join(dir, 'resources/js'), IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES))
     .map((file) => toPosixRelative(dir, file))
-  writtenPagesByCase.set(prefix, pages.length)
   if (pages.length === 0) return
+  casesWithPages.add(prefix)
   expect(lintFiles({ config: NO_RAW_COLOR_CONFIG, files: pages, cwd: dir })).toBe('')
 
-  const styled = []
+  const styled: string[] = []
   for (const page of pages) {
     if (GUREN_UI_CLASS.test(await readFile(join(dir, page), 'utf8'))) styled.push(page)
   }
-  if (styled.length > 0) {
-    expect({ styled, tokens: existsSync(join(dir, 'resources/css/guren.css')) }).toEqual({ styled, tokens: true })
-  }
+  if (styled.length > 0) expect(existsSync(join(dir, TOKENS_PATH)), `${TOKENS_PATH} for ${styled.join(', ')}`).toBe(true)
 }
 
 async function expectAllOutputsParse(
@@ -270,15 +269,14 @@ describe('generated sources parse', () => {
   // Runs after the cases above: a generator whose pages moved out of resources/js
   // would leave the raw-color and token checks above with nothing to judge.
   it('the page checks saw pages from every page-writing generator', () => {
-    const pagesWritten = (prefix: string) =>
-      [...writtenPagesByCase].filter(([key]) => key.startsWith(prefix)).reduce((sum, [, count]) => sum + count, 0)
-    const counts = {
-      'make:auth': pagesWritten('guren-parse-auth-'),
-      'make:feature': pagesWritten('guren-parse-feature-'),
-      'make:view': pagesWritten('guren-parse-make-view-'),
-      'add admin': pagesWritten('guren-parse-add-admin-'),
+    const prefixes = {
+      'make:auth': 'guren-parse-auth-',
+      'make:feature': 'guren-parse-feature-',
+      'make:view': 'guren-parse-make-view-',
+      'add admin': 'guren-parse-add-admin-',
     }
-    expect(Object.entries(counts).filter(([, count]) => count === 0).map(([name]) => name)).toEqual([])
+    const seen = (prefix: string) => [...casesWithPages].some((key) => key.startsWith(prefix))
+    expect(Object.entries(prefixes).filter(([, prefix]) => !seen(prefix)).map(([name]) => name)).toEqual([])
   })
 })
 

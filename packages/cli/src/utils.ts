@@ -243,7 +243,13 @@ export async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-const RESOURCES_PATH = /(?:^|\/)resources\//
+// A Guren UI utility (`bg-g-panel`, `focus:outline-g-accent`) or token variable (`var(--g-line)`).
+const GUREN_UI_USE_RE = /(?<![\w-])[a-z][a-z0-9-]*-g-[a-z]|--g-[a-z]/
+
+/** Whether a scaffolded file under `resources/` styles with the Guren UI tokens. */
+function usesGurenUiTokens(entry: ScaffoldFileEntry): boolean {
+  return /(?:^|\/)resources\//.test(entry.path) && GUREN_UI_USE_RE.test(entry.contents)
+}
 
 export type ScaffoldFilesOptions = WriterOptions & {
   /**
@@ -292,9 +298,9 @@ export async function writeScaffoldFiles(
   }
   // Imported here: guren-css.ts reaches this module back through discovery.ts.
   // `entries`, not `pending`: a `skipExisting` re-run repairs a missing guren.css too.
-  if (entries.some((entry) => RESOURCES_PATH.test(entry.path))) {
-    const { ensureGurenUiTokens, usesGurenUiTokens } = await import('./guren-css')
-    if (entries.some(usesGurenUiTokens)) await ensureGurenUiTokens(cwd)
+  if (entries.some(usesGurenUiTokens)) {
+    const { ensureGurenUiTokens } = await import('./guren-css')
+    await ensureGurenUiTokens(cwd)
   }
 
   return created
