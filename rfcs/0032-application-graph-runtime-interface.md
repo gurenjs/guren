@@ -409,7 +409,7 @@ work, where a person acts at decisions rather than starting from the graph.
 `/_guren/plans.json`, the `guren_get_plans` overview with each plan's slug,
 in the server process, since it reads plan files and `.guren/plans/` only.
 `plan:next` and `plan:verify` print the path so an agent can hand it over. The
-M2 limits stand: one read on open, refresh buttons, no command execution, and
+M2 limits stand: one read on open, refresh buttons, no command that writes, and
 no held-step judgement, which needs the application read.
 
 The same day the plan review moved here as RFC 0030's served mode:
@@ -418,6 +418,15 @@ The same day the plan review moved here as RFC 0030's served mode:
 answers to `.guren/plans/<slug>.feedback.json`. That route is the Dev Center's
 only write. It checks the `Origin`, the schema and the plan's digest, runs no
 command, and leaves approval to `plan:approve`.
+
+On 2026-11-01 the plan page was designed to carry the person's three decisions
+(RFC 0030 §8, amended that day). Approve, waive and close are checked, never
+run: `/_guren/plans/<slug>/readiness/<approve|close|waive>` runs the matching
+command with `--dry-run --json` as a child, as `/_guren/graph.json` runs
+`guren graph`, and the page copies the command for the person's terminal. The
+feedback route stays the only write. The Dev Center cannot tell the person
+from the agent's browser that `browser:serve` points at it, which is why no
+button writes.
 
 Also on 2026-10-31, the plan page gained each step's evidence, so a person can
 judge a step without asking the agent. `/_guren/plans/<slug>/evidence` returns,

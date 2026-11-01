@@ -3024,6 +3024,72 @@ The route is the Dev Center's first write, and the only one: it accepts the
 feedback document and nothing else, runs no command, and writes under
 `.guren/` only. Approval stays `plan:approve`.
 
+**Amended in design (2026-11-01), the person's decisions in the Dev Center.**
+The plan page offers approve, waive and close where it says a person has to
+act. None of them runs the command. A button asks the server whether the
+command would go through now, shows the answer, and copies the command for the
+person to run in their own terminal. The rule above holds: approving, waiving
+and closing stay CLI acts, the feedback route stays the Dev Center's only
+write, and nothing the page sends reaches a command that writes.
+
+The buttons do not execute because nothing here can tell the person from the
+agent. The Dev Center is mounted under `GUREN_MCP=1`, and `browser:serve`
+starts the app with that flag for the agent's own browser verification (RFC
+0033 §3), so a button that ran `plan:approve` would be one click for the
+agent's Playwright. The `Origin` check stops another site, not that browser,
+and a loopback connection carries no sign of who sent it. The skills tell the
+agent never to run the three commands; an executing button would put that
+rule one page away from being broken by accident.
+
+- **Readiness is the command's own answer.** `plan:approve` and `plan:waive`
+  gain `--dry-run`, as `plan:close` has it: every refusal runs and nothing is
+  written (no baseline stamped, no approvals, decisions or documents). A dry
+  approve of a draft still asks `git status`, so a dirty tree reads "commit
+  first" on the page. `GET /_guren/plans/<slug>/readiness/approve`, `…/readiness/close` and
+  `…/readiness/waive?element=<id>` run the CLI as a child, the way
+  `/_guren/graph.json` runs `guren graph`: `process.execPath` with the CLI
+  entry, an argv built from the discovered plan path and fixed flags
+  (`--dry-run --json --app <root>`), a timeout and an output cap. An element
+  id must be one the plan declares, matched exactly, before any child starts;
+  ids open with a letter (`ID_PATTERN`), so none is read as a flag. A
+  waiver's reason is never sent to the server, so a dry `plan:waive` judges
+  the element without `--reason`, while a real run still requires one.
+- **A dropped flag cannot write.** The child also runs with
+  `GUREN_PLAN_DRY_RUN=1`, and the writers the three commands share
+  (`writeFileAtomic()`, the approvals, decisions and close documents) refuse
+  while it is set, whatever the argv says. A route test runs each readiness
+  path against a temporary repository holding a draft and an approved plan
+  and requires the plan, its records, `docs/plans/` and `docs/entities/` to be
+  byte-identical afterwards; with `--dry-run` taken out of the argv it fails.
+- **Three answers, one of them ready.** `ready` carries what the command would
+  write, `refused` the CLI's refusal (the `CliError` message on stderr, with
+  a non-zero exit), and `unavailable` a timeout, a crash or output that does
+  not parse, which is never read as ready. The page renders the message as
+  text, never as HTML: it carries the plan's title and ids, which the agent
+  wrote. A shared slug or an unlisted plans directory refuses as the review
+  routes do.
+- **It is a snapshot.** The page shows when it checked and offers to check
+  again. The command checks everything again when the person runs it, so a
+  stale `ready` costs one refusal in the terminal, never a wrong write.
+- **What is copied.** Approve and close copy `planCommand()`'s rendering.
+  Waive builds `plan:waive <file> <id> --reason '<reason>'` in the page, the
+  reason quoted for a POSIX shell (each `'` written `'\''`, as `plan:close`
+  quotes the `make:adr` commands it prints); `JSON.stringify` and
+  `quotePlanCommand()` are display forms and are not used for it. The command
+  is always shown; its button reads "Copy" after `ready` and "Copy anyway"
+  otherwise, beside the reason.
+- **Where.** On the attention card that names the decision: approve for a
+  draft or an edited plan (after a saved review, the card still says to
+  revise first, since approving does not apply feedback), close when every
+  step is verified or the plan derives none, and waive on a stalled step,
+  listing the step's own elements from the task derivation, each checked by
+  its own dry run. A close refusal shows the remedies `describeCloseBlockers()`
+  prints, which name `plan:waive` where a waiver is the way out.
+
+Nothing in this changes what an agent can do: the readiness routes write
+nothing, and an agent that reads them learns only what the dry run it could
+run itself would print.
+
 Like `ai:eval`, `guren plan` is opt-in, costs money, and is never part of
 `check` or `gate`. `guren check --plan` is advisory: it reports approved plans
 with `drifted` elements and two open plans that touch the same element.
