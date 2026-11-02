@@ -144,17 +144,17 @@ describe('tool:dev', () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITHOUT_PLUGIN)
 
     await expect(runToolDev({ appRoot: appDir, port: ANY_PORT })).rejects.toThrow(
-      /No App MCP endpoint answered.*404/s,
+      /No App MCP endpoint is mounted at \/mcp/s,
     )
   })
 
   it('diagnoses a missing plugin even behind a global auth middleware', async () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_GLOBAL_AUTH)
 
-    // requireAuthenticated() alone answers 401 here, which a status-only probe
-    // reads as "live"; carrying the token gets past it to the truth.
+    // requireAuthenticated() answers 401 to the tools-only probe token here, so the
+    // diagnosis comes from the paths the app declares, not from the status.
     await expect(runToolDev({ appRoot: appDir, port: ANY_PORT })).rejects.toThrow(
-      /No App MCP endpoint answered.*404/su,
+      /No App MCP endpoint is mounted at \/mcp/su,
     )
   })
 
@@ -185,6 +185,8 @@ describe('tool:dev', () => {
     const guard = auth.createGuard('token', {
       ctx: {
         req: {
+          // The plugin's endpoint, where a tools-only token is accepted.
+          url: 'http://127.0.0.1/mcp',
           header: (name: string) =>
             name.toLowerCase() === 'authorization' ? `Bearer ${session.token}` : undefined,
         },

@@ -8,6 +8,9 @@ import {
 } from './context'
 import { isOptionalExpiryPast } from '../support/expiry'
 import { AuthenticationException } from '../errors/exceptions/AuthenticationException'
+import { grantsOnlyAgentTools } from '../agent/scopes'
+import { isAgentDispatch } from '../internal/agent-principal'
+import { tryGetRequestContainer } from '../http/request-container'
 
 /**
  * API token data stored in the backing store.
@@ -224,6 +227,36 @@ export interface VerifiedApiToken {
   abilities: string[]
 }
 
+/** The paths whose own endpoint judges tool scopes; `Application` supplies its declared ones. */
+export type AgentEndpointPaths = () => ReadonlySet<string>
+
+/**
+ * Whether a verified token may authenticate this request. A token granting only
+ * agent tools (`tool:` / `tools:` abilities) answers for the tool calls the
+ * pipeline dispatched after judging its scopes, and for a request to an endpoint
+ * that judges them itself (the MCP endpoint, reached through app-wide auth
+ * middleware); never for a request a client sent straight to a route.
+ */
+export function tokenAuthenticatesRequest(
+  verified: VerifiedApiToken,
+  ctx: Context,
+  agentEndpoints?: AgentEndpointPaths,
+): boolean {
+  if (!grantsOnlyAgentTools(verified.abilities)) return true
+  if (isAgentDispatch(ctx.req.raw)) return true
+  const path = requestPathname(ctx)
+  return path !== undefined && (agentEndpoints?.().has(path) ?? false)
+}
+
+// The pathname CSRF matches declared paths against, so both judge one path alike.
+function requestPathname(ctx: Context): string | undefined {
+  try {
+    return new URL(ctx.req.url).pathname
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Verify an API token and return the associated user ID.
  */
@@ -351,7 +384,7 @@ export interface BearerTokenMiddlewareOptions {
 
   loadUser?: (userId: string | number) => Promise<unknown>
 
-  /** Required abilities. Any valid token is accepted when unset. */
+  /** Required abilities. Unset, any valid token is accepted except one granting only agent tools. */
   abilities?: string[]
 
   onUnauthorized?: (ctx: Context) => Response | Promise<Response>
@@ -363,6 +396,12 @@ export interface BearerTokenMiddlewareOptions {
 
   /** @default true */
   updateLastUsed?: boolean
+}
+
+// The middleware has no handle on the app, so it reaches the declared paths through the request's container.
+function appAgentEndpoints(ctx: Context): AgentEndpointPaths | undefined {
+  const app = tryGetRequestContainer(ctx)?.makeOptional<{ getAgentEndpointPaths?: AgentEndpointPaths }>('app')
+  return app?.getAgentEndpointPaths ? () => app.getAgentEndpointPaths!() : undefined
 }
 
 /**
@@ -402,6 +441,11 @@ export function createBearerTokenMiddleware(
     if (!result) {
       if (onUnauthorized) return onUnauthorized(ctx)
       return ctx.json({ error: 'Invalid or expired token' }, 401)
+    }
+
+    if (!tokenAuthenticatesRequest(result, ctx, appAgentEndpoints(ctx))) {
+      if (onUnauthorized) return onUnauthorized(ctx)
+      return ctx.json({ error: 'This token only grants agent tools' }, 401)
     }
 
     if (abilities && abilities.length > 0) {

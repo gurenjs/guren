@@ -3,9 +3,11 @@ import type { AuthCredentials, Guard, UserProvider } from './types'
 import type { Session } from '../http/middleware'
 import {
   API_TOKEN_KEY,
+  type AgentEndpointPaths,
   parseApiToken,
   readBearerToken,
   revokePresentedToken,
+  tokenAuthenticatesRequest,
   verifyApiToken,
   type ApiTokenStore,
   type VerifiedApiToken,
@@ -22,6 +24,8 @@ export interface TokenGuardOptions<User = unknown> {
   provider?: UserProvider<User>
   /** Update the token's lastUsedAt on successful verification. Default true. */
   updateLastUsed?: boolean
+  /** Endpoints that judge tool scopes themselves, where a tools-only token is accepted. */
+  agentEndpoints?: AgentEndpointPaths
 }
 
 /**
@@ -35,6 +39,7 @@ export class TokenGuard<User = unknown> implements Guard<User> {
   private readonly store: ApiTokenStore
   private readonly provider?: UserProvider<User>
   private readonly updateLastUsed: boolean
+  private readonly agentEndpoints?: AgentEndpointPaths
 
   private verification?: Promise<VerifiedApiToken | null>
   private resolvedUser?: Promise<User | null>
@@ -44,6 +49,7 @@ export class TokenGuard<User = unknown> implements Guard<User> {
     this.store = options.store
     this.provider = options.provider
     this.updateLastUsed = options.updateLastUsed ?? true
+    this.agentEndpoints = options.agentEndpoints
   }
 
   private verify(): Promise<VerifiedApiToken | null> {
@@ -59,9 +65,10 @@ export class TokenGuard<User = unknown> implements Guard<User> {
           return existing
         }
 
-        const result = await verifyApiToken(plainTextToken, this.store, {
+        const verified = await verifyApiToken(plainTextToken, this.store, {
           updateLastUsed: this.updateLastUsed,
         })
+        const result = verified && tokenAuthenticatesRequest(verified, this.ctx, this.agentEndpoints) ? verified : null
         if (result) {
           this.ctx.set(API_TOKEN_KEY, result)
         }

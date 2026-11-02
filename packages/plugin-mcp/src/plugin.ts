@@ -176,6 +176,9 @@ const factory = definePlugin<McpPluginConfig>({
     // external-auth seam and refuses 401 otherwise, so CSRF verification here
     // guards no ambient authority and would answer 403 in place of that 401.
     app.declareCookielessAuthPath(path)
+    // The handler judges a token's tool scopes, so a tools-only token is accepted on this
+    // path by auth middleware in front of it. Optional: an older server has no such declaration.
+    app.declareAgentEndpoint?.(path)
 
     app.hono.all(path, async (c) => {
       // Consulted first, on the raw request: a hit means an authority in front

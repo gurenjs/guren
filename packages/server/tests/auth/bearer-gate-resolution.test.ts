@@ -223,3 +223,35 @@ describe('createBearerTokenMiddleware with the Gate', () => {
     expect(res.status).toBe(200)
   })
 })
+
+describe('tools-only tokens and declared agent endpoints', () => {
+  it('should accept one on a declared agent endpoint and refuse it elsewhere, through the bearer middleware', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken } = await createApiToken(store, { name: 'mcp', userId: 1, abilities: ['tools:*'] })
+    const app = new Application()
+    await app.boot()
+    app.declareAgentEndpoint('/agent')
+    const bearer = createBearerTokenMiddleware({ store })
+    app.hono.get('/agent', bearer, (c) => c.text('agent'))
+    app.hono.get('/other', bearer, (c) => c.text('other'))
+    const headers = { Authorization: `Bearer ${plainTextToken}` }
+
+    expect((await app.fetch(new Request('http://localhost/agent', { headers }))).status).toBe(200)
+    expect((await app.fetch(new Request('http://localhost/other', { headers }))).status).toBe(401)
+  })
+
+  it('should not accept one on a path that is only exempt from CSRF', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken } = await createApiToken(store, { name: 'mcp', userId: 1, abilities: ['tools:*'] })
+    const app = new Application()
+    await app.boot()
+    app.declareCookielessAuthPath('/webhooks/acme')
+    app.hono.post('/webhooks/acme', createBearerTokenMiddleware({ store }), (c) => c.text('hook'))
+
+    const response = await app.fetch(new Request('http://localhost/webhooks/acme', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${plainTextToken}` },
+    }))
+    expect(response.status).toBe(401)
+  })
+})

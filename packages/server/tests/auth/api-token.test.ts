@@ -15,6 +15,7 @@ import {
   getApiToken,
   MemoryApiTokenStore,
 } from '../../src/auth/api-token'
+import { markAgentDispatch } from '../../src/internal/agent-principal'
 
 describe('MemoryApiTokenStore', () => {
   let store: MemoryApiTokenStore
@@ -510,6 +511,27 @@ describe('createBearerTokenMiddleware', () => {
     })
 
     expect(res.status).toBe(200)
+  })
+
+  it('rejects a token granting only agent tools on a direct request', async () => {
+    const { plainTextToken } = await createApiToken(store, {
+      name: 'MCP client',
+      userId: 1,
+      abilities: ['tools:*'],
+    })
+
+    app.use('*', createBearerTokenMiddleware({ store }))
+    app.get('/', (c) => c.text('OK'))
+
+    const direct = await app.request('/', {
+      headers: { Authorization: `Bearer ${plainTextToken}` },
+    })
+    expect(direct.status).toBe(401)
+
+    const dispatched = await app.fetch(markAgentDispatch(new Request('http://localhost/', {
+      headers: { Authorization: `Bearer ${plainTextToken}` },
+    })))
+    expect(dispatched.status).toBe(200)
   })
 
   it('rejects missing authorization header', async () => {

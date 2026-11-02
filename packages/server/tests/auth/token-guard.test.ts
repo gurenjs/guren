@@ -7,6 +7,7 @@ import {
   type VerifiedApiToken,
 } from '../../src/auth/api-token'
 import type { UserProvider } from '../../src/auth/types'
+import { markAgentDispatch } from '../../src/internal/agent-principal'
 
 import { fakeContext } from '../support/fake-context'
 
@@ -191,5 +192,52 @@ describe('TokenGuard', () => {
   test('session should be undefined', async () => {
     const guard = new TokenGuard({ store: new MemoryApiTokenStore(), ctx: fakeContext() })
     expect(guard.session()).toBeUndefined()
+  })
+
+  describe('agent-only tokens', () => {
+    test('should not authenticate a direct request with a token granting only agent tools', async () => {
+      const store = new MemoryApiTokenStore()
+      const { plainTextToken } = await issueToken(store, { abilities: ['tools:*', 'tool:notes.store'] })
+      const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } })
+
+      const guard = new TokenGuard({ store, ctx })
+
+      expect(await guard.check()).toBe(false)
+      expect(await guard.id()).toBeNull()
+      expect(ctx.get(API_TOKEN_KEY)).toBeUndefined()
+    })
+
+    test('should authenticate a tool call the pipeline dispatched with that token', async () => {
+      const store = new MemoryApiTokenStore()
+      const { plainTextToken } = await issueToken(store, { abilities: ['tools:*'] })
+      const raw = markAgentDispatch(new Request('http://localhost/notes', { method: 'POST' }))
+      const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` }, raw })
+
+      const guard = new TokenGuard({ store, ctx })
+
+      expect(await guard.check()).toBe(true)
+      expect(await guard.id()).toBe(42)
+    })
+
+    test('should authenticate it on an endpoint that judges tool scopes itself', async () => {
+      const store = new MemoryApiTokenStore()
+      const { plainTextToken } = await issueToken(store, { abilities: ['tools:read'] })
+      const headers = { Authorization: `Bearer ${plainTextToken}` }
+      const agentEndpoints = () => new Set(['/mcp'])
+
+      const onEndpoint = fakeContext({ headers, raw: new Request('http://localhost/mcp', { method: 'POST' }) })
+      expect(await new TokenGuard({ store, ctx: onEndpoint, agentEndpoints }).check()).toBe(true)
+
+      const elsewhere = fakeContext({ headers, raw: new Request('http://localhost/mcp/notes') })
+      expect(await new TokenGuard({ store, ctx: elsewhere, agentEndpoints }).check()).toBe(false)
+    })
+
+    test('should keep authenticating a token that grants an ability besides agent tools', async () => {
+      const store = new MemoryApiTokenStore()
+      const { plainTextToken } = await issueToken(store, { abilities: ['tools:read', 'notes:read'] })
+      const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } })
+
+      expect(await new TokenGuard({ store, ctx }).check()).toBe(true)
+    })
   })
 })

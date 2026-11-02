@@ -41,7 +41,7 @@ import {
 } from './gate'
 import type { Deferrer } from '../support/keep-alive'
 import { redactAgentArguments } from './redact'
-import { installAgentPrincipal } from '../internal/agent-principal'
+import { installAgentPrincipal, markAgentDispatch } from '../internal/agent-principal'
 
 /**
  * What the audit hooks need from a tool: its name, and the redaction rules its
@@ -431,16 +431,17 @@ export function createAgentInvocationPipeline(
           return { status: 'executed', outcome }
         }
 
-        // The principal handoff, on the exact object about to be dispatched.
-        // `installAgentPrincipal` returns the same object; assigning its
-        // result is what keeps a future refactor from dispatching a copy.
-        const request =
+        // The dispatch mark and principal handoff, on the exact object about to
+        // be dispatched. Both return the same object; assigning the result is
+        // what keeps a future refactor from dispatching a copy.
+        const request = markAgentDispatch(
           options.handoff === 'seam' && options.principal
             ? installAgentPrincipal(built.request, {
                 principal: options.principal,
                 abilities: options.abilities,
               })
-            : built.request
+            : built.request,
+        )
 
         // env and execution context are forwarded explicitly — omitting them
         // silently loses D1/R2 bindings and waitUntil on Workers.

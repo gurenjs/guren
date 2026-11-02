@@ -299,6 +299,7 @@ export class Application {
   private disposeBunTeardown?: () => void
   private autoSessionAttached = false
   private readonly cookielessAuthPaths = new Set<string>()
+  private readonly agentEndpointPaths = new Set<string>()
   /** {@link configDefinitions} with where each was listed, which ConfigServiceProvider's errors name. */
   readonly configEntries: ReadonlyArray<ConfiguredDefinition>
   private routeRegistration?: BootSequence
@@ -320,6 +321,7 @@ export class Application {
     this.container = new Container()
     this.router = new Router()
     this.authManager = new AuthManager({ hasher: options.auth?.hasher })
+    this.authManager.setAgentEndpoints(() => this.agentEndpointPaths)
     this.providerManager = new ProviderManager(this.container)
 
     // Not in boot(): Hono composes matched handlers in registration order, and
@@ -468,14 +470,13 @@ export class Application {
   declareCookielessAuthPath(path: string): void {
     // The app's route is registered first and answers there, so honouring a
     // colliding declaration disarms CSRF for a handler that may read cookies.
-    const collision = this.router.definitions().find((route) => route.path === path)
+    const collision = this.routeAt(path)
     if (collision) {
       console.warn(
         `[guren] Refusing to exempt "${path}" from CSRF verification: the application already `
-        + `routes ${collision.method} ${path}${collision.name ? ` (${collision.name})` : ''}, `
-        + 'which is registered first and answers there. Mount the declaring endpoint on a path of '
-        + 'its own — as it stands it is unreachable, and exempting the path would disarm CSRF for '
-        + 'the route that does answer.',
+        + `routes ${collision}, which is registered first and answers there. Mount the declaring `
+        + 'endpoint on a path of its own — as it stands it is unreachable, and exempting the path '
+        + 'would disarm CSRF for the route that does answer.',
       )
       return
     }
@@ -486,6 +487,36 @@ export class Application {
   /** Matched by exact path — see {@link declareCookielessAuthPath}. */
   getCookielessAuthPaths(): ReadonlySet<string> {
     return this.cookielessAuthPaths
+  }
+
+  /**
+   * Asserts that the endpoint at `path` judges `tool:` / `tools:` scopes itself,
+   * so a tools-only token authenticates there (through app-wide auth middleware
+   * in front of it) and nowhere else. Call from `boot`, after `mountRoutes()`.
+   * Only an app route at exactly this path is detected: a parameterised or
+   * wildcard route registered ahead of the endpoint would answer here unseen.
+   */
+  declareAgentEndpoint(path: string): void {
+    const collision = this.routeAt(path)
+    if (collision) {
+      console.warn(
+        `[guren] Refusing to accept tools-only tokens at "${path}": the application already routes `
+        + `${collision}, which is registered first and answers there and checks no tool scope.`,
+      )
+      return
+    }
+
+    this.agentEndpointPaths.add(path)
+  }
+
+  /** Matched by exact pathname — see {@link declareAgentEndpoint}. */
+  getAgentEndpointPaths(): ReadonlySet<string> {
+    return this.agentEndpointPaths
+  }
+
+  private routeAt(path: string): string | undefined {
+    const route = this.router.definitions().find((definition) => definition.path === path)
+    return route ? `${route.method} ${path}${route.name ? ` (${route.name})` : ''}` : undefined
   }
 
   async mountRoutes(): Promise<void> {

@@ -4,6 +4,7 @@ import {
   AGENT_TOOL_NAME_PATTERN,
   classifyRegistrationScope,
   expandToolScopes,
+  grantsOnlyAgentTools,
   parseToolScope,
   scopesAllowTool,
   type ScopedTool,
@@ -203,6 +204,19 @@ describe('expandToolScopes', () => {
  * §3). Both read this one function, so these cases are the only place the
  * registration rule is pinned.
  */
+describe('grantsOnlyAgentTools', () => {
+  test('should be true when every ability is a tool scope, malformed ones included', () => {
+    expect(grantsOnlyAgentTools(['tools:*'])).toBe(true)
+    expect(grantsOnlyAgentTools(['tool:posts.store', 'tools:read', 'tools:'])).toBe(true)
+  })
+
+  test('should be false for a general ability, the default wildcard, or no abilities', () => {
+    expect(grantsOnlyAgentTools(['tools:read', 'posts:read'])).toBe(false)
+    expect(grantsOnlyAgentTools(['*'])).toBe(false)
+    expect(grantsOnlyAgentTools([])).toBe(false)
+  })
+})
+
 describe('classifyRegistrationScope', () => {
   test('should accept a single tool by exact name', () => {
     expect(classifyRegistrationScope('tool:posts.index')).toEqual({

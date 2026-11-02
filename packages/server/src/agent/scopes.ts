@@ -81,6 +81,17 @@ export function parseToolScope(entry: string): ParsedToolScope | null {
 }
 
 /**
+ * Whether a token's abilities are all `tool:` / `tools:` entries, malformed ones
+ * included: such a token was issued for agent tools, and its scopes are judged
+ * only by the tool pipeline, so it must not authenticate an ordinary request.
+ * An empty list is not agent-only, since it was not issued for tools either.
+ */
+export function grantsOnlyAgentTools(abilities: readonly string[]): boolean {
+  return abilities.length > 0
+    && abilities.every((entry) => entry.startsWith(SINGLE_PREFIX) || entry.startsWith(SET_PREFIX))
+}
+
+/**
  * The scope forms a **registration** may declare (RFC 0017 §3): the narrower
  * half of the grammar above, because a registration grants an *unattended*
  * principal and is outlived by the route graph, so a set grant would acquire
