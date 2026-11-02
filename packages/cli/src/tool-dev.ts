@@ -129,7 +129,9 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
       `No App MCP endpoint is mounted at ${path}: the application declares none there `
         + '(a route of its own at that path refuses the declaration, with a warning above). '
         + 'Install and register the plugin — `guren plugin @guren/plugin-mcp`, then add '
-        + '`mcpPlugin()` to createApp({ providers }) — or pass --path if it is mounted elsewhere.',
+        + '`mcpPlugin()` to createApp({ providers }) — or pass --path if it is mounted elsewhere. '
+        + 'If it is registered, upgrade @guren/plugin-mcp: a release older than @guren/server\'s '
+        + 'declares no endpoint.',
     )
   }
 
