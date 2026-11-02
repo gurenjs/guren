@@ -1,5 +1,25 @@
 # @guren/core
 
+## 1.26.0
+
+### Minor Changes
+
+- c87e60d: The bound-parameter redaction `@guren/server` applies to the errors it renders and logs is published to the framework's own packages as `@guren/server/internal/redact-query-params` (re-exported as `@guren/core/internal/redact-query-params`). Through it, an agent whose conversation turn fails to store, an eval case whose setup or teardown throws, a console command that fails, and a `guren` command that fails on a query no longer print the bound values of that query.
+
+### Patch Changes
+
+- Updated dependencies [51c16be]
+- Updated dependencies [1cf1761]
+- Updated dependencies [d3452e3]
+- Updated dependencies [1cf1761]
+- Updated dependencies [fcc2972]
+- Updated dependencies [7f7b92d]
+- Updated dependencies [c87e60d]
+- Updated dependencies [c87e60d]
+- Updated dependencies [434698d]
+  - @guren/server@2.34.0
+  - @guren/cli@2.35.0
+
 ## 1.25.0
 
 ### Minor Changes
