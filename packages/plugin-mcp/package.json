@@ -1,6 +1,6 @@
 {
   "name": "@guren/plugin-mcp",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Production MCP endpoint for Guren applications: serves the agent tools derived from routes that declare .agent() over the Model Context Protocol, with rate limiting.",
   "keywords": [
     "guren",
@@ -50,7 +50,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.20.1",
+    "@guren/core": "^1.26.0",
     "@modelcontextprotocol/server": "^2.0.0"
   },
   "devDependencies": {

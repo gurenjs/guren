@@ -1,5 +1,32 @@
 # @guren/cli
 
+## 2.35.0
+
+### Minor Changes
+
+- 434698d: Seeding on boot is now allowed by name. The scaffolded `config/database.ts` passes `seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test'` instead of `process.env.NODE_ENV !== 'production'`, so a server started without `NODE_ENV` (a forgotten variable, a platform that sets none) no longer runs every seeder, demo accounts included. The `dev:server` script sets `NODE_ENV=development`, so `bun run dev` keeps seeding, and `bun test` sets `test` itself. `guren dev` sets `NODE_ENV=development` when it is unset.
+
+  A new `seed-on-boot` doctor check warns when `seedOnBoot` in `config/database.ts` still compares `process.env.NODE_ENV !== 'production'`, alone or inside a logical expression, and says what to edit: replace the comparison with `(process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test')` and start `bin/serve.ts` under `NODE_ENV=development` in the dev script. Nothing rewrites an installed app. The `guren add browser-tests` warning and the `guren doctor --next` database migration hint spell the new expression.
+
+### Patch Changes
+
+- 51c16be: A token whose abilities are all `tool:` / `tools:` scopes no longer authenticates ordinary routes. Such a token, the kind `guren token:issue --tools` mints for MCP clients, used to pass the token guard `useTokens()` registers and `createBearerTokenMiddleware` on every route, where no tool scope is checked, so a token issued for a few read tools could delete records. It now authenticates only the tool calls the agent pipeline dispatches after judging its scopes, and requests to an endpoint declared with the new `Application.declareAgentEndpoint(path)`, which plugin-mcp calls for its own endpoint since it judges the scopes itself (so app-wide authentication middleware in front of it still lets an MCP client through); a token that also carries an ordinary ability, or `['*']`, is unchanged. In tests, call an agent tool as a user with `app.agent().call(name, args, { as: user })`; a tools-only bearer set through `withHeaders()` on that bridge is now refused like any direct request. `guren tool:dev` now reports a missing endpoint from those declared paths. Upgrade `@guren/plugin-mcp` together with `@guren/server`: an older plugin declares no endpoint, so its MCP clients are refused by app-wide authentication middleware.
+- d3452e3: Generated and scaffolded forms render `method="post"` and an `action` naming their route. A form submitted before React hydrated (common in dev while Vite optimizes dependencies) was a native GET, which put every named field in the URL, the password on the sign-in page included, and so in access logs and browser history. That early submit is now a plain POST: the server still refuses it, since it carries no CSRF token (and a PUT or PATCH route has no POST to answer it), but the fields stay out of the URL. This covers the sign-in, registration, password reset, email verification and profile pages `guren add auth` writes, the New and Edit pages `make:feature` writes, and the same pages in the `blog` starter. Once hydrated, the page submits with the route's own method as before.
+- 1cf1761: `this.authorize('create', [Post])`, and the same one-element array given to `this.can()`, `gate.allows()`, `denies()`, `authorize()` and `inspect()`, resolves `Post`'s policy and asks its record-less ability, as `this.authorize('create', Post)` does. It used to find no policy and answer 403. Any other array that names no policy (`[]`, `[record]`, three elements, a list of records) now throws an `Error` naming the accepted forms when no gate is defined for the ability, instead of denying; a gate defined for the ability still receives the array. `guren audit`'s policy suggestion for a mutating route also names the bare-class form for an ability with no record.
+- fcc2972: Text inputs, textareas and selects now show a focus ring. Under Tailwind v4, `outline-none` sets the outline style to `none` and `focus:outline-2` only sets the width, so a focused field had no outline, and `focus:border-transparent` hid its border as well. The `Input`, `Textarea` and `Select` components (now v2) and the `ui.md` harness rule use `focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent` and keep the border, and the blog starter's post forms use the components instead of a copied class string. `guren upgrade` updates unedited copies of the three components and the token block only: pages generated before this release (`make:auth` and `make:feature` output, the blog starter's pages) still carry `focus:border-transparent focus:outline-2`, so replace it there with `focus:outline-solid focus:outline-2`.
+
+  `--g-muted` now meets WCAG AA for text: `#6b7280` in light mode (4.67:1 on `--g-raised`, was 2.46:1) and `#8d89a7` in dark mode (4.52:1 on `--g-raised`, was 2.94:1). Dark `--g-text-2` moves to `#aeabc9` so secondary text stays distinct from muted text (1.51:1 apart, as light mode's 1.56:1). The docs viewer, Dev Center, plan page and the error and debug pages carry the same values.
+
+- 7f7b92d: The agent harness documents what agents kept looking up in `node_modules`: `assertInertia` needs `http.json()`, faking mail and queues on the app's container, registering a policy in a provider's `boot()` and the bare-class form for abilities with no record (`this.authorize('create', Post)`), and, in the `guren plan` prompt, that a view or model reference is an element id rather than a page path or class name. The feature skill mentions prototype mode. Doc pointers in the harness and in `guren context` now go to `https://guren.dev/docs/guides/<slug>` instead of files in the framework repository, and the scheduling hint printed by `guren add` no longer links to a 404.
+- c87e60d: The bound-parameter redaction `@guren/server` applies to the errors it renders and logs is published to the framework's own packages as `@guren/server/internal/redact-query-params` (re-exported as `@guren/core/internal/redact-query-params`). Through it, an agent whose conversation turn fails to store, an eval case whose setup or teardown throws, a console command that fails, and a `guren` command that fails on a query no longer print the bound values of that query.
+- Updated dependencies [51c16be]
+- Updated dependencies [1cf1761]
+- Updated dependencies [1cf1761]
+- Updated dependencies [fcc2972]
+- Updated dependencies [c87e60d]
+- Updated dependencies [c87e60d]
+  - @guren/server@2.34.0
+
 ## 2.34.0
 
 ### Minor Changes
