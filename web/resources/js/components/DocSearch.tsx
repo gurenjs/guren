@@ -267,11 +267,11 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
         ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
-        className={`flex w-full items-center gap-2 rounded-lg border border-docs-border bg-docs-panel px-3 py-2 text-left text-sm text-docs-text-muted transition hover:border-docs-border-strong hover:text-docs-text ${className}`}
+        className={`flex w-full items-center gap-2 rounded-lg border border-docs-border bg-docs-panel px-3 py-2 text-left text-sm text-docs-text-secondary transition hover:border-docs-border-strong hover:text-docs-text ${className}`}
       >
         <SearchIcon className="size-4 shrink-0" />
         <span className="flex-1 truncate">{copy.trigger}</span>
-        <kbd className="docs-mono hidden shrink-0 rounded border border-docs-border px-1.5 py-0.5 text-[0.7rem] text-docs-text-muted sm:block">
+        <kbd className="docs-mono hidden shrink-0 rounded border border-docs-border px-1.5 py-0.5 text-[0.7rem] text-docs-text-secondary sm:block">
           {isApple ? '⌘K' : 'Ctrl K'}
         </kbd>
       </button>
@@ -300,7 +300,7 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
             className="flex max-h-[70vh] w-full max-w-[640px] flex-col overflow-hidden rounded-xl border border-docs-border bg-docs-page shadow-2xl"
           >
             <div className="flex items-center gap-2 border-b border-docs-border px-4 py-3">
-              <SearchIcon className="size-5 shrink-0 text-docs-text-muted" />
+              <SearchIcon className="size-5 shrink-0 text-docs-text-secondary" />
               <input
                 ref={inputRef}
                 type="search"
@@ -321,7 +321,7 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
                 aria-autocomplete="list"
                 aria-controls="docs-search-results"
                 aria-activedescendant={hits.length > 0 ? `docs-search-hit-${selected}` : undefined}
-                className="min-w-0 flex-1 bg-transparent text-base text-docs-text outline-none placeholder:text-docs-text-muted"
+                className="min-w-0 flex-1 bg-transparent text-base text-docs-text outline-none placeholder:text-docs-text-secondary"
               />
               <label className="sr-only" htmlFor="docs-search-locale">
                 {copy.localeLabel}
@@ -342,7 +342,7 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
                 type="button"
                 onClick={close}
                 aria-label={copy.close}
-                className="shrink-0 rounded p-1 text-docs-text-muted transition hover:text-docs-text"
+                className="shrink-0 rounded p-1 text-docs-text-secondary transition hover:text-docs-text"
               >
                 <XIcon className="size-4" />
               </button>
@@ -381,7 +381,7 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
                       <span className="truncate text-sm font-semibold text-docs-heading">
                         {result.heading}
                       </span>
-                      <span className="docs-mono shrink-0 text-[0.7rem] text-docs-text-muted">
+                      <span className="docs-mono shrink-0 text-[0.7rem] text-docs-text-secondary">
                         {result.docTitle}
                       </span>
                     </div>
@@ -397,14 +397,14 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
                   // Announced when it changes: every one of these states
                   // arrives after an await, with no other cue that it did.
                   aria-live="polite"
-                  className="px-4 py-8 text-center text-sm text-docs-text-muted"
+                  className="px-4 py-8 text-center text-sm text-docs-text-secondary"
                 >
                   {statusMessage(display.kind, copy)}
                 </p>
               )}
             </div>
 
-            <div className="flex items-center gap-3 border-t border-docs-border px-4 py-2 text-[0.7rem] text-docs-text-muted">
+            <div className="flex items-center gap-3 border-t border-docs-border px-4 py-2 text-[0.7rem] text-docs-text-secondary">
               <span className="docs-mono">↑↓ ⏎</span>
               <span>{copy.hint}</span>
               <span className="docs-mono ml-auto">esc</span>

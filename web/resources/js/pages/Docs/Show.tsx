@@ -545,7 +545,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
       <Header variant="docs" basePath={basePath} locales={locales} />
 
       <main className={`docs-layout ${toc.items.length > 0 ? 'docs-layout--toc' : ''}`}>
-        <aside className="docs-sidebar">
+        <aside aria-label={locale === 'ja' ? 'ドキュメントの目次' : 'Documentation'} className="docs-sidebar">
           <DocSearch locale={locale} className="mb-6" />
           <button
             type="button"
@@ -669,7 +669,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
         </article>
 
         {toc.items.length > 0 && (
-          <aside className="docs-toc">
+          <aside aria-label={locale === 'ja' ? 'このページの見出し' : 'On this page'} className="docs-toc">
             <p className="docs-kicker mb-3 text-xs text-docs-text-secondary">
               On this page
             </p>
