@@ -11,7 +11,7 @@
     "console": "bun bin/console.ts",
     "smoke": "bun run ./smoke.ts",
     "test": "vitest run",
-    "build": "bun run codegen && bunx vite build && bunx vite build --ssr",
+    "build": "bun run codegen && bunx vite build && bunx vite build --ssr && bunx vite build --mode mcp-app",
     "dev:prototype": "bun run codegen && bunx vite --mode prototype",
     "build:prototype": "bun run codegen && bun ../../packages/cli/src/bin.ts check --prototype && bunx vite build --mode prototype",
     "e2e": "playwright test",
@@ -37,7 +37,9 @@
     "postgres": "^3.4.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "zod": "^4.5.0"
+    "zod": "^4.5.0",
+    "@guren/plugin-mcp": "workspace:*",
+    "@modelcontextprotocol/ext-apps": "2.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
