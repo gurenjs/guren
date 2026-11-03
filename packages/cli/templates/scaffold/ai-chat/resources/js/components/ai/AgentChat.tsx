@@ -134,7 +134,7 @@ function Conversation({
       <p role="status" className="sr-only">{busy ? 'The agent is answering.' : ''}</p>
       {error || failed ? <Alert tone="danger">The agent could not answer. Try again.</Alert> : null}
       {/* method and action: a submit before hydration posts to the chat route, never a GET with the text in the URL. */}
-      <form method="post" action={api} onSubmit={send} className="flex items-end gap-2">
+      <form method="post" action={api} onSubmit={send} className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <Textarea
           aria-label="Message"
           rows={2}
@@ -143,8 +143,10 @@ function Conversation({
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
         />
-        <Button type="submit" disabled={busy || !draft.trim()}>Send</Button>
-        <Button variant="secondary" disabled={!busy} onClick={() => void stop()}>Stop</Button>
+        <div className="flex justify-end gap-2">
+          <Button type="submit" disabled={busy || !draft.trim()}>Send</Button>
+          <Button variant="secondary" disabled={!busy} onClick={() => void stop()}>Stop</Button>
+        </div>
       </form>
     </div>
   )
@@ -211,12 +213,21 @@ function ToolCall({ part }: { part: ToolPart }) {
       <summary className="cursor-pointer font-mono text-xs">
         <span className="text-g-heading">{name}</span> <span className={state.tone}>{state.label}</span>
       </summary>
-      <div className="mt-2 space-y-2 font-mono text-xs text-g-text-2">
-        <pre className="overflow-x-auto whitespace-pre-wrap">{json(part.input)}</pre>
-        {part.state === 'output-available' ? <pre className="overflow-x-auto whitespace-pre-wrap">{json(part.output)}</pre> : null}
-        {part.state === 'output-error' ? <p className="text-g-danger">{part.errorText}</p> : null}
-      </div>
+      <dl className="mt-2 space-y-2 font-mono text-xs text-g-text-2">
+        <ToolField label="Input">{json(part.input)}</ToolField>
+        {part.state === 'output-available' ? <ToolField label="Output">{json(part.output)}</ToolField> : null}
+        {part.state === 'output-error' ? <ToolField label="Error" tone="text-g-danger">{part.errorText}</ToolField> : null}
+      </dl>
     </details>
+  )
+}
+
+function ToolField({ label, tone = '', children }: { label: string; tone?: string; children: string }) {
+  return (
+    <div>
+      <dt className="text-g-muted">{label}</dt>
+      <dd className={`mt-0.5 overflow-x-auto whitespace-pre-wrap ${tone}`}>{children}</dd>
+    </div>
   )
 }
 
