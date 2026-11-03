@@ -17,7 +17,7 @@ import { buildMailSource } from '../make-mail'
 import { buildNotificationSource } from '../make-notification'
 import { AUTH_ALIAS, authAliasLine, buildRoutesSource, routeCall } from '../make-route'
 import { isAutoIncrementPrimaryKey, quoteString } from '../schema-columns'
-import { camelCase, isBindingName, isIdentifier, pascalCase, quoteObjectKey, relativeImportPath } from '../utils'
+import { camelCase, importSpecifier, isBindingName, isIdentifier, pascalCase, quoteObjectKey } from '../utils'
 import { entityDocPath } from './close-docs'
 import type { PlanScaffoldUnwritten } from './scaffold-http'
 import type { PlanAction, PlanColumn, PlanController, PlanDraft, PlanModel, PlanRoute, PlanSideEffect } from './schema'
@@ -115,11 +115,6 @@ class Imports {
   lines(): string[] {
     return [...this.byFile].map(([file, names]) => `import { ${[...names].sort().join(', ')} } from '${importSpecifier(this.from, file)}'`)
   }
-}
-
-/** The specifier an app file imports another by, with the runtime extension the scaffolds write. */
-export function importSpecifier(from: string, to: string): string {
-  return relativeImportPath(from, to).replace(/\.tsx?$/u, '.js')
 }
 
 function oneLine(text: string): string {

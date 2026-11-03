@@ -7,7 +7,7 @@ import { detectRunner } from './make-test'
 import { resolveAppEntry } from './provider-registrar'
 import { listTools } from './tool-list'
 import {
-  relativeImportPath,
+  importSpecifier,
   resourceName,
   safeModuleName,
   splitCommaList,
@@ -67,8 +67,8 @@ export async function makeAiAgent(name: string, options: MakeAiAgentOptions = {}
       contents: testTemplate({
         className,
         runner: await detectRunner(cwd),
-        appImport: importOf(testPath, appEntry),
-        agentImport: importOf(testPath, agentPath),
+        appImport: importSpecifier(testPath, appEntry),
+        agentImport: importSpecifier(testPath, agentPath),
         output: Boolean(options.output),
       }),
       flag: '--test',
@@ -124,10 +124,6 @@ async function assertToolsExist(cwd: string, names: readonly string[]): Promise<
     .map((name) =>
       `The tool name "${name}" is outside [A-Za-z0-9_-]{1,64}, which Anthropic and OpenAI reject. `
       + 'Set agent.toolName on its route.')
-}
-
-function importOf(fromFile: string, target: string): string {
-  return relativeImportPath(fromFile, target.replace(/\.ts$/u, '.js'))
 }
 
 function agentTemplate(className: string, agentName: string, tools: readonly string[], output: boolean): string {

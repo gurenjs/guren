@@ -39,7 +39,6 @@ import { requirePlanApproval } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
 import { entityDocPath } from './plan/close-docs'
 import { emitPlanScaffold, planScaffoldFilePaths, planScaffoldMountCommandLine, planScaffoldMounts, type PlanScaffoldMount, type PlanScaffoldOutput } from './plan/scaffold'
-import { importSpecifier } from './plan/scaffold-controller'
 import { emitPlanTests, planTestsFilePath, type PlanTestsOutput } from './plan/scaffold-tests'
 import type { Plan, PlanDraft } from './plan/schema'
 import { planSlug, readPlanState } from './plan/state'
@@ -49,7 +48,7 @@ import { composeAppProviderRegistration, resolveAppEntry } from './provider-regi
 import { composeRouteRegistrarCall, resolveRoutesEntry } from './route-registrar'
 import { isRoutesFileMounted } from './routes-check'
 import { parseSchemaTables, schemaPathFor } from './schema-parser'
-import { pathExists, writeScaffoldFiles } from './utils'
+import { importSpecifier, pathExists, writeScaffoldFiles } from './utils'
 
 export const PLAN_SCAFFOLD_REPORT_VERSION = 1
 

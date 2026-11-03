@@ -209,7 +209,7 @@ describe('guren make:ai-agent', () => {
       ])
       expect(await readFile(resolve('resources/js/components/ai/AgentChat.tsx'), 'utf8'))
         .toBe(loadScaffoldTemplate('ai-chat/resources/js/components/ai/AgentChat.tsx'))
-      expect(await fileExists(process.cwd(), 'resources/js/components/ui/Textarea.tsx')).toBe(true)
+      expect(await fileExists(process.cwd(), 'resources/js/components/ui/Alert.tsx')).toBe(true)
       const routes = await readFile(resolve('routes/web.ts'), 'utf8')
       expect(routes).toContain("import { registerSupportBotChatRoutes } from './support-bot-chat.js'")
       expect(routes).toContain('registerSupportBotChatRoutes(router)')
@@ -217,7 +217,7 @@ describe('guren make:ai-agent', () => {
       expect(controller).toContain('.as(user).history(conversation)')
       expect(controller).toContain("this.inertia(pages['support-bot'].Chat, {")
       expect(await readFile(resolve('routes/support-bot-chat.ts'), 'utf8'))
-        .toContain("{ name: 'support-bot.chat', body: ChatTurnSchema, middlewares: [requireAuthenticated({ redirectTo: '/login' })] }")
+        .toContain("router.post('/support-bot/chat', { name: 'support-bot.send', body: ChatTurnSchema, middlewares: [requireAuthenticated({ redirectTo: '/login' })] }")
       expect(notes).toEqual([
         'The chat page uses useChat() from @ai-sdk/react, the 4.x line that pairs with ai 7. Run: bun add @ai-sdk/react@^4',
         'A chat keeps its history in a conversation store, and config/ai.ts configures none. Set `conversations` there (guren add ai writes one unless --no-conversations).',

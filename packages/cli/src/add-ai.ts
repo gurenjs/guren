@@ -209,10 +209,15 @@ async function appendConversationTables(): Promise<AppendSchemaTableResult> {
   return conversations === 'appended' || messages === 'appended' ? 'appended' : 'already-declared'
 }
 
+/** Whether `config/ai.ts` names a conversation store: a `conversations:` key on a line of its own, never a comment. */
+export function configuresConversations(source: string): boolean {
+  return /^\s*conversations\s*:/m.test(source)
+}
+
 /** Point `config/ai.ts` at the tables when it names no store and still has the shape the template gives it. */
 async function wireConversationStore(providerName: string): Promise<void> {
   const source = await readIfExists(process.cwd(), 'config/ai.ts')
-  if (source === null || /^\s*conversations\s*:/m.test(source)) return
+  if (source === null || configuresConversations(source)) return
 
   const anchor = `  default: '${providerName}',\n`
   if (!source.includes(anchor)) {

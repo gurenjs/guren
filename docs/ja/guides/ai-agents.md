@@ -471,7 +471,7 @@ function Conversation({ conversationId, messages: initialMessages }: Props) {
 bunx guren make:ai-agent SupportBot --chat
 ```
 
-エージェントのほかに、`show()` と `chat()` を持つ `SupportBotChatController`、ログインを必須にした `GET /support-bot` と `POST /support-bot/chat` を登録する `routes/support-bot-chat.ts`（`routes/web.ts` に組み込まれます）、ページの `resources/js/pages/support-bot/Chat.tsx` が書き出されます。ページが描画する `resources/js/components/ai/AgentChat.tsx` は、ストリーミング中の回答、停止ボタン、エラー、ツール呼び出しの入力と出力、再読み込み後に戻した履歴を表示します。見た目は Guren UI のトークンで整えてあり、`guren add ui` の `Alert`、`Button`、`Textarea` を使います。これらがアプリに無ければ、コマンドがコピーします。
+エージェントのほかに、`show()` と `chat()` を持つ `SupportBotChatController`、ログインを必須にした `GET` と `POST /support-bot/chat`（名前はリソースと重ならない `support-bot.chat` と `support-bot.send`）を登録する `routes/support-bot-chat.ts`（`routes/web.ts` に組み込まれます）、ページの `resources/js/pages/support-bot/Chat.tsx` が書き出されます。ページが描画する `resources/js/components/ai/AgentChat.tsx` は、ストリーミング中の回答、エラー、ツール呼び出しの入力と出力、再読み込み後に戻した履歴を表示します。送信と停止は、入力欄の中にある 1 つのアイコンボタンで切り替わります。見た目は Guren UI のトークンで整えてあり、`guren add ui` の `Alert` を使います。アプリに無ければ、コマンドがコピーします。
 
 `AgentChat.tsx` はアプリにコピーされ、その後はアプリのファイルとして扱います。2 つ目のエージェントに `--chat` を付けたときは既存のコピーをそのまま使い、`--force` を付けたときだけ置き換えます。`guren upgrade` は書き換えません。`@ai-sdk/react` が無いと表示されたら 4.x をインストールし、チャットには会話ストアが必要なので `config/ai.ts` に `conversations` を設定してください。このフラグは `--output` や `--module` と一緒には使えません。
 

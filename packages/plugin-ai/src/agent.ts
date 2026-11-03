@@ -379,10 +379,7 @@ export function bindAgent<T extends Agent>(
   const bound = (conversation: string | undefined): BoundAgent<T> => ({
     agent: instance,
     continue: (id) => bound(id),
-    history: async (id) => {
-      const stored = await scope.manager.conversations().load(id, conversationOwner())
-      return stored?.agentName === agentName ? toUIMessages(stored.messages, { idPrefix: id }) : null
-    },
+    history,
     prompt: async (input, options = {}) => {
       const { history, loop, call, continueCall, persistTurn } = await run(input, options, conversation)
       const rounds = [await loop.generate(call)]
@@ -489,8 +486,7 @@ export function bindAgent<T extends Agent>(
   }
 
   const conversationOwner = (): AgentPrincipal => {
-    const owner = instance.principal
-    if (!owner) {
+    if (!principal) {
       throw new Error(
         `${agentName} was asked for a conversation under as(null). A conversation belongs to the principal `
         + 'that started it, and an anonymous run has none to check: bind a user or service with as(principal).',
@@ -502,15 +498,28 @@ export function bindAgent<T extends Agent>(
         + `is named "${ANONYMOUS_AGENT_NAME}". Pass agent({ agentName }) to keep conversations with it.`,
       )
     }
-    return owner
+    return principal
+  }
+
+  // The one read of a stored conversation, so a page reload and a continued turn apply the same checks.
+  const loadConversation = async (id: string) => {
+    const owner = conversationOwner()
+    const store = scope.manager.conversations()
+    return { store, owner, stored: await store.load(id, owner) }
+  }
+
+  const history = async (id: string): Promise<UIMessage[] | null> => {
+    const { stored } = await loadConversation(id)
+    return stored?.agentName === agentName ? toUIMessages(stored.messages, { idPrefix: id }) : null
   }
 
   const openConversation = async (requested: true | string | undefined) => {
     if (requested === undefined) return undefined
-    const owner = conversationOwner()
-    const store = scope.manager.conversations()
-    if (requested === true) return { store, owner, id: crypto.randomUUID(), isNew: true, messages: [] as ModelMessage[] }
-    const stored = await store.load(requested, owner)
+    if (requested === true) {
+      const owner = conversationOwner()
+      return { store: scope.manager.conversations(), owner, id: crypto.randomUUID(), isNew: true, messages: [] as ModelMessage[] }
+    }
+    const { store, owner, stored } = await loadConversation(requested)
     if (!stored) {
       throw new Error(`${agentName} cannot continue conversation "${requested}": no conversation with that id belongs to this principal.`)
     }
