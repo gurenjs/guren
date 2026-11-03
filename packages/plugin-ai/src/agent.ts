@@ -18,6 +18,7 @@ import {
   type Tool,
   type ToolLoopAgentSettings,
   type ToolSet,
+  type UIMessage,
 } from 'ai'
 
 import { ambientManager } from './ambient'
@@ -28,6 +29,7 @@ import { CONVERSATION_HEADER } from './protocol'
 import { RunAgentJob, registeredAgent } from './queue'
 import { resolveRuntime } from './runtime'
 import type { AgentToolInput, AgentToolName, AgentToolOutput, AgentToolScope, AiProviderName, Granted } from './types'
+import { MASKED_ERROR_TEXT, toUIMessages } from './ui-messages'
 
 const ON_A_MANAGER = 'call ai.agent(Class).as(...) on a manager'
 
@@ -150,6 +152,11 @@ export interface BoundAgent<T extends Agent> {
   broadcast(input: string, channel: string, options?: QueueOptions): Promise<QueuedAgentRun>
   /** The same agent, prompting within conversation `id`, which this principal must have started with this agent. */
   continue(id: string): BoundAgent<T>
+  /**
+   * Conversation `id` as `useChat` messages, for the page a reload lands on (RFC 0029 §4); `null` for an
+   * unknown id, another principal's conversation and another agent's alike, so a page can start afresh.
+   */
+  history(id: string): Promise<UIMessage[] | null>
 }
 
 /** What `appTools(names)` returns: each tool typed against its route contract, refusals included in the result. */
@@ -372,6 +379,10 @@ export function bindAgent<T extends Agent>(
   const bound = (conversation: string | undefined): BoundAgent<T> => ({
     agent: instance,
     continue: (id) => bound(id),
+    history: async (id) => {
+      const stored = await scope.manager.conversations().load(id, conversationOwner())
+      return stored?.agentName === agentName ? toUIMessages(stored.messages, { idPrefix: id }) : null
+    },
     prompt: async (input, options = {}) => {
       const { history, loop, call, continueCall, persistTurn } = await run(input, options, conversation)
       const rounds = [await loop.generate(call)]
@@ -422,7 +433,11 @@ export function bindAgent<T extends Agent>(
           }
         },
       })
-      return result.toUIMessageStreamResponse(history ? { headers: { [CONVERSATION_HEADER]: history.id } } : {})
+      return result.toUIMessageStreamResponse({
+        // The SDK's default, named so a reloaded history masks a tool error to the same text.
+        onError: () => MASKED_ERROR_TEXT,
+        ...(history ? { headers: { [CONVERSATION_HEADER]: history.id } } : {}),
+      })
     },
     queue: (input, options = {}) => enqueue(input, options, conversation),
     broadcast: async (input, channel, options = {}) => {
@@ -473,8 +488,7 @@ export function bindAgent<T extends Agent>(
     }
   }
 
-  const openConversation = async (requested: true | string | undefined) => {
-    if (requested === undefined) return undefined
+  const conversationOwner = (): AgentPrincipal => {
     const owner = instance.principal
     if (!owner) {
       throw new Error(
@@ -488,6 +502,12 @@ export function bindAgent<T extends Agent>(
         + `is named "${ANONYMOUS_AGENT_NAME}". Pass agent({ agentName }) to keep conversations with it.`,
       )
     }
+    return owner
+  }
+
+  const openConversation = async (requested: true | string | undefined) => {
+    if (requested === undefined) return undefined
+    const owner = conversationOwner()
     const store = scope.manager.conversations()
     if (requested === true) return { store, owner, id: crypto.randomUUID(), isNew: true, messages: [] as ModelMessage[] }
     const stored = await store.load(requested, owner)

@@ -8,6 +8,7 @@ import type { ChatTurn } from './chat'
 import { CONVERSATION_HEADER } from './protocol'
 
 export { AGENT_CHUNK_EVENT } from './protocol'
+export type { UIMessage } from 'ai'
 
 // `XSRF_COOKIE_NAME` and `XSRF_HEADER_NAME` in @guren/server's CSRF middleware, which this entry cannot import;
 // `readXsrfToken()` in @guren/plugin-webmcp's client reads the same cookie.

@@ -21,6 +21,8 @@ export type {
 } from './agent'
 
 export { ChatTurnSchema } from './chat'
+export { toUIMessages } from './ui-messages'
+export type { ToUIMessagesOptions } from './ui-messages'
 export { AGENT_CHUNK_EVENT } from './protocol'
 
 export { appToolDefinitions, appTools } from './app-tools'
@@ -67,3 +69,4 @@ export type {
 
 // What an agent class file needs from the AI SDK, so it imports one package.
 export { Output, stepCountIs, tool } from 'ai'
+export type { UIMessage } from 'ai'
