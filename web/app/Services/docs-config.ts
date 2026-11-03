@@ -230,6 +230,11 @@ export function docCategoryDir(category: DocCategory): string {
   return DOC_CATEGORY_CONFIG[category].dir
 }
 
+/** The page a bare `/docs/<category>` lands on: the first in the sidebar order. */
+export function docCategoryLanding(category: DocCategory): string {
+  return DOC_CATEGORY_CONFIG[category].order[0]
+}
+
 export function docLocaleDir(locale: DocLocale): string {
   return DOC_LOCALE_CONFIG[locale].dir
 }
