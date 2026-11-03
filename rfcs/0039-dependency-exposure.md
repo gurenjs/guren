@@ -122,10 +122,14 @@ minimumReleaseAgeExcludes = [
 The template ranges are written at `changeset version` to the version being
 released, so without exclusions `create-guren-app` fails to install for three
 days after every release, as the first row shows. `smoke:starter:npm` and
-`guren upgrade` stall the same way. The list is the closure of `@guren/*`
+`guren upgrade` stall the same way. ~~The list is the closure of `@guren/*`
 packages reachable from the template's dependencies in the release being cut
 (the default template's is above; `@guren/server` arrives through
-`@guren/core`, and the api-only template has no `@guren/inertia-client`). An
+`@guren/core`, and the api-only template has no `@guren/inertia-client`).~~
+**Amended in implementation:** the list is every `@guren/*` package the
+workspace publishes, the same in both templates. An app adds plugins after
+scaffolding, and a release can make a package it has depend on a `@guren/*`
+package its scaffold never listed; the closure covered neither. An
 exact name per package is required, since the scope pattern does nothing.
 `sync:template-deps` writes the list from the same manifest read that writes
 the ranges, and `audit:template-deps` fails CI when they disagree.
@@ -140,12 +144,15 @@ publish time from the registry (the pin today, `1.0.0-rc.4`, was published on
 2026-06-27).~~
 **Amended in implementation:** the wall is not drizzle's alone. On 2026-11-03
 the default template asked for `@inertiajs/react@^3.11.0`, which only a
-release from the day before satisfied. `sync-template-deps.ts --release`
-therefore checks every third-party range a scaffold resolves at the top of its
-tree (the templates' own, and the dependencies and required peers of each
-excluded `@guren/*` package) and refuses the release while one admits only
-versions younger than the gate, or when the registry cannot say. The check
-depends on the date, so it runs at release and not on every PR. The smokes that
+release from the day before satisfied. `sync-template-deps.ts --gate-ages`, the
+first step of `version-packages` (before `changeset version`, so a refusal
+leaves nothing half done), therefore checks every third-party range a scaffold
+or a `guren add` resolves at the top of its tree: the templates' own, the
+driver `create-guren-app --db` adds, the `ai` and `@ai-sdk/*` ranges `guren add
+ai` pins, and the dependencies and required peers of each `@guren/*` package a
+scaffold installs. It refuses the release while one admits only versions
+younger than the gate, or when the registry cannot say. The check depends on the
+date, so it never runs on a PR. The smokes that
 install this checkout's builds lift the gate in the scaffolded app, and
 `smoke:starter:npm`, which installs from the registry, keeps it.
 

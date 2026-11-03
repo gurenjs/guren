@@ -2,13 +2,14 @@
 // quietly stopped covering a package would surface a release late — how
 // `@guren/testing` went missing from two of the three lists. These run fast.
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
   assertLocalGurenDependencies,
   collectLocalPackages,
   distDifferences,
+  liftReleaseAgeGate,
   vendorLocalPackages,
   type DependencyManifest,
 } from './local-packages'
@@ -212,3 +213,24 @@ async function packedManifest(tarball: string): Promise<DependencyManifest> {
   expect(await proc.exited).toBe(0)
   return JSON.parse(output) as DependencyManifest
 }
+
+describe('liftReleaseAgeGate', () => {
+  test('sets the scaffolded gate to zero and keeps the exclusions', async () => {
+    await withApp({ name: 'app' }, async (appDir) => {
+      const bunfig = '[install]\nminimumReleaseAge = 259200\nminimumReleaseAgeExcludes = [\n  "@guren/core",\n]\n'
+      await writeFile(join(appDir, 'bunfig.toml'), bunfig, 'utf8')
+
+      await liftReleaseAgeGate(appDir)
+
+      expect(await readFile(join(appDir, 'bunfig.toml'), 'utf8')).toBe(bunfig.replace('259200', '0'))
+    })
+  })
+
+  test('leaves an app without a bunfig.toml as it was', async () => {
+    await withApp({ name: 'app' }, async (appDir) => {
+      await liftReleaseAgeGate(appDir)
+
+      expect(await Bun.file(join(appDir, 'bunfig.toml')).exists()).toBe(false)
+    })
+  })
+})

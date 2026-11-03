@@ -1,16 +1,25 @@
 # Bun skips package versions published less than minimumReleaseAge seconds
-# ago (3 days), so a compromised release has time to be found and pulled before
-# an install here picks it up. To take a fix that is newer than that, add its
-# exact version to the list below, for example "some-package@1.2.4".
-# The @guren packages are listed by name because Bun does not read "@guren/*",
-# and each release of this app's scaffold asks for the versions it shipped with.
+# ago (3 days), so a compromised release has time to be found and pulled
+# before an install here picks it up. To take a fix that is newer than that, add
+# its exact version to the list below, for example "some-package@1.2.4".
+# The @guren packages are listed one by one because Bun does not read "@guren/*",
+# and a Guren upgrade asks for releases newer than the gate allows.
 [install]
 minimumReleaseAge = 259200
 minimumReleaseAgeExcludes = [
   "@guren/cli",
   "@guren/core",
   "@guren/inertia-client",
+  "@guren/openapi",
   "@guren/orm",
+  "@guren/plugin-agents",
+  "@guren/plugin-ai",
+  "@guren/plugin-cloudflare",
+  "@guren/plugin-lambda",
+  "@guren/plugin-markdown",
+  "@guren/plugin-mcp",
+  "@guren/plugin-vercel",
+  "@guren/plugin-webmcp",
   "@guren/server",
   "@guren/testing",
 ]

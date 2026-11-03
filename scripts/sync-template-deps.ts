@@ -231,10 +231,10 @@ async function bunfigDrift(): Promise<BunfigDrift[]> {
 }
 
 /**
- * Release-only, since the answer depends on the date: a scaffold installs under
- * the gate it ships, so a release whose templates (or the `@guren/*` packages they
- * install) ask for a range only young versions satisfy would scaffold apps that
- * cannot install. An unreachable registry refuses the release too.
+ * `--gate-ages`, the head of `version-packages`: a scaffold installs under the gate
+ * it ships, so a release asking for a range only young versions satisfy would
+ * scaffold apps that cannot install. It runs before `changeset version`, since no
+ * third-party range moves there, and depends on the date, so never on a PR.
  */
 async function assertScaffoldInstallsUnderGate(): Promise<void> {
   const young = await youngRanges(await scaffoldThirdPartyRanges(await templateManifests()), fetchNpmPackument, Date.now())
@@ -333,9 +333,6 @@ async function write(options: { release: boolean }): Promise<void> {
   }
   if (changed.length === 0 && bunfigs.length === 0) {
     console.log('Template dependency versions already match the workspace.')
-    if (options.release) {
-      await assertScaffoldInstallsUnderGate()
-    }
     return
   }
 
@@ -351,8 +348,6 @@ async function write(options: { release: boolean }): Promise<void> {
   }
 
   if (options.release) {
-    // After the manifests are written: a drizzle pin this run moved is a range too.
-    await assertScaffoldInstallsUnderGate()
     await assertCreateAppRepublishes()
     return
   }
@@ -366,7 +361,9 @@ async function write(options: { release: boolean }): Promise<void> {
 }
 
 if (import.meta.path === Bun.main) {
-  await (process.argv.includes('--check')
-    ? check()
-    : write({ release: process.argv.includes('--release') }))
+  await (process.argv.includes('--gate-ages')
+    ? assertScaffoldInstallsUnderGate()
+    : process.argv.includes('--check')
+      ? check()
+      : write({ release: process.argv.includes('--release') }))
 }

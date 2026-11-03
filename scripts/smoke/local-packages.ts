@@ -362,7 +362,7 @@ export async function rewriteAppDependencies(
  * fails the install until they age. `sync-template-deps.ts --release` judges that
  * case, and `smoke:starter:npm`, which rewrites nothing, keeps the gate.
  */
-async function liftReleaseAgeGate(appDir: string): Promise<void> {
+export async function liftReleaseAgeGate(appDir: string): Promise<void> {
   const path = join(appDir, 'bunfig.toml')
   const bunfig = await readFile(path, 'utf8').catch(() => undefined)
   if (bunfig === undefined) return
