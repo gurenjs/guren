@@ -7,7 +7,7 @@
 import type { Plan, PlanDraft } from './schema'
 import { awaitsVerification, type PlanElementState, type PlanElementStatus } from './status'
 import { listPlanSteps, type PlanTaskDerivation } from './tasks'
-import { behaviourCanReach, behaviourCarriers } from './reach'
+import { behaviourCanReach, behaviourCarriers, planElementsWithoutBehaviour } from './reach'
 import { cannotFingerprint, restsOnReach } from './verification'
 
 interface BlockerContext {
@@ -18,6 +18,10 @@ interface BlockerContext {
   carriers: Map<string, string[]>
   /** The elements a behaviour added to the plan could reach (`behaviourCanReach()`). */
   reachable: Set<string>
+  /** `planElementsWithoutBehaviour()`: what an approval accepts as complete on its step's run alone. */
+  withoutBehaviour: Set<string>
+  /** What the approval of the plan's current hash accepted; `undefined` where none stands. */
+  accepted: ReadonlySet<string> | undefined
 }
 
 export interface CloseBlocker {
@@ -29,14 +33,25 @@ export interface CloseBlocker {
   moves: string
 }
 
-/** Each element `plan:close` refuses, with what holds it and the command that moves it. */
+/**
+ * Each element `plan:close` refuses, with what holds it and the command that moves it. `accepted`
+ * is `approvedAcceptance()` of the standing the overlay judged through.
+ */
 export function describeCloseBlockers(
   plan: PlanDraft | Plan,
   derivation: PlanTaskDerivation,
   elements: ReadonlyArray<PlanElementStatus<PlanElementState>>,
   planArgument: string,
+  accepted?: ReadonlySet<string>,
 ): CloseBlocker[] {
-  const context: BlockerContext = { planArgument, owners: new Map(), carriers: behaviourCarriers(plan, derivation), reachable: behaviourCanReach(plan) }
+  const context: BlockerContext = {
+    planArgument,
+    owners: new Map(),
+    carriers: behaviourCarriers(plan, derivation),
+    reachable: behaviourCanReach(plan),
+    withoutBehaviour: new Set(planElementsWithoutBehaviour(plan).map((entry) => entry.id)),
+    accepted,
+  }
   for (const { step } of listPlanSteps(derivation)) for (const id of step.elementIds) context.owners.set(id, step.id)
   return elements.map((element) => {
     const hold = element.hold
@@ -53,7 +68,8 @@ export function formatCloseBlocker(blocker: CloseBlocker): string {
 
 /**
  * Mirrors `applyVerification()`'s holds: a run it would not count is never suggested, so an
- * element no step's behaviour reaches, or one with nothing to fingerprint, is sent to plan:waive.
+ * element no step's behaviour reaches and no approval accepted, or one with nothing to
+ * fingerprint, is sent to plan:waive.
  */
 function closeRemedy(element: PlanElementStatus<PlanElementState>, context: BlockerContext): string {
   const owner = context.owners.get(element.id)
@@ -67,10 +83,15 @@ function closeRemedy(element: PlanElementStatus<PlanElementState>, context: Bloc
     const target = element.state === 'planned' ? 'Implement it' : `Change the code until plan:status reports it ${element.completesAt}`
     return `${target}, then run ${verify(owner)}${orWaive}`
   }
-  const unmatched = restsOnReach(element)
+  const withoutBehaviour = context.withoutBehaviour.has(element.id)
+  // An accepted element needs its step's run and no behaviour: `applyVerification()` lifts it to `accepted`.
+  const unmatched = restsOnReach(element) && !(withoutBehaviour && context.accepted?.has(element.id) === true)
   const carriers = context.carriers.get(element.id) ?? []
   const unreached = unmatched && carriers.length === 0
   if (unreached && !context.reachable.has(element.id)) {
+    if (withoutBehaviour && context.accepted !== undefined) {
+      return `No planned property of it matched beyond its existence and no behaviour can reach it, and the approval of this hash did not accept it as complete without one: approve the plan again with \`bunx guren plan:approve ${context.planArgument}\`, which records that, then run ${verify(owner)} if plan:status does not report it accepted${orWaive}`
+    }
     return `No planned property of it matched beyond its existence and no behaviour can reach it, so no plan:verify run lifts it: waive it with ${waive}`
   }
   // Ahead of offering a behaviour: one added to the plan would still leave nothing to fingerprint.

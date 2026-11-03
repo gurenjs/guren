@@ -706,16 +706,16 @@ describe('judgePlan', () => {
       expect(element.properties.filter((property) => property.property.startsWith('relationship comments')).map((property) => property.verdict)).toEqual(['match', 'match'])
     })
 
-    test('should send an alter no behaviour can reach to a waiver, and a reachable one to a behaviour, when no match counts', () => {
+    test('should send an alter no behaviour can reach to its step under the approval, or a waiver, and a reachable one to a behaviour, when no match counts', () => {
       const columnAlter = withColumn(ALTER)
       const column = only(judgePlan(columnAlter, app(), []), 'c')
       const action = only(judgePlan(showAlter, app(), []), 'a')
 
       expect(column.state).toBe('unjudged')
-      expect(column.reason).toEndWith('waive it, since no behaviour can reach it.')
+      expect(column.reason).toEndWith("let its step's verified run complete it, which approving the plan accepts since no behaviour can reach it, or waive it.")
       expect(action.reason).toEndWith('verify the change through a behaviour that reaches it.')
       const held = only(judgePlan(columnAlter, app(), readAlterProperties(columnAlter, app())), 'c')
-      expect(held.reason).toEndWith('state the change in a property the application did not hold, or waive it, since no behaviour can reach it.')
+      expect(held.reason).toEndWith("state the change in a property the application did not hold, or let its step's verified run complete it, which approving the plan accepts since no behaviour can reach it, or waive it.")
     })
 
     test('should name plan:approve where a planned property still differs and the approval holds no reading of it', () => {
@@ -927,7 +927,7 @@ describe('judgePlan', () => {
       const { summary } = judgePlan(document, app())
 
       expect(summary.existing).toEqual({ found: 1, missing: ['ghost'], unread: [] })
-      expect(summary.states).toEqual({ planned: 1, present: 0, wired: 0, verified: 0, drifted: 0, unjudged: 0, blocked: 0, waived: 0 })
+      expect(summary.states).toEqual({ planned: 1, present: 0, wired: 0, verified: 0, accepted: 0, drifted: 0, unjudged: 0, blocked: 0, waived: 0 })
     })
 
     test('should keep an existing element nobody could read out of both the found and the changed counts', () => {
