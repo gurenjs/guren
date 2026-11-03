@@ -87,7 +87,11 @@ it, and do not edit the application back or the plan to make it pass.
   configured database; open it with `await ready()`, so a failed boot, not a
   database error, is what each test reports.
   The step verifies with `tests:fail`, so a test that already passes, or is skipped (`test.skip`,
-  `test.todo`), fails the step. Each test must still request its behaviour's
+  `test.todo`), fails the step. A behaviour `plan:next` lists as holding already
+  (`"alreadyHolds": true` in the plan) guards what the app does today: write its
+  test to pass, since `tests:fail` does not ask it to fail. One that `plan:scaffold`
+  reports as possibly passing now, with no such mark, is to be made to fail first,
+  or marked by the person through a plan revision. Each test must still request its behaviour's
   route through a `TestApp`, with a path it spells, in its own body or a
   function of the same file it calls: `plan:verify` reads the requests before
   it runs the tests, and fails one that requests another route, nothing, or

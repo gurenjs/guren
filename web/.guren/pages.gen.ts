@@ -12,6 +12,7 @@ export const pageManifest = {
   'Docs/Index': './pages/Docs/Index.tsx',
   'Docs/Show': './pages/Docs/Show.tsx',
   'Home': './pages/Home.tsx',
+  'NotFound': './pages/NotFound.tsx',
   'Start': './pages/Start.tsx',
 } as const
 
@@ -107,6 +108,9 @@ export interface PagePropsMap {
   'Home': {
   codeExamples: Record<string, string>
 }
+  'NotFound': {
+  path: string
+}
   'Start': {
   initial: StartOptions
 }
@@ -142,5 +146,6 @@ export const pages = {
     Show: defineGeneratedPage<'Docs/Show', PagePropsMap['Docs/Show']>('Docs/Show', pageManifest['Docs/Show'])
   },
   Home: defineGeneratedPage<'Home', PagePropsMap['Home']>('Home', pageManifest['Home']),
+  NotFound: defineGeneratedPage<'NotFound', PagePropsMap['NotFound']>('NotFound', pageManifest['NotFound']),
   Start: defineGeneratedPage<'Start', PagePropsMap['Start']>('Start', pageManifest['Start'])
 } as const

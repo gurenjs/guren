@@ -15,6 +15,7 @@ import { CliError } from './cli-error'
 import { readPlanFile } from './plan-render'
 import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
 import { loadPlanAppState } from './plan/app-state'
+import { alreadyHoldingIds } from './plan/acceptance-status'
 import { describeUnapproved, readPlanApprovalStanding } from './plan/approvals'
 import { describeDependency, type PlanStepContextElement } from './plan/step-context'
 import { listPlanStates, planDigest, planSlug, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
@@ -103,12 +104,14 @@ export function judgeStopHook(
  * For a `tests:fail` step: its behaviours passing in `run` with no red run on record, before it
  * or in it, and the later step of its task that runs them as `tests`, verified with its files
  * unchanged at any plan hash. A behaviour whose earlier red run a revision's change left behind is
- * not one: its test, rewritten to the revised plan, fails against that implementation.
+ * not one: its test, rewritten to the revised plan, fails against that implementation. Nor is one
+ * in `holding`, marked `alreadyHolds`, which `tests:fail` never asks to fail.
  */
 async function unobservableRedRuns(
   appRoot: string,
   records: Readonly<Record<string, PlanStepRecord>>,
   derivation: PlanTaskDerivation,
+  holding: ReadonlySet<string>,
   stepId: string,
   run: PlanStepRecord,
 ): Promise<UnobservableRedRuns | undefined> {
@@ -116,7 +119,9 @@ async function unobservableRedRuns(
   const found = findPlanStep(derivation, stepId)
   if (!found?.step.verify.includes('tests:fail')) return undefined
   const seen = recordedRedRuns(Object.values(records))
-  const ids = run.acceptance.filter((behaviour) => behaviour.status === 'passing' && behaviour.red === undefined && !seen.has(behaviour.id)).map((behaviour) => behaviour.id)
+  const ids = run.acceptance
+    .filter((behaviour) => behaviour.status === 'passing' && behaviour.red === undefined && !seen.has(behaviour.id) && !holding.has(behaviour.id))
+    .map((behaviour) => behaviour.id)
   if (ids.length === 0) return undefined
   const key = acceptanceKey(found.step.acceptanceIds)
   const later = found.task.steps.find((step) => step.id !== stepId && step.verify.includes('tests') && acceptanceKey(step.acceptanceIds) === key)
@@ -189,7 +194,7 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
   const owned = new Set(step.elementIds)
   const blockedElements = report.elements.filter((element) => owned.has(element.id) && element.state === 'blocked')
   const stale = report.staleContext?.find((context) => context.stepId === active.step)?.stale ?? []
-  const unobservable = await unobservableRedRuns(appRoot, records, derivation, active.step, verification.record)
+  const unobservable = await unobservableRedRuns(appRoot, records, derivation, alreadyHoldingIds(plan), active.step, verification.record)
   const judgement = judgeStopHook(active, verification.record, blockedElements, stopHookActive, stale, unobservable)
   if (judgement.kind === 'verified') {
     // Earlier steps are not this step's continuation: plan:next returns them once this one is done.

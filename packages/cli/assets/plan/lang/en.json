@@ -171,6 +171,8 @@
   "acceptance.has": "{table} has {values}",
   "acceptance.hasNo": "{table} has no {values}",
   "acceptance.renders": "renders {page}",
+  "acceptance.alreadyHolds": "holds already",
+  "acceptance.alreadyHoldsNote": "It guards what the application does before this plan: its test is not asked to fail first, and must pass once the work is done.",
 
   "breaking.tableDropped": "The {table} table is dropped.",
   "breaking.renamedFrom": "Renamed from {from}.",

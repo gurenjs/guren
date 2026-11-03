@@ -94,7 +94,9 @@ for (const [description, scenario] of Object.entries(scenarios)) {
         models: isUnreadable(current.models) ? current.models : undefined, validators: await readValidatorExports(workspace.dir, new ParseCache()),
       })
       const legacyRoutes = Array.isArray(legacy.routes) ? legacy.routes.map(({ name, method, path }) => ({ name, method, path })) : legacy.routes
-      expect(current.routes).toEqual(legacyRoutes)
+      // Each route also carries its registered middleware, which the legacy reading left out; no routes file means no definitions and no routes.
+      expect(isUnreadable(current.routes) ? current.routes : current.routes.map(({ name, method, path }) => ({ name, method, path }))).toEqual(legacyRoutes)
+      if (!isUnreadable(current.routes)) expect(current.routes.map((route) => route.middleware)).toEqual((legacy.definitions ?? []).map((definition) => definition.middlewareNames ?? []))
       expect(current.detail).toEqual(detail)
       const previous = { ...current, routes: legacyRoutes, detail }
       const plan = PlanDraftSchema.parse(loadCommentsPlan())
@@ -157,6 +159,31 @@ test('registrar graph retains live schema identities, directory provenance and t
   } finally { await workspace.cleanup() }
 })
 
+test('the Plan reading carries each registered route\'s middleware, by name and by declared authentication', async () => {
+  const workspace = await createTempWorkspace('guren-route-middleware-')
+  try {
+    await linkWorkspaceCore(workspace.dir)
+    await writeWorkspaceFiles(workspace.dir, {
+      'package.json': '{"type":"module"}',
+      'routes/web.ts': `import { requireAuthenticated, type Router } from '@guren/core'
+
+export function registerWebRoutes(base: Router): void {
+  const router = base.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  router.get('/open', (c) => c.text('ok')).name('open')
+  router.middleware('auth').group((auth) => {
+    auth.get('/guarded', (c) => c.text('ok')).name('guarded')
+  })
+}
+`,
+    })
+    const plan = await loadPlanAppState(workspace.dir)
+    expect(plan.routes).toEqual([
+      { method: 'GET', path: '/open', name: 'open', middleware: [], hasInlineMiddleware: false, authenticationRequired: false },
+      { method: 'GET', path: '/guarded', name: 'guarded', middleware: ['auth'], hasInlineMiddleware: false, authenticationRequired: true },
+    ])
+  } finally { await workspace.cleanup() }
+})
+
 test('registered graph keeps fresh app-only routes while the Plan compatibility reading keeps its registrar', async () => {
   const workspace = await createTempWorkspace('guren-route-authority-')
   try {
@@ -167,7 +194,7 @@ test('registered graph keeps fresh app-only routes while the Plan compatibility 
       'src/main.ts': "import { createApp } from '@guren/core'; export default createApp({ routes(router) { router.get('/app', (c) => c.text('ok')).name('app') } })",
     })
     const plan = await loadPlanAppState(workspace.dir)
-    expect(plan.routes).toEqual([{ method: 'GET', path: '/file', name: 'file' }])
+    expect(plan.routes).toEqual([{ method: 'GET', path: '/file', name: 'file', middleware: [], hasInlineMiddleware: false, authenticationRequired: false }])
     const graph = await loadApplicationGraph({ cwd: workspace.dir })
     expect(graph.nodes.filter((node) => node.kind === 'route').map((node) => node.label)).toEqual(['app'])
     await writeFile(resolve(workspace.dir, 'src/main.ts'), "import { createApp } from '@guren/core'; export default createApp({ routes(router) { router.get('/fresh', (c) => c.text('ok')).name('fresh') } })")

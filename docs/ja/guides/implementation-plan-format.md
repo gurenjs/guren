@@ -95,7 +95,7 @@
 }
 ```
 
-`kind` には `success`、`validation`、`unauthenticated`、`forbidden`、`not-found`、`state` のどれかを書きます。検査はこの種類ごとに振る舞いを数え、validator があるのに `validation` の振る舞いがないルートや、認証が必要なのに `unauthenticated` の振る舞いがないルートを報告します。
+`kind` には `success`、`validation`、`unauthenticated`、`forbidden`、`not-found`、`state` のどれかを書きます。検査は、計画が追加または変更するルートについて、この種類ごとに振る舞いを数えます。validator があるのに `validation` の振る舞いがないルートや、認証が必要なのに `unauthenticated` の振る舞いがないルートを報告します。
 
 `expect` には `status`、`redirect`、`inertia`、`errors`、`database` を書けます。リクエストの `input` とデータベースの値は、`{ "name": "body", "json": "\"Nice post\"" }` のように値を JSON テキストとして書きます。
 
@@ -109,6 +109,25 @@ test("[AC-comments-4] a user cannot delete someone else's comment", async () => 
 ```
 
 Guren は、GET 以外のリクエストに対するリダイレクトを 303 で返します。フォーム送信後にリダイレクトすることを期待する振る舞いには、`"status": 303` と書いてください。
+
+計画の作業より前から成り立っている振る舞いには、`"alreadyHolds": true` を付けます。よくあるのは、計画が変更するルートのうち、いまの時点で認証が必要なものに対する `unauthenticated` の振る舞いです。ゲストはすでにサインインへ送られていて、計画はそれを変えずに保ちます。
+
+```json
+{
+  "id": "AC-comments-6",
+  "description": "A guest is sent to sign in before editing a post.",
+  "kind": "unauthenticated",
+  "actor": "guest",
+  "route": "route.posts.edit",
+  "given": [],
+  "alreadyHolds": true,
+  "expect": { "redirect": "/login" }
+}
+```
+
+`tests` ステップは、実装ができる前にどの振る舞いのテストも失敗することを求めます。すでに成り立っていることのテストは、この時点で失敗できません。印を付けた振る舞いについてはテストがあることだけを確かめ、テストを実行するステップでは引き続き通ることを求めます。認証を計画そのものが追加する場合は印を付けないでください。そのテストは作業が終わるまで失敗するからです。`existing` のルートには、`unauthenticated` の振る舞いはそもそも要りません。
+
+`plan:render` は、実装ができる前にテストが通ってしまうかもしれない振る舞いを、ページ上で警告します。Dev Center のレビューにも同じ警告が出ます。準備するものがなく、ルートがすでにあるか、前のタスクがマウントするものです。ルートがすでにあるなら、すでに成り立っていることを守る振る舞いには印を付け、そうでなければ計画した作業でしか満たせない前提や期待を書いてください。前のタスクが追加するルートなら、その振る舞いをそのタスクへ移します。そのタスクの tests ステップで失敗を確かめられるからです。まだ成り立ちようのない振る舞いに印が付いている場合も警告します。ルートがまだ応答しない場合、前のタスクがルートを追加する場合、計画がルートに認証を付けるのに、アプリケーションのいまのルートには認証がない場合です。
 
 ## 質問
 
