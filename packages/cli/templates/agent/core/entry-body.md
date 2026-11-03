@@ -71,8 +71,11 @@ bun run test
 bunx guren gate                    # every CI stage (codegen, typecheck, lint, check, audit, test); exit 0 = done
 ```
 
-Implementation plans: the `plan-write` and `plan-implement` skills. Browser
-verification: the `verify-in-browser` skill. Each lists its own commands.
+Implementation plans: the `plan-write` and `plan-implement` skills. A plan is
+built only after a person approves it, so in a session nobody approves from (a
+non-interactive `claude -p` run, a scheduled job, a request that says nobody will
+review) build the change directly, without one. Browser verification: the
+`verify-in-browser` skill. Each lists its own commands.
 
 ## MCP Server (AI Agent Integration)
 
