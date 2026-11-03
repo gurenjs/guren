@@ -168,7 +168,7 @@ app.use('*', createSessionMiddleware())
 
 セッションは `getSessionFromContext(ctx)` か `ctx.get('guren:session')` で取り出します。
 
-`store` には `SessionStore` そのものか、それを返す関数を渡します。関数はリクエストのたびに呼ばれるので、ランタイムのバインディング（Workers）や接続（Redis）が必要なストアを起動時に組み立てずに済みます。組み立てが重い場合は自分でメモ化してください。複数のストアを宣言して環境ごとに切り替えるには `SessionManager` を使います（[認証](./authentication.md#sessionmanager-でストアを選ぶ)を参照）。
+`store` には `SessionStore` そのものか、それを返す関数を渡します。関数はリクエストのたびに呼ばれるので、ランタイムのバインディング（Workers）や接続（Redis）が必要なストアを起動時に組み立てずに済みます。組み立てが重い場合は自分でメモ化してください。複数のストアを宣言して環境ごとに切り替えるには `SessionManager` を使います（[認証](./sessions.md#sessionmanager-でストアを選ぶ)を参照）。
 
 ### 認証ガード
 

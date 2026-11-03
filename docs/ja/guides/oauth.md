@@ -1,6 +1,6 @@
 # OAuthガイド
 
-Guren には、「GitHub / Google / Discordでサインイン」のようなログインを作るための OAuth 2.0 認可コードフローが入っています。リダイレクト、CSRF対策を含むstateの管理、トークンの交換、プロフィールの取得は Guren が受け持つので、アプリ側で書くのはログイン用のコントローラーと、セッションへのログイン処理だけです。
+Guren には、「GitHub / Google / Discordでサインイン」のようなログインを作るための OAuth 2.0 認可コードフローが入っています。リダイレクト、CSRF対策を含むstateの管理、トークンの交換、プロフィールの取得は Guren が受け持ちます。アプリ側で書くのはログイン用のコントローラーとセッションへのログイン処理だけで、それも `make:auth --oauth` か `guren add oauth` でスキャフォールドできます。
 
 ## コアコンセプト
 
@@ -30,6 +30,94 @@ sequenceDiagram
   A->>A: ユーザーを検索または作成してログイン
   A-->>B: 302 /dashboard
 ```
+
+## OAuth のスキャフォールド
+
+プロバイダーでのサインインを追加する方法は 2 つあります。
+
+| コマンド | 得られるもの |
+|----------|--------------|
+| `make:auth --oauth github,google` | 生成されるログインページと登録ページのボタン。アカウントの作成と紐付けまで実装済み |
+| `guren add oauth` | OAuth マネージャー、コールバックがスタブのコントローラー、ルート。サインインの流れは自分で書く |
+
+同じアプリで両方を実行しないでください。同じファイルを書き出すので、2 回目の実行は失敗します（`--force` を付けると 1 回目のファイルを上書きします）。
+
+### OAuth ログインボタン
+
+`--oauth` にカンマ区切りでプロバイダー名を渡すと、ログインページに「Continue with GitHub / Google / Discord」のボタンが生成されます（`--minimal` でなければ登録ページにも付きます）。
+
+```bash
+bunx guren make:auth --install --oauth github,google
+```
+
+このオプションを付けると、プロバイダーごとの `githubId` / `googleId` カラムが `users` テーブルに追加されます。あわせて、次の 2 つが生成されます。
+
+- `config/oauth.ts` の定義。`OAUTH_<PROVIDER>_CLIENT_ID`・`_CLIENT_SECRET`・`_REDIRECT_URI` がすべて設定されているプロバイダーだけを `OAuthManager` に登録します（キーはコマンドが `config/env.ts` に宣言します。[マネージャーの登録](#マネージャーの登録)を参照）
+- `redirectToProvider` / `callback` アクションを持つ `OAuthController`
+
+コールバックは、そのプロバイダーの ID に紐付いたユーザーでログインさせます。紐付いたユーザーがいない場合は、次のように動きます。
+
+- 同じメールアドレスの既存アカウントがあれば、自動で紐付けずに拒否します。そのアカウントには、作成したときの方法でサインインしてもらいます。
+- プロバイダーがそのアドレスを未検証と報告していれば（Google の `email_verified`、Discord の `verified`）、アカウントを作りません。未検証のまま作成すると、自分のものではないアドレスを名乗れてしまうためです。すでに紐付け済みのアカウントは、あとからプロバイダー側の状態が変わっても影響を受けません。
+- どちらでもなければ、**パスワードを持たない**アカウントを作ってログインさせます。サインアップのときにハッシュの計算は発生せず、生成される `users.passwordHash` カラムも nullable のままです。
+
+`--verify` を付けずに `--oauth` を使うと、プロフィールのメールアドレスは**読み取り専用**で生成されます。`ProfileUpdateSchema` からフィールドが除かれ、`ProfileController.update()` もメールアドレスを受け取らないので、フォームからでも、手で組み立てたリクエストからでも、プロバイダーが保証したアドレスからアカウントを付け替えることはできません。
+
+`--verify` も付けた場合は、メールアドレスを編集できます。その場合、変更後のアドレスは `emailVerifiedAt` がリセットされ、そのアドレスに届いたリンクで確認するまで検証済みになりません。
+
+なお、どのモードでも、アドレスは名乗られるだけで、誰かのために確保されるわけではありません。登録フォームは形式が正しいメールアドレスならすべて受け付け、`users.email` には一意制約があります。そのため、あるアドレスをすでに別のアカウントが使っていると、本来の持ち主が初めて OAuth でサインインしようとしても拒否されます。これが問題になるアプリでは、アドレスの所有を確かめる仕組みを独自に追加してください。
+
+コールバックを認可リダイレクトと結びつける OAuth の state は、データベースに保存します。`--oauth` は `db/schema.ts` に `oauth_states` テーブルを追加し、`users` や `sessions` と同じマイグレーションに含めます。
+
+`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡し、`--install` がその定義を `createApp({ config })` に追加します。これで、リダイレクトとコールバックが別々のプロセスに届いても動きます。Workers、Lambda、Vercel ではそれがふつうです（[Stateストレージ](#stateストレージ)を参照）。
+
+`db/schema.ts` がないアプリでは `stateStore` のない定義が生成され、state はプロセスのメモリに置かれます。
+
+この定義の形で生成されるのは、`config/env.ts` があり、`oauth` をバインドするプロバイダーがない場合です。それ以外の場合は、同じ内容を登録する `app/Providers/OAuthProvider.ts` を生成し、そちらを登録します（`db/schema.ts` がなければ `CoreOAuthServiceProvider` も登録します）。OAuth をサービスプロバイダーで設定しているアプリも、そのまま動きます。詳しくは[サービスプロバイダーを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
+
+### OAuth のみでサインインする
+
+`--oauth` だけを付けた場合は、パスワードでのログインも一緒に生成されます。パスワードでのログインを完全になくすには、`--oauth-only` を付けます。
+
+```bash
+bunx guren make:auth --install --oauth github --oauth-only
+```
+
+`/login` は資格情報の入力欄がない、プロバイダーのボタンだけのページになり、`POST /login` ルートは生成されません。`LoginController` にあるのは `show()` とログアウト用の `destroy()` だけになります。新規登録、パスワードリセット、ログインページとプロフィールページのパスワード欄、`LoginValidator`、デモ用の `UsersSeeder` は、どれも生成されません（サインインに使えないパスワードをシードしても意味がないためです）。
+
+`--oauth-only` を使うには、プロバイダーを 1 つ以上指定した `--oauth` が必要です（そうしないと、サインインする手段のないアプリになります）。`--oauth-only` には `--minimal` の効果も含まれます。プロバイダーから得たメールアドレスはすでに検証済みとして扱えるので、`--verify` は無視されます。
+
+`--verify` なしの `--oauth` と同じく、このモードでもプロフィールのメールアドレスは読み取り専用です（詳しくは上を参照）。
+
+`make:auth` はファイルを書き込むだけで、削除はしません。そのため、パスワード認証を使っている既存のアプリを `--oauth-only --force` で変換すると、以前の登録やリセット関連のファイルがディスク上に残ります（生成時に一覧が表示されます）。これらは削除してください。特に、残った `db/seeders/UsersSeeder.ts` はルートテーブルではなく `db:seed` から読み込まれるので、`routes/auth.ts` を書き換えただけでは無効になりません。
+
+Cloudflare Workers の無料プランのように CPU 時間で課金や制限がかかる実行環境では、この構成をおすすめします。どのハッシュアルゴリズムを選んでも、パスワードを 1 回ハッシュするだけで 1 リクエストあたりの CPU の上限を超えてしまうためです。
+
+### `guren add oauth`
+
+Guren には、OAuth の部品と GitHub、Google、Discord 向けのプリセットがあります。`guren add oauth` は、`make:auth` のページを使わずにそれらを用意します。
+
+```bash
+bunx guren add oauth
+```
+
+次のファイルが生成されます。
+
+- `config/oauth.ts`
+- `app/Http/Controllers/Auth/OAuthController.ts`
+- `routes/oauth.ts`
+
+あわせて、`config/oauth.ts` の定義が `createApp({ config })` に追加されます。この定義が `oauth` マネージャーを登録します。中身は後述の[マネージャーの登録](#マネージャーの登録)で説明します。
+
+`db/schema.ts` には `oauth_states` テーブルが追加され、そのマイグレーションも生成されます。`drizzle-kit` をまだインストールしていない場合は、あとで `bun run db:make` を実行してください。`oauth-states:prune` コマンドも登録されます。
+
+`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡すので、認可リダイレクトを発行したのとは別のプロセスにコールバックが届いても動きます。Workers、Lambda、Vercel ではそれがふつうです（[Stateストレージ](#stateストレージ)を参照）。`CoreOAuthServiceProvider` は state をメモリ上に持つので、登録しません。
+
+`db/schema.ts` がないアプリでは、何も書き込まずにエラーで終了します。
+
+[`--oauth`](#oauth-ログインボタン) と同じく、`config/env.ts` がないアプリや、すでにプロバイダーが `oauth` をバインドしているアプリでは、同じ内容とストアを登録する `app/Providers/OAuthProvider.ts` が生成されます。
+
+`routes/oauth.ts` には 2 つのルートが登録されます。`GET /auth/:provider` にアクセスすると、署名付きの state が作られ、プロバイダーの同意画面にリダイレクトされます。`GET /auth/:provider/callback` では、state を検証してから認可コードをアクセストークンに交換し、プロフィールを取得します。プロバイダーごとの `OAUTH_<PROVIDER>_*` の 3 つのキーは `config/env.ts` に宣言され、値を空にして `.env` にも追加されます。定義がこのキーをどう読むかは[マネージャーの登録](#マネージャーの登録)を参照してください。
 
 ## 基本的な使い方
 
@@ -212,6 +300,8 @@ return this.redirect(redirectTo ?? '/dashboard')
 
 `redirectTo` は自動でサニタイズされます。アプリ内の相対パス（`/settings/billing`）は常に許可されますが、絶対URLはホストが `allowedRedirectHosts` に含まれていなければ捨てられます。ログインしたユーザーを外部サイトへ飛ばすリンクを、攻撃者に作らせないための仕組みです。
 
+プロトコル相対 URL（`//evil.com`）、バックスラッシュを使った変形、http(s) 以外のスキームも捨てられます。捨てられた `redirectTo` は `undefined` になるので、フォールバック先が使われます。
+
 許可するホストのリストは、定義の `stateConfig` に、プロバイダーや state ストアと並べて書きます。
 
 ```ts
@@ -224,6 +314,9 @@ return {
   },
 }
 ```
+
+> [!NOTE]
+> オプトインの `createRedirectSafetyMiddleware` は、独自の `allowedHosts` オプションで `Location` ヘッダーを検証します。両方を使う場合は、2 つの許可リストをそろえてください。食い違っていると、許可したはずの外部リダイレクトがミドルウェアによって `/` に書き換えられます。
 
 ## 組み込みプロバイダー
 

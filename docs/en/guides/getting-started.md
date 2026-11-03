@@ -155,7 +155,7 @@ Then continue through the guides in this order:
 1. [Architecture](./architecture.md)
 2. [Routing Guide](./routing.md)
 3. [Controller Guide](./controllers.md)
-4. [Database Guide](./database.md)
+4. [Database Guide](./database.md), then [Models](./models.md)
 5. [Frontend Guide](./frontend.md)
 6. [Authentication Guide](./authentication.md)
 7. [Testing Guide](./testing.md)

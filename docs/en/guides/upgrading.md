@@ -93,7 +93,7 @@ export class SyncInvoiceJob extends Job<{ url: string }> {
 
 - **What changed**: `Model.query()` carries `@deprecated` and warns once per model. It keeps working until `@guren/orm` 3.0.0. The query builder gains `sum()`, `avg()`, `min()`, `max()`, `exists()`, `toSql()` and `toDrizzle()`, and every one of them applies the model's global scopes.
 - **Who is affected**: Code that calls `Post.query()` or `Post.query(db)`. That query skips every global scope, so on a model with `SoftDeletes` or a tenant scope it has been reading trashed rows and other tenants' rows.
-- **How to migrate**: Run `bunx guren upgrade --check-only` for the call sites. There is no codemod, because the replacement depends on what the query does: an aggregate moves to the builder, and a join moves to `toDrizzle()`. See [Dropping to Drizzle](./database.md#dropping-to-drizzle).
+- **How to migrate**: Run `bunx guren upgrade --check-only` for the call sites. There is no codemod, because the replacement depends on what the query does: an aggregate moves to the builder, and a join moves to `toDrizzle()`. See [Dropping to Drizzle](./models.md#dropping-to-drizzle).
 
 ```ts
 // Before
@@ -169,7 +169,7 @@ export class User extends defineModel(users, { base: AuthenticatableModel }) {
 
 - **What changed**: Models that define `fillable` now throw a `MassAssignmentException` when `create()` / `update()` receives a field outside the allowlist. Previously, extra fields were silently discarded.
 - **Who is affected**: Any code that passes unfiltered objects (spread request bodies, merged defaults) to `create()` / `update()`.
-- **How to migrate**: Pass only allowlisted fields in the data. A column the server chooses, such as the author, goes in the `set` option ([Columns the server chooses](./database.md#columns-the-server-chooses)). Keep `forceCreate()` / `forceUpdate()` for writes that carry no request data, such as seeders and system records.
+- **How to migrate**: Pass only allowlisted fields in the data. A column the server chooses, such as the author, goes in the `set` option ([Columns the server chooses](./models.md#columns-the-server-chooses)). Keep `forceCreate()` / `forceUpdate()` for writes that carry no request data, such as seeders and system records.
 
 ```ts
 // Before: authorId silently dropped when not in fillable

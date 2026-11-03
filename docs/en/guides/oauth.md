@@ -1,6 +1,6 @@
 # OAuth Guide
 
-Guren ships an OAuth 2.0 authorization-code flow for "Sign in with GitHub / Google / Discord" style login. It handles the redirect, CSRF-safe state, token exchange, and profile fetch. You wire it into your own login controller and session.
+Guren ships an OAuth 2.0 authorization-code flow for "Sign in with GitHub / Google / Discord" style login. It handles the redirect, CSRF-safe state, token exchange, and profile fetch. `make:auth --oauth` and `guren add oauth` scaffold it for you, and you can also wire it into a login controller of your own.
 
 ## Core Concepts
 
@@ -30,6 +30,81 @@ sequenceDiagram
   A->>A: find or create the user, then sign in
   A-->>B: 302 /dashboard
 ```
+
+## Scaffolding OAuth
+
+There are two ways to add provider sign-in:
+
+| Command | What you get |
+|---------|--------------|
+| `make:auth --oauth github,google` | Buttons on the generated login and registration pages, with account creation and linking already written |
+| `guren add oauth` | The OAuth manager, a controller with a stub callback, and routes, for a sign-in flow you write yourself |
+
+Don't run both against the same app: they write the same files, so the second run aborts (or, with `--force`, overwrites the first).
+
+### OAuth login buttons
+
+Pass `--oauth` with a comma-separated provider list to also scaffold "Continue with GitHub / Google / Discord" buttons on the login (and, unless `--minimal` is set, registration) pages:
+
+```bash
+bunx guren make:auth --install --oauth github,google
+```
+
+This adds:
+
+- a `githubId` / `googleId` column per provider on the `users` table;
+- a `config/oauth.ts` definition that registers each provider with the `OAuthManager` once its `OAUTH_<PROVIDER>_CLIENT_ID`, `_CLIENT_SECRET` and `_REDIRECT_URI` are all set (the command declares them in `config/env.ts`; see [Registering the Manager](#registering-the-manager));
+- an `OAuthController` with `redirectToProvider` and `callback` actions.
+
+The callback signs in the user linked to that provider ID. Otherwise:
+
+- If an existing account has the same email, it refuses to link them: that account signs in with the method it was created with.
+- If the provider reports the address as unverified (Google's `email_verified`, Discord's `verified`), it refuses to create an account, since an unverified address would let an account claim one it does not own. Existing links are unaffected if a provider's status changes later.
+- Otherwise it creates a **passwordless** account and signs the user in. Nothing is hashed at signup, and the scaffolded `users.passwordHash` column is nullable.
+
+`--oauth` without `--verify` scaffolds the profile email **read-only**: `ProfileUpdateSchema` omits the field and `ProfileController.update()` never reads one, so neither the form nor a hand-crafted request can move an account off the address its provider vouched for. With `--verify` the field stays editable, because a replacement address resets `emailVerifiedAt` and has to be confirmed through a link sent to it. Note that in every mode an address is only *claimed*, never reserved: registration accepts any well-formed email and `users.email` is unique, so an account already holding an address blocks its real owner's first OAuth sign-in. Add your own ownership checks if that matters for your app.
+
+The OAuth state that ties the callback to its authorize redirect is kept in the database. `--oauth` adds an `oauth_states` table to `db/schema.ts`, covered by the same migration as `users` and `sessions`, and `config/oauth.ts` passes `DatabaseOAuthStateStore` as its `stateStore`. `--install` lists the definition in `createApp({ config })`. The redirect and the callback can then reach different processes, which on Workers, Lambda and Vercel is the normal case (see [State Storage](#state-storage)). An app with no `db/schema.ts` gets the definition without a `stateStore`, so state stays in process memory.
+
+The definition is what the command writes once `config/env.ts` exists and no provider binds `oauth`. Otherwise it writes `app/Providers/OAuthProvider.ts` with the same registrations (plus `CoreOAuthServiceProvider` when there is no `db/schema.ts`) and wires that provider instead. Apps that configure OAuth in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
+
+### OAuth as the only sign-in method
+
+`--oauth` still scaffolds password login alongside the buttons. Add `--oauth-only` to drop it entirely:
+
+```bash
+bunx guren make:auth --install --oauth github --oauth-only
+```
+
+`/login` becomes a provider-buttons page with no credential form and no `POST /login` route; `LoginController` keeps only `show()` and `destroy()` (logout). Registration, password reset, the login and profile password fields, `LoginValidator`, and the demo `UsersSeeder` are all skipped: a seeded password could never be used to sign in. `--oauth-only` requires `--oauth` with at least one provider (otherwise the app would have no way in at all) and subsumes `--minimal`; `--verify` is skipped under it, since provider-supplied emails arrive already vouched for.
+
+Like plain `--oauth` without `--verify`, the profile email is read-only in this mode (see above).
+
+`make:auth` only writes the files it scaffolds; it never deletes. Converting an existing password app with `--oauth-only --force` therefore leaves the old registration and reset files behind, and the scaffold prints the list. Delete them: the stale `db/seeders/UsersSeeder.ts` in particular is picked up by `db:seed` rather than by the route table, so a dead `routes/auth.ts` does not neutralize it.
+
+This is the recommended shape for CPU-metered runtimes such as the Cloudflare Workers free tier, where a single password hash exceeds the per-request CPU budget no matter which hashing algorithm you pick.
+
+### `guren add oauth`
+
+Guren ships OAuth primitives plus provider presets for GitHub, Google and Discord. `guren add oauth` sets them up without the `make:auth` pages:
+
+```bash
+bunx guren add oauth
+```
+
+This creates:
+
+- `config/oauth.ts`
+- `app/Http/Controllers/Auth/OAuthController.ts`
+- `routes/oauth.ts`
+
+and lists the `config/oauth.ts` definition in `createApp({ config })`. The definition binds the `oauth` manager; its contents are shown in [Registering the Manager](#registering-the-manager) below.
+
+It also adds an `oauth_states` table to `db/schema.ts` and generates its migration (run `bun run db:make` yourself if `drizzle-kit` is not installed yet), and registers the `oauth-states:prune` command. `config/oauth.ts` passes `DatabaseOAuthStateStore` as its `stateStore`, so the callback does not need to reach the process that issued the authorize redirect, which on Workers, Lambda and Vercel it usually does not (see [State Storage](#state-storage)). `CoreOAuthServiceProvider` is not registered, because its manager keeps state in process memory. The command refuses to run in an app with no `db/schema.ts`, and writes nothing.
+
+As with [`--oauth`](#oauth-login-buttons), an app without `config/env.ts`, or with a provider already binding `oauth`, gets `app/Providers/OAuthProvider.ts` with the same registrations and store instead.
+
+`routes/oauth.ts` registers two routes. `GET /auth/:provider` creates a signed state and redirects to the provider's consent screen; `GET /auth/:provider/callback` validates the state, exchanges the code for a token and fetches the profile. Each provider's three `OAUTH_<PROVIDER>_*` keys are declared in `config/env.ts` and added, blank, to `.env`; [Registering the Manager](#registering-the-manager) shows how the definition reads them.
 
 ## Basic Setup
 
@@ -227,6 +302,8 @@ return this.redirect(redirectTo ?? '/dashboard')
 
 `redirectTo` is sanitized automatically: app-relative paths (`/settings/billing`) always pass, but absolute URLs are dropped unless their host is in `allowedRedirectHosts`. This prevents an attacker from crafting a login link that redirects a user off-site after authenticating.
 
+Protocol-relative URLs (`//evil.com`), backslash variants and non-http schemes are dropped as well. A dropped `redirectTo` comes back as `undefined`, so your fallback applies.
+
 The allowlist goes in the definition's `stateConfig`, next to the providers and the state store:
 
 ```ts
@@ -239,6 +316,9 @@ return {
   },
 }
 ```
+
+> [!NOTE]
+> `createRedirectSafetyMiddleware` (opt-in) validates `Location` headers with its own separate `allowedHosts` option. If you mount it, keep both allowlists in agreement, or the middleware rewrites an approved external redirect to `/`.
 
 ## Built-in Providers
 
