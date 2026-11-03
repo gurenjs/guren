@@ -382,9 +382,24 @@ const next = await ai.agent(SupportTriager).as(user).continue(first.conversation
 // app/Http/Controllers/SupportChatController.ts
 import { Controller } from '@guren/core'
 import { ChatTurnSchema } from '@guren/plugin-ai'
+import { z } from 'zod'
+import { pages } from '@/.guren/pages.gen'
 import { SupportTriager } from '../../Ai/Agents/SupportTriager'
 
+const ChatPageQuerySchema = z.object({ conversation: z.string().min(1).optional() })
+
 export default class SupportChatController extends Controller {
+  async show() {
+    const { conversation } = this.validateQuery(ChatPageQuerySchema)
+    const user = await this.auth.userOrFail<{ id: number }>()
+    const messages = conversation ? await this.make('ai').agent(SupportTriager).as(user).history(conversation) : null
+
+    return this.inertia(pages.support.Chat, {
+      conversationId: messages ? conversation! : null,
+      messages: messages ?? [],
+    })
+  }
+
   async chat(): Promise<Response> {
     const { conversation, message } = await this.validateBody(ChatTurnSchema)
     const user = await this.auth.userOrFail<{ id: number }>()
@@ -397,24 +412,38 @@ export default class SupportChatController extends Controller {
 }
 ```
 
+`show()` はチャットのページを返します。`history(id)` は保存済みの会話を `useChat` のメッセージに変換して返し、そのときの確認は `continue()` と同じ 2 つです。ほかのユーザーが始めた会話や、別のエージェントの会話を指す id には、存在しない id と同じく `null` が返るので、ページはエラーにならずに空のチャットを開きます。ツール呼び出しは結果と合わせて `tool-<name>` パーツになり、ストリーミング中と同じ形で表示されます。失敗したツールのエラー文も、ストリーミング中と同じく伏せられます。`toModelOutput` を定義したツールは、モデルが受け取った出力で戻ります。ほかの方法で読み出した履歴は、`@guren/plugin-ai` の `toUIMessages()` で同じように変換できます。
+
 ページ側では、`@guren/plugin-ai/client` の `createChatTransport()` が 1 ターン分の `{ conversation, message }` だけを送り、それまでのやりとり全体は送りません。ブラウザから送られた記録を受け入れると、モデルやツールが「すでに言ったこと」をブラウザ側で捏造できてしまうため、履歴はサーバー側に置きます。
 
 最初のターンでは `conversation: null` を送ります。コントローラが会話を始め、レスポンスの `X-Guren-Conversation` ヘッダでその id を返すので、トランスポートはそれを覚えておき、以降のターンで送ります。
 
 トランスポートは `XSRF-TOKEN` クッキーを `X-XSRF-TOKEN` ヘッダに入れて送り返すので、ルートは CSRF 保護の内側に置いたままで構いません。
 
+再読み込みするとクエリに会話の id が付いた状態で `show()` に戻るので、ページは保存済みの履歴から始まります。`useChat({ id, messages })` は履歴を表示するだけで、次のターンで送るのは `{ conversation, message }` だけです。トランスポートはマウントごとに一度だけ作るので、Inertia の遷移で別の会話を開いたときは `key` でチャットを作り直します。
+
 ```tsx
+// resources/js/pages/support/Chat.tsx
 import { useChat } from '@ai-sdk/react'
-import { createChatTransport } from '@guren/plugin-ai/client'
+import { createChatTransport, type UIMessage } from '@guren/plugin-ai/client'
 import { useState } from 'react'
 
-export default function SupportChat({ conversationId }: { conversationId: string | null }) {
+interface Props {
+  conversationId: string | null
+  messages: UIMessage[]
+}
+
+export default function Chat(props: Props) {
+  return <Conversation key={props.conversationId ?? 'new'} {...props} />
+}
+
+function Conversation({ conversationId, messages: initialMessages }: Props) {
   const [transport] = useState(() =>
     createChatTransport('/support/chat', {
       conversation: conversationId,
       onConversation: (id) => window.history.replaceState(null, '', `?conversation=${id}`),
     }))
-  const { messages, sendMessage } = useChat({ transport })
+  const { messages, sendMessage } = useChat({ id: conversationId ?? undefined, messages: initialMessages, transport })
   const [draft, setDraft] = useState('')
 
   return (
@@ -430,12 +459,11 @@ export default function SupportChat({ conversationId }: { conversationId: string
 }
 ```
 
-`useChat` を使うには、`ai` 7 と対になる `@ai-sdk/react` 4.x をアプリにインストールしてください。履歴をサーバー側に置くため、次の 4 つの制約があります。
+`useChat` を使うには、`ai` 7 と対になる `@ai-sdk/react` 4.x をアプリにインストールしてください。履歴をサーバー側に置くため、次の 3 つの制約があります。
 
 - チャットには会話ストアが必要です。状態を持たない形では使えません。
 - `output` を宣言したエージェントはストリーミングできません。JSON がただのテキストとしてチャットに届いてしまうからです。そのエージェントには `prompt()` を使ってください。
 - トランスポートは、メッセージの再生成と、ファイルを添付したユーザーメッセージを受け付けません。
-- 保存済みの履歴を `useChat` のメッセージに戻す変換は、プラグインにはありません。会話の途中でページを再読み込みすると、メッセージの一覧は空から始まりますが、サーバー側では同じ会話が続きます。
 
 `signal` で中断したリクエストは、何も保存しません。回答のストリーミングが始まった後で保存に失敗した場合は、ステータスコードをもう送ってしまっているので、ログに記録されます。
 
