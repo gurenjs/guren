@@ -144,8 +144,10 @@ export function planVisit(
   if (match.tool.inputBodyNested) {
     if (body.value !== undefined) args.set('body', body.value)
   } else if (isRecord(body.value)) {
+    // The URL names the record: a body carrying a whole record (`useForm(post)`) must not
+    // move a path parameter, which `buildToolRequest()` writes back into the path.
     for (const [key, value] of Object.entries(body.value)) {
-      if (key !== '_method') args.set(key, value)
+      if (key !== '_method' && !Object.hasOwn(match.params, key)) args.set(key, value)
     }
   }
   return { kind: 'call', tool: match.tool, method: spoofed, path, arguments: Object.fromEntries(args) }
@@ -170,6 +172,8 @@ export interface BridgeDeps {
   /** Open an absolute URL in the browser; the visit settles without changing the page. */
   handOff(url: string): void
   pendingApproval(visit: PendingApprovalVisit): void
+  /** A visit the view could not carry out, with the application's URL for the page it stays on. */
+  refused?(refusal: { message: string; url?: string }): void
 }
 
 type Answer = { kind: 'page'; page: Page } | { kind: 'settled' }
@@ -225,7 +229,13 @@ async function visit(
       : refuse(deps, bag, 'This action is not available here. Open the page in the application to continue.')
   }
 
-  const result = await deps.call(plan.tool.toolName, plan.arguments)
+  let result: ToolResultLike
+  try {
+    result = await deps.call(plan.tool.toolName, plan.arguments)
+  } catch (error) {
+    // The host refused the call, the user declined it, or the connection dropped.
+    return refuse(deps, bag, error instanceof Error && error.message ? error.message : 'The host could not run this action.')
+  }
   const { response, page } = readToolResult(result)
   if (!response || response.contract !== MCP_APP_CONTRACT) {
     return plan.method === 'GET'
@@ -267,6 +277,8 @@ function handOff(deps: BridgeDeps, url: string): Answer {
 }
 
 function refuse(deps: BridgeDeps, bag: string | undefined, message: string): Answer {
+  const current = deps.currentPage()
+  deps.refused?.({ message, url: current ? appUrl(current.url, deps.origins()) : undefined })
   return errorsPage(deps, bag, { [MCP_APP_ERROR_KEY]: message })
 }
 

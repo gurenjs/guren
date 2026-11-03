@@ -82,6 +82,11 @@ describe('planVisit', () => {
     expect((plan as { arguments: Record<string, unknown> }).arguments).not.toHaveProperty('_method')
   })
 
+  it('keeps the record the URL names when the body carries another id', () => {
+    const plan = planVisit(catalogue, 'put', '/posts/12', { id: 13, title: 'New' }, origins)
+    expect(plan).toMatchObject({ kind: 'call', arguments: { id: '12', title: 'New' } })
+  })
+
   it('passes a nested body under "body"', () => {
     const plan = planVisit(catalogue, 'put', '/posts/1/tags', ['a', 'b'], origins)
     expect(plan).toMatchObject({ kind: 'call', arguments: { id: '1', body: ['a', 'b'] } })
@@ -193,6 +198,19 @@ describe('createMcpAppHttpClient', () => {
     answers.set('posts.update', { _meta: { 'dev.guren/response': { contract: MCP_APP_CONTRACT, outcome: 'failed', message: 'Boom.' } } })
     const response = await send({ method: 'put', url: '/posts/12', data: {} })
     expect(JSON.parse(response.data).props.errors).toEqual({ mcp: 'Boom.' })
+  })
+
+  it('stays on the current page when the host refuses the call', async () => {
+    const refusals: unknown[] = []
+    const client = createMcpAppHttpClient(deps({
+      call: async () => {
+        throw new Error('The user declined the tool call.')
+      },
+      refused: (refusal) => refusals.push(refusal),
+    }))
+    const response = await client.request({ method: 'put', url: '/posts/12', data: {} } as HttpRequestConfig)
+    expect(JSON.parse(response.data)).toMatchObject({ url: '/posts/12', props: { errors: { mcp: 'The user declined the tool call.' } } })
+    expect(refusals).toEqual([{ message: 'The user declined the tool call.', url: `${APP}/posts/12` }])
   })
 
   it('opens an unmatched GET in the browser and refuses an unmatched mutation', async () => {

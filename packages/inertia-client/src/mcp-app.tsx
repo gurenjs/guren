@@ -76,6 +76,12 @@ export interface McpAppState {
   pendingApproval?: PendingApproval
   /** A URL the host could not open (no `openLinks`), for the page to show. */
   handOff?: string
+  /**
+   * The last visit the view could not carry out. It also lands in the page's
+   * `errors.mcp`, which a page written for the browser never shows, so a layout
+   * can render this with a link to `url`, the page in the application.
+   */
+  refusal?: { message: string; url?: string }
   sendMessage(params: unknown): Promise<unknown>
   updateModelContext(params: unknown): Promise<unknown>
   openLink(url: string): Promise<unknown>
@@ -180,6 +186,7 @@ export async function startMcpApp(options: StartMcpAppOptions): Promise<unknown>
       }
     },
     pendingApproval: (visit) => watchApproval(host, visit),
+    refused: (refusal) => update({ refusal }),
   })
   return mountInertiaApp({ ...options, resolve }, page, http)
 }
