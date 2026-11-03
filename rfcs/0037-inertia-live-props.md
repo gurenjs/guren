@@ -2,7 +2,10 @@
 
 **Author:** Urata Daiki (@7nohe)
 **Date:** 2026-11-03
-**Status:** Draft
+**Status:** Accepted (2026-11-03; the standard two-week discussion window was
+shortened by the deciding maintainer, after a Codex review whose eleven
+findings are addressed in PR #1299. The open questions stay open for the
+implementation PRs to settle.)
 
 > Inertia 3.11.0 refreshes a page prop with a partial reload whenever a
 > broadcast event names it. The server lists, per prop, the channels and event
