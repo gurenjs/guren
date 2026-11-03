@@ -86,8 +86,8 @@ export function startInertiaClient(options: StartInertiaClientOptions): Promise<
   return mountInertiaApp(options, initialPage)
 }
 
-/** Both entry points mount through here; without `http` Inertia keeps its own XHR client. */
-function mountInertiaApp(options: StartInertiaClientOptions, page: Page, http?: HttpClient): Promise<unknown> {
+/** Every entry point mounts through here (the MCP App's too); without `http` Inertia keeps its own XHR client. */
+export function mountInertiaApp(options: StartInertiaClientOptions, page: Page, http?: HttpClient): Promise<unknown> {
   const resolve =
     options.resolve ??
     createPagesResolverFactory({
