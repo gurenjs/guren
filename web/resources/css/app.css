@@ -1515,14 +1515,25 @@ pre:hover .docs-copy-btn,
 }
 
 /* ─── Doc card hover ─── */
-.docs-card {
-  transition: all 0.2s ease;
+/* ─── Docs index: the three ways in, and the directory of pages ─── */
+.docs-entry,
+.docs-index-link {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: background-color 150ms ease, outline-color 150ms ease;
 }
 
-.docs-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--docs-shadow-floating);
-  border-color: var(--docs-accent-strong) !important;
+.docs-entry:hover {
+  background-color: var(--docs-surface-raised);
+}
+
+.docs-index-link:hover {
+  background-color: var(--docs-accent-tint);
+}
+
+.docs-entry:focus-visible,
+.docs-index-link:focus-visible {
+  outline-color: var(--docs-accent-strong);
 }
 
 /* Color-mode toggle icons on server-rendered content pages (app/View/Header):
