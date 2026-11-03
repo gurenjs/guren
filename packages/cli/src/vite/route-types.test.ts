@@ -1,9 +1,9 @@
 import { describe, it, test, expect, beforeEach, afterEach } from 'bun:test'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { HmrContext, Logger, Plugin, ResolvedConfig, ViteDevServer } from 'vite'
+import type { ConfigEnv, HmrContext, Logger, Plugin, ResolvedConfig, UserConfig, ViteDevServer } from 'vite'
 import { resolveCodegenCommand, routeTypesPlugin, type RouteTypesPluginOptions } from './route-types'
 
 const CODEGEN_TAIL = ['codegen', '--force']
@@ -115,6 +115,18 @@ describe('routeTypesPlugin', () => {
     }
     return runs
   }
+
+  it('should have Vite pre-bundle the component catalog\'s packages when serving, leaving its entries alone', async () => {
+    const config = (plugin: Plugin, command: ConfigEnv['command']) =>
+      (plugin.config as (config: UserConfig, env: ConfigEnv) => Promise<UserConfig | undefined>)({ root: tempDir }, { command, mode: 'development' })
+    await mkdir(join(tempDir, 'app/resources/js/components/ui'), { recursive: true })
+    await writeFile(join(tempDir, 'app/resources/js/components/ui/Card.tsx'), "import { z } from 'zod'\n")
+    const served = await config(createPlugin(), 'serve')
+    expect(served?.optimizeDeps?.include).toContain('react-dom/client')
+    expect(served?.optimizeDeps?.entries).toBeUndefined()
+    expect((await config(createPlugin({ appRoot: 'app' }), 'serve'))?.optimizeDeps?.include).toContain('zod')
+    expect(await config(createPlugin(), 'build')).toBeUndefined()
+  })
 
   it('should coalesce events arriving during a run into one follow-up run', async () => {
     const plugin = createPlugin()

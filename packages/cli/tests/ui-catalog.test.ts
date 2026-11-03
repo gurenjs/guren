@@ -8,6 +8,7 @@ import {
   bundleUiCatalogClient,
   readUiCatalog,
   UI_CATALOG_COMPONENT_PREFIX,
+  UI_CATALOG_DEPENDENCIES,
   UI_CATALOG_ENTRY_ID,
   UI_CATALOG_PREVIEW_PATH,
   UI_CATALOG_STYLESHEET_ID,
@@ -16,7 +17,7 @@ import {
   uiCatalogPreviewOrigin,
 } from '../src/ui-catalog'
 import { UI_CATALOG_VARIANTS } from '../src/ui-catalog-variants'
-import { uiCatalogHooks } from '../src/vite/ui-catalog'
+import { uiCatalogHooks, uiCatalogPrebundled } from '../src/vite/ui-catalog'
 
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'guren-ui-catalog-')) })
@@ -102,6 +103,23 @@ describe('the preview entry', () => {
     expect(hooks.resolveId(`${UI_CATALOG_COMPONENT_PREFIX}../../secret`)).toBeUndefined()
   })
 
+  // Found on a request instead, each re-bundles and reloads, and a copy loaded in between can meet a second React.
+  it('has Vite pre-bundle the preview\'s imports and every package a copy imports', async () => {
+    copy('Button')
+    copy('Field')
+    copy('Card', [
+      "import { z } from 'zod'",
+      "import type { Schema } from 'types-only'",
+      "import { helper } from '@/resources/js/lib/helper'",
+      "import { Label } from './Label'",
+      "import { readFileSync } from 'node:fs'",
+      "export { format } from 'date-fns'",
+      'export function Card() { return null }',
+    ].join('\n'))
+    copy('Select', 'export function Select( {')
+    expect([...await uiCatalogPrebundled(root)].sort()).toEqual([...UI_CATALOG_DEPENDENCIES, '@guren/inertia-client/forms', 'zod', 'date-fns'].sort())
+  })
+
   it('answers the preview path with the HTML Vite transformed', async () => {
     const handlers = new Map<string, (req: unknown, res: unknown, next: (error?: unknown) => void) => void>()
     const server = {
@@ -132,6 +150,14 @@ describe('the catalog client', () => {
     const imports = [...bundle.matchAll(/^import .* from "([^"]+)";?$/gmu)].map((match) => match[1]).sort()
     expect(imports).toEqual(['@inertiajs/react', 'react'])
     expect(bundle).toMatch(/export \{[^}]*renderUiCatalog/u)
+  })
+
+  it('lists every package the entry and the client import among the dependencies Vite pre-bundles', () => {
+    copy('Button')
+    const bundle = bundleUiCatalogClient(join(import.meta.dir, '../src/ui-catalog-page'))
+    const sources = [uiCatalogEntrySource(root), bundle].join('\n')
+    const packages = [...sources.matchAll(/^import .*?['"]([^'"]+)['"];?$/gmu)].map((match) => match[1]!).filter((id) => !id.startsWith('virtual:'))
+    expect([...new Set(packages)].sort()).toEqual([...UI_CATALOG_DEPENDENCIES].sort())
   })
 })
 

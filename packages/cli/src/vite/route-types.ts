@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process'
 import { basename, dirname, extname, resolve } from 'node:path'
-import type { HmrContext, Logger, Plugin, ResolvedConfig, ViteDevServer } from 'vite'
+import type { ConfigEnv, HmrContext, Logger, Plugin, ResolvedConfig, UserConfig, ViteDevServer } from 'vite'
 import { IMPORTABLE_EXTENSIONS, MODELS_DIR, RESOURCES_DIR, toPosixRelative, VALIDATORS_DIR } from '../discovery'
 import { MODULE_ENTRY_FILE, MODULE_ROUTES_FILE } from '../import-resolution'
 import { escapeRegExp } from '../utils'
 import { cliEntry } from '../cli-entry'
-import { uiCatalogHooks } from './ui-catalog'
+import { uiCatalogHooks, uiCatalogPrebundled } from './ui-catalog'
 
 export interface RouteTypesPluginOptions {
   /**
@@ -212,6 +212,11 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     name: 'guren-route-types',
     resolveId: catalog.resolveId,
     load: catalog.load,
+    async config(config: UserConfig, env: ConfigEnv) {
+      if (env.command !== 'serve') return undefined
+      const root = resolve(config.root ?? process.cwd(), options.appRoot ?? '.')
+      return { optimizeDeps: { include: await uiCatalogPrebundled(root) } }
+    },
     async configResolved(config: ResolvedConfig) {
       appRoot = resolve(config.root, options.appRoot ?? '.')
       logger = config.logger
