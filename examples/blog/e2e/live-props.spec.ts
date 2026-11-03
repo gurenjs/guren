@@ -4,12 +4,28 @@ import { gotoHydrated, waitForHydrated } from './helpers.js'
 // A guest in its own context watches while the signed-in author writes. The
 // marker survives only if the watcher's page was never reloaded, so a passing
 // assertion means the change arrived through a live prop's partial reload.
-async function openWatcher(browser: Browser, path: string): Promise<Page> {
+async function openWatcher(browser: Browser, path: string, channel: string): Promise<Page> {
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } })
   const watcher = await context.newPage()
-  const socketOpened = watcher.waitForEvent('websocket', (socket) => socket.url().includes('/broadcasting/socket'))
+  // An event sent before the channel is subscribed never arrives, so wait for the server to confirm it.
+  const subscribed = new Promise<void>((resolve) => {
+    watcher.on('websocket', (socket) => {
+      socket.on('framereceived', ({ payload }) => {
+        let frame: { event?: string; data?: { channel?: string; subscribed?: boolean; channels?: string[] } }
+        try {
+          frame = JSON.parse(String(payload))
+        } catch {
+          return
+        }
+        if (
+          (frame.event === 'subscription' && frame.data?.channel === channel && frame.data.subscribed)
+          || (frame.event === 'connected' && frame.data?.channels?.includes(channel))
+        ) resolve()
+      })
+    })
+  })
   await gotoHydrated(watcher, path)
-  await socketOpened
+  await subscribed
   await watcher.evaluate(() => {
     (window as unknown as { liveMarker: string }).liveMarker = 'not reloaded'
   })
@@ -37,7 +53,7 @@ test.describe('Live props', () => {
   test.describe.configure({ mode: 'serial' })
 
   test('a new post appears on an open posts index', async ({ browser, page }) => {
-    const watcher = await openWatcher(browser, '/posts')
+    const watcher = await openWatcher(browser, '/posts', 'posts')
     const title = `Live Index Post ${Date.now()}`
 
     await createPost(page, title)
@@ -51,7 +67,8 @@ test.describe('Live props', () => {
     const originalTitle = `Live Show Post ${Date.now()}`
     const updatedTitle = `${originalTitle} Edited`
     const postUrl = await createPost(page, originalTitle)
-    const watcher = await openWatcher(browser, new URL(postUrl).pathname)
+    const postPath = new URL(postUrl).pathname
+    const watcher = await openWatcher(browser, postPath, `posts.${postPath.split('/').pop()}`)
     await expect(watcher.getByRole('heading', { name: originalTitle })).toBeVisible()
 
     await gotoHydrated(page, `${postUrl}/edit`)

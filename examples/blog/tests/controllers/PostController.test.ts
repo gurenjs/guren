@@ -22,6 +22,7 @@ const {
   mockGetPaginatedPosts,
   mockInvalidatePost,
   mockEmit,
+  mockBroadcastEvent,
   MockPostCacheService,
 } = vi.hoisted(() => ({
   mockFindOrFail: vi.fn(),
@@ -35,6 +36,7 @@ const {
   mockGetPaginatedPosts: vi.fn(),
   mockInvalidatePost: vi.fn(),
   mockEmit: vi.fn(),
+  mockBroadcastEvent: vi.fn(),
   // vitest 4 refuses to `new` a mock whose implementation is an arrow function.
   MockPostCacheService: vi.fn().mockImplementation(function () {
     return {
@@ -102,6 +104,16 @@ vi.mock('@guren/core', async () => {
 })
 
 import PostController from '../../app/Http/Controllers/PostController.js'
+import { PostsChanged } from '../../app/Events/PostsChanged.js'
+import { PostUpdated } from '../../app/Events/PostUpdated.js'
+
+/** The events each broadcastEvent() call sent, as `name on channels`, in call order. */
+function broadcastsSent(): string[] {
+  return mockBroadcastEvent.mock.calls.map(([event]) => {
+    const sent = event as PostsChanged | PostUpdated
+    return `${sent.eventName} on ${sent.broadcastOn().join(',')}`
+  })
+}
 
 type MockAuth = {
   user: ReturnType<typeof vi.fn>
@@ -185,6 +197,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -219,6 +232,8 @@ describe('PostController', () => {
         url: '/posts?page=1',
         active: true,
       })
+      const postsListener = { listeners: [{ channel: { name: 'posts', type: 'public' }, events: ['PostsChanged'] }] }
+      expect((payload as { liveProps?: unknown }).liveProps).toEqual({ data: postsListener, pagination: postsListener })
     })
 
     it('returns page 1 when no page param provided', async () => {
@@ -229,6 +244,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -245,6 +261,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -259,6 +276,7 @@ describe('PostController', () => {
       const ctx = createControllerContext('http://blog.test/posts', {}, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -279,6 +297,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
 
@@ -302,6 +321,9 @@ describe('PostController', () => {
           private: 'posts.1',
         },
       })
+      expect((payload as { liveProps?: unknown }).liveProps).toEqual({
+        post: { listeners: [{ channel: { name: 'posts.1', type: 'public' }, events: ['PostUpdated'] }] },
+      })
     })
 
     it('returns 404 for non-existent post', async () => {
@@ -312,6 +334,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
       setRouteParams(ctx, { id: '999' })
 
@@ -326,6 +349,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
       setRouteParams(ctx, { id: 'abc' })
 
@@ -342,6 +366,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -366,6 +391,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
         ...storeInput,
       }) as unknown as Context
 
@@ -378,6 +404,35 @@ describe('PostController', () => {
         { title: 'New Post', excerpt: 'Excerpt', body: 'Body content' },
         { set: { authorId: 1 } },
       )
+      expect(broadcastsSent()).toEqual(['PostsChanged on posts'])
+      expect(mockBroadcastEvent).toHaveBeenCalledWith(expect.any(PostsChanged), { except: ctx })
+    })
+
+    it('still announces the created post when its cover is rejected', async () => {
+      const mockUser = { id: 1, name: 'John Doe' }
+      mockCreate.mockResolvedValue({ id: 42, title: 'New Post', excerpt: 'Excerpt', body: 'Body content', authorId: 1 })
+      mockAttach.mockRejectedValueOnce(Object.assign(new Error('The cover must be an image.'), { statusCode: 422 }))
+      const auth = createAuthStub(mockUser)
+
+      const formData = new FormData()
+      formData.append('title', 'New Post')
+      formData.append('excerpt', 'Excerpt')
+      formData.append('body', 'Body content')
+      formData.append('cover', new File(['not an image'], 'cover.txt', { type: 'text/plain' }))
+
+      const ctx = createControllerContext('http://blog.test/posts', {
+        method: 'POST',
+        body: formData,
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
+        ...storeInput,
+      }) as unknown as Context
+
+      const controller = createControllerWithAuth(PostController, auth, ctx)
+      await expect(controller.store()).rejects.toMatchObject({ statusCode: 422 })
+      expect(broadcastsSent()).toEqual(['PostsChanged on posts'])
     })
 
     it('attaches an uploaded cover to the created post', async () => {
@@ -399,6 +454,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
         ...storeInput,
       }) as unknown as Context
 
@@ -428,6 +484,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
         ...storeInput,
       }) as unknown as Context
 
@@ -447,11 +504,13 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
         ...storeInput,
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
       await expect(controller.store()).rejects.toMatchObject({ statusCode: 401, message: 'Unauthenticated.' })
+      expect(mockBroadcastEvent).not.toHaveBeenCalled()
     })
   })
 
@@ -464,6 +523,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
 
@@ -485,6 +545,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
 
@@ -501,6 +562,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
       setRouteParams(ctx, { id: '999' })
 
@@ -521,6 +583,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
         ...updateInput,
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
@@ -536,6 +599,8 @@ describe('PostController', () => {
         body: 'Updated body',
       })
       expect(mockAttach).not.toHaveBeenCalled()
+      expect(broadcastsSent()).toEqual(['PostsChanged on posts', 'PostUpdated on posts.1'])
+      expect(mockBroadcastEvent).toHaveBeenCalledWith(expect.any(PostUpdated), { except: ctx })
     })
 
     it('replaces the cover when a new file is uploaded', async () => {
@@ -556,6 +621,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
         ...updateInput,
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
@@ -583,6 +649,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
         ...updateInput,
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
@@ -592,6 +659,7 @@ describe('PostController', () => {
       expect(mockUpdate).not.toHaveBeenCalled()
       expect(mockInvalidatePost).not.toHaveBeenCalled()
       expect(mockAttach).not.toHaveBeenCalled()
+      expect(mockBroadcastEvent).not.toHaveBeenCalled()
     })
 
     it('returns 404 for non-existent post', async () => {
@@ -604,6 +672,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
         ...updateInput,
       }) as unknown as Context
       setRouteParams(ctx, { id: '999' })
@@ -624,6 +693,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
 
@@ -639,6 +709,7 @@ describe('PostController', () => {
         mockDelete.mock.invocationCallOrder[0]!,
       )
       expect(mockInvalidatePost).toHaveBeenCalledWith(1)
+      expect(broadcastsSent()).toEqual(['PostsChanged on posts'])
     })
 
     it('returns 403 when the requester is not the author', async () => {
@@ -649,6 +720,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
 
@@ -666,6 +738,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
       }) as unknown as Context
       setRouteParams(ctx, { id: '999' })
 

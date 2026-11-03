@@ -9,10 +9,10 @@ export class PostUpdated extends Event {
   }
 
   broadcastOn(): string[] {
-    return [`private-posts.${this.postId}`]
+    return [`posts.${this.postId}`]
   }
 
-  // Everyone on the channel receives the payload, so it carries the id only.
+  // A public channel, like the page it refreshes, so the payload carries the id only.
   broadcastWith(): Record<string, unknown> {
     return { postId: this.postId }
   }
