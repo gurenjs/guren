@@ -1,0 +1,5 @@
+---
+'@guren/cli': patch
+---
+
+The agent harness `guren agent:init` installs now describes what an app can reach. The controllers rule says which Inertia props are shared (flashed `errors`, `_i18n`, and `auth.user` only where `app/Providers/AuthProvider.ts` exists) instead of claiming a fresh app shares none, and shows the whole provider a policy is registered in, `register()` included, since `ServiceProvider` declares it abstract and a boot-only provider did not compile. The `guren-api` skill points each subsystem at its guide on guren.dev and the installed declarations rather than at framework source paths no app has, with short signatures for jobs, mail and events. New entries cover `useRouteForm()` with route `params` and a shared form typed as `RouteForm<…>`, `Model.inTransaction(trx)` beside `transaction()`, `authorize(ability, [Model, context])` with a plain object, async policy abilities and `denyAsNotFound()`, and reading what a faked mail sent with `sent()` / `sentTo()`. Run `bunx guren agent:sync` to pick them up.

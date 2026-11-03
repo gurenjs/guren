@@ -105,8 +105,16 @@ using _queue = app.container.fake('queue', createQueueManager({ default: 'fake',
 
 // ...make the request, then:
 mail.assertSentTo('ada@example.com')
+const [receipt] = mail.sentTo('ada@example.com')   // mail.sent() for every one
+expect(receipt?.message.subject).toBe('Your receipt')
 queue.assertPushed<ProcessOrderPayload>(ProcessOrderJob, (payload) => payload.sku === 'book')
 ```
+
+`sent()` / `sentTo(email)` return `{ message, timestamp }[]`, the built
+message being `{ to, from?, cc?, bcc?, subject, text?, html?, attachments? }`
+(addresses as `{ email, name? }`). Assertions besides `assertSentTo`:
+`assertSent(fn?)`, `assertSentTimes(n)`, `assertNothingSent()`,
+`assertSentWithSubject()`, `assertSentWithBodyContaining()`.
 
 Events: `const events = fakeEvent()`, then
 `using _events = app.container.fake('events', events.getManager())` and

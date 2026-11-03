@@ -58,6 +58,22 @@ await Post.whereNull('publishedAt').get()   // not where('publishedAt', 'is null
 await Post.where({ authorId }).count()      // count() is on the query builder, not the model
 ```
 
+## Transactions
+
+```typescript
+await Order.transaction(async (trx, txOrder) => {   // a throw rolls everything back
+  const order = await txOrder.create(data, { set: { userId } })
+  await OrderLine.inTransaction(trx).create({ orderId: order.id, sku })
+})
+```
+
+`txOrder` is `Order.inTransaction(trx)`: `all`, `find`, `findOrFail`, `first`,
+`where`, `newQuery`, `create`, `update`, `delete`, `paginate`, each bound to
+`trx`. The statics it lacks (`forceCreate`, `findWith`, `restore`, …) take
+`{ trx }` in their trailing options argument. A model call in the callback
+joins the open transaction even without either; pass them to make that
+explicit, e.g. to a helper the callback calls.
+
 ## Pagination
 
 ```typescript
