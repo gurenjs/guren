@@ -366,6 +366,8 @@ export default defineStorageConfig((env) => {
 
 開発では `STORAGE_DISK=local`、本番では `STORAGE_DISK=s3` にします。コードは書き換えずに済み、`storage.disk()` が選んだほうのディスクを返します。`STORAGE_DISK` は `guren add storage` が宣言しますが、`S3_BUCKET` は自分で `config/env.ts` に宣言してください。
 
+`guren add storage` は、`.gitignore` に `storage/app/` と `public/storage` も追加します。どちらも、アプリが動いている間に書き込むファイルの置き場所です（`local` ディスクに保存したアップロード、`public` ディスク、`guren storage:link` が作るリンク）。追加しないと、ユーザーがアップロードしたファイルまで `git add -A` でコミットされてしまいます。コマンドをもう一度実行しても、同じ行が重ねて追加されることはありません。ロゴのようにアプリと一緒にコミットするファイルは、`public/storage` ではなく `public/` のほかの場所に置いてください。
+
 > **アップロードを受け取るディスクを、`public/` の下や `guren storage:link` が公開する場所に置かないでください。** 配信されるディレクトリの下にあるファイルは、署名も有効期限も認可のチェックもなしに、URL だけで取得できてしまいます。見知らぬ人がアップロードしたファイルも例外ではありません。アップロードは上の `local` のようなディスクに保存し、[attachments の配信ルート](./attachments.md)から渡してください。ディスクがそのように公開される attachments の設定は、`guren check` が失敗として報告します。
 
 この形には、注意点が 2 つあります。

@@ -38,10 +38,10 @@ bun run db:make create_attachments
 bun run db:migrate
 ```
 
-手で加える変更が 2 つあります。1 つ目は `.gitignore` です。ディスクにはコミットしてはいけないファイルが入るので、そのディレクトリを追加します。
+手で加える変更が 2 つあります。1 つ目は `.gitignore` です。ディスクにはコミットしてはいけないファイルが入るので、次の 2 行が `.gitignore` に入っていることを確かめます（新しい CLI は自分で追加します。下のコマンドは足りない行だけを追加します）。
 
 ```bash run
-printf 'storage/app/\npublic/storage/\n' >> .gitignore
+for line in 'storage/app/' 'public/storage'; do grep -qxF "$line" .gitignore || echo "$line" >> .gitignore; done
 ```
 
 2 つ目は、config にモデルのマップを足すことです。どのモデルが attachments を持つかはジェネレーターには分からないので、この部分は自動では書かれません。prune コマンドはこのマップを使って、attachment の持ち主がまだ存在するかを確かめます。

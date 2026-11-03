@@ -34,10 +34,10 @@ bun run db:make create_attachments
 bun run db:migrate
 ```
 
-Two hand edits. The disks hold files nothing should commit:
+Two hand edits. The disks hold files nothing should commit, so make sure these two lines are in `.gitignore` (a recent CLI adds them itself, and the command below adds only what is missing):
 
 ```bash run
-printf 'storage/app/\npublic/storage/\n' >> .gitignore
+for line in 'storage/app/' 'public/storage'; do grep -qxF "$line" .gitignore || echo "$line" >> .gitignore; done
 ```
 
 And the config needs a model map the generator cannot write for you, because it does not know which of your models will carry attachments. The prune command needs the map to check that an attachment's owner still exists. The block below adds `Model.morphMap` at the end and the `Model` and `Post` imports it needs, and trims the generator's longer comments down to the three decisions this section explains:

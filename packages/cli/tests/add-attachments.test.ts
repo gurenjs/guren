@@ -82,6 +82,14 @@ describe('guren add attachments', () => {
     expect(existsSync(resolve('app/Providers/StorageProvider.ts'))).toBe(true)
   })
 
+  it('git-ignores the storage disks of the storage blueprint it installs first', async () => {
+    await seedApp(PG_SCHEMA_FIXTURE)
+
+    await runBlueprint('attachments', {})
+
+    expect((await readFile(resolve('.gitignore'), 'utf8')).split('\n')).toEqual(['storage/app/', 'public/storage', ''])
+  })
+
   it('produces a config the attachments check accepts', async () => {
     await seedApp(PG_SCHEMA_FIXTURE, { routes: WEB_ROUTES })
 
