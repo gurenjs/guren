@@ -331,12 +331,25 @@ describe('liveTransport()', () => {
     expect(sockets[1]!.sent.map((message) => message.channel)).toEqual(['private-orders.1', 'news'])
   })
 
+  it('quotes a name from the wire in a warning, so it cannot forge a console line', () => {
+    const transport = create()
+    transport.subscribe(order, 'OrderUpdated', () => {})
+    const [socket] = sockets
+    socket!.connected()
+
+    socket!.answer('private-orders.1\n[guren] forged line', false)
+
+    const message = String(warn.mock.calls[0]?.[0])
+    expect(message).toContain('"private-orders.1\\n[guren] forged line"')
+    expect(message).not.toContain('\n')
+  })
+
   it('subscribes nothing for a channel type Guren does not have', () => {
     const transport = create()
     const off = transport.subscribe({ name: 'x', type: 'encrypted-private' }, 'E', () => {})
 
     off()
     expect(sockets).toHaveLength(0)
-    expect(String(warn.mock.calls[0]?.[0])).toContain('no encrypted-private channels')
+    expect(String(warn.mock.calls[0]?.[0])).toContain('no "encrypted-private" channels')
   })
 })

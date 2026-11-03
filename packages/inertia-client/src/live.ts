@@ -153,6 +153,9 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions & { t
   /** A fresh socket is up once every message sent on it, the replay and any added since, is answered. */
   let settling = false
 
+  /** A value from the wire or the page in a warning: JSON-quoted, so no newline or control character reaches the console, and capped. */
+  const quoted = (value: unknown): string => JSON.stringify(String(value).slice(0, 200))
+
   const warnOnce = (key: string, message: string): void => {
     if (warned.has(key)) return
     warned.add(key)
@@ -206,7 +209,7 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions & { t
     outstanding = Math.max(0, outstanding - 1)
     const answer = (data ?? {}) as { channel?: unknown; authorized?: unknown }
     if (answer.authorized === false && typeof answer.channel === 'string') {
-      warnOnce(`refused:${answer.channel}`, `The server refused the live channel "${answer.channel}"; props listening on it will not refresh.`)
+      warnOnce(`refused:${answer.channel}`, `The server refused the live channel ${quoted(answer.channel)}; props listening on it will not refresh.`)
     }
     flush()
     settleIfAnswered()
@@ -214,7 +217,7 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions & { t
 
   const onEvent = (frame: Frame): void => {
     if (frame.channel === undefined) {
-      warnOnce('no-channel', `"${frame.event}" arrived without a channel, so no live prop can be refreshed by it; live props need @guren/server 2.36 or later.`)
+      warnOnce('no-channel', `${quoted(frame.event)} arrived without a channel, so no live prop can be refreshed by it; live props need @guren/server 2.36 or later.`)
       return
     }
     const listeners = handlers.get(`${frame.channel}::${frame.event}`)
@@ -226,7 +229,7 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions & { t
   const scheduleReconnect = (): void => {
     if (stopped || channelCounts.size === 0 || reconnectTimer) return
     if (gaveUp()) {
-      warnOnce('gave-up', `Could not open ${url} after ${MAX_FAILED_ATTEMPTS} attempts; live props stay as rendered. Serve the app with Application.listen() on Bun and mount broadcast.webSocketMiddleware() there.`)
+      warnOnce('gave-up', `Could not open ${quoted(url)} after ${MAX_FAILED_ATTEMPTS} attempts; live props stay as rendered. Serve the app with Application.listen() on Bun and mount broadcast.webSocketMiddleware() there.`)
       return
     }
     const delay = Math.min(RECONNECT_MAX, RECONNECT_BASE * 2 ** Math.max(0, failedAttempts - 1))
@@ -243,7 +246,7 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions & { t
       current = createSocket(socketUrl(url))
     } catch (error) {
       failedAttempts += 1
-      warnOnce('open-failed', `Could not open ${url}: ${String(error)}`)
+      warnOnce('open-failed', `Could not open ${quoted(url)}: ${quoted(error)}`)
       scheduleReconnect()
       return
     }
@@ -326,7 +329,7 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions & { t
     subscribe(channel, event, handler) {
       const wire = liveWireName(channel)
       if (wire === undefined) {
-        warnOnce(`type:${channel.type}`, `Guren has no ${channel.type} channels; the live prop listening on "${channel.name}" will not refresh.`)
+        warnOnce(`type:${channel.type}`, `Guren has no ${quoted(channel.type)} channels; the live prop listening on ${quoted(channel.name)} will not refresh.`)
         return () => {}
       }
       const key = `${wire}::${event}`
