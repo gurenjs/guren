@@ -1,11 +1,8 @@
-import type { InteractiveDiagramProps } from './registry.js'
-
-type Locale = InteractiveDiagramProps['locale']
+import type { DocLocale as Locale } from '../../../../config/site.js'
 
 export type StepKind = 'name' | 'function' | 'router'
 
 export interface MiddlewareStep {
-  id: string
   kind: StepKind
   code: string
   where: Record<Locale, string>
@@ -15,7 +12,6 @@ export interface MiddlewareStep {
 /** The middleware guide's "Execution Order" example, one entry per box in its flowchart. */
 export const MIDDLEWARE_STEPS: Record<string, MiddlewareStep> = {
   inlineA: {
-    id: 'inlineA',
     kind: 'function',
     code: '.middleware(inlineA)',
     where: { en: 'outer group', ja: '外側グループ' },
@@ -25,7 +21,6 @@ export const MIDDLEWARE_STEPS: Record<string, MiddlewareStep> = {
     },
   },
   auth: {
-    id: 'auth',
     kind: 'name',
     code: ".middleware('auth')",
     where: { en: 'inner group', ja: '内側グループ' },
@@ -35,7 +30,6 @@ export const MIDDLEWARE_STEPS: Record<string, MiddlewareStep> = {
     },
   },
   inlineB: {
-    id: 'inlineB',
     kind: 'function',
     code: '.middleware(inlineB)',
     where: { en: 'route', ja: 'ルート' },
@@ -45,7 +39,6 @@ export const MIDDLEWARE_STEPS: Record<string, MiddlewareStep> = {
     },
   },
   validation: {
-    id: 'validation',
     kind: 'router',
     code: 'body / params / query',
     where: { en: 'route contract validation', ja: 'ルートコントラクトの検証' },
@@ -55,7 +48,6 @@ export const MIDDLEWARE_STEPS: Record<string, MiddlewareStep> = {
     },
   },
   action: {
-    id: 'action',
     kind: 'router',
     code: 'controller action',
     where: { en: 'the handler', ja: 'ハンドラー' },
@@ -72,8 +64,6 @@ export const ORDERS: Record<Order, string[]> = {
   written: ['inlineA', 'auth', 'inlineB', 'validation', 'action'],
   run: ['auth', 'inlineA', 'inlineB', 'validation', 'action'],
 }
-
-export const PLAY_INTERVAL_MS = 1100
 
 export const LABELS = {
   en: {

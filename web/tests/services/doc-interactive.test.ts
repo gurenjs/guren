@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { htmlToText } from '../../app/Services/search-sections.js'
 import { INTERACTIVE_DIAGRAMS } from '../../config/interactive-diagrams.js'
-import { ORDERS } from '../../resources/js/components/diagrams/middleware-order-steps.js'
+import { MIDDLEWARE_STEPS, ORDERS } from '../../resources/js/components/diagrams/middleware-order-steps.js'
 import { PLAN_LIFECYCLE_STAGES } from '../../resources/js/components/diagrams/plan-lifecycle-stages.js'
 import { INTERACTIVE_DIAGRAM_LOADERS } from '../../resources/js/components/diagrams/registry.js'
 
@@ -64,15 +64,28 @@ describe('interactive diagrams', () => {
     }
   })
 
-  it.each(['en', 'ja'] as const)('upgrades the %s middleware guide over the flowchart it animates', async (locale) => {
+  it.each(['en', 'ja'] as const)('upgrades the %s middleware guide over a flowchart in the same orders', async (locale) => {
     const path = fileURLToPath(new URL(`../../../docs/${locale}/guides/middleware.md`, import.meta.url))
     const html = await renderMarkdownToHtml(readFileSync(path, 'utf8'), { locale, category: 'guides' })
-    const block = /<div class="doc-interactive" data-interactive="middleware-order">([\s\S]*?)<\/div>/u.exec(html)
+    const block = /<div class="doc-interactive" data-interactive="middleware-order"><pre class="mermaid">([\s\S]*?)<\/pre>/u.exec(html)
     expect(block).not.toBeNull()
-    // The flowchart is the no-JS fallback, so it must name the same middleware in the same run order.
-    const fallback = block![1]
-    const positions = ORDERS.run.slice(0, 3).map((id) => fallback.lastIndexOf(id))
-    expect(positions.every((at) => at >= 0)).toBe(true)
-    expect([...positions].sort((a, b) => a - b)).toEqual(positions)
+    // The flowchart is the no-JS fallback: each subgraph's chain must list the diagram's steps in its order.
+    const source = block![1].replace(/&gt;/gu, '>').replace(/&#39;/gu, "'").replace(/&quot;/gu, '"')
+    const labels = new Map([...source.matchAll(/(\w+)\["([^"]*)"\]/gu)].map(([, node, label]) => [node, label]))
+    const chain = (prefix: string) =>
+      new RegExp(`^\\s*(${prefix}\\d(?:\\s*-->\\s*${prefix}\\d)+)\\s*$`, 'mu').exec(source)![1].split(/\s*-->\s*/u)
+    const token = (id: string) => MIDDLEWARE_STEPS[id].code.replace(/^\.middleware\((.*)\)$/u, '$1')
+
+    const run = chain('A')
+    expect(run).toHaveLength(ORDERS.run.length)
+    ORDERS.run.forEach((id, index) => {
+      if (MIDDLEWARE_STEPS[id].kind !== 'router') expect(labels.get(run[index])).toContain(token(id))
+    })
+    expect(labels.get(run[ORDERS.run.indexOf('validation')])).toContain('body / params / query')
+
+    const written = chain('W')
+    expect(written.map((node) => labels.get(node))).toEqual(
+      ORDERS.written.filter((id) => MIDDLEWARE_STEPS[id].kind !== 'router').map((id) => expect.stringContaining(token(id))),
+    )
   })
 })
