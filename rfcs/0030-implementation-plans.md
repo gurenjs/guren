@@ -981,6 +981,49 @@ What shipped (`settleBuiltFindings()` in `plan/validate.ts`, reading
   page pins no failure the plan's own work explains, and the element's card
   shows the finding as a `pass` that says it was built by this plan.
 
+**Amended in implementation (accepting what no behaviour can reach,
+2026-11-03).** No behaviour can reach a command, a side effect or a column
+(§6, the reach rule), so an element of those kinds that no planned property
+lifts closed only by a waiver taken after every step verified. Two
+dogfooding applications needed about twenty waivers each, none of them a
+decision anybody had to think about, and nothing before approval said they
+would be needed. The decision is now taken once, at approval
+(`planElementsWithoutBehaviour()` in `plan/reach.ts`, `plan-approve.ts`,
+`plan/approvals.ts`, `plan-render.ts`):
+
+- The elements are the ones `behaviourCanReach()` leaves out, of a kind no
+  planned property can lift: every command, a side effect the plan adds or
+  alters, and a column it alters. An added or renamed column is left out,
+  since its type, nullability, uniqueness and index match once it is built;
+  so are a dropped element (lifted on its step alone) and an `existing` one.
+- `plan:render` pins them to the page as one advisory warning,
+  `plan:without-behaviour`, grouped by kind, so the person reads the list
+  before approving; the Dev Center's review serves that page, and its approve
+  check prints the list from `plan:approve --dry-run --json`. The warning is
+  appended in `plan-render.ts`, not in `validatePlan()`, so `plan:next`, which
+  prints the non-passing checks, does not repeat it.
+- `plan:approve` prints the list, `--dry-run` included, and records it on the
+  approval entry as `acceptedWithoutBehaviour`, outside the hash like the
+  readings. It is computed from the approved plan alone and never carried
+  from another entry, so a revision accepts again at its own approval and
+  inherits nothing, as with waivers. Re-approving a hash whose entry lacks the
+  field (an approval recorded before this) adds it and replaces nothing,
+  which is how a plan approved earlier gets it.
+- Acceptance comes with approval, with no flag. A person who declines it has
+  no other way to verify these elements, since no plan reference links a
+  behaviour to them: the alternative is the same per-element waiver at the
+  end, or taking the element out of the plan. Approving already means
+  approving the page as rendered, and the list is on that page and in the
+  command's output, so nothing is accepted that the approver was not shown.
+  This is not "approval by silence" in the sense of an open question: the
+  list states the plan's shape, not an assumption about the application. A
+  flag would also change the command the Dev Center copies and every
+  `plan:approve` the docs, the course and the skill print.
+- What is accepted is the behaviour requirement only (§6, the `accepted`
+  state). The element still has to reach its completion state, its step still
+  has to verify, and its files still have to hash as they did, so acceptance
+  never closes a job class nobody wrote.
+
 ### 5. Tasks are derived, not written
 
 The model supplies `tasks[]`: what each slice must achieve, and its acceptance
@@ -1649,6 +1692,7 @@ implementation.
 | `present` | exists, and every planned property the scanners can read matches (for `drop`: is absent, in a file the scanner fully read) | `status` |
 | `wired` | reachable from the application, below | `status` |
 | `verified` | its step's verify commands and behaviours passed, at a fingerprint that still matches | `verify` |
+| `accepted` | as `verified`, for an element no behaviour can reach, which the approval accepted as complete on its step's run (§4, amended) | `verify` |
 | `drifted` | exists and a readable property differs, or a verified fingerprint no longer matches | `status` |
 | `unjudged` | no static signal exists | `status` |
 | `blocked` | cannot be judged or verified here; carries the reason | either |
@@ -1864,6 +1908,7 @@ for some of them:
 | `add` / `alter` / `rename` with a static signal | `wired`, then `verified` |
 | `drop` | `present` (absent), then `verified`; there is nothing to wire |
 | `unjudged` | `verified` on its behaviours alone |
+| one no behaviour can reach, accepted at approval | its completion state, then `accepted` on its step's run alone |
 | `existing` | never part of completion |
 | any | `waived` |
 
@@ -2086,6 +2131,34 @@ each rule was read.
   `view.posts.show` changes only `form`, `actions` and `states`, and its form
   targets a route, which does not carry reach. Both need a waiver, or a
   behaviour with `expect.inertia` on the route that shows the post.
+  **Amended in implementation (the `accepted` state, 2026-11-03).** For a
+  command, an added or altered side effect and an altered column, the
+  waiver is now taken at approval (§4, amended): where the overlay would hold
+  such an element only because no behaviour reaches it, and the approval of
+  the plan's current hash lists it in `acceptedWithoutBehaviour`, it is lifted
+  to `accepted` on the same terms `verified` has (its step's record stands,
+  the element is at its completion state or `unjudged`, every file it rests on
+  is fingerprinted and unchanged), with a note naming the run. Every other
+  hold applies to it unchanged: below its completion state it is `incomplete`,
+  a changed file makes it `drifted`, and nothing of it fingerprinted leaves it
+  held. `verified` keeps its meaning, so a reader can still tell an element a
+  behaviour exercised from one accepted without one. It is a state of its own
+  rather than `waived`, which means accepted incomplete: a waiver lifts an
+  element whatever the readers found and takes it out of its step's judgement,
+  while an accepted element is complete, can still drift, and is judged by its
+  step. Reported as `waived`, the plan document's table and `plan:status`'s
+  summary would show every command and side effect as a deviation, and the
+  status line naming the decision log would point at a log that holds none of
+  them. Its readers are few: `closesPlan()` (`plan:close`, `plan:next`), the
+  summary counts, and the close documents; the `Stop` hook, the docs viewer and
+  the Dev Center read step records, never element states. The record and the step
+  outcome are untouched: `plan:verify` judges an accepted element like any
+  other (it is never in the step's `waived`), so the `Stop` hook and
+  `recordStillHolds()` read as before. A waiver on an accepted element is not
+  needed, as on a `verified` one. Where an approval stands and lacks an element
+  of the list (it was recorded before the field existed), the hold's note and
+  `plan:close`'s remedy name `plan:approve` before the waiver; with no approval
+  (a draft) the note says what it said before.
 - Cause 1, an `alter` completing on a property that already held, is settled
   by the readings recorded at approval (the next amendment).
 
@@ -2134,8 +2207,9 @@ matched when the plan was approved says nothing about the change. What shipped
   That helps only before the work: a planned property that still differs and
   has no reading gets a note naming `plan:approve`. A match with no reading
   does not, since a reading taken then records it as one that already held;
-  the `unjudged` reason sends it to a behaviour that reaches it, or to a
-  waiver where no behaviour can (`behaviourCanReach()`). A draft has no
+  the `unjudged` reason sends it to a behaviour that reaches it, or, where no
+  behaviour can (`behaviourCanReach()`), to its step's verified run under the
+  approval's acceptance (§4, amended) or a waiver. A draft has no
   approval, so its `alter`s count no match; its verification records start
   over at approval anyway.
 - A model's relationship is read as two properties, its type and its target,
@@ -2587,8 +2661,8 @@ with these readings (`packages/cli/src/plan-waive.ts`, `plan/decisions.ts`).
   taken against another hash is reported in the status summary
   (`staleWaivers`) and lifts nothing.
 - A waiver lifts its element to `waived` whatever the readers found, unless
-  the element is already `verified`: verification is a stronger answer than
-  acceptance, so the note then says the waiver is not needed. `plan:status`,
+  the element is already `verified` or `accepted`: its step's verified run is a
+  stronger answer than a waiver, so the note then says the waiver is not needed. `plan:status`,
   `plan:verify` and the Stop hook read the log through the one overlay.
 - `plan:verify` leaves a waived element out of the step's judgement and
   records which ones it left out. A step whose only missing elements are
@@ -2677,7 +2751,8 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
 
 - Completion is judged by `planStatusFile()`, the function `plan:status`
   prints, so the two cannot disagree. Every element outside `existing`, in a
-  section `plan:status` judges, must be `verified` or `waived`; the refusal
+  section `plan:status` judges, must be `verified`, `accepted` or `waived`
+  (`closesPlan()` in `plan/status.ts`, which `plan:next` asks too); the refusal
   names each one that is not and its state. A state file or a decision log
   that will not read refuses too. The plan must carry a baseline, and its
   current hash must be in the approvals beside it: a revision approved under
@@ -2701,6 +2776,15 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   element `plan:verify` cannot fingerprint, are sent to `plan:waive` alone.
   `plan:next`, once every step is verified, lists the same lines
   (`plan/close-remedy.ts`), so the two commands give one piece of advice.
+  **Amended in implementation (2026-11-03).** An element the approval accepted
+  without a behaviour (§4, amended) is sent to its step's `plan:verify` run,
+  as a reached one is; one of the same kinds that an approval stands without
+  accepting is sent to `plan:approve`, which records the acceptance, and only
+  then to the waiver. The plan's document lists the accepted elements under
+  Decisions, after the waivers (or under "No element was waived." when there
+  are none), and in the entity documents' Decisions block for the elements the
+  entity owns; the `--json` report carries them as `accepted`. No `make:adr` is
+  offered for them: an acceptance is no deviation from the plan.
 - "Archives the plan" is the doc node. Under the `file` store nothing is moved
   or deleted: the plan, its approvals and its decision log stay committed where
   they are, and `.guren/plans/` is left alone. No command yet refuses to work on

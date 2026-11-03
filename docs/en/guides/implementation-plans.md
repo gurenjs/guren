@@ -36,9 +36,10 @@ The page uses these words in a fixed sense. Each is explained in full in its sec
 | Reading | What an `alter`'s planned property read at approval ([Readings of an `alter`](./implementation-plan-verification.md#readings-of-an-alter)) |
 | Task, step | The work Guren derives: mostly a task per entity, plus tasks for shared work, split into steps of six kinds ([Implementing](#implementing-plannext-and-planverify)) |
 | Record | A step's verification result, kept in `.guren/plans/` |
-| State | How far an element is: `planned`, `present`, `wired`, `verified`, `drifted`, `unjudged`, `blocked` or `waived` ([Reading progress](#reading-progress-planstatus)) |
+| State | How far an element is: `planned`, `present`, `wired`, `verified`, `accepted`, `drifted`, `unjudged`, `blocked` or `waived` ([Reading progress](#reading-progress-planstatus)) |
 | Reach | Whether a passing behaviour exercises an element, following the plan's references from its route and expected page ([rules](./implementation-plan-verification.md#when-an-element-counts-as-complete)) |
 | Fresh, stale | Whether what an element depends on still matches the baseline ([Freshness](./implementation-plan-verification.md#freshness)). `plan:next` holds back a step whose context went stale |
+| Accepted | An element no behaviour can reach (a command, a side effect, an altered column), which approving the plan accepts as complete once its step verifies it ([Approving](#approving-planapprove)) |
 | Waiver | A person accepting an element incomplete, with a reason ([Waiving](#waiving-an-element-planwaive)) |
 
 ## Where a plan lives
@@ -48,7 +49,7 @@ A plan is a directory under `docs/plans/`, named by its slug:
 | File | What it is | Committed |
 |---|---|---|
 | `docs/plans/comments/plan.json` | The plan | yes |
-| `docs/plans/comments/approvals.json` | The hashes `plan:approve` recorded, with the readings of each `alter` | yes |
+| `docs/plans/comments/approvals.json` | The hashes `plan:approve` recorded, with the readings of each `alter` and the elements each approval accepted without a behaviour | yes |
 | `docs/plans/comments/decisions.json` | Waivers, written by `plan:waive` | yes |
 | `docs/plans/comments/revisions/0001.json` | Revisions, written by `plan:revise` | yes |
 | `docs/plans/comments/plan.html` | The page `plan:render` writes | no |
@@ -98,6 +99,8 @@ The page is one file with no network access: it opens from disk and can be attac
 
 With the dev server running and `GUREN_MCP=1`, open the same page from the plan's page in the [Dev Center](./application-diagnostics.md#plans) instead (**Review this plan**, `/_guren/plans/<slug>/review`). Each verdict, comment and answer is then saved to `.guren/plans/<slug>.feedback.json` as you make it, and the page loads it again when you come back. The file records which version of the plan it was given on, so after the plan changes the review page asks for `plan:render` before it takes more. Tell the agent you reviewed the plan: there is no JSON to paste.
 
+A plan with a command, a side effect it adds or alters, or a column it alters also gets **Completes without a behaviour** under "Needs attention". It is a warning that asks nothing of you: no behaviour can reach these elements, so approving the plan accepts each as complete once its step verifies it ([Approving](#approving-planapprove)), and the warning is how you see the list before you approve.
+
 The checks run against the application as it is now. They report, among others, a route whose action is not in the plan, a foreign key to a model that exists nowhere, an `add` whose name is already taken, an `existing` or `alter` target that does not exist, a mutating route with authentication and no authorization, a body-carrying route with no validator, and the missing behaviours described in [Acceptance behaviours](./implementation-plan-format.md#acceptance-behaviours). Rendering never fails on a check; `plan:approve` does. On a plan with a baseline, `plan:render` settles the same findings approval does, so a collision the plan's own work explains shows on the page as a passing check rather than a blocking one. Renaming the delete route of the example to a name the blog already uses gives:
 
 ```text
@@ -128,6 +131,15 @@ Comments on posts (plan.json)
 Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 14 element(s) hashed.
 Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recorded in docs/plans/comments/approvals.json.
 ```
+
+A plan with elements no behaviour can reach gets one more block. A request to a route shows nothing of a job the route dispatches, a command the plan runs, or a column it changes in a way the schema reader already matched, so no behaviour can verify one. Approving the plan accepts each of them as complete once its step's verified run holds, and the output says which. In a copy of the example whose plan also declared a `CommentPosted` event, emitted from `CommentController.store`:
+
+```text
+Accepted as complete on their step's verified run, since no behaviour can reach them (plan:status reports each one accepted once that run holds, and plan:close needs no waiver for it):
+  side effects: event.commentPosted
+```
+
+This is the list the rendered page pins as **Completes without a behaviour**, and `--dry-run` prints it too, so you can read it before deciding. It is recorded in `approvals.json` as part of the approval and belongs to that hash: a revision accepts its own list when it is approved, and inherits nothing. A plan approved before Guren recorded this gets it when you run `plan:approve` on it again. Acceptance replaces only the behaviour: the event still has to be emitted, and its step still has to verify, before it counts.
 
 The first approval writes a `baseline` into the plan: `rev`, the commit the plan was written against, and `contextHash`, a hash per referenced element of what the application holds for it today. That is why it refuses a repository with no commit and a working tree with uncommitted changes (the plan's own files excepted). The approval itself goes to `approvals.json`, beside the plan and never inside it. Commit both. With `--dry-run`, `plan:approve` runs every refusal and reports what it would record, writing nothing.
 
@@ -347,7 +359,7 @@ Policies
   verified  add       CommentPolicy              policy.comment
 
 Elements the plan changes: 16
-  planned 0, present 0, wired 0, verified 16, drifted 0, unjudged 0, blocked 0, waived 0
+  planned 0, present 0, wired 0, verified 16, accepted 0, drifted 0, unjudged 0, blocked 0, waived 0
 ```
 
 | State | Meaning |
@@ -356,6 +368,7 @@ Elements the plan changes: 16
 | `present` | In the code, and every planned property the scanners can read matches (for a `drop`, absent) |
 | `wired` | Reachable: a route mounted by `createApp()` that no earlier route answers first, an action such a route dispatches to, a page such an action returns, a validator such a route or action validates with, a side effect the application dispatches, emits, registers or sends |
 | `verified` | Its step verified, and the files it fingerprinted are unchanged |
+| `accepted` | The same, for an element no behaviour can reach, which the approval accepted as complete on its step's run |
 | `drifted` | Partly there with a property that differs, or changed since it was verified |
 | `unjudged` | No planned property of it could be read (for an `alter`: none differs, and no match counts against its readings), and nothing else says whether the change happened |
 | `blocked` | Cannot be judged here; the line says why |
@@ -385,23 +398,23 @@ For an approved plan, `plan:status` also reports whether what each element depen
 
 ## Waiving an element: `plan:waive`
 
-When an element will not be finished under this plan, or nothing in the plan can judge it, a person can accept it incomplete, with a reason. A side effect is the usual case. In a copy of the example whose plan also declared a `CommentPosted` event, emitted from `CommentController.store`, the event read `wired`, and `plan:close` listed it among the elements left:
+When an element will not be finished under this plan, a person can accept it incomplete, with a reason. Take the `CommentPosted` event from [Approving](#approving-planapprove), and suppose the controller is not to emit it until the listener's plan ships. Approval accepted the event without a behaviour, but not unfinished: the class exists, nothing emits it, and `plan:close` lists it among the elements left:
 
 ```text
-  event.commentPosted: wired
-    No planned property of it matched beyond its existence and no behaviour can reach it, so no plan:verify run lifts it: waive it with bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "<why>"
+  event.commentPosted: present (Not confirmed as wired: nothing in the application's source emits it)
+    Change the code until plan:status reports it wired, then run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http; or waive it: bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "<why>"
 ```
 
-No behaviour can reach a side effect (see [When an element counts as complete](./implementation-plan-verification.md#when-an-element-counts-as-complete)), so the line names only the waiver:
+Leaving it unemitted is a decision, so it is a waiver:
 
 ```bash
-bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "no behaviour can observe an emitted event; the listener's own plan tests the notification"
+bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "emitted once the listener's plan ships"
 ```
 
 ```text
 Comments on posts (plan.json)
 
-Waived event.commentPosted: no behaviour can observe an emitted event; the listener's own plan tests the notification
+Waived event.commentPosted: emitted once the listener's plan ships
 
 Recorded in docs/plans/comments/decisions.json
 The decision log is committed with the plan. A waiver names this plan hash, so a revision does not inherit it.
@@ -411,19 +424,19 @@ The element reads `waived`, `plan:verify` leaves it out of its step's judgement,
 
 ## Closing: `plan:close`
 
-A plan is closed when an approval names its current hash and every element it changes is `verified` or `waived`. Until then it refuses, and names each element that is left, what holds it, and on the next line the command that moves it. In the drift above, before `http` was re-checked (cut to two of the eight elements it listed):
+A plan is closed when an approval names its current hash and every element it changes is `verified`, `accepted` or `waived`. Until then it refuses, and names each element that is left, what holds it, and on the next line the command that moves it. In the drift above, before `http` was re-checked (cut to two of the eight elements it listed):
 
 ```text
- ERROR  docs/plans/comments/plan.json is not closed: every element must be verified or waived with a reason (guren plan:waive), and these are not, each with what holds it and what moves it:
+ ERROR  docs/plans/comments/plan.json is not closed: every element must be verified, accepted at approval, or waived with a reason (guren plan:waive), and these are not, each with what holds it and what moves it:
   validator.comment: drifted (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http; changed since: app/Http/Resources/CommentResource.ts)
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http again, since that run no longer holds; or waive it: bunx guren plan:waive docs/plans/comments/plan.json validator.comment --reason "<why>"
   controller.comments: present (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http, but no planned property of it matched beyond its existence and no verified run of a step whose behaviours reach it (task/entity/model.comment/http) holds now, so that result is not counted: run plan:verify on that step, or waive it)
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http; or waive it: bunx guren plan:waive docs/plans/comments/plan.json controller.comments --reason "<why>"
 ```
 
-`controller.comments` is verified only through a behaviour of `http`, so re-checking that step lifts it too. An element below its completion state, or `blocked`, needs the code or the environment fixed before `plan:verify`. Where no `plan:verify` run can lift an element, the line names `plan:waive`. When all the element lacks is a behaviour that reaches it, the line also offers adding one and approving the plan again, except for a column, a command or a side effect, where it names only the waiver (see Waiving). An element `plan:verify` cannot fingerprint gets only the waiver too, since no run lifts it. `plan:next` prints the same lines once every step is verified, so an agent at the end of the loop still sees what keeps the plan open.
+`controller.comments` is verified only through a behaviour of `http`, so re-checking that step lifts it too. An element below its completion state, or `blocked`, needs the code or the environment fixed before `plan:verify`. Where no `plan:verify` run can lift an element, the line names `plan:waive`. When all the element lacks is a behaviour that reaches it, the line also offers adding one and approving the plan again, except for a column, a command or a side effect, where no behaviour can help: one the approval accepted is sent to its step's `plan:verify`, and one an older approval did not accept is sent to `plan:approve`, which records the acceptance, before the waiver. An element `plan:verify` cannot fingerprint gets only the waiver too, since no run lifts it. `plan:next` prints the same lines once every step is verified, so an agent at the end of the loop still sees what keeps the plan open.
 
-When every element is verified or waived, `--dry-run` prints everything the close would write. Then:
+When every element is verified, accepted or waived, `--dry-run` prints everything the close would write. Then:
 
 ```bash
 bunx guren plan:close docs/plans/comments/plan.json
@@ -454,7 +467,7 @@ Closed 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0. The pla
 <!-- /guren:plan comments rules -->
 ```
 
-Edit the text outside the markers freely: closing a later plan for the same entity replaces only what is inside its own markers. A heading the close has to add is written in the plan's `locale`, so a `ja` plan gets Japanese headings. Each rule cites the behaviours that test it, and `bunx guren check --docs` warns about a cited id no test carries. A plan closed with waivers also prints a `make:adr` command per waiver, for the ones worth recording as decisions. A closed plan drops out of `check --plan`: the close writes `closed: true` and the plan's hash into `docs/plans/<slug>.md`, and a revision approved after the close counts as open again. Nothing is deleted: the plan, its approvals and its decision log stay committed, and `docs/spec/` from `bunx guren spec:generate` stays the description of what the code is.
+Edit the text outside the markers freely: closing a later plan for the same entity replaces only what is inside its own markers. A heading the close has to add is written in the plan's `locale`, so a `ja` plan gets Japanese headings. Each rule cites the behaviours that test it, and `bunx guren check --docs` warns about a cited id no test carries. A plan closed with waivers also prints a `make:adr` command per waiver, for the ones worth recording as decisions. Accepted elements are listed under Decisions too, and get no `make:adr`: accepting what no behaviour can reach is no deviation from the plan. A closed plan drops out of `check --plan`: the close writes `closed: true` and the plan's hash into `docs/plans/<slug>.md`, and a revision approved after the close counts as open again. Nothing is deleted: the plan, its approvals and its decision log stay committed, and `docs/spec/` from `bunx guren spec:generate` stays the description of what the code is.
 
 ## Not available yet
 
