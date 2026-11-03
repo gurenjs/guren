@@ -4,5 +4,5 @@ import { tsdownPreset } from '../../scripts/tsdown-preset'
 
 export default defineConfig({
   ...tsdownPreset,
-  entry: ['src/app.tsx', 'src/server.tsx', 'src/contracts.ts', 'src/channel.ts', 'src/typed-forms.ts', 'src/components.tsx', 'src/forms.ts', 'src/prototype.ts', 'src/live.ts', 'src/index.ts'],
+  entry: ['src/app.tsx', 'src/server.tsx', 'src/contracts.ts', 'src/channel.ts', 'src/typed-forms.ts', 'src/components.tsx', 'src/forms.ts', 'src/prototype.ts', 'src/live.ts', 'src/mcp-app.tsx', 'src/index.ts'],
 })

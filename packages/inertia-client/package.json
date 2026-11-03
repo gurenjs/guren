@@ -81,6 +81,11 @@
       "import": "./dist/live.js",
       "default": "./dist/live.js"
     },
+    "./mcp-app": {
+      "types": "./dist/mcp-app.d.ts",
+      "import": "./dist/mcp-app.js",
+      "default": "./dist/mcp-app.js"
+    },
     "./package.json": {
       "default": "./package.json"
     }
@@ -102,15 +107,20 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "typescript": "^7.0.2",
-    "hono": "^4.13.0"
+    "hono": "^4.13.0",
+    "@modelcontextprotocol/ext-apps": "2.1.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "hono": "^4.13.0"
+    "hono": "^4.13.0",
+    "@modelcontextprotocol/ext-apps": "^2.0.0"
   },
   "peerDependenciesMeta": {
     "hono": {
+      "optional": true
+    },
+    "@modelcontextprotocol/ext-apps": {
       "optional": true
     }
   }

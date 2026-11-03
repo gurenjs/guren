@@ -5,10 +5,12 @@ export {
   type RateLimitConfig,
 } from './rate-limit'
 export { createAppMcpServer, type AppMcpServerOptions } from './server'
+export { MCP_APP_CONTRACT } from './mcp-apps'
 export type {
   AppMcpUi,
   BridgeCatalogueEntry,
   GurenToolResponse,
+  GurenToolResponseContract,
   McpAppCsp,
   McpAppPage,
   McpAppPagesModule,

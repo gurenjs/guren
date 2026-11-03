@@ -508,7 +508,7 @@ no build hash, since the catalogue is computed per request and never cached as
 a template. The server answers it per caller, from the same filter as `tools/list`, with
 `{ toolName, method, path, inputSources }` per tool in route registration
 order (**amended:** plus `inputBodyNested` and `bridgeable`, false for a tool
-whose derivation reported an input-name collision, `DerivedAgentTool.inputCollisions`). What this discloses beyond `tools/list` is the method and path of tools
+whose derivation reported an input-name collision, `DerivedAgentTool.inputCollisions`; and, from the Phase 2 run on claude.ai, `page`, the page the tool renders, so a view that does not bundle it opens the application without calling the tool). What this discloses beyond `tools/list` is the method and path of tools
 the caller can already call, which the guide states.
 
 1. **Initial page.** The bridge connects `App` from
@@ -627,8 +627,9 @@ type GurenToolResponse =
 
 **Amended by the Phase 2 spike:** every envelope carries `contract`, the
 version of the `dev.guren/*` keys and the bridge catalogue that the plugin
-speaks, and every built document carries the version its bridge was built
-against. A bridge that reads another number does not drive visits: it renders
+speaks, and `bridge`, the catalogue's URI (absent when the app serves no
+views), so the view never derives the server's `ui://` authority. Every built
+document carries the version its bridge was built against. A bridge that reads another number does not drive visits: it renders
 the page it was given, and every visit becomes the hand-off of step 5, so a
 host still holding an older template (§3) degrades to links instead of
 misreading results. The number changes only when those shapes do, not with
