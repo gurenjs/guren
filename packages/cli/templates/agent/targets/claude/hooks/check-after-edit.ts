@@ -97,7 +97,8 @@ if (!wantsCheck && !wantsLint) {
 // checks run consola and app code in this process. Bun's console.log bypasses stdout.write.
 const writeStdout = process.stdout.write.bind(process.stdout)
 process.stdout.write = process.stderr.write.bind(process.stderr) as typeof process.stdout.write
-console.log = console.info = console.debug = console.error
+const toStderr = console.error.bind(console)
+console.log = console.info = console.debug = toStderr
 
 /**
  * Always exit 0 after this: exit 2 would show the findings as a hook error, and a PostToolUse

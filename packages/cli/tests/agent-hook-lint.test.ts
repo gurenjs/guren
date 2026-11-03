@@ -39,6 +39,11 @@ function contextOf(result: HookRun): string {
   return context
 }
 
+function git(dir: string, ...args: string[]): void {
+  const result = Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
+  if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
+}
+
 function expectSilent(result: HookRun): void {
   expect(result.exitCode).toBe(0)
   expect(result.stdout).toBe('')
@@ -133,6 +138,18 @@ describe('check-after-edit hook: oxlint', () => {
 
     test('still checks an untracked file git does not ignore', async () => {
       expect(contextOf(await runHook(app, 'lib.ts'))).toContain('eslint(no-debugger)')
+    })
+
+    // An ignore pattern does not apply to a tracked file; `check-ignore --no-index` would say it does.
+    test('still checks a tracked file an ignore pattern matches', async () => {
+      const result = await runHook((dir) => {
+        app(dir)
+        writeFileSync(join(dir, 'scratch', 'kept.ts'), FLAGGED_FILE)
+        git(dir, 'add', '-f', 'scratch/kept.ts')
+        git(dir, 'commit', '-q', '-m', 'init')
+      }, 'scratch/kept.ts')
+
+      expect(contextOf(result)).toContain('After editing scratch/kept.ts:')
     })
   })
 
