@@ -125,6 +125,18 @@ describe('requireAuthenticated', () => {
     expect(await res.text()).toContain('You need to sign in to access this page.')
   })
 
+  it('keeps a responseFactory ahead of the page for a browser navigation', async () => {
+    const app = new Hono()
+    app.use(attachAuthContext(() => createMockAuthContext({ isAuthenticated: false })))
+    app.use('/protected/*', requireAuthenticated({ responseFactory: () => new Response('custom', { status: 418 }) }))
+    app.get('/protected/resource', (c) => c.text('secret data'))
+
+    const res = await app.request('/protected/resource', navigation)
+
+    expect(res.status).toBe(418)
+    expect(await res.text()).toBe('custom')
+  })
+
   it('keeps the JSON for an Inertia visit and for an agent tool call that accept HTML', async () => {
     const app = new Hono()
     app.use(attachAuthContext(() => createMockAuthContext({ isAuthenticated: false })))
