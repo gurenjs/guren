@@ -9,7 +9,7 @@
  */
 import { readdir } from 'node:fs/promises'
 
-import { parseHighlightLines } from '../../web/config/code-highlight'
+import { HIGHLIGHT_PREFIX, parseHighlightLines } from '../../web/config/code-highlight'
 
 export interface BlockIssue {
   file: string
@@ -185,12 +185,15 @@ export function parseTutorialBlocks(markdown: string, file = '<markdown>'): Pars
     }
     const [lang = '', ...tokens] = info.split(/\s+/u).filter((token) => token.length > 0)
     const base: BlockBase = { line: openLine, lang, body: body.join('\n') }
-    const highlights = tokens.filter((token) => token.startsWith('highlight='))
-    const attrs = tokens.filter((token) => !token.startsWith('highlight='))
+    // Taken out before classify, which allows highlight= beside any attribute set;
+    // classify's own duplicate check compares whole tokens, so it would pass two values.
+    const highlights: string[] = []
+    const attrs: string[] = []
+    for (const token of tokens) (token.startsWith(HIGHLIGHT_PREFIX) ? highlights : attrs).push(token)
     if (highlights.length > 1) {
       issues.push({ file, line: openLine, message: `duplicate attribute on fence: ${highlights.join(' ')}` })
     } else if (highlights.length === 1) {
-      base.highlight = highlights[0]!.slice('highlight='.length)
+      base.highlight = highlights[0]!.slice(HIGHLIGHT_PREFIX.length)
       const parsed = parseHighlightLines(base.highlight, body.length)
       if ('error' in parsed) issues.push({ file, line: openLine, message: parsed.error })
     }
@@ -206,21 +209,18 @@ export function executableBlocks(blocks: readonly TutorialBlock[]): ExecutableBl
 }
 
 /**
- * One line per executable block, everything the smoke acts on and nothing
- * else: kind, mode, path, fallback, body, plus the highlighted lines, which
- * must match across locales because the bodies do. The locale check compares these, so
- * translated prose around a block never counts and a translated body does.
+ * One line per executable block, what the locale check compares: kind, mode,
+ * path, fallback and body, which the smoke acts on, plus the highlighted lines,
+ * which must match across locales because the bodies do. Translated prose
+ * around a block never counts and a translated body does.
  */
 export function executableSignature(block: ExecutableBlock): string {
-  const highlight = block.highlight === undefined ? '' : ` highlight=${block.highlight}`
-  switch (block.kind) {
-    case 'run':
-      return `run ${block.mode}${block.fallback ? ' fallback' : ''}${highlight}\n${block.body}`
-    case 'file':
-      return `file=${block.path}${block.fallback ? ' fallback' : ''}${highlight}\n${block.body}`
-    case 'manual':
-      return `manual${highlight}\n${block.body}`
-  }
+  const head =
+    block.kind === 'run' ? `run ${block.mode}${block.fallback ? ' fallback' : ''}`
+    : block.kind === 'file' ? `file=${block.path}${block.fallback ? ' fallback' : ''}`
+    : 'manual'
+  const highlight = block.highlight === undefined ? '' : ` ${HIGHLIGHT_PREFIX}${block.highlight}`
+  return `${head}${highlight}\n${block.body}`
 }
 
 /**

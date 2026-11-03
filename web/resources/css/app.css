@@ -918,6 +918,8 @@ body.docs-theme {
   width: calc(100% + 2.5rem);
   margin: 0 -1.25rem;
   padding: 0 1.25rem;
+  /* An empty line has no inline content to give it height. */
+  min-height: 1lh;
   background: rgba(235, 111, 146, 0.14);
   box-shadow: inset 3px 0 0 var(--g-accent);
 }

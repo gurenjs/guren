@@ -482,23 +482,6 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     return () => { cleanups.forEach((fn) => fn()) }
   }, [doc])
 
-  // A long listing is capped and scrolls (doc-file--long), so a highlighted line
-  // below the cap would never be seen: start such a block at its first one.
-  useEffect(() => {
-    if (!doc) return
-
-    const container = document.querySelector('.docs-content')
-    if (!container) return
-
-    for (const pre of container.querySelectorAll<HTMLPreElement>('pre.has-highlighted')) {
-      if (pre.scrollHeight <= pre.clientHeight) continue
-      const first = pre.querySelector<HTMLElement>('.line.highlighted')
-      if (!first) continue
-      const header = pre.querySelector<HTMLElement>('.doc-file-head')
-      pre.scrollTop = first.offsetTop - (header?.offsetHeight ?? 0) - 16
-    }
-  }, [doc?.html])
-
   return (
     <>
       {doc ? (
