@@ -44,6 +44,8 @@ describe('Blog BroadcastProvider', () => {
     expect(config.drivers.memory()).toBeInstanceOf(MemoryBroadcastDriver)
     expect(container.make('broadcast')).toBe(broadcastManager)
     expect(broadcastManager.channel).toHaveBeenCalledWith('announcements', expect.any(Function))
+    expect(broadcastManager.channel).toHaveBeenCalledWith('posts', expect.any(Function))
+    expect(broadcastManager.channel).toHaveBeenCalledWith('posts.{id}', expect.any(Function))
     expect(broadcastManager.privateChannel).toHaveBeenCalledWith('posts.{id}', expect.any(Function))
   })
 })

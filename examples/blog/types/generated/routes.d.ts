@@ -11,6 +11,7 @@ declare namespace Guren {
     | `/attachments/${string}/${string}`
     | `/auth/${string}`
     | `/auth/${string}/callback`
+    | '/broadcasting/socket'
     | '/dashboard'
     | '/forgot-password'
     | '/health'

@@ -4,6 +4,7 @@ import { Post } from '../app/Models/Post.js'
 import { PageQuerySchema, PostIdParamSchema, PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
 import { pages } from '@/.guren/pages.gen'
 import { registerAuthenticatedAreaRoutes } from './authenticated.js'
+import { registerBroadcastingRoutes } from './broadcasting.js'
 
 export function registerWebRoutes(baseRouter: Router): void {
   const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
@@ -18,6 +19,7 @@ export function registerWebRoutes(baseRouter: Router): void {
   router.get('/health', (c) => c.json({ status: 'ok' })).name('health')
 
   registerAuthenticatedAreaRoutes(router)
+  registerBroadcastingRoutes(router)
 
   router.group('/posts', (posts) => {
     // The two reads an MCP Apps host renders with the blog's own pages (RFC 0038).

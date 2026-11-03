@@ -28,7 +28,7 @@ export default defineConfig({
     },
     {
       name: 'authenticated',
-      testMatch: /(posts-crud|validation|navigation)\.spec\.ts/,
+      testMatch: /(posts-crud|validation|navigation|live-props)\.spec\.ts/,
       dependencies: ['setup'],
       use: {
         ...devices['Desktop Chrome'],

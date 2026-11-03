@@ -21,6 +21,15 @@ import {
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 import { OLDEST_TESTED_BUN } from './bun-support'
+import {
+  BUNFIG_FILE,
+  RELEASE_AGE_SECONDS,
+  addExclusions,
+  appGurenPackages,
+  missingExclusions,
+  readReleaseAge,
+  renderReleaseAgeBunfig,
+} from './release-age'
 import { compareVersions } from './codemods'
 import {
   describePageManifestSuppression,
@@ -1164,6 +1173,79 @@ async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorC
   )
 }
 
+const RELEASE_AGE_KEY = 'supply-chain-cooldown'
+const RELEASE_AGE_TITLE = 'Release-Age Gate'
+const RELEASE_AGE_GUIDE = 'See "Dependency Updates" in the operations guide.'
+
+async function detectSupplyChainCooldown(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const text = (await readIfExists(context.cwd, BUNFIG_FILE)) ?? undefined
+  const reading = readReleaseAge(text)
+  const check = (status: DoctorStatus, message: string, options: Parameters<typeof createCheck>[4] = {}) =>
+    createCheck(RELEASE_AGE_KEY, RELEASE_AGE_TITLE, status, message, options)
+  const writeGate = `Run \`guren upgrade\` to add a ${RELEASE_AGE_SECONDS / 86_400}-day minimumReleaseAge to ${BUNFIG_FILE}. ${RELEASE_AGE_GUIDE}`
+
+  switch (reading.kind) {
+    case 'missing-file':
+    case 'no-install-table':
+      return check('warn', `${BUNFIG_FILE} sets no minimumReleaseAge, so an install takes package versions published moments ago.`, {
+        fix: writeGate,
+        canAutofix: true,
+        manualFix: writeGate,
+      })
+    case 'no-gate': {
+      const manual = `Add minimumReleaseAge = ${RELEASE_AGE_SECONDS} under [install] in ${BUNFIG_FILE}, and list each @guren package in minimumReleaseAgeExcludes. ${RELEASE_AGE_GUIDE}`
+      return check('warn', `${BUNFIG_FILE} sets no minimumReleaseAge, so an install takes package versions published moments ago.`, { fix: manual, manualFix: manual })
+    }
+    case 'unreadable':
+      return check('warn', `${BUNFIG_FILE} could not be read (${reading.reason}), so the release-age gate was not judged.`, {
+        fix: `Repair ${BUNFIG_FILE}.`,
+        manualFix: `Repair ${BUNFIG_FILE}.`,
+      })
+    case 'off':
+      return check('pass', `minimumReleaseAge is 0 in ${BUNFIG_FILE}: the release-age gate is off.`)
+    case 'on': {
+      const missing = missingExclusions(reading.excludes, await appGurenPackages(context.cwd))
+      if (missing.length === 0) {
+        return check('pass', `Bun holds back versions younger than ${reading.seconds} seconds, and every @guren package is excluded by name.`)
+      }
+      const patchable = text !== undefined && addExclusions(text, missing) !== null
+      const manual = `Add ${missing.map((name) => JSON.stringify(name)).join(', ')} to minimumReleaseAgeExcludes in ${BUNFIG_FILE}.`
+      return check('warn', `minimumReleaseAgeExcludes leaves out ${missing.join(', ')}, so installing a release of it younger than the gate fails.`, {
+        fix: patchable ? `Run \`guren upgrade\`, or: ${manual}` : manual,
+        canAutofix: patchable,
+        manualFix: manual,
+      })
+    }
+  }
+}
+
+async function createSupplyChainCooldownAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
+  if (check.status === 'pass' || !check.canAutofix) {
+    return null
+  }
+
+  return {
+    key: check.key,
+    title: check.title,
+    summary: `Hold back package versions younger than ${RELEASE_AGE_SECONDS / 86_400} days in ${BUNFIG_FILE}, excluding the @guren packages by name.`,
+    // Read again: package.json may have moved since detect, and the file is the author's.
+    async apply(cwd: string) {
+      const text = (await readIfExists(cwd, BUNFIG_FILE)) ?? undefined
+      const reading = readReleaseAge(text)
+      const packages = await appGurenPackages(cwd)
+      if (reading.kind === 'missing-file') {
+        await writeFile(resolve(cwd, BUNFIG_FILE), renderReleaseAgeBunfig(packages), 'utf8')
+      } else if (reading.kind === 'no-install-table' && text !== undefined) {
+        const separator = text === '' ? '' : text.endsWith('\n') ? '\n' : '\n\n'
+        await writeFile(resolve(cwd, BUNFIG_FILE), `${text}${separator}${renderReleaseAgeBunfig(packages)}`, 'utf8')
+      } else if (reading.kind === 'on' && text !== undefined) {
+        const patched = addExclusions(text, missingExclusions(reading.excludes, packages))
+        if (patched !== null) await writeFile(resolve(cwd, BUNFIG_FILE), patched, 'utf8')
+      }
+    },
+  }
+}
+
 async function detectSeedOnBoot(context: DoctorRuleContext): Promise<DoctorCheck> {
   const configFile = await findFirstExisting(context.cwd, DATABASE_CONFIG_CANDIDATES)
   const source = configFile ? await readIfExists(context.cwd, configFile) : null
@@ -1423,6 +1505,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'seed-on-boot', title: 'Seeding On Boot', detect: detectSeedOnBoot },
   { key: 'test-infrastructure', title: 'Test Infrastructure', detect: detectTestInfrastructure },
   { key: 'plugin-compatibility', title: 'Plugin Compatibility', detect: detectPluginCompatibility },
+  { key: RELEASE_AGE_KEY, title: RELEASE_AGE_TITLE, detect: detectSupplyChainCooldown, autofix: createSupplyChainCooldownAutofix },
   { key: 'guren-ui-tokens', title: 'Guren UI Tokens', detect: detectGurenUiTokens, autofix: createGurenUiTokensAutofix },
   { key: 'guren-ui-components', title: 'Guren UI Components', detect: detectGurenUiComponents, autofix: createGurenUiComponentsAutofix },
 ]
