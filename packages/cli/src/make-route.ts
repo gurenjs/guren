@@ -1,5 +1,5 @@
-import type { WriterOptions } from './utils'
-import { coreImportLine, docComment, escapeSingleQuoted, kebabCase, scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { coreImportLine, docComment, escapeSingleQuoted, kebabCase, scaffoldFileEntry, writeScaffoldFile } from './utils'
 import { ROUTES_DIR } from './discovery'
 import { singularize } from './inflect'
 
@@ -54,14 +54,21 @@ function routeTemplate(prefix: string, controller: string): string {
 }
 
 export async function makeRoute(name: string, options: WriterOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = routeFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+/** What `make:route` writes, for the plan check that compares it with the routes file `plan:scaffold` writes. */
+export function routeFile(name: string, options: WriterOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: ROUTES_DIR,
     fileName: ({ fileName }) => fileName,
-    template: ({ className, rawName }) => {
-      const baseName = singularize(className)
-      const controller = baseName.endsWith('Controller') ? baseName : `${baseName}Controller`
-      const prefix = `/${kebabCase(rawName)}`
-      return routeTemplate(prefix, controller)
-    },
+    template: ({ className, rawName }) => routeTemplate(`/${kebabCase(rawName)}`, routeGroupController(className)),
   }, options)
+}
+
+/** The controller a `make:route` group imports. */
+export function routeGroupController(className: string): string {
+  const baseName = singularize(className)
+  return baseName.endsWith('Controller') ? baseName : `${baseName}Controller`
 }

@@ -27,8 +27,10 @@ import {
 } from './app-state'
 import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
 import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
+import { planCommandTargets, type PlanCommandTargetHit } from './command-targets'
 import { elementsAtPlannedEnd, judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
+import { derivePlanTasks, type PlanTaskDerivation } from './tasks'
 import {
   findDuplicatePlanIds,
   hasBaseline,
@@ -122,6 +124,7 @@ export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResul
 
   checkDuplicateIds(plan, results)
   checkCommands(plan, results)
+  checkCommandTargets(plan, app, results)
   checkInternalReferences(plan, index, results)
   checkChangeConsistency(plan, results)
   checkAgainstApp(plan, app, results)
@@ -175,6 +178,7 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 const TITLES: Record<string, string> = {
   'plan:duplicate-id': 'Plan element ids',
   'plan:command': 'Plan commands',
+  'plan:command-target': 'Plan commands',
   'plan:reference': 'Plan references',
   'plan:change-consistency': 'Plan change consistency',
   'plan:app-collision': 'Plan against the application',
@@ -223,6 +227,51 @@ function checkCommands(plan: PlanDraft, results: PlanCheckResult[]): void {
       }),
     )
   }
+}
+
+/**
+ * A command that writes an element the plan adds runs before the step writing it, which then
+ * collides (`plan:scaffold` refuses a target that exists); one importing such an element fails
+ * the commands step's own typecheck. Matched by name, so the reading is a lower bound.
+ */
+function checkCommandTargets(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
+  let derived: PlanTaskDerivation | undefined
+  const derivation = (): PlanTaskDerivation => (derived ??= derivePlanTasks(plan, { apiOnly: app.apiOnly }))
+  const commandsStep = (): string | undefined => derivation().tasks.flatMap((task) => task.steps).find((step) => step.kind === 'commands')?.id
+  for (const { id, quoted, hits } of planCommandTargets(plan, derivation)) {
+    const written = hits.filter((hit) => hit.effect === 'writes')
+    const imported = hits.filter((hit) => hit.effect === 'imports')
+    const clauses = [
+      ...groupByStep(written).map(({ step, hits: group }) =>
+        `it writes ${listHits(group)}, which ${step === undefined ? 'a later step writes' : step.scaffold ? `plan:scaffold writes at step ${step.id}, refusing a target that already exists` : `step ${step.id} writes`}`),
+      ...groupByStep(imported).map(({ step, hits: group }) =>
+        `it imports ${listHits(group)}, which ${step === undefined ? 'a later step writes' : `step ${step.id} writes`}, so the commands step${stepName(commandsStep())} fails its typecheck`),
+    ]
+    results.push(
+      finding('plan:command-target', 'fail', `The command ${quoted} runs before the steps that build what the plan adds: ${clauses.join('; ')}.`, {
+        elementId: id,
+        section: 'commands',
+        suggestion: 'plan:scaffold writes what the plan declares, so `commands` hold generators only for what it does not. Drop this command, or write what it adds beyond the plan (a factory, a seeder) by hand in a step after the element it imports exists.',
+      }),
+    )
+  }
+}
+
+const stepName = (id: string | undefined): string => (id === undefined ? '' : ` (${id})`)
+
+function listHits(hits: readonly PlanCommandTargetHit[]): string {
+  const names = hits.map((hit) => `${hit.label} (${hit.elementId})`)
+  return names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+}
+
+function groupByStep(hits: readonly PlanCommandTargetHit[]): Array<{ step: PlanCommandTargetHit['step']; hits: PlanCommandTargetHit[] }> {
+  const groups = new Map<string | undefined, { step: PlanCommandTargetHit['step']; hits: PlanCommandTargetHit[] }>()
+  for (const hit of hits) {
+    const group = groups.get(hit.step?.id) ?? { step: hit.step, hits: [] }
+    group.hits.push(hit)
+    groups.set(hit.step?.id, group)
+  }
+  return [...groups.values()]
 }
 
 /**

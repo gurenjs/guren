@@ -109,7 +109,9 @@ const COMMANDS = `## Commands
 
 \`commands\` holds only the Guren generators the change needs before it is implemented, each written as ${PLAN_COMMAND_FORM}. The subcommands allowed: ${planGeneratorNames()
   .map((name) => `\`${name}\``)
-  .join(', ')}. Nothing else passes: not \`make:migration\` or \`add plugin\`, not \`bun run db:migrate\` (the data step runs migrations), not \`codegen\`. Arguments hold letters, digits and \`_-.,:/=@+%\`, with single or double quotes around a value that has spaces. A shell operator, \`$\`, a backslash, an absolute path or a \`..\` segment fails the check.`
+  .join(', ')}. Nothing else passes: not \`make:migration\` or \`add plugin\`, not \`bun run db:migrate\` (the data step runs migrations), not \`codegen\`. Arguments hold letters, digits and \`_-.,:/=@+%\`, with single or double quotes around a value that has spaces. A shell operator, \`$\`, a backslash, an absolute path or a \`..\` segment fails the check.
+
+\`plan:scaffold\` writes what the plan declares, so \`commands\` are for what it does not declare. The commands run before every other step: a generator that writes a model, a model's table, a controller, validator, resource, policy, route or side effect the plan adds (\`make:model\`, \`make:feature\`, \`add session\` beside an added \`sessions\` table) collides with the step that writes it, and one that imports such a model (\`make:factory\`, \`make:resource\`) fails its typecheck. Both fail the check.`
 
 const CHECK = `## Check the plan
 

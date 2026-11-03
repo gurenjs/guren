@@ -340,6 +340,15 @@ plan and the application's current context (`generateContext()`,
   it. The other kinds are deliberately unconstrained: a `store` step may name
   a model or a resource, a `decision` a validator or a policy, and an `actor`
   names nothing at all.
+- (amended in implementation) a `commands` entry whose generator writes an
+  element the plan adds, or an added model's table (a blueprint's, judged in
+  any root), or imports one (`make:factory` or `make:resource` for an added
+  model). The commands run first, in Foundation, so the step
+  that writes the element would find it there (`plan:scaffold` refuses a
+  target that exists), and the import fails the commands step's typecheck.
+  The finding (`plan:command-target`, a failure) names the element and that
+  step. What each generator writes or imports is `PLAN_GENERATOR_TARGETS` in
+  `plan/command-targets.ts`, a table total over the allowed generators.
 
 **Amended in implementation:** a check against the application reads the app root
 the plan element names (`module`, absent meaning the project root), for models,
@@ -2908,7 +2917,11 @@ Claude Code docs as read on 2026-09-23:
   classified. `PlanCommandSchema` still takes a string, so a plan with a
   refused command parses and shows the finding. `plan:next` refuses such a
   plan before it marks a step, drafts included, since a draft never passes
-  `plan:approve`. `check --plan` warns on an approved one.
+  `plan:approve`. `check --plan` warns on an approved one. An allowed
+  command can still collide with the plan: `plan:scaffold` writes what the
+  plan declares, so a generator that writes or imports an element the plan
+  adds fails `plan:command-target` (§2), and the prompt says `commands` are
+  for what the plan does not declare.
 
 `guren plan --print-prompt` writes the prompt and the schema to stdout and
 calls nothing, for any other agent, and for a Claude Code session already in
