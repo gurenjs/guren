@@ -32,6 +32,7 @@ export class UserController extends Controller {
 | Lazy props（送るときだけ評価する関数） | 対応 | `() => value` を渡します。ページの `Props` には、解決後の値の型をそのまま宣言します。 |
 | Always props | 対応 | `always(value)` を使います。`errors` もこの方法で共有しています。 |
 | グループ付き deferred props（`deferredProps`） | 対応 | `defer(() => value, group)`。[Deferred Props](./frontend.md#deferred-props) を参照してください。 |
+| live props（`liveProps`） | 対応 | `live(value, { on: new SomeEvent(…) })` をアプリ自身のブロードキャスト用ソケットで動かし、`@guren/inertia-client/live` の `liveTransport()` を使います。イベントが値を運ぶモードは使いません。[Live Props](./live-props.md) を参照してください。 |
 | Rescued deferred props（`rescuedProps`） | 未対応 | deferred のコールバックが例外を投げると、後続のリクエストが失敗します。 |
 | Optional props | 未対応 | 初回描画の後で届いてよいデータには `defer()` を使ってください。 |
 | Merge、prepend、deep merge props（`mergeProps`、`prependProps`、`deepMergeProps`、`matchPropsOn`） | 未対応 | partial reload では prop が丸ごと置き換わります。 |
