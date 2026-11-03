@@ -266,3 +266,23 @@ function judgeDeferredKey(page: PageReading, pageId: string, key: string, action
     relPath,
   )
 }
+
+/**
+ * Whether `className.action` in this controller file calls the framework's
+ * `defer()`, read as this check reads it (an aliased or namespace import
+ * included), so another rule asking the same question cannot disagree.
+ * Undefined when the file does not parse.
+ */
+export async function actionCallsDefer(
+  cache: ParseCache,
+  filePath: string,
+  className: string,
+  action: string,
+): Promise<boolean | undefined> {
+  const parsed = await cache.get(filePath)
+  if (!parsed) return undefined
+  const bindings = propHelperBindings(parsed.ast)
+  if (bindings.defer.locals.size === 0 && bindings.defer.namespaces.size === 0) return false
+  return scanActions(parsed.ast, filePath, bindings)
+    .some((scan) => scan.className === className && scan.action === action && scan.defers)
+}

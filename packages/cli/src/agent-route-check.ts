@@ -30,7 +30,8 @@ import { expectedInertiaPagePath, extractInertiaPageRefs, resolveInertiaPageFile
 import { describeMethod } from './http-methods'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import { ParseCache } from './parse-cache'
-import { MCP_PLUGIN_EXPORT, scanPluginCalls } from './plugin-calls'
+import { actionCallsDefer } from './deferred-props-check'
+import { MCP_PLUGIN_EXPORT, scanPluginCalls, type PluginCall } from './plugin-calls'
 
 export interface AgentRouteCheckOptions {
   cwd: string
@@ -72,6 +73,8 @@ interface AgentRoute {
   keySuffix: string
   controllerKey?: string
   methodInfo?: ControllerMethodInfo
+  /** `agent.ui` as `deriveAgentToolUi()` reads it: the derived value, or why it is malformed. */
+  ui?: ReturnType<typeof deriveAgentToolUi>
 }
 
 function readOnlyOf(route: AgentRoute): boolean {
@@ -316,7 +319,7 @@ function readOnlyHonestyFinding(route: AgentRoute): CheckResult | undefined {
 function outputFinding(route: AgentRoute): CheckResult | undefined {
   if (describesOutput(route.definition)) return undefined
   // A `ui` page's Inertia response is the declared design, and `agent-route-ui-output` refuses the output schema this would suggest (RFC 0038 §2).
-  if (declaresUiPage(route)) return undefined
+  if (uiPageOf(route) !== undefined) return undefined
 
   const title = `${route.label} agent tool`
   const suggestion =
@@ -394,11 +397,7 @@ type ApprovalConfigEvidence =
  * unsuppressible. The key is `AGENT_APPROVAL_CONFIG_KEY` from `@guren/core`, never the
  * literal string: the CLI cannot import `@guren/plugin-mcp`, so a restated name rots silently.
  */
-async function scanApprovalConfig(
-  cwd: string,
-  cache: ParseCache,
-): Promise<ApprovalConfigEvidence | undefined> {
-  const calls = await scanPluginCalls(cwd, cache, MCP_PLUGIN_EXPORT)
+function approvalConfigOf(calls: readonly PluginCall[]): ApprovalConfigEvidence | undefined {
   // A configured call anywhere settles it: an app may mount the endpoint twice.
   const configured = calls.find((call) => call.keys.has(AGENT_APPROVAL_CONFIG_KEY))
   if (configured) return { kind: 'configured', relPath: configured.relPath }
@@ -442,132 +441,118 @@ function approvalStoreFinding(
 // `body` key — needs the merged schema `deriveAgentTools()` builds, and is
 // therefore left to the PR that lands that derivation.
 
-function declaresUiPage(route: AgentRoute): boolean {
-  const ui = route.agent.ui === undefined ? undefined : deriveAgentToolUi(route.agent.ui)
-  return typeof ui === 'object' && ui.page !== undefined
+function uiPageOf(route: AgentRoute): string | undefined {
+  return typeof route.ui === 'object' ? route.ui.page : undefined
 }
 
-/** A `defer(…)` call in a comment- and string-blanked body. */
-const DEFER_CALL_PATTERN = /\bdefer\s*\(/
+type Push = (result: CheckResult | undefined, evidence?: CheckEvidence) => void
 
-interface Finding {
-  result: CheckResult
-  evidence?: CheckEvidence
+interface UiRuleContext {
+  cwd: string
+  cache: ParseCache
+  /** Page id → its component file, resolved once per run. */
+  pageFiles: Map<string, Promise<string | undefined>>
 }
 
 /**
- * The MCP Apps rules for a route declaring `ui` (RFC 0038 §2), judged through
- * `deriveAgentToolUi()`, the rule the derivation itself applies.
+ * The MCP Apps rules for a route declaring `ui` (RFC 0038 §2), judged on the
+ * reading `deriveAgentToolUi()` gave, the rule the derivation itself applies.
  */
-async function uiFindings(route: AgentRoute, cwd: string): Promise<Finding[]> {
-  const declared = route.agent.ui
-  if (declared === undefined) return []
-
-  const title = `${route.label} agent tool`
-  const ui = deriveAgentToolUi(declared)
-  if (typeof ui === 'string') {
-    return [{
-      result: check(
-        `agent-route-ui-shape:${route.keySuffix}`,
-        title,
-        'fail',
-        `The route's agent ui declares ${ui}. A malformed ui is not narrowed or dropped: the tool is left `
-        + 'out of the agent surface entirely, since dropping ui would show an app-only tool to the model.',
-        'Declare ui as a page (ui: pages.posts.Show), or as { page?, visibility } with visibility a non-empty '
-        + "list of 'model' and 'app'.",
-      ),
-    }]
+async function uiFindings(route: AgentRoute, context: UiRuleContext, push: Push): Promise<void> {
+  const { ui } = route
+  if (ui === undefined) return
+  const rule = (name: string, status: 'fail' | 'warn', message: string, fix: string, filePath?: string): void => {
+    push(check(`agent-route-ui-${name}:${route.keySuffix}`, `${route.label} agent tool`, status, message, fix, filePath), filePath ? 'static' : undefined)
   }
 
-  const findings: Finding[] = []
-  if (ui.page !== undefined) {
-    if (!(await resolveInertiaPageFile(cwd, ui.page))) {
-      findings.push({
-        result: check(
-          `agent-route-ui-page:${route.keySuffix}`,
-          title,
-          'fail',
-          `The route's agent ui names the page "${ui.page}", but ${expectedInertiaPagePath(ui.page)} does not `
-          + 'exist, so the MCP App build has nothing to build and the tool is listed without a view.',
-          `Create ${expectedInertiaPagePath(ui.page)}, or name an existing page (ui: pages.<group>.<Page>).`,
-        ),
-      })
-    }
-    if (route.definition.schemas?.output) {
-      findings.push({
-        result: check(
-          `agent-route-ui-output:${route.keySuffix}`,
-          title,
-          'fail',
-          'The route declares both an agent ui page and an output schema. The router validates output against '
-          + 'the whole response, which for an Inertia action is the page envelope rather than its props, so the '
-          + 'two cannot describe one response.',
-          'Drop the output schema (the model reads the page props, narrowed by mcpPlugin({ ui: { sharedProps } })), '
-          + 'or drop ui.page and return JSON from this route.',
-        ),
-      })
-    }
-    const info = route.methodInfo
-    if (info) {
-      const rendered = extractInertiaPageRefs(info.rawBody, (index) => info.body.startsWith('this', index)).map((ref) => ref.id)
-      if (!rendered.includes(ui.page)) {
-        findings.push({
-          result: check(
-            `agent-route-ui-renders:${route.keySuffix}`,
-            title,
-            'warn',
-            `${route.controllerKey} does not render "${ui.page}"`
-            + (rendered.length > 0 ? ` (it renders ${rendered.map((id) => `"${id}"`).join(', ')})` : '')
-            + ", so the view the route's agent ui names would never receive its page.",
-            "Name the page the action renders, or drop ui.page and keep ui: { visibility: ['app'] } for a "
-            + 'write a view performs.',
-            info.filePath,
-          ),
-          evidence: 'static',
-        })
-      }
-      if (DEFER_CALL_PATTERN.test(info.body)) {
-        findings.push({
-          result: check(
-            `agent-route-ui-deferred:${route.keySuffix}`,
-            title,
-            'warn',
-            `${route.controllerKey} passes a defer() prop. A tool call is not an Inertia request, so deferred `
-            + 'props are never resolved for it, and the view would wait for values that never arrive.',
-            'Pass the value directly for this action, or keep the page out of the agent ui.',
-            info.filePath,
-          ),
-          evidence: 'static',
-        })
-      }
-    }
+  if (typeof ui === 'string') {
+    rule(
+      'shape',
+      'fail',
+      `The route's agent ui declares ${ui}. A malformed ui is not narrowed or dropped: the tool is left `
+      + 'out of the agent surface entirely, since dropping ui would show an app-only tool to the model.',
+      'Declare ui as a page (ui: pages.posts.Show), or as { page?, visibility } with visibility a non-empty '
+      + "list of 'model' and 'app'.",
+    )
+    return
   }
 
   if (ui.visibility.length === 1 && ui.visibility[0] === 'app' && route.agent.expose?.mcp === false) {
-    findings.push({
-      result: check(
-        `agent-route-ui-visibility:${route.keySuffix}`,
-        title,
-        'warn',
-        "The tool is visible only to an MCP App view (visibility: ['app']) but is not exposed on MCP "
-        + '(expose.mcp: false), so no host can ever call it.',
-        'Remove expose.mcp: false, or drop the agent ui.',
-      ),
-    })
+    rule(
+      'visibility',
+      'warn',
+      "The tool is visible only to an MCP App view (visibility: ['app']) but is not exposed on MCP "
+      + '(expose.mcp: false), so no host can ever call it.',
+      'Remove expose.mcp: false, or drop the agent ui.',
+    )
   }
 
-  return findings
+  const { page } = ui
+  if (page === undefined) return
+
+  let pageFile = context.pageFiles.get(page)
+  if (!pageFile) {
+    pageFile = resolveInertiaPageFile(context.cwd, page)
+    context.pageFiles.set(page, pageFile)
+  }
+  if (!(await pageFile)) {
+    rule(
+      'page',
+      'fail',
+      `The route's agent ui names the page "${page}", but ${expectedInertiaPagePath(page)} does not `
+      + 'exist, so the MCP App build has nothing to build and the tool is listed without a view.',
+      `Create ${expectedInertiaPagePath(page)}, or name an existing page (ui: pages.<group>.<Page>).`,
+    )
+  }
+  if (route.definition.schemas?.output) {
+    rule(
+      'output',
+      'fail',
+      'The route declares both an agent ui page and an output schema. The router validates output against '
+      + 'the whole response, which for an Inertia action is the page envelope rather than its props, so the '
+      + 'two cannot describe one response.',
+      'Drop the output schema (the model reads the page props, narrowed by mcpPlugin({ ui: { sharedProps } })), '
+      + 'or drop ui.page and return JSON from this route.',
+    )
+  }
+
+  const info = route.methodInfo
+  const controller = route.definition.controller
+  if (!info || !controller) return
+
+  const rendersAny = INERTIA_CALL_PATTERN.test(info.body)
+  const rendered = extractInertiaPageRefs(info.rawBody, (index) => info.body.startsWith('this', index)).map((ref) => ref.id)
+  // A page passed through a variable or a helper names nothing here, so only an action that renders no
+  // page, or names other pages only, is judged.
+  if (!rendersAny || (rendered.length > 0 && !rendered.includes(page))) {
+    rule(
+      'renders',
+      'warn',
+      `${route.controllerKey} `
+      + (rendersAny ? `renders ${rendered.map((id) => `"${id}"`).join(', ')}, not "${page}"` : 'renders no Inertia page')
+      + ", so the view the route's agent ui names would never receive its page.",
+      "Name the page the action renders, or drop ui.page and keep ui: { visibility: ['app'] } for a "
+      + 'write a view performs.',
+      info.filePath,
+    )
+  }
+  if (await actionCallsDefer(context.cache, resolve(context.cwd, info.filePath), controller.name, controller.action)) {
+    rule(
+      'deferred',
+      'warn',
+      `${route.controllerKey} passes a defer() prop. A tool call is not an Inertia request, so deferred `
+      + 'props are never resolved for it, and the view would wait for values that never arrive.',
+      'Pass the value directly for this action, or keep the page out of the agent ui.',
+      info.filePath,
+    )
+  }
 }
 
 /**
- * A route with `ui.page` while the `mcpPlugin({ … })` call has no `ui` option:
+ * Routes with `ui.page` while the `mcpPlugin({ … })` call has no `ui` option:
  * the plugin then has no built pages and lists every such tool without a view.
  */
-async function uiPagesModuleFinding(routes: AgentRoute[], cwd: string, cache: ParseCache): Promise<CheckResult | undefined> {
-  const withPage = routes.filter(declaresUiPage)
-  if (withPage.length === 0) return undefined
-
-  const calls = await scanPluginCalls(cwd, cache, MCP_PLUGIN_EXPORT)
+function uiPagesModuleFinding(withPage: AgentRoute[], calls: readonly PluginCall[]): CheckResult | undefined {
   if (calls.some((call) => call.keys.has('ui'))) return undefined
   const absent = calls.find((call) => call.complete)
   if (!absent) return undefined
@@ -606,6 +591,7 @@ function toAgentRoute(
     keySuffix: `${method}:${definition.path}`,
     controllerKey,
     methodInfo: definition.controller ? controllerMethodFor(scan, definition.controller).info : undefined,
+    ...(agent.ui === undefined ? {} : { ui: deriveAgentToolUi(agent.ui) }),
   }
 }
 
@@ -730,9 +716,14 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
 
   results.push(...duplicateFindings(routes))
 
+  // One scan of the app's `mcpPlugin({ … })` calls, made only when a rule needs it.
+  let pluginCalls: Promise<PluginCall[]> | undefined
+  const mcpPluginCalls = (): Promise<PluginCall[]> => (pluginCalls ??= scanPluginCalls(cwd, cache, MCP_PLUGIN_EXPORT))
+  const uiContext: UiRuleContext = { cwd, cache, pageFiles: new Map() }
+
   // Only asked when a route declares approval — the scan reads every app source.
   if (routes.some((route) => route.agent.approval === 'required')) {
-    push(approvalStoreFinding(routes, await scanApprovalConfig(cwd, cache)), 'static')
+    push(approvalStoreFinding(routes, approvalConfigOf(await mcpPluginCalls())), 'static')
   }
 
   for (const route of routes) {
@@ -743,12 +734,11 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     push(readOnlyHonestyFinding(route), fromBody(route))
     push(outputFinding(route))
     push(inputFinding(route))
-    for (const finding of await uiFindings(route, cwd)) push(finding.result, finding.evidence)
+    await uiFindings(route, uiContext, push)
   }
 
-  if (routes.some((route) => route.agent.ui !== undefined)) {
-    push(await uiPagesModuleFinding(routes, cwd, cache), 'static')
-  }
+  const withPage = routes.filter((route) => uiPageOf(route) !== undefined)
+  if (withPage.length > 0) push(uiPagesModuleFinding(withPage, await mcpPluginCalls()), 'static')
 
   if (results.length === 0) {
     push(

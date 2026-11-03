@@ -18,7 +18,6 @@ export {
 export type {
   BuildToolRequestOptions,
   BuiltToolRequest,
-  InertiaPageObject,
   ToolCallOutcome,
   ToolRequestBuildFailure,
 } from './dispatch'

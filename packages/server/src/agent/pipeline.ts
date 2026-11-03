@@ -41,7 +41,7 @@ import {
 } from './gate'
 import type { Deferrer } from '../support/keep-alive'
 import { redactAgentArguments } from './redact'
-import { installAgentPrincipal, markAgentDispatch } from '../internal/agent-principal'
+import { installAgentPrincipal, installAgentSharedProps, markAgentDispatch } from '../internal/agent-principal'
 
 /**
  * What the audit hooks need from a tool: its name, and the redaction rules its
@@ -183,6 +183,12 @@ export interface AgentInvocationOptions {
    * so a route behind those refuses. Omitted, nothing is installed.
    */
   handoff?: 'seam'
+  /**
+   * The shared Inertia props the dispatched request may carry (RFC 0038 §6),
+   * installed on the request object so nothing on the wire can widen it.
+   * Undefined leaves them all.
+   */
+  sharedProps?: readonly string[]
   /** Forwarded to `app.fetch` — D1/R2 bindings on Workers (RFC 0016 §3.1). */
   env?: unknown
   /** Forwarded to `app.fetch` — `waitUntil` on Workers. */
@@ -442,6 +448,7 @@ export function createAgentInvocationPipeline(
               })
             : built.request,
         )
+        if (options.sharedProps) installAgentSharedProps(request, options.sharedProps)
 
         // env and execution context are forwarded explicitly — omitting them
         // silently loses D1/R2 bindings and waitUntil on Workers.

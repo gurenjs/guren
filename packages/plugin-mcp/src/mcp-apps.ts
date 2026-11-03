@@ -8,15 +8,15 @@ import type {
   AgentInvocationResult,
   AgentToolDenialReason,
   DerivedAgentTool,
-  InertiaPageObject,
+  InertiaPagePayload,
 } from '@guren/core'
 
 export const MCP_APPS_EXTENSION_ID = 'io.modelcontextprotocol/ui'
-export const MCP_APP_MIME_TYPE = 'text/html;profile=mcp-app'
+const MCP_APP_MIME_TYPE = 'text/html;profile=mcp-app'
 /** Read by hosts that predate the nested `_meta.ui.resourceUri`; the specification drops it before GA. */
 const LEGACY_RESOURCE_URI_KEY = 'ui/resourceUri'
-export const RESPONSE_META_KEY = 'dev.guren/response'
-export const INERTIA_PAGE_META_KEY = 'dev.guren/inertia-page'
+const RESPONSE_META_KEY = 'dev.guren/response'
+const INERTIA_PAGE_META_KEY = 'dev.guren/inertia-page'
 
 /** One built page: its whole HTML document and the content hash its URI carries. */
 export interface McpAppPage {
@@ -56,8 +56,8 @@ export interface McpUiConfig {
   /** Host-specific dedicated origin, passed through unvalidated. */
   domain?: string
   /**
-   * Shared Inertia props an App MCP tool call carries, to the model and to a
-   * view alike. Default none: every other key is dropped once the `share()` resolvers ran.
+   * Shared Inertia props an App MCP tool call carries, to the model and to a view
+   * alike. Default none, which runs no `share()` resolver for a tool call at all.
    */
   sharedProps?: readonly string[]
 }
@@ -76,20 +76,18 @@ export function uiAuthority(serverName: string): string {
   return label === '' ? 'guren-app' : label
 }
 
-export function pageResourceUri(ui: AppMcpUi, page: string, hash: string): string {
-  return `ui://${ui.authority}/pages/${page}?v=${hash}`
-}
-
-export function bridgeResourceUri(ui: AppMcpUi): string {
-  return `ui://${ui.authority}/bridge`
+interface BuiltPage {
+  page: string
+  built: McpAppPage
+  uri: string
 }
 
 /** The built page a tool's view loads, or undefined when it declares none or none was built. */
-function builtPage(tool: DerivedAgentTool, ui: AppMcpUi | undefined): { page: string; built: McpAppPage } | undefined {
+function builtPage(tool: DerivedAgentTool, ui: AppMcpUi | undefined): BuiltPage | undefined {
   const page = tool.ui?.page
   if (page === undefined || !ui?.pages) return undefined
   const built = ui.pages[page]
-  return built ? { page, built } : undefined
+  return built ? { page, built, uri: `ui://${ui.authority}/pages/${page}?v=${built.hash}` } : undefined
 }
 
 /**
@@ -99,9 +97,8 @@ function builtPage(tool: DerivedAgentTool, ui: AppMcpUi | undefined): { page: st
 export function toolUiMeta(tool: DerivedAgentTool, ui: AppMcpUi | undefined): Record<string, unknown> | undefined {
   if (!tool.ui) return undefined
   const page = builtPage(tool, ui)
-  if (!page || !ui) return { ui: { visibility: tool.ui.visibility } }
-  const resourceUri = pageResourceUri(ui, page.page, page.built.hash)
-  return { ui: { resourceUri, visibility: tool.ui.visibility }, [LEGACY_RESOURCE_URI_KEY]: resourceUri }
+  if (!page) return { ui: { visibility: tool.ui.visibility } }
+  return { ui: { resourceUri: page.uri, visibility: tool.ui.visibility }, [LEGACY_RESOURCE_URI_KEY]: page.uri }
 }
 
 /** The page ids some tool declares with no build behind it, for the warning the plugin prints once. */
@@ -123,65 +120,58 @@ function resourceUiMeta(ui: AppMcpUi, page: string): Record<string, unknown> {
   }
 }
 
-export interface UiResourceEntry {
-  uri: string
-  name: string
-  mimeType: string
-  _meta?: Record<string, unknown>
+/** The distinct built pages the listed tools name, in listing order. */
+function listedPages(listed: readonly DerivedAgentTool[], ui: AppMcpUi): BuiltPage[] {
+  const pages = new Map<string, BuiltPage>()
+  for (const tool of listed) {
+    const page = builtPage(tool, ui)
+    if (page && !pages.has(page.page)) pages.set(page.page, page)
+  }
+  return [...pages.values()]
 }
 
 /** `resources/list`: one entry per built page the listed tools name, plus the bridge catalogue. */
-export function listUiResources(listed: readonly DerivedAgentTool[], ui: AppMcpUi | undefined): UiResourceEntry[] {
+export function listUiResources(listed: readonly DerivedAgentTool[], ui: AppMcpUi | undefined) {
   if (!ui || !listed.some((tool) => tool.ui)) return []
-  const entries = new Map<string, UiResourceEntry>()
-  for (const tool of listed) {
-    const page = builtPage(tool, ui)
-    if (!page || entries.has(page.page)) continue
-    entries.set(page.page, {
-      uri: pageResourceUri(ui, page.page, page.built.hash),
+  return [
+    ...listedPages(listed, ui).map((page) => ({
+      uri: page.uri,
       name: page.page,
       mimeType: MCP_APP_MIME_TYPE,
       _meta: { ui: resourceUiMeta(ui, page.page) },
-    })
-  }
-  return [
-    ...entries.values(),
-    { uri: bridgeResourceUri(ui), name: 'guren-bridge', mimeType: 'application/json' },
+    })),
+    { uri: bridgeUri(ui), name: 'guren-bridge', mimeType: 'application/json' },
   ]
-}
-
-export interface UiResourceContents {
-  uri: string
-  mimeType: string
-  text: string
-  _meta?: Record<string, unknown>
 }
 
 /**
  * `resources/read`, for a URI the caller's listing contains; undefined for any
  * other, including a page URI naming a stale build.
  */
-export function readUiResource(
-  uri: string,
-  listed: readonly DerivedAgentTool[],
-  ui: AppMcpUi | undefined,
-): UiResourceContents | undefined {
-  const entry = listUiResources(listed, ui).find((candidate) => candidate.uri === uri)
-  if (!entry || !ui) return undefined
-  if (entry.mimeType === MCP_APP_MIME_TYPE) {
-    const built = ui.pages?.[entry.name]
-    if (!built) return undefined
-    return { uri, mimeType: MCP_APP_MIME_TYPE, text: built.html, _meta: { ui: resourceUiMeta(ui, entry.name) } }
+export function readUiResource(uri: string, listed: readonly DerivedAgentTool[], ui: AppMcpUi | undefined) {
+  if (!ui || !listed.some((tool) => tool.ui)) return undefined
+  if (uri === bridgeUri(ui)) {
+    return { uri, mimeType: 'application/json', text: JSON.stringify({ tools: bridgeCatalogue(listed) }) }
   }
-  return { uri, mimeType: 'application/json', text: JSON.stringify({ tools: bridgeCatalogue(listed) }) }
+  const page = listedPages(listed, ui).find((candidate) => candidate.uri === uri)
+  if (!page) return undefined
+  return { uri, mimeType: MCP_APP_MIME_TYPE, text: page.built.html, _meta: { ui: resourceUiMeta(ui, page.page) } }
 }
+
+function bridgeUri(ui: AppMcpUi): string {
+  return `ui://${ui.authority}/bridge`
+}
+
+/** One tool as the view's bridge reads it: what `buildToolRequest()` needs, and whether a visit can be one call. */
+export type BridgeCatalogueEntry =
+  Pick<DerivedAgentTool, 'toolName' | 'method' | 'path' | 'inputSources' | 'inputBodyNested'> & { bridgeable: boolean }
 
 /**
  * What the view's bridge needs to turn a visit into a call (RFC 0038 §5), for
  * the tools this caller can already call, in registration order. Discloses
  * each tool's method and path beyond `tools/list`, and nothing else.
  */
-function bridgeCatalogue(listed: readonly DerivedAgentTool[]): Array<Record<string, unknown>> {
+function bridgeCatalogue(listed: readonly DerivedAgentTool[]): BridgeCatalogueEntry[] {
   return listed.map((tool) => ({
     toolName: tool.toolName,
     method: tool.method,
@@ -213,35 +203,38 @@ export function resultMeta(
   result: AgentInvocationResult,
   appOrigin: string,
 ): Record<string, unknown> {
-  if (result.status === 'failed') {
-    return { [RESPONSE_META_KEY]: { outcome: 'failed', message: result.message } satisfies GurenToolResponse }
+  const page = result.status === 'executed' && tool.ui?.page !== undefined ? result.outcome.inertiaPage : undefined
+  return {
+    [RESPONSE_META_KEY]: toolResponse(result, page, appOrigin),
+    ...(page ? { [INERTIA_PAGE_META_KEY]: relativePage(page) } : {}),
   }
+}
+
+function toolResponse(
+  result: AgentInvocationResult,
+  page: InertiaPagePayload | undefined,
+  appOrigin: string,
+): GurenToolResponse {
+  if (result.status === 'failed') return { outcome: 'failed', message: result.message }
   if (result.status === 'denied') {
     const { reason, message, body } = result.denial
     const approval = typeof body?.requestId === 'string' && typeof body.status === 'string'
       ? { requestId: body.requestId, status: body.status as AgentApprovalStatus | 'spent' }
       : undefined
-    const response: GurenToolResponse = { outcome: 'denied', reason, message, ...(approval ? { approval } : {}) }
-    return { [RESPONSE_META_KEY]: response }
+    return { outcome: 'denied', reason, message, ...(approval ? { approval } : {}) }
   }
-
   const { outcome } = result
-  const page = tool.ui?.page !== undefined ? outcome.inertiaPage : undefined
-  const response: GurenToolResponse = {
+  return {
     outcome: 'executed',
     status: outcome.status,
     ...(page ? { url: absolute(page.url, appOrigin) } : {}),
     ...(outcome.location ? { location: absolute(outcome.location, appOrigin) } : {}),
     ...(outcome.errors ? { errors: outcome.errors } : {}),
   }
-  return {
-    [RESPONSE_META_KEY]: response,
-    ...(page ? { [INERTIA_PAGE_META_KEY]: relativePage(page) } : {}),
-  }
 }
 
 /** Inertia writes `url` into the frame's history, which refuses another origin (RFC 0038 §5). */
-function relativePage(page: InertiaPageObject): InertiaPageObject {
+function relativePage(page: InertiaPagePayload): InertiaPagePayload {
   try {
     const url = new URL(page.url, 'http://relative.invalid')
     return { ...page, url: `${url.pathname}${url.search}` }

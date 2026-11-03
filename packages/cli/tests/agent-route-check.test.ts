@@ -1029,7 +1029,7 @@ describe('checkAgentRoutes: MCP Apps ui (RFC 0038)', () => {
   async function writeApp(body: string, pages: string[] = ['posts/Show']): Promise<void> {
     await writeWorkspaceFiles(tempDir, {
       'app/Http/Controllers/PostController.ts': `
-import { Controller } from '@guren/core'
+import { Controller, defer } from '@guren/core'
 
 export class PostController extends Controller {
   async show() {

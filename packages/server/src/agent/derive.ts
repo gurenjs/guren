@@ -8,7 +8,7 @@
  * result, and `guren check` turns those warnings into a failing build. Opt-in —
  * a route becomes a tool only by declaring `.agent()` *and* carrying a name.
  */
-import type { AgentRouteMetadata, AgentRouteUi, ResourceResponseShape, RouteDefinition } from '../mvc/Router'
+import type { AgentRouteMetadata, ResourceResponseShape, RouteDefinition } from '../mvc/Router'
 import { extractPathParamNames } from '../internal/route-path'
 import { derivableAbility } from '../authorization/middleware'
 import {
@@ -441,19 +441,31 @@ function deriveAuthorization(
 
 const UI_AUDIENCES: ReadonlySet<string> = new Set(['model', 'app'])
 
+function pageIdOf(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const id = (value as { id?: unknown }).id
+  return typeof id === 'string' ? id : undefined
+}
+
 /**
  * The declared `ui` resolved, or why it is malformed. The one rule: the
  * derivation and `guren check` both judge a declaration through it.
  */
 export function deriveAgentToolUi(declared: NonNullable<AgentRouteMetadata['ui']>): DerivedAgentToolUi | string {
-  const form: AgentRouteUi = typeof declared === 'string' || 'id' in declared ? { page: declared } : declared
-  const page = form.page === undefined ? undefined : typeof form.page === 'string' ? form.page : form.page.id
+  // Typed, but read as unknown: a routes file is JavaScript to the router, and `introspect` hands over JSON.
+  const value: unknown = declared
+  const form = typeof value === 'string' || pageIdOf(value) !== undefined ? { page: value } : value
+  if (typeof form !== 'object' || form === null || Array.isArray(form)) return 'neither a page nor a { page, visibility } object'
+  const { page: rawPage, visibility: rawVisibility } = form as { page?: unknown; visibility?: unknown }
+  const page = rawPage === undefined ? undefined : typeof rawPage === 'string' ? rawPage : pageIdOf(rawPage)
+  if (rawPage !== undefined && page === undefined) return 'a page that is neither a page id nor a page contract'
   if (page !== undefined && page.trim() === '') return 'an empty page id'
-  if (page === undefined && form.visibility === undefined) return 'neither a page nor a visibility'
-  const visibility: string[] = form.visibility === undefined ? ['model', 'app'] : [...form.visibility]
+  if (page === undefined && rawVisibility === undefined) return 'neither a page nor a visibility'
+  if (rawVisibility !== undefined && !Array.isArray(rawVisibility)) return 'a visibility that is not a list'
+  const visibility: unknown[] = rawVisibility === undefined ? ['model', 'app'] : [...rawVisibility]
   if (visibility.length === 0) return 'an empty visibility list'
-  const unknown = visibility.find((entry) => !UI_AUDIENCES.has(entry))
-  if (unknown !== undefined) return `the visibility entry "${unknown}", which is neither "model" nor "app"`
+  const unknown = visibility.find((entry) => typeof entry !== 'string' || !UI_AUDIENCES.has(entry))
+  if (unknown !== undefined) return `the visibility entry ${JSON.stringify(unknown)}, which is neither "model" nor "app"`
   return {
     ...(page !== undefined ? { page } : {}),
     visibility: Array.from(new Set(visibility)) as Array<'model' | 'app'>,

@@ -1,6 +1,5 @@
 import {
   AGENT_AUDIT_BINDING,
-  AGENT_SHARED_PROPS_BINDING,
   AgentToolDenied,
   AgentToolInvoked,
   createAgentApprovalContext,
@@ -96,12 +95,10 @@ export interface McpPluginConfig {
  */
 const factory = definePlugin<McpPluginConfig>({
   name: 'mcp',
-  register(container, config): void {
+  register(): void {
     // The audit emitter, this plugin's one service, cannot be registered here:
     // it closes over a sink resolved asynchronously and over the event manager,
     // neither of which exists until `boot`. Everything else binds per request.
-    // Bound unconditionally: an App MCP tool call carries no shared prop the app did not name (RFC 0038 §6).
-    container.instance(AGENT_SHARED_PROPS_BINDING, [...(config.ui?.sharedProps ?? [])])
   },
   async boot(container, config): Promise<void> {
     const app = container.make<Application>('app')
@@ -229,6 +226,7 @@ const factory = definePlugin<McpPluginConfig>({
       // status tool that reports on them — so the two cannot disagree about whether
       // a queue exists; the server reads only three of its keys. `defer` rides along.
       const approvals = createAgentApprovalContext(config.approvals, principal, defer)
+      const origin = new URL(c.req.url).origin
 
       const pipeline = createAgentInvocationPipeline({
         app,
@@ -254,8 +252,10 @@ const factory = definePlugin<McpPluginConfig>({
         // the real Host the MCP client reached `/mcp` on. Defaulting to
         // localhost (dispatch's fallback) makes host-authorization middleware
         // — which RFC 0016's "in production" apps are encouraged to enable —
-        // reject every tool call with 403.
-        origin: new URL(c.req.url).origin,
+        // reject every tool call with 403. A view's hand-off is made absolute against it too.
+        origin,
+        // An App MCP tool call carries no shared prop the app did not name (RFC 0038 §6).
+        sharedProps: config.ui?.sharedProps ?? [],
         // A forwarded credential or the principal seam, never both. See
         // `ResolvedCaller.credential`.
         ...credential,
@@ -274,8 +274,8 @@ const factory = definePlugin<McpPluginConfig>({
         pipeline,
         limiter,
         rateKey,
-        ...(ui ? { ui } : {}),
-        appOrigin: new URL(c.req.url).origin,
+        ui,
+        appOrigin: origin,
         onInvoked: (tool, args, status, durationMs) => {
           record(
             new AgentToolInvoked(
@@ -422,13 +422,21 @@ function executionContext(c: Context): ExecutionContext | undefined {
 
 type ExecutionContext = Parameters<Application['fetch']>[2]
 
-/** The pages module, loaded once at boot. A loader that throws leaves the app serving every tool without a view. */
+/** The pages module, loaded once at boot. A module that fails or has another shape leaves every tool without a view. */
 async function loadUi(config: McpUiConfig | undefined, serverName: string): Promise<AppMcpUi | undefined> {
   if (!config) return undefined
   let pages: AppMcpUi['pages']
   if (config.pages) {
     try {
-      pages = (await config.pages()).mcpAppPages
+      const loaded: unknown = (await config.pages()).mcpAppPages
+      if (typeof loaded === 'object' && loaded !== null) {
+        pages = loaded as AppMcpUi['pages']
+      } else {
+        console.error(
+          '[@guren/plugin-mcp] The MCP App pages module exports no `mcpAppPages` object, '
+          + 'the shape `vite build --mode mcp-app` writes to .guren/mcp-app/index.gen.ts.',
+        )
+      }
     } catch (error) {
       console.error('[@guren/plugin-mcp] The MCP App pages module failed to load:', error)
     }

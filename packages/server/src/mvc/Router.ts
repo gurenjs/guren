@@ -229,26 +229,21 @@ export interface AgentRouteUi {
  */
 function cloneAgentMetadata(metadata: AgentRouteMetadata): AgentRouteMetadata {
   if (metadata.ui === undefined) return structuredClone(metadata)
-  // A generated `PageContract` carries a `props()` method, which `structuredClone` throws on.
   const { ui, ...rest } = metadata
-  return { ...structuredClone(rest), ui: normalizeAgentUi(ui) }
+  return { ...structuredClone(rest), ui: structuredClone(pageIdsOf(ui)) }
 }
 
 /**
- * Plain data, with the page reduced to its id. Anything unreadable becomes an
- * empty id or an empty visibility list, which `deriveAgentTools()` refuses,
- * so a malformed declaration is never stored as a wider one.
+ * A generated `PageContract` reduced to its id, since its `props()` method is
+ * what `structuredClone` throws on. Everything else is kept as written for
+ * `deriveAgentToolUi()` to judge, so a malformed declaration is reported as written.
  */
-function normalizeAgentUi(ui: unknown): AgentRouteUi {
-  const form = typeof ui === 'string' || isPageLike(ui) ? { page: ui } : ui
-  if (typeof form !== 'object' || form === null) return { page: '' }
-  const { page, visibility } = form as { page?: unknown; visibility?: unknown }
-  const normalized: AgentRouteUi = {}
-  if (page !== undefined) normalized.page = typeof page === 'string' ? page : isPageLike(page) ? page.id : ''
-  if (visibility !== undefined) {
-    normalized.visibility = Array.isArray(visibility) ? visibility.map((entry) => String(entry)) as Array<'model' | 'app'> : []
+function pageIdsOf(ui: unknown): AgentRouteMetadata['ui'] {
+  if (isPageLike(ui)) return ui.id
+  if (typeof ui === 'object' && ui !== null && isPageLike((ui as { page?: unknown }).page)) {
+    return { ...(ui as AgentRouteUi), page: (ui as { page: { id: string } }).page.id }
   }
-  return normalized
+  return ui as AgentRouteMetadata['ui']
 }
 
 function isPageLike(value: unknown): value is { id: string } {

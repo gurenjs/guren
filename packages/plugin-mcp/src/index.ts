@@ -7,6 +7,7 @@ export {
 export { createAppMcpServer, type AppMcpServerOptions } from './server'
 export type {
   AppMcpUi,
+  BridgeCatalogueEntry,
   GurenToolResponse,
   McpAppCsp,
   McpAppPage,

@@ -718,11 +718,13 @@ describe('ui (RFC 0038)', () => {
     router.put('/drafts/:id', handler).name('drafts.update').agent({
       ui: { visibility: ['app', 'browser' as 'app'] },
     })
+    router.get('/notes/:id', handler).name('notes.show').agent({ ui: 42 as unknown as string })
 
     const { tools, warnings } = deriveAgentTools(router.definitions())
     expect(tools.map((tool) => tool.toolName)).toEqual([])
     expect(warnings.some((warning) => warning.includes('posts.update') && warning.includes('empty visibility'))).toBe(true)
     expect(warnings.some((warning) => warning.includes('drafts.update') && warning.includes('"browser"'))).toBe(true)
+    expect(warnings.some((warning) => warning.includes('notes.show') && warning.includes('neither a page nor a { page'))).toBe(true)
   })
 
   test('stores the declaration as plain data the definitions snapshot can clone', () => {
@@ -730,7 +732,7 @@ describe('ui (RFC 0038)', () => {
     const page = { id: 'posts/Show', props: () => page }
     router.get('/posts/:id', handler).name('posts.show').agent({ ui: page })
 
-    expect(router.definitions()[0]!.agent?.ui).toEqual({ page: 'posts/Show' })
+    expect(router.definitions()[0]!.agent?.ui).toBe('posts/Show')
   })
 
   test('records input names two sources declared', () => {

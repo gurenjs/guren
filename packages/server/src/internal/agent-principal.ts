@@ -61,3 +61,20 @@ export function markAgentDispatch(request: Request): Request {
 export function isAgentDispatch(request: Request): boolean {
   return dispatched.has(request)
 }
+
+const sharedProps = new WeakMap<Request, ReadonlySet<string>>()
+
+/**
+ * Mark `request` as allowed only the named shared Inertia props (RFC 0038 §6),
+ * returning that same object. A surface opts in through the pipeline's
+ * `sharedProps`; nothing on the wire can ask for it, and nothing can widen it.
+ */
+export function installAgentSharedProps(request: Request, keys: readonly string[]): Request {
+  sharedProps.set(request, new Set(keys))
+  return request
+}
+
+/** The shared props this exact request may carry, or `undefined` for all of them. */
+export function readAgentSharedProps(request: Request): ReadonlySet<string> | undefined {
+  return sharedProps.get(request)
+}

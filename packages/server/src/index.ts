@@ -111,7 +111,6 @@ export {
 export type {
   BuildToolRequestOptions,
   BuiltToolRequest,
-  InertiaPageObject,
   ToolCallOutcome,
   ToolRequestBuildFailure,
 } from './agent/dispatch'
@@ -155,8 +154,6 @@ export type {
 // `@guren/plugin-mcp` binds one as `'agent.audit'`, `guren tool:call` resolves
 // that binding to record the `'cli'` surface.
 export { AGENT_AUDIT_BINDING, createAuditEmitter } from './agent/audit-emitter'
-// The shared Inertia props an App MCP tool call may carry (RFC 0038 §6), bound by `@guren/plugin-mcp`.
-export { AGENT_SHARED_PROPS_BINDING } from './internal/agent-request'
 export type { AgentAuditEmitter, AgentAuditSink, AuditEmitterOptions } from './agent/audit-emitter'
 // Not in `@guren/server/agent`: the file branch writes to disk.
 export { resolveAgentAuditSink } from './agent/audit-sink'

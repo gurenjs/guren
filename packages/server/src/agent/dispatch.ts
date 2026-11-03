@@ -6,6 +6,7 @@
  */
 import type { AgentToolInputSource, DerivedAgentTool } from './derive'
 import type { AgentSurface } from './events'
+import type { InertiaPagePayload } from '../mvc/inertia/InertiaEngine'
 import { PATH_PARAM_PATTERN } from '../internal/route-path'
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
 import { AGENT_SURFACE_HEADER } from '../internal/agent-request'
@@ -262,16 +263,8 @@ export interface ToolCallOutcome {
   location?: string
   /** A 422 response's `errors` object, when the body carries one (RFC 0038 §6). */
   errors?: Record<string, string[]>
-  /** The whole Inertia page an Inertia action answered with, before `content` unwraps it to its props. */
-  inertiaPage?: InertiaPageObject
-}
-
-/** The Inertia page object as the engine serializes it for a JSON request. */
-export interface InertiaPageObject {
-  component: string
-  props: Record<string, unknown>
-  url: string
-  version?: string | null
+  /** The whole Inertia page a `ui` page tool's action answered with, before `content` unwraps it to its props. */
+  inertiaPage?: InertiaPagePayload
 }
 
 /**
@@ -336,7 +329,8 @@ export async function mapToolResponse(
   }
 
   const payload = unwrapInertiaProps(tool, response, parsed)
-  const inertiaPage = readInertiaPage(response, parsed)
+  // Read only where a view renders it (RFC 0038): the props already ride in `content`.
+  const inertiaPage = tool.ui?.page === undefined ? undefined : readInertiaPage(response, parsed)
 
   if (structured && !isRecord(payload)) {
     return inconsistentOutput(tool, `a ${Array.isArray(payload) ? 'JSON array' : typeof payload} body`, status)
@@ -395,11 +389,11 @@ function readValidationErrors(response: Response, raw: string): Record<string, s
   return errors
 }
 
-function readInertiaPage(response: Response, parsed: unknown): InertiaPageObject | undefined {
+function readInertiaPage(response: Response, parsed: unknown): InertiaPagePayload | undefined {
   if (response.headers.get('X-Inertia') !== 'true' || !isRecord(parsed)) return undefined
   const { component, props, url, version } = parsed
   if (typeof component !== 'string' || !isRecord(props) || typeof url !== 'string') return undefined
-  return { component, props, url, ...(typeof version === 'string' || version === null ? { version } : {}) }
+  return { component, props, url, ...(typeof version === 'string' ? { version } : {}) }
 }
 
 function unwrapInertiaProps(tool: DerivedAgentTool, response: Response, parsed: unknown): unknown {

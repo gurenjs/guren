@@ -432,14 +432,19 @@ describe('mapToolResponse facts for MCP Apps (RFC 0038)', () => {
     expect(outcome.errors).toEqual({ title: ['Required'] })
   })
 
-  test('keeps the whole Inertia page beside the unwrapped props', async () => {
+  test('keeps the whole Inertia page beside the unwrapped props for a ui page tool only', async () => {
     const page = { component: 'posts/Index', props: { posts: [1] }, url: '/posts', version: 'v' }
-    const response = new Response(JSON.stringify(page), {
+    const inertiaResponse = () => new Response(JSON.stringify(page), {
       status: 200,
       headers: { 'Content-Type': 'application/json', 'X-Inertia': 'true' },
     })
-    const outcome = await mapToolResponse(plainTool(), response)
+    const uiTool = toolFor((router) => {
+      router.get('/posts', handler).name('posts.index').agent({ ui: 'posts/Index' })
+    }, 'posts.index')
+
+    const outcome = await mapToolResponse(uiTool, inertiaResponse())
     expect(outcome.inertiaPage).toEqual(page)
     expect(JSON.parse(outcome.content[0]!.text)).toEqual({ posts: [1] })
+    expect((await mapToolResponse(plainTool(), inertiaResponse())).inertiaPage).toBeUndefined()
   })
 })

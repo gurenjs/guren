@@ -34,7 +34,7 @@ import {
   type AppMcpUi,
 } from './mcp-apps'
 import { describePreflightTool, readPreflightArguments, toPreflightVerdict } from './preflight'
-import type { AgentRateLimiter } from './rate-limit'
+import { takeReadBudget, type AgentRateLimiter } from './rate-limit'
 
 export type { AuditedTool }
 
@@ -179,14 +179,20 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
   })
 
   if (servesUi) {
-    server.setRequestHandler('resources/list', () => ({ resources: listUiResources(listedTools(), options.ui) }))
+    // Metered like `guren_approval_status`, the other reads that never enter the pipeline.
+    const meterRead = (): void => {
+      const refused = takeReadBudget(options.limiter, options.rateKey)
+      if (refused) throw new ProtocolError(ProtocolErrorCode.InvalidRequest, refused)
+    }
 
-    // Metered like `guren_approval_status`, the other read that never enters the pipeline.
+    server.setRequestHandler('resources/list', () => {
+      meterRead()
+      return { resources: listUiResources(listedTools(), options.ui) }
+    })
+
     server.setRequestHandler('resources/read', (request) => {
       const uri = request.params.uri
-      if (options.limiter && !options.limiter.take(options.rateKey, { write: false })) {
-        throw new ProtocolError(ProtocolErrorCode.InvalidRequest, 'Rate limit exceeded for this token. Retry later.')
-      }
+      meterRead()
       const contents = readUiResource(uri, listedTools(), options.ui)
       if (!contents) throw new ResourceNotFoundError(uri)
       return { contents: [contents] }
@@ -264,12 +270,13 @@ async function handleApprovalStatus(
 
   const audited: AuditedTool = { toolName: APPROVAL_STATUS_TOOL_NAME }
 
-  if (options.limiter && !options.limiter.take(options.rateKey, { write: false })) {
-    // Metered as a read: a status check reaches the application's storage, so
-    // an unmetered one is a hole in the per-token budget an agent can poll
-    // through.
+  // Metered as a read: a status check reaches the application's storage, so
+  // an unmetered one is a hole in the per-token budget an agent can poll
+  // through.
+  const refused = takeReadBudget(options.limiter, options.rateKey)
+  if (refused) {
     options.onDenied(audited, args, 'rate-limit')
-    return errorResult('Rate limit exceeded for this token. Retry later.')
+    return errorResult(refused)
   }
 
   const startedAt = performance.now()

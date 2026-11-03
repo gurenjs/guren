@@ -588,20 +588,24 @@ page) are the part an author does not see at the call site: `auth.user`, flash
 messages, the `_i18n` catalogue. One policy governs both destinations, decided
 here rather than left to `share()`:
 
-- On a request the agent dispatch makes (the agent surface header, which App MCP
-  sets on its own in-process request), `Controller.inertia()` resolves **only
+- On a request the agent dispatch makes ~~(the agent surface header, which App MCP
+  sets on its own in-process request)~~, `Controller.inertia()` resolves **only
   the shared props named in `mcpPlugin({ ui: { sharedProps: [...] } })`**,
   default none. ~~Unlisted lazy shared props are never evaluated.~~
-  **Amended in implementation (Phase 1):** every `share()` resolver still runs,
-  since one resolver returns several keys; the projection drops the unlisted
-  keys afterwards, so only a lazy value nested inside a dropped key is never
-  evaluated. Filtering per resolver would need resolvers to declare their keys.
+  **Amended in implementation (Phase 1):** the allowlist is installed by the
+  agent pipeline (`AgentInvocationOptions.sharedProps`) on the exact `Request`
+  it dispatches, the seam the principal handoff uses (RFC 0017 §2), not read
+  from the surface header: `buildToolRequest()` defaults that header to `mcp`,
+  so `TestApp.agent()` and `guren tool:call` would have been narrowed too, and
+  nothing on the wire can now set or widen it. An empty allowlist runs no
+  `share()` resolver; a non-empty one runs them all, since one resolver returns
+  several keys, and drops the unlisted keys afterwards.
 - The action's own props are sent; the controller chose them for that page.
 - The text `content` is the same projected `page.props`, so the model reads no
   more than the view receives.
 
-The header can be sent by a browser on a WebMCP call, but sending it only
-withholds shared props from the response, so a forged one discloses nothing.
+~~The header can be sent by a browser on a WebMCP call, but sending it only
+withholds shared props from the response, so a forged one discloses nothing.~~
 A shorter model-facing summary for `ui` tools (a Resource or a function of the
 props) is an additive option for later; the default is the projected props.
 
