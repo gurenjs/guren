@@ -111,7 +111,9 @@ import { PostUpdated } from '../../app/Events/PostUpdated.js'
 function broadcastsSent(): string[] {
   return mockBroadcastEvent.mock.calls.map(([event]) => {
     const sent = event as PostsChanged | PostUpdated
-    return `${sent.eventName} on ${sent.broadcastOn().join(',')}`
+    // The @guren/core mock leaves Event without its instance getter, so read the class's own static name.
+    const name = (sent.constructor as typeof PostsChanged | typeof PostUpdated).eventName
+    return `${name} on ${sent.broadcastOn().join(',')}`
   })
 }
 
