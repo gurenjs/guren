@@ -157,6 +157,7 @@ describe('mcpPlugin MCP Apps (RFC 0038)', () => {
       inputBodyNested: false,
       bridgeable: true,
     })
+    expect(catalogue.tools.find((tool) => tool.toolName === 'posts.show')?.page).toBe('posts/Show')
   })
 
   test('returns the Inertia page and the outcome in the result _meta', async () => {

@@ -41,6 +41,8 @@ export interface BridgeTool {
   inputSources: Record<string, BridgeInputSource>
   inputBodyNested: boolean
   bridgeable: boolean
+  /** The page the tool renders; absent from a server older than this field. */
+  page?: string
 }
 
 export type GurenToolResponse = { contract: number; bridge?: string } & (
@@ -227,6 +229,12 @@ async function visit(
     return plan.method === 'GET'
       ? handOff(deps, appUrl(plan.path, origins))
       : refuse(deps, bag, 'This action is not available here. Open the page in the application to continue.')
+  }
+
+  // A page this document does not bundle opens in the browser whatever the call
+  // returns, so the call is not made (RFC 0038 §7 builds one document per page).
+  if (plan.method === 'GET' && plan.tool.page !== undefined && !(await deps.hasComponent(plan.tool.page))) {
+    return handOff(deps, appUrl(plan.path + new URL(url, origins.sandbox).search, origins))
   }
 
   let result: ToolResultLike

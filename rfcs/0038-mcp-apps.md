@@ -508,7 +508,7 @@ no build hash, since the catalogue is computed per request and never cached as
 a template. The server answers it per caller, from the same filter as `tools/list`, with
 `{ toolName, method, path, inputSources }` per tool in route registration
 order (**amended:** plus `inputBodyNested` and `bridgeable`, false for a tool
-whose derivation reported an input-name collision, `DerivedAgentTool.inputCollisions`). What this discloses beyond `tools/list` is the method and path of tools
+whose derivation reported an input-name collision, `DerivedAgentTool.inputCollisions`; and, from the Phase 2 run on claude.ai, `page`, the page the tool renders, so a view that does not bundle it opens the application without calling the tool). What this discloses beyond `tools/list` is the method and path of tools
 the caller can already call, which the guide states.
 
 1. **Initial page.** The bridge connects `App` from

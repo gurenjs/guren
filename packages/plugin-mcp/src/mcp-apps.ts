@@ -180,12 +180,17 @@ function bridgeUri(ui: AppMcpUi): string {
 
 /** One tool as the view's bridge reads it: what `buildToolRequest()` needs, and whether a visit can be one call. */
 export type BridgeCatalogueEntry =
-  Pick<DerivedAgentTool, 'toolName' | 'method' | 'path' | 'inputSources' | 'inputBodyNested'> & { bridgeable: boolean }
+  Pick<DerivedAgentTool, 'toolName' | 'method' | 'path' | 'inputSources' | 'inputBodyNested'> & {
+    bridgeable: boolean
+    /** The page the tool renders, so a view that does not bundle it opens the app instead of calling. */
+    page?: string
+  }
 
 /**
  * What the view's bridge needs to turn a visit into a call (RFC 0038 §5), for
  * the tools this caller can already call, in registration order. Discloses
- * each tool's method and path beyond `tools/list`, and nothing else.
+ * each tool's method and path beyond `tools/list` (its page is in `tools/list`
+ * already, in the resource URI), and nothing else.
  */
 function bridgeCatalogue(listed: readonly DerivedAgentTool[]): BridgeCatalogueEntry[] {
   return listed.map((tool) => ({
@@ -196,6 +201,7 @@ function bridgeCatalogue(listed: readonly DerivedAgentTool[]): BridgeCatalogueEn
     inputBodyNested: tool.inputBodyNested,
     // A visit carrying both colliding inputs cannot be one flat call.
     bridgeable: tool.inputCollisions === undefined,
+    ...(tool.ui?.page === undefined ? {} : { page: tool.ui.page }),
   }))
 }
 

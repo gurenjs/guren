@@ -221,6 +221,14 @@ describe('createMcpAppHttpClient', () => {
     expect(calls).toEqual([])
   })
 
+  it('opens a tool whose page this document does not bundle without calling it', async () => {
+    const elsewhere = new BridgeCatalogue([tool('users.show', 'GET', '/users/:id', { page: 'users/Show' })])
+    const client = createMcpAppHttpClient(deps({ catalogue: () => elsewhere }))
+    await expect(client.request({ method: 'get', url: `${SANDBOX}/users/1?tab=posts` } as HttpRequestConfig)).rejects.toBeInstanceOf(HttpCancelledError)
+    expect(handOffs).toEqual([`${APP}/users/1?tab=posts`])
+    expect(calls).toEqual([])
+  })
+
   it('hands off a page this document does not bundle, and a result on another contract', async () => {
     answers.set('posts.show', executed({ status: 200, url: `${APP}/users/1` }, page('users/Show', '/users/1')))
     await expect(send({ url: '/posts/1' })).rejects.toBeInstanceOf(HttpCancelledError)
