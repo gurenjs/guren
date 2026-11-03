@@ -9,19 +9,24 @@ You are a documentation assistant for the Guren framework.
 
 > The authoritative signature-level API reference is `__RULES_DIR__/*.md` (each file's `paths` frontmatter states the paths it covers) plus the full references in `reference/` beside this file (`orm-models.md`, `controllers-http.md`, `routes-codegen.md`, `testing.md`); this skill is a subsystem tour for interactive Q&A.
 
-`Source:` paths below are files in the Guren framework repository
-(github.com/gurenjs/guren), not in this app. The guides are at
-`https://guren.dev/docs/guides/<slug>` (append `.md` for the raw Markdown);
-`https://guren.dev/llms.txt` lists every page.
+Each section names its guide on guren.dev (append `.md` to the URL for the raw
+Markdown; `https://guren.dev/llms.txt` lists every page). For a signature that
+neither a guide nor the rules show, read the installed declarations. A
+subsystem's declarations sit under `node_modules/@guren/*/dist/<area>/` (`queue/Job.d.ts`,
+`authorization/Policy.d.ts`, `mail/Mail.d.ts`); models are in
+`node_modules/@guren/orm/dist/index.d.ts`, the test helpers in
+`node_modules/@guren/testing/dist/index.d.ts`, form hooks in
+`node_modules/@guren/inertia-client/dist/forms.d.ts`. Whichever package
+declares a server or ORM name, app code imports it from `@guren/core`.
 
 ## Your Role
 
-Help users understand and use Guren framework APIs by providing examples, patterns, and source file locations.
+Help users understand and use Guren framework APIs by providing examples, patterns, and the guide that covers each subsystem.
 
 ## Core Subsystems
 
 ### Controllers
-Source: `packages/server/src/mvc/Controller.ts`
+Guide: https://guren.dev/docs/guides/controllers
 
 ```typescript
 import { Controller } from '@guren/core'
@@ -73,7 +78,7 @@ All throw `ValidationException` (HTTP 422) on failure.
 - `this.auth.userOrFail<T>()` — returns user or throws `AuthenticationException` (401)
 
 ### Models
-Source: `packages/orm/src/Model.ts`
+Guide: https://guren.dev/docs/guides/database
 
 ```typescript
 import { defineModel } from '@guren/core'
@@ -88,7 +93,7 @@ await Post.where('published', true).get()
 await Post.create({ title: 'Hello' })
 ```
 
-`ModelNotFoundException` (source: `packages/orm/src/ModelNotFoundException.ts`) carries `statusCode: 404` and is automatically rendered as HTTP 404 by the ExceptionHandler.
+`ModelNotFoundException` carries `statusCode: 404` and is automatically rendered as HTTP 404 by the ExceptionHandler.
 
 **Mass assignment protection** — prevent injection of unintended fields via `create()` / `update()`:
 
@@ -144,7 +149,7 @@ await Post.withPaginate('author', { page: 1 }) // paginated + relations
 Also available: `hasOne`, `belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey?, relatedKey?)`, `hasManyThrough`, `morphMany`/`morphTo`. There are **no `attach`/`detach`/`sync` pivot helpers and no `firstOrCreate`/`updateOrCreate`** — manage pivot rows via a model on the pivot table (`PivotModel.create(...)` / `PivotModel.delete(...)`), and hand-roll find-or-create with `Model.first(where)` + `Model.create(...)`. Full guide: https://guren.dev/docs/guides/database (Relationships section).
 
 ### Routes
-Source: `packages/server/src/mvc/Router.ts`
+Guide: https://guren.dev/docs/guides/routing
 
 ```typescript
 import { Router, requireAuthenticated } from '@guren/core'
@@ -177,7 +182,7 @@ not expressible in OpenAPI 3.1, not sendable from Inertia forms (use the API cli
 - Frontend derives form types via `RouteBody<ApiRoutes, 'route.name'>`
 
 ### End-to-End Type Safety
-Source: `packages/cli/src/api-client-types.ts`, `packages/inertia-client/src/typed-forms.ts`
+Guide: https://guren.dev/docs/guides/frontend (forms), https://guren.dev/docs/guides/routing
 
 Guren provides bidirectional type safety between frontend forms and backend validation:
 
@@ -222,8 +227,36 @@ form.post(route('posts.store'))
 const { body: data } = this.validated('posts.store')  // typed from the contract after codegen
 ```
 
+**Forms bound to a route** (`.guren/forms.gen.ts`, one `<route>Form` contract per
+named POST/PUT/PATCH/DELETE route with an object body; `Field` is the scaffold's
+copy in `resources/js/components/ui/`, which `bunx guren add ui` restores):
+```tsx
+import { resolveRouteUrl, useRouteForm, type RouteForm } from '@guren/inertia-client/forms'
+import type { RouteBody } from '@guren/inertia-client/typed-forms'
+import type { ApiRoutes } from '@/.guren/api-client.gen'
+import { postsUpdateForm } from '@/.guren/forms.gen'
+import { Field } from '@/resources/js/components/ui/Field'
+
+// useRouteForm(contract, initial, options?): the body type comes from the contract,
+// and `initial` must match it. `params` is required exactly when the path has parameters.
+const form = useRouteForm(postsUpdateForm, { title: post.title, body: post.body }, { params: { id: post.id } })
+
+<form method="post" action={resolveRouteUrl(postsUpdateForm.path, { id: post.id })} onSubmit={form.handleSubmit}>
+  <PostFields form={form} />
+</form>
+
+// Fields shared by New and Edit take the form typed by the body both routes accept:
+function PostFields({ form }: { form: RouteForm<RouteBody<ApiRoutes, 'posts.update'>> }) {
+  return <Field form={form} name="title" />
+}
+```
+`action` covers a submit made before hydration (a PUT form still says `post`).
+Options besides `params`: `adoptPageErrors` (seed errors once from the page's
+shared `errors`) and `errorBag`. `form.handleSubmit` takes no visit options;
+the rest of Inertia's form (`data`, `setData`, `errors`, `processing`, `reset`) is there.
+
 ### Middleware
-Source: `packages/server/src/http/middleware/`
+Guide: https://guren.dev/docs/guides/middleware
 
 ```typescript
 import { defineMiddleware } from '@guren/core'
@@ -235,7 +268,7 @@ export const logRequest = defineMiddleware(async (ctx, next) => {
 ```
 
 ### Authentication
-Source: `packages/server/src/auth/`
+Guide: https://guren.dev/docs/guides/authentication
 
 ```typescript
 import { Router, requireAuthenticated } from '@guren/core'
@@ -253,13 +286,15 @@ const user = await this.auth.userOrFail()   // throws AuthenticationException (4
 const isLoggedIn = await this.auth.check()  // returns boolean
 ```
 
-Additional auth features:
-- API Tokens: `packages/server/src/auth/api-token.ts`
-- Email Verification: `packages/server/src/auth/email-verification.ts`
-- Password Reset: `packages/server/src/auth/password-reset.ts`
+Additional auth features, each with its guide:
+[API tokens](https://guren.dev/docs/guides/api-tokens) ·
+[email verification](https://guren.dev/docs/guides/email-verification) ·
+[password reset](https://guren.dev/docs/guides/password-reset) ·
+[OAuth](https://guren.dev/docs/guides/oauth) ·
+[rate limiting](https://guren.dev/docs/guides/rate-limiting).
 
 ### Testing (@guren/testing)
-Source: `packages/testing/src/`
+Guide: https://guren.dev/docs/guides/testing
 
 Included by default in `create-app`-scaffolded apps' `devDependencies`; if missing, `bun add -d @guren/testing`.
 
@@ -316,94 +351,126 @@ await this.authorize('create', Post)           // PostPolicy.create(user)
 const canEdit = await this.can('update', [Post, post])   // boolean, no 403
 ```
 
+An ability may be `async` and returns a boolean or one of the `Policy`
+helpers: `this.deny(message?)` (403), `this.denyWithStatus(status, message?)`,
+`this.denyAsNotFound(message?)` (404, so a stranger cannot tell the record
+exists; `can()` is `false`). An ability with no record that still needs data
+takes a plain object as the tuple's second element:
+
+```typescript
+import { Policy, type AuthUser } from '@guren/core'
+
+export class CommentPolicy extends Policy {
+  view(user: AuthUser | null, comment: CommentRecord) {
+    return comment.published || user?.id === comment.authorId ? true : this.denyAsNotFound()
+  }
+
+  create(user: AuthUser | null, context: { postLocked: boolean }) {
+    return user !== null && !context.postLocked
+  }
+}
+
+await this.authorize('create', [Comment, { postLocked: post.locked }])   // CommentPolicy.create(user, { postLocked })
+```
+
 ### Events & Listeners
-Source: `packages/server/src/events/`
+Guide: https://guren.dev/docs/guides/events
 
-- `Event.ts` — Base event class
-- `EventManager.ts` — Event dispatcher
-- `Listener.ts` — Base listener class
-- `builtin.ts` — Built-in framework events
-
-Register listeners with `events.listen(Listener)` in the app's event provider
-(`app/Providers/EventProvider.ts`), and list that provider in `createApp({ providers })`.
+`bunx guren make:event OrderPlaced` writes an `Event` subclass in `app/Events/`;
+`bunx guren make:listener SendReceipt --event OrderPlaced` writes
+`SendReceiptListener`, a `Listener<OrderPlaced>` with `static event = OrderPlaced`
+and `async handle(event)` (`static shouldQueue = true` runs it on the queue).
+Register listeners with `events.listen(SendReceiptListener)` in the app's event
+provider (`app/Providers/EventProvider.ts`, from `bunx guren add events`), and
+list that provider in `createApp({ providers })`. Emit with
+`await this.make('events').emit(new OrderPlaced(order))` (`emitParallel()` runs
+the listeners concurrently). Main names: `Event`, `Listener`, `EventManager`,
+`createEventManager`.
 
 ### Jobs & Queue
-Source: `packages/server/src/queue/`
+Guide: https://guren.dev/docs/guides/queue
 
-- `Job.ts` — Base job class with `handle()` method
-- `QueueManager.ts` — Queue manager (memory, Redis drivers)
-- `Worker.ts` — Queue worker process
+`bunx guren add queue` binds the `queue` manager (`QUEUE_CONNECTION` picks the
+driver; `sync` runs a job inline on dispatch) and writes a provider whose
+`boot()` registers each job, since a worker resolves the class by the name in
+the message.
 
-Drivers: `packages/server/src/queue/drivers/`
+```typescript
+// app/Jobs/SendReceiptJob.ts (bunx guren make:job SendReceipt)
+import { Job } from '@guren/core'
+
+export class SendReceiptJob extends Job<{ orderId: number }> {
+  static queue = 'emails'   // default 'default'; also maxAttempts (3) and backoff
+  async handle({ orderId }: { orderId: number }): Promise<void> {
+    // look the order up and send the receipt
+  }
+}
+
+registerJob(SendReceiptJob)                             // in the provider's boot()
+await SendReceiptJob.dispatch({ orderId: order.id })   // → job id; dispatchAfter(ms, payload)
+```
+
+A worker is `bunx guren queue:work` (`--queue=emails,default` in priority
+order). Main names: `Job`, `registerJob`, `Worker`, `QueueManager`,
+`createQueueManager`, `MemoryQueueDriver`, `SyncQueueDriver`, `RedisQueueDriver`.
 
 ### Mail
-Source: `packages/server/src/mail/`
+Guide: https://guren.dev/docs/guides/mail
 
-- `Mail.ts` — Base mailable class
-- `MailManager.ts` — Mail manager
+`bunx guren add mail` binds the `mail` manager (`MAIL_MAILER` picks the
+transport). `bunx guren make:mail Welcome` writes `app/Mail/WelcomeMail.ts`, a
+`Mail` subclass whose `build()` sets the subject and body; `send()` runs it:
 
-Transports:
-- `MemoryTransport.ts` — For testing
-- `ResendTransport.ts` — Resend API
-- `SmtpTransport.ts` — SMTP
+```typescript
+await new WelcomeMail(this.make('mail'), { name: user.name }).to(user.email).send()
+await new WelcomeMail(this.make('mail')).to(user.email).queue('emails')   // a job on the `queue` manager
+```
+
+Builder: `to/toMany/cc/bcc/replyTo/from(address)` · `subject()` · `text()` ·
+`html()` · `attach()` · `via(transport)`. Transports: `LogTransport`,
+`MemoryTransport`, `SmtpTransport`, `ResendTransport`. Asserting what a test
+sent: `__RULES_DIR__/testing.md` (Faking mail and queues).
 
 ### Cache
-Source: `packages/server/src/cache/`
+Guide: https://guren.dev/docs/guides/cache
 
-- `CacheManager.ts` — Cache manager
-- `TaggedCache.ts` — Tag-based cache invalidation
-
-Stores:
-- `MemoryStore.ts` — In-memory
-- `FileStore.ts` — File-based
-- `RedisStore.ts` — Redis
+`CacheManager` / `createCacheManager`, `TaggedCache` for tag-based
+invalidation; stores `MemoryCacheStore`, `FileCacheStore`, `RedisCacheStore`.
 
 ### Validation
-Source: `packages/server/src/http/validation/`
+Guide: https://guren.dev/docs/guides/validation
 
-- `Validator.ts` — Validation engine
-- `rules.ts` — Built-in validation rules
-- `FormRequest.ts` — Form request validation (`packages/server/src/http/FormRequest.ts`)
+Zod schemas on the route contract are the standard path (see Routes above).
+`Validator` / `createValidator` and `FormRequest` also exist.
 
 ### Broadcasting
-Source: `packages/server/src/broadcasting/`
+Guide: https://guren.dev/docs/guides/broadcasting
 
-- `BroadcastManager.ts` — Broadcast manager
-
-Channels: `Channel.ts`, `PrivateChannel.ts`, `PresenceChannel.ts`
-Drivers: `MemoryDriver.ts`, `RedisDriver.ts`
+`BroadcastManager`; channels `Channel`, `PrivateChannel`, `PresenceChannel`;
+drivers `MemoryBroadcastDriver`, `RedisBroadcastDriver`.
 
 ### Notifications
-Source: `packages/server/src/notifications/`
+Guide: https://guren.dev/docs/guides/notifications
 
-- `Notification.ts` — Base notification class
-- `NotificationManager.ts` — Notification dispatcher
-
-Channels: `MailChannel.ts`, `SlackChannel.ts`, `DatabaseChannel.ts`, `MemoryChannel.ts`
+`Notification`, `NotificationManager`; channels `MailChannel`, `SlackChannel`,
+`DatabaseChannel`, `MemoryChannel`.
 
 ### Storage
-Source: `packages/server/src/storage/`
+Guide: https://guren.dev/docs/guides/storage
 
-- `StorageManager.ts` — Storage manager
-
-Drivers: `LocalDriver.ts`, `MemoryDriver.ts`, `S3Driver.ts`. On Cloudflare Workers, `R2Driver` from `@guren/plugin-cloudflare` (bucket binding; register with `storage.registerDisk()`).
+`StorageManager` / `createStorageManager`; drivers `LocalStorageDriver`,
+`MemoryStorageDriver`, `S3Driver`. On Cloudflare Workers, `R2Driver` from
+`@guren/plugin-cloudflare` (bucket binding; register with `storage.registerDisk()`).
 
 ### Scheduling
-Source: `packages/server/src/scheduling/`
+Guide: https://guren.dev/docs/guides/scheduling
 
-- `Schedule.ts` — Schedule definition
-- `Scheduler.ts` — Scheduler runner
-- `ScheduledTask.ts` — Individual scheduled task
-- `CronParser.ts` — Cron expression parser
+`Schedule`, `Scheduler`, `ScheduledTask`.
 
 ### I18n (Internationalization)
-Source: `packages/server/src/i18n/`
+Guide: https://guren.dev/docs/guides/i18n
 
-- `I18nManager.ts` — I18n manager
-- `Translator.ts` — Translation engine
-- `pluralization.ts` — Pluralization rules
-
-Loaders: `JsonLoader.ts`, `MemoryLoader.ts`
+`I18nManager`, `Translator`; loaders `JsonLoader`, `MemoryLoader`.
 
 App wiring: `createApp({ i18n: { supported: ['en', 'ja'] } })` loads
 `lang/<locale>/*.json`, mounts locale detection (query → cookie →
@@ -418,28 +485,22 @@ a select option `fields.<name>.options.<value>`, before the field name as
 words. `hasTranslation(i18n, key)` tells a missing key from one `t()` echoes.
 
 ### Encryption
-Source: `packages/server/src/encryption/`
+Guide: https://guren.dev/docs/guides/encryption
 
-- `Encrypter.ts` — Encrypt/decrypt values
-- `Hash.ts` — Hashing utilities
-- `Random.ts` — Secure random generation
+`Encrypter` (encrypt/decrypt values), `Hash` (password hashing).
 
 ### Health Checks
-Source: `packages/server/src/health/`
+Guide: https://guren.dev/docs/guides/health-checks
 
-- `HealthManager.ts` — Health check manager
-- `HealthCheck.ts` — Base health check
-
-Checks: `DatabaseCheck.ts`, `RedisCheck.ts`, `CacheCheck.ts`, `MemoryCheck.ts`, `StorageCheck.ts`, `CustomCheck.ts`
+`HealthManager` / `createHealthManager`, `HealthCheck`; checks `DatabaseCheck`,
+`RedisCheck`, `CacheCheck`, `MemoryCheck`, `StorageCheck`, `CustomCheck`.
 
 ### Error Handling
-Source: `packages/server/src/errors/`
+Guide: https://guren.dev/docs/guides/error-handling
 
-- `ExceptionHandler.ts` — Global exception handler (supports duck-typed `statusCode` property)
-- `HttpException.ts` — Base HTTP exception
-- `debug-page.ts` — Debug error page
-
-Exceptions: `NotFoundHttpException.ts`, `ValidationException.ts`, `AuthenticationException.ts`, `AuthorizationException.ts`, `MethodNotAllowedException.ts`
+`ExceptionHandler` renders every thrown error; the exceptions are
+`HttpException`, `NotFoundHttpException`, `ValidationException`,
+`AuthenticationException`, `AuthorizationException`, `MethodNotAllowedException`.
 
 The ExceptionHandler automatically handles:
 - `HttpException` subclasses → uses their status code
@@ -475,81 +536,44 @@ NotFoundHttpException.forModel('User', 123)
 `Model.findOrFail()` throws `ModelNotFoundException` (exported from `@guren/core`) — it does *not* extend `HttpException`; the handler picks it up via its duck-typed `statusCode: 404`.
 
 ### Container & Service Providers
-Source: `packages/server/src/container/`
+Guide: https://guren.dev/docs/guides/architecture (Service Container, Service Providers)
 
-- `Container.ts` — IoC container
-- `ServiceProvider.ts` — Base service provider
-
-Built-in providers: `packages/server/src/providers/`
+`Container`, `ServiceProvider`. A provider declares `register()` (abstract)
+and may add `boot()`, which runs once every provider has registered;
+`bunx guren make:provider <Name>` writes both. `this.container.make('<key>')`
+resolves a binding (`gate`, `events`, `queue`, `mail`, `cache`, `storage`, …).
 
 ### Console Commands
-Source: `packages/server/src/console/`
+Guide: https://guren.dev/docs/guides/console
 
-- `Command.ts` — Base command class
-- `ConsoleKernel.ts` — Console kernel
-- `Input.ts` / `Output.ts` — IO handling
+`Command`, `ConsoleKernel`, `Input` / `Output`.
 
 ### API Resources
-Source: `packages/server/src/http/resources/`
+Guide: https://guren.dev/docs/guides/api-resources
 
-- `Resource.ts` — API resource transformer
-- `ResourceCollection.ts` — Collection of resources
-- `Paginator.ts` — Offset-based pagination
-- `CursorPaginator.ts` — Cursor-based pagination
+`Resource`, `ResourceCollection`, `Paginator` (offset), `CursorPaginator`.
 
 ### Database (Factory & Seeder)
-Source: `packages/server/src/database/`
+Guide: https://guren.dev/docs/guides/database (Seeding)
 
-- `Factory.ts` — Model factory for testing
-- `Seeder.ts` — `BaseSeeder`/`Seeder`, deprecated in 2.9.0 (removed in 3.0.0)
-- `SeederRunner.ts` — deprecated in 2.9.0 (removed in 3.0.0), wired to no command
-
-Seeding itself does not live here. `db:seed` runs every seeder in `db/seeders/`,
-and seeders are written with `defineSeeder` from `@guren/core`.
+`db:seed` runs every seeder in `db/seeders/`, and seeders are written with
+`defineSeeder` from `@guren/core`. `Factory` builds model records for tests.
+`BaseSeeder`, `Seeder` and `SeederRunner` are deprecated since 2.9.0 (removed
+in 3.0.0) and wired to no command.
 
 ### Logging
-Source: `packages/server/src/logging/`
+Guide: https://guren.dev/docs/guides/logging
 
-- `LogManager.ts` — Log manager
-- `Logger.ts` — Logger instance
-
-Channels: `ConsoleChannel.ts`, `FileChannel.ts`, `DailyFileChannel.ts`
+`LogManager`, `Logger`; channels `ConsoleChannel`, `FileChannel`, `DailyFileChannel`.
 
 ### Redis
-Source: `packages/server/src/redis/`
+Imported from `@guren/core/redis`: `createRedisClient`, and the Redis-backed
+stores `RedisSessionStore`, `RedisRateLimitStore`, `RedisApiTokenStore`,
+`RedisEmailVerificationStore`, `RedisPasswordResetStore`, `RedisOAuthStateStore`,
+`RedisSchedulerLock`. Each subsystem's guide shows where its store plugs in.
 
-- `client.ts` — Redis client
-- Session, rate-limit, API token, email verification, password reset stores
+## Example apps
 
-## Reference Locations
-
-| Subsystem | Source Path |
-|-----------|------------|
-| Controllers | `packages/server/src/mvc/Controller.ts` |
-| Models | `packages/orm/src/Model.ts` |
-| Routes | `packages/server/src/mvc/Route.ts` |
-| Auth | `packages/server/src/auth/` |
-| Testing | `packages/testing/src/` |
-| Authorization | `packages/server/src/authorization/` |
-| Events | `packages/server/src/events/` |
-| Queue/Jobs | `packages/server/src/queue/` |
-| Mail | `packages/server/src/mail/` |
-| Cache | `packages/server/src/cache/` |
-| Validation | `packages/server/src/http/validation/` |
-| Broadcasting | `packages/server/src/broadcasting/` |
-| Notifications | `packages/server/src/notifications/` |
-| Storage | `packages/server/src/storage/` |
-| Scheduling | `packages/server/src/scheduling/` |
-| I18n | `packages/server/src/i18n/` |
-| Encryption | `packages/server/src/encryption/` |
-| Health Checks | `packages/server/src/health/` |
-| Error Handling | `packages/server/src/errors/` |
-| Container | `packages/server/src/container/` |
-| Console | `packages/server/src/console/` |
-| API Resources | `packages/server/src/http/resources/` |
-| Database/Seeder | `packages/server/src/database/` |
-| Logging | `packages/server/src/logging/` |
-| Redis | `packages/server/src/redis/` |
-| Example App | `examples/blog/` |
-| API Example | `examples/api/` |
-| Docs | https://guren.dev/llms.txt |
+The framework repository's reference apps, to read rather than copy into this
+app: https://github.com/gurenjs/guren/tree/main/examples/blog (full stack) and
+https://github.com/gurenjs/guren/tree/main/examples/api (API only).
