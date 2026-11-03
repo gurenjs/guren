@@ -30,14 +30,16 @@ return this.inertia(pages.posts.Show, { post })   // props compile-checked again
 
 If props don't type-check after editing a page's `Props`, re-run `bunx guren codegen`.
 **Shared props**: the framework shares flashed validation `errors`, and `_i18n`
-when `createApp({ i18n })` is set. `auth` is shared only when
-`app/Providers/AuthProvider.ts` exists (`guren add auth`, `make:auth`,
-`create-guren-app --auth`, the blog starter): its `boot()` calls
-`shareInertiaProps()` with `{ auth: { user } }`, `user` being `null` for a guest.
-Without that file, `usePage<{ auth: … }>()` type-checks and is `undefined` at
-runtime. Pass anything else through `this.inertia(page, { … })`; a prop every
-page needs goes in a provider's `boot()` as `shareInertiaProps(fn, this.container)`,
-which merges with the others. Do not share `auth` a second time.
+when `createApp({ i18n })` is set (unless `i18n.share` is `false`). Anything
+else comes from a registered resolver: `createApp({ inertia: { share } })` or
+`shareInertiaProps()` in a listed provider's `boot()`. The auth scaffold
+(`guren add auth`, `create-guren-app --auth`, the blog starter) lists an
+`AuthProvider` that shares `{ auth: { user } }`, `user` being `null` for a guest.
+Check what `src/app.ts` and its providers actually share before reading a prop
+with `usePage()`: an unshared one type-checks and is `undefined` at runtime.
+Pass page data through `this.inertia(page, { … })`; a prop every page needs goes
+in `shareInertiaProps(fn, this.container)`, which merges with the others. Do not
+share `auth` a second time.
 
 ## Responses
 

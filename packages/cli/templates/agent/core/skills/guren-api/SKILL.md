@@ -385,7 +385,10 @@ Guide: https://guren.dev/docs/guides/events
 `bunx guren make:event OrderPlaced` writes an `Event` subclass in `app/Events/`;
 `bunx guren make:listener SendReceipt --event OrderPlaced` writes
 `SendReceiptListener`, a `Listener<OrderPlaced>` with `static event = OrderPlaced`
-and `async handle(event)` (`static shouldQueue = true` runs it on the queue).
+and `async handle(event)`. `static shouldQueue = true` queues it only where a
+`queue` manager is bound (`bunx guren add queue`, which `add events` does not
+run) and a worker drains it (`bunx guren queue:work`); with no queue it runs
+inline with a warning, and the `sync` driver runs it inline too.
 Register listeners with `events.listen(SendReceiptListener)` in the app's event
 provider (`app/Providers/EventProvider.ts`, from `bunx guren add events`), and
 list that provider in `createApp({ providers })`. Emit with
