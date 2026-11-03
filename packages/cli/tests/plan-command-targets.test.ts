@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import { readdir, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { builtinSubCommands } from '../src/commands'
 import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
@@ -165,8 +166,23 @@ describe('the §2 check', () => {
 
     const inModule = { ...plan, models: [...plan.models, { ...session, module: 'accounts' }] }
     expect(messageOf('guren add session', inModule)).toEndWith(
-      'it creates table sessions of model Session (model.session) with a migration of its own, before step task/entity/model.session/data writes the migration for that table.',
+      'it declares table sessions of model Session (model.session) in db/schema.ts and generates a migration for it, before step task/entity/model.session/data declares that table.',
     )
+  })
+
+  test('should name a migration only for a blueprint that generates one', () => {
+    const plan = commentsPlan()
+    const attachment = { id: 'model.attachment', change: { kind: 'add' }, name: 'Attachment', table: 'attachments', module: 'media', columns: [], relationships: [], fillable: [] }
+    expect(messageOf('guren add attachments', { ...plan, models: [...plan.models, attachment] })).toEndWith(
+      'it declares table attachments of model Attachment (model.attachment) in db/schema.ts, before step task/entity/model.attachment/data declares that table.',
+    )
+  })
+
+  test("should match make:auth's validator exports against a validator plan:scaffold writes", () => {
+    const plan = commentsPlan() as PlanDocument & { validators: unknown[]; tasks: Array<{ covers: string[] }> }
+    const login = { id: 'validator.login', change: { kind: 'add' }, name: 'LoginSchema', fields: [] }
+    const covered = plan.tasks.map((task, index) => (index === 0 ? { ...task, covers: [...task.covers, 'validator.login'] } : task))
+    expect(messageOf('guren make:auth', { ...plan, validators: [...plan.validators, login], tasks: covered })).toEndWith(`it writes validator LoginSchema (validator.login), ${REFUSES}.`)
   })
 
   test('should judge a renamed model and a renamed table by the name they take, which is absent when the plan starts', () => {
@@ -178,7 +194,7 @@ describe('the §2 check', () => {
       ...plan,
       models: plan.models.map((model) => (model.id === 'model.post' ? { ...model, tableRenamedFrom: 'posts', table: 'sessions', dataMigration: { kind: 'none', reason: 'Renamed in place.' } } : model)),
     }
-    expect(messageOf('guren add session', intoSessions)).toContain('it creates table sessions of model Post (model.post) with a migration of its own')
+    expect(messageOf('guren add session', intoSessions)).toContain('it declares table sessions of model Post (model.post) in db/schema.ts and generates a migration for it')
   })
 
   test('should fail a model no scaffold writes only for the db/schema export it imports before anything declares it', () => {
@@ -237,23 +253,26 @@ describe("make:auth's targets", () => {
 
   function written(created: readonly string[]): Record<string, string[]> {
     const pick = (pattern: RegExp): string[] => created.flatMap((path) => pattern.exec(path)?.slice(1, 2) ?? []).sort()
+    const schemas = created
+      .filter((path) => path.includes('/app/Http/Validators/'))
+      .flatMap((path) => [...readFileSync(path, 'utf8').matchAll(/^export const (\w+)/gmu)].map((match) => `${basename(path)}#${match[1]}`))
     return {
       models: pick(/\/app\/Models\/(\w+)\.ts$/),
       controllers: pick(/\/app\/Http\/Controllers\/(?:\w+\/)*(\w+)\.ts$/),
       mails: pick(/\/app\/Mail\/(\w+)\.ts$/),
-      validators: pick(/\/app\/Http\/Validators\/(\w+)Validator\.ts$/),
+      validators: schemas.sort(),
     }
   }
 
   function planned(args: string[]): Record<string, string[]> {
     const { writes } = rule('make:auth').targets(readPlanGeneratorCall(rule('make:auth'), args)!)
     const names = (keep: (target: (typeof writes)[number]) => boolean): string[] =>
-      writes.filter(keep).flatMap((target) => ('names' in target ? [...target.names] : 'entity' in target ? [target.entity] : [])).sort()
+      writes.filter(keep).flatMap((target) => ('names' in target ? [...target.names] : [])).sort()
     return {
       models: names((target) => target.section === 'models'),
       controllers: names((target) => target.section === 'controllers'),
       mails: names((target) => target.section === 'sideEffects' && target.kind === 'mail'),
-      validators: names((target) => target.section === 'validators'),
+      validators: writes.flatMap((target) => (target.section === 'validators' ? target.exports.map((name) => `${basename(target.file)}#${name}`) : [])).sort(),
     }
   }
 
@@ -263,7 +282,7 @@ describe("make:auth's targets", () => {
     [['--verify'], { verify: true }],
     [['--oauth', 'github'], { oauth: 'github' }],
     [['--oauth', 'github', '--oauth-only'], { oauth: 'github', oauthOnly: true }],
-  ] as Array<[string[], MakeAuthOptions]>)('should name the classes and validator files make:auth %j writes', async (args, options) => {
+  ] as Array<[string[], MakeAuthOptions]>)('should name the classes and validator schemas make:auth %j writes', async (args, options) => {
     const workspace = await createTempWorkspace('guren-plan-command-targets-auth-')
     try {
       await writeWorkspaceFiles(workspace.dir, AUTH_APP)

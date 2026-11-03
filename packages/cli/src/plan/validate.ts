@@ -231,9 +231,9 @@ function checkCommands(plan: PlanDraft, results: PlanCheckResult[]): void {
 
 /**
  * The commands run before every step that builds what the plan adds or renames. A command breaks the
- * plan where `plan:scaffold` then refuses a target it left, where it writes a table the data step's
- * migration is to create, or where its output imports what no step has written yet, which fails the
- * commands step's own typecheck. Any other write is a stub its step edits, and no finding.
+ * plan where `plan:scaffold` then refuses a target it left, where it declares a table the data step
+ * declares (some blueprints with a migration), or where its output imports what no step has written
+ * yet, which fails the commands step's own typecheck. Any other write is a stub its step edits.
  */
 function checkCommandTargets(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
   let derived: PlanTaskDerivation | undefined
@@ -257,7 +257,10 @@ function targetClauses(hits: readonly PlanCommandTargetHit[], commandsStep: stri
   return [
     ...groupByStep(hits.filter((hit) => hit.problem.kind === 'scaffold')).map(({ step, hits: group }) =>
       `it writes ${listHits(group)}, which plan:scaffold writes at ${later(step)}, refusing a target that already exists`),
-    ...hits.flatMap((hit) => (hit.problem.kind === 'table' ? [`it creates ${named(hit)} with a migration of its own, before ${later(hit.step)} writes the migration for that table`] : [])),
+    ...hits.flatMap(({ problem, ...hit }) =>
+      problem.kind === 'table'
+        ? [`it declares ${hit.label} (${hit.elementId}) in db/schema.ts${problem.migration ? ' and generates a migration for it' : ''}, before ${later(hit.step)} declares that table`]
+        : []),
     ...groupByStep(hits.filter((hit) => hit.problem.kind === 'imports')).map(({ step, hits: group }) =>
       `it imports ${listHits(group)}, which ${later(step)} writes, ${typecheck}`),
     ...hits.flatMap((hit) => {

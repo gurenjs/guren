@@ -343,8 +343,9 @@ plan and the application's current context (`generateContext()`,
 - (amended in implementation) a `commands` entry whose generator, run first
   in Foundation, breaks a later step by writing early what the plan adds or
   renames: a target `plan:scaffold` writes, which it then refuses; an added
-  model's table, which a blueprint creates with a migration of its own
-  (judged in any root); or output that imports what no step has written yet
+  model's table, which a blueprint declares a second time in `db/schema.ts`,
+  some with a migration (judged in any root); or output that imports what no
+  step has written yet
   (`make:factory` or `make:resource` for an added model, a model whose
   `db/schema` export or a controller whose page is missing), which fails the
   commands step's typecheck. A stub no scaffold writes and nothing imports
@@ -2923,7 +2924,7 @@ Claude Code docs as read on 2026-09-23:
   plan before it marks a step, drafts included, since a draft never passes
   `plan:approve`. `check --plan` warns on an approved one. An allowed
   command can still break the plan: a generator that writes early what
-  `plan:scaffold` or a migration is to write, or whose output imports what no
+  `plan:scaffold` or the data step is to write, or whose output imports what no
   step has written yet, fails `plan:command-target` (§2), and the prompt says
   `commands` are for what the plan does not declare.
 

@@ -40,12 +40,12 @@ export type PlanGeneratorTarget =
   | { section: 'sideEffects'; kind: PlanSideEffect['kind']; names: readonly string[] }
   /** A policy's provider, `<Policy>Provider`, which `plan:scaffold` writes beside the policy. */
   | { section: 'policyProviders'; names: readonly string[] }
-  /** `app/Http/Validators/<entity>Validator.ts` with `make:validator`'s three schemas. */
-  | { section: 'validators'; entity: string }
+  /** A validator file and the schemas it exports. */
+  | { section: 'validators'; file: string; exports: readonly string[] }
   /** An app-relative routes file. */
   | { section: 'routes'; file: string }
-  /** SQL table names, matched against a planned model's `table` in any root. */
-  | { section: 'tables'; names: readonly string[] }
+  /** SQL table names, matched against a planned model's `table` in any root, and whether the generator also writes their migration. */
+  | { section: 'tables'; names: readonly string[]; migration: boolean }
 
 export interface PlanGeneratorTargets {
   writes: PlanGeneratorTarget[]
@@ -78,6 +78,20 @@ const stringFlag = (call: PlanGeneratorCall, ...names: string[]): string | undef
   names.map((name) => call.flags.get(name)).find((value): value is string => typeof value === 'string')
 const sideEffect = (kind: PlanSideEffect['kind'], ...names: string[]): PlanGeneratorTarget => ({ section: 'sideEffects', kind, names })
 
+/** The validator file `make:validator` writes for an entity, with its three schemas. */
+function entityValidators(entity: string): PlanGeneratorTarget {
+  return { section: 'validators', file: validatorFile(entity).path, exports: Object.values(validatorSchemaNames(entity)) }
+}
+
+/** The schemas each validator file `make:auth` writes exports, by the entity the file is named after; the test pins them against its output. */
+const AUTH_VALIDATOR_EXPORTS: Readonly<Record<string, readonly string[]>> = {
+  Profile: ['ProfileUpdateSchema'],
+  Login: ['LoginSchema'],
+  Register: ['RegisterSchema'],
+  ForgotPassword: ['ForgotPasswordSchema'],
+  ResetPassword: ['ResetPasswordSchema'],
+}
+
 /** A model class as `make:model` writes it, importing its table's `db/schema` export. */
 function modelTarget(name: string): PlanGeneratorTarget {
   const model = declared(modelFile(name))
@@ -94,7 +108,7 @@ function featureTargets(singular: string, policy: boolean): PlanGeneratorTargets
     modelTarget(singular),
     { section: 'controllers', names: [`${singular}Controller`] },
     { section: 'resources', names: [`${singular}Resource`] },
-    { section: 'validators', entity: singular },
+    entityValidators(singular),
     ...(policy ? [{ section: 'policies' as const, names: [declared(policyFile(singular))] }] : []),
   )
 }
@@ -122,8 +136,8 @@ function authTargets(call: PlanGeneratorCall): PlanGeneratorTargets {
     { section: 'models', names: ['User'] },
     { section: 'controllers', names: controllers },
     sideEffect('mail', ...mails),
-    ...validators.map((entity) => ({ section: 'validators' as const, entity })),
-    { section: 'tables', names: tables },
+    ...validators.map((entity): PlanGeneratorTarget => ({ section: 'validators', file: validatorFile(entity).path, exports: AUTH_VALIDATOR_EXPORTS[entity] ?? [] })),
+    { section: 'tables', names: tables, migration: true },
   )
 }
 
@@ -161,7 +175,7 @@ export const PLAN_GENERATOR_TARGETS: Readonly<Record<string, PlanGeneratorRule |
   'make:notification': sideEffectRule('notification', notificationFile),
   'make:provider': { valueFlags: MODULE, positional: true, targets: ({ name }) => writes({ section: 'policyProviders', names: [suffixed(name!, 'Provider')] }) },
   'make:adr': 'a decision record, which no plan section declares',
-  'make:validator': { valueFlags: ['fields', 'F', ...MODULE], positional: true, targets: ({ name }) => writes({ section: 'validators', entity: unsuffixed(name!, 'Validator') }) },
+  'make:validator': { valueFlags: ['fields', 'F', ...MODULE], positional: true, targets: ({ name }) => writes(entityValidators(unsuffixed(name!, 'Validator'))) },
   'make:agent': 'a durable agent, which no plan section declares',
   'make:ai-agent': 'an in-process agent, which no plan section declares',
   'make:module': 'a module skeleton, which elements in that module need before any step writes them',
@@ -199,12 +213,13 @@ export const PLAN_GENERATOR_TARGETS: Readonly<Record<string, PlanGeneratorRule |
     positional: true,
     targets: (call) => {
       const singular = className(call.name!)
-      return flagOn(call, 'prototype') ? writes({ section: 'validators', entity: singular }) : featureTargets(singular, flagOn(call, 'policy'))
+      return flagOn(call, 'prototype') ? writes(entityValidators(singular)) : featureTargets(singular, flagOn(call, 'policy'))
     },
   },
   'lang:publish': "the framework's translation catalogs, which no plan section declares",
   'add admin': { ...BLUEPRINT, targets: () => writes({ section: 'controllers', names: [declared({ path: ADMIN_DASHBOARD_CONTROLLER_PATH })] }) },
-  'add attachments': { ...BLUEPRINT, targets: () => writes({ section: 'tables', names: ['attachments'] }) },
+  // It prints a `db:make` hint rather than generating the migration.
+  'add attachments': { ...BLUEPRINT, targets: () => writes({ section: 'tables', names: ['attachments'], migration: false }) },
   'add broadcasting': 'broadcast channels and their provider, which no plan section declares',
   'add cache': 'the cache config and a cache service, which no plan section declares',
   'add events': {
@@ -221,8 +236,8 @@ export const PLAN_GENERATOR_TARGETS: Readonly<Record<string, PlanGeneratorRule |
     targets: ({ name }) => {
       const singular = singularize(className(name!))
       const [, ...rest] = featureTargets(singular, false).writes
-      // It appends the model's table itself, so the model imports nothing missing.
-      return writes({ section: 'models', names: [declared(modelFile(singular))] }, ...rest, { section: 'tables', names: [tableNameFor(singular)] })
+      // It appends the model's table itself, so the model imports nothing missing; it generates no migration.
+      return writes({ section: 'models', names: [declared(modelFile(singular))] }, ...rest, { section: 'tables', names: [tableNameFor(singular)], migration: false })
     },
   },
   'add prototype': 'the prototype fixture and its wiring, which no plan section declares',
@@ -233,13 +248,13 @@ export const PLAN_GENERATOR_TARGETS: Readonly<Record<string, PlanGeneratorRule |
   'add auth': { ...BLUEPRINT, targets: authTargets },
   'add oauth': {
     ...BLUEPRINT,
-    targets: () => writes({ section: 'controllers', names: [declared({ path: OAUTH_CONTROLLER_PATH })] }, { section: 'tables', names: ['oauth_states'] }),
+    targets: () => writes({ section: 'controllers', names: [declared({ path: OAUTH_CONTROLLER_PATH })] }, { section: 'tables', names: ['oauth_states'], migration: true }),
   },
-  'add session': { ...BLUEPRINT, targets: () => writes({ section: 'tables', names: ['sessions'] }) },
+  'add session': { ...BLUEPRINT, targets: () => writes({ section: 'tables', names: ['sessions'], migration: true }) },
   'add ai': {
     valueFlags: ['provider'],
     positional: false,
-    targets: (call) => (flagOn(call, 'no-conversations') ? writes() : writes({ section: 'tables', names: ['ai_conversations', 'ai_messages'] })),
+    targets: (call) => (flagOn(call, 'no-conversations') ? writes() : writes({ section: 'tables', names: ['ai_conversations', 'ai_messages'], migration: true })),
   },
 } satisfies Record<string, PlanGeneratorRule | string>)
 
@@ -273,12 +288,12 @@ export function readPlanGeneratorCall(rule: PlanGeneratorRule, args: readonly st
 
 /**
  * Why a command breaks the plan: `scaffold`, the step is `plan:scaffold`'s and refuses the target the
- * command left; `table`, a migration the step's own would create or rename into; the others fail the
- * commands step's typecheck, the output importing the element, a `db/schema` export or a missing page.
+ * command left; `table`, a second declaration of a table the step declares (with a migration when the
+ * generator writes one); the others fail the commands step's typecheck on what the output imports.
  */
 export type PlanCommandTargetProblem =
   | { kind: 'scaffold' }
-  | { kind: 'table' }
+  | { kind: 'table'; migration: boolean }
   | { kind: 'imports' }
   | { kind: 'schema'; identifier: string }
   | { kind: 'page'; page: string }
@@ -353,8 +368,9 @@ export function planCommandTargets(
     for (const target of targets.writes) {
       for (const element of index.match(target, module)) {
         if (index.writer(element)?.scaffold) hit(element, { kind: 'scaffold' })
-        // A migration is applied and forward-only, so unlike a stub a hand-written step cannot edit it away.
-        else if (target.section === 'tables') hit(element, { kind: 'table' })
+        // The step declares this table, so one already in db/schema.ts is a second declaration rather than
+        // a stub to edit, and a generated migration is applied and forward-only.
+        else if (target.section === 'tables') hit(element, { kind: 'table', migration: target.migration })
         else if ('needs' in target) hit(element, missing(target.needs, module))
       }
     }
@@ -419,9 +435,8 @@ function indexPlanned(plan: PlanDraft, derivation: PlanTaskDerivation) {
         case 'sideEffects':
           return effects.filter((effect) => effect.kind === target.kind && target.names.includes(effect.name) && sameModule(effect, module))
         case 'validators': {
-          const exports = Object.values(validatorSchemaNames(target.entity))
-          const named = validators.filter((candidate) => exports.includes(candidate.name) && sameModule(candidate, module)).map((candidate) => candidate.id)
-          const inFile = module === undefined ? (validatorFiles.get(validatorFile(target.entity).path) ?? []) : []
+          const named = validators.filter((candidate) => target.exports.includes(candidate.name) && sameModule(candidate, module)).map((candidate) => candidate.id)
+          const inFile = module === undefined ? (validatorFiles.get(target.file) ?? []) : []
           return [...new Set([...named, ...inFile])].map((id) => validatorById.get(id)!)
         }
         case 'tables':

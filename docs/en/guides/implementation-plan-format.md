@@ -140,7 +140,7 @@ A command passes when it reads `guren <subcommand>` or `bunx guren <subcommand>`
 The commands run first, before any step builds what the plan declares, so `commands` are for what the plan does not declare. A second check fails a generator for an element the plan adds or renames where running it first breaks a later step:
 
 - In an app that is not API-only, `plan:scaffold` writes each model the plan adds in the project root, with its table, validators, resources, policies, controllers, routes and side effects, and refuses a target that already exists. `guren make:model Comment` beside an added `Comment` model is refused there.
-- A blueprint that creates an added model's table writes a migration the data step's own would repeat, as `guren add session` does beside an added model on the `sessions` table.
+- A blueprint that declares an added model's table in `db/schema.ts` makes a second declaration beside the data step's, and some blueprints generate a migration for it too: `guren add session` beside an added model on the `sessions` table does both.
 - Output that imports what no step has written yet fails the commands step's typecheck: `guren make:factory CommentFactory` imports a `Comment` model the plan adds.
 
 A stub that no scaffold writes and nothing imports passes, such as a job the plan adds in a task with no added model: its step edits the stub. The finding names the element and the step that writes it, and `plan:approve` refuses on it too.
