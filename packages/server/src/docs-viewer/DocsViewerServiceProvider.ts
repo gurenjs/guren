@@ -1,7 +1,6 @@
-import { createRequire } from 'node:module'
 import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { ServiceProvider } from '../container/ServiceProvider'
 import { createDocsViewerAccessGuard, DOCS_VIEWER_PATH, isDocsViewerEnabled } from './endpoint'
 
@@ -24,6 +23,21 @@ interface DocsViewerCliApi {
  * inside the dev server every few seconds only to find the ETag unchanged.
  */
 const DATA_CACHE_TTL_MS = 15_000
+
+/**
+ * `node_modules/mermaid/dist/mermaid.min.js` in `cwd` or its nearest ancestor.
+ * Read off the disk, not through the module resolver: Bun caches a failed
+ * resolution for the life of the process.
+ */
+async function readAppMermaid(cwd: string): Promise<Buffer> {
+  for (let dir = cwd; ; dir = dirname(dir)) {
+    try {
+      return await readFile(join(dir, 'node_modules', 'mermaid', 'dist', 'mermaid.min.js'))
+    } catch (error) {
+      if (dirname(dir) === dir) throw error
+    }
+  }
+}
 
 /**
  * The docs viewer (RFC 0005) at /_guren/docs: a read-only, loopback-guarded UI
@@ -93,16 +107,14 @@ export class DocsViewerServiceProvider extends ServiceProvider {
       return ctx.html(page, 200, { 'Cache-Control': 'no-store' })
     })
 
-    // Mermaid is resolved from the *app's* node_modules rather than shipped in
-    // a @guren/* package (~1 MB every install would carry for a dev-only
-    // screen); absent, the UI degrades diagram fences to code blocks. Read once
-    // and served with a validator, since it is identical on every request.
+    // Mermaid comes from the *app's* node_modules rather than a @guren/*
+    // package (~1 MB every install would carry for a dev-only screen); absent,
+    // the UI shows diagram fences as code with an install hint. A hit is read
+    // once; a miss is looked up again, so `bun add -d mermaid` needs no restart.
     let mermaid: Promise<Buffer> | null = null
     hono.get(`${DOCS_VIEWER_PATH}/assets/mermaid.js`, async (ctx) => {
       try {
-        mermaid ??= readFile(
-          createRequire(join(cwd, 'package.json')).resolve('mermaid/dist/mermaid.min.js'),
-        )
+        mermaid ??= readAppMermaid(cwd)
         const source = await mermaid
         return ctx.body(new Uint8Array(source), 200, {
           'Content-Type': 'text/javascript',
@@ -110,7 +122,11 @@ export class DocsViewerServiceProvider extends ServiceProvider {
         })
       } catch {
         mermaid = null
-        return ctx.json({ message: 'mermaid is not installed (bun add -d mermaid)' }, 404)
+        return ctx.json(
+          { message: 'mermaid is not installed (bun add -d mermaid)' },
+          404,
+          { 'Cache-Control': 'no-store' },
+        )
       }
     })
   }
