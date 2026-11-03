@@ -127,7 +127,7 @@ broadcast.privateChannel('orders.{orderId}', async (channel, user) => {
 })
 ```
 
-拒否されたチャンネルは、ブラウザのコンソールに一度だけ警告が出て、その prop はページを描画したときの値のまま残ります。イベントが新しい値そのものを運ぶことはなく、届いたイベントはリロードのきっかけになるだけです。リロードではミドルウェアと Policy を通ってコントローラーが動くので、prop にページ以上の情報が載ることはありません。ただしイベントの payload はチャンネルの購読者全員に届くので、live prop が待つイベントの payload は ID だけにしておいてください。
+チャンネルが拒否されると、ブラウザのコンソールに一度だけ警告が出て、その prop はページを描画したときの値のまま残ります。イベントが新しい値そのものを運ぶことはなく、届いたイベントはリロードのきっかけになるだけです。リロードではミドルウェアと Policy を通ってコントローラーが動くので、prop にページ以上の情報が載ることはありません。ただしイベントの payload はチャンネルの購読者全員に届くので、live prop が待つイベントの payload は ID だけにしておいてください。
 
 ## 送信元を除く
 
@@ -137,15 +137,15 @@ broadcast.privateChannel('orders.{orderId}', async (channel, user) => {
 await broadcast.broadcastEvent(new OrderUpdated(order.id), { except: this.ctx })
 ```
 
-transport は Inertia のリクエストすべてにソケット ID を付けて送り、マネージャーはその ID を持ち、かつサインイン中のユーザーのものであるソケットだけを除きます。詳しくは[送信元を除く](./broadcasting.md#送信元を除く)を参照してください。
+Inertia のリクエストにはすべてソケット ID が付いて送られます。配信から外れるソケットは、その ID を持ち、サインイン中のユーザーが開いたものだけです。詳しくは[送信元を除く](./broadcasting.md#送信元を除く)を参照してください。
 
 ## 再接続
 
-ソケットが切れると、transport は間隔を少しずつ延ばしながら再接続し、すべてのチャンネルを購読し直してから、復帰したことを Inertia に伝えます。切れている間に送られたイベントは届いていないので、Inertia はこの時点で live prop をすべて読み込み直します。
+ソケットが切れると、間隔を少しずつ延ばしながら再接続を試み、すべてのチャンネルを購読し直してから、復帰したことを Inertia に伝えます。切れている間に送られたイベントは届いていないので、Inertia はこの時点で live prop をすべて読み込み直します。
 
 ## ソケットのない実行環境
 
-`live()` はページにメタデータを足すだけなので、これを使うコントローラーはどの実行環境でも描画できます。Workers、Lambda、Vercel、Node ではソケットのルートが 501 を返し、transport は 5 回試したところで諦めてコンソールに一度だけ警告を出します。ページは描画したときの props のまま動き続けます。コントローラーに手を入れずにビルド単位で live props を止めたいときは、`startInertiaClient()` に `live` を渡さないでください。
+`live()` はページにメタデータを足すだけなので、これを使うコントローラーはどの実行環境でも描画できます。Workers、Lambda、Vercel、Node ではソケットのルートが 501 を返します。その場合は 5 回試したところで接続をやめ、コンソールに一度だけ警告が出ます。ページは描画したときの props のまま動き続けます。コントローラーに手を入れずにビルド単位で live props を止めたいときは、`startInertiaClient()` に `live` を渡さないでください。
 
 ## `guren check` が報告するもの
 
@@ -156,7 +156,7 @@ transport は Inertia のリクエストすべてにソケット ID を付けて
 | `live-props:socket-route` | どのファイルも `broadcast.webSocketMiddleware()` をマウントしておらず、transport の接続先がない |
 | `live-props:event-name:…` | live prop が待つイベントに `broadcastAs()` も `static eventName` もない |
 | `live-props:outermost:…` | `live()` が `always()` か deferred のコールバックの中にある |
-| `live-props:unverifiable:…` | `live()` のオプションが、`on` をそのまま書いたオブジェクトリテラルではなく、どのイベントを待つのか読み取れない |
+| `live-props:unverifiable:…` | 待つイベントが読み取れない。オプションが `on` をそのまま書いたオブジェクトリテラルでない、イベントが `app/` にあるクラスの `new SomeEvent(…)` でない（同じ名前を 2 つのファイルが宣言しているときは、コントローラーの import で判断します）、または基底クラスを読み取れない |
 
 既存の [deferred props の警告](./frontend.md#deferred-props)も、`live()` の中の `defer()` を見るようになっています。また `bunx guren codegen` は、アプリが `broadcastEvent()` で送るイベントをイベントクラスから読み取り、`.guren/channels.gen.ts` に載せます。
 

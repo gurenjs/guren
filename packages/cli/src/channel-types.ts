@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
 import { literalString, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
-import { readBroadcastEventClasses, type BroadcastEventClass } from './broadcast-event-classes'
+import { BroadcastEventIndex } from './broadcast-event-classes'
 import { parseSourceFile } from './parse-cache'
 import { escapeSingleQuoted as esc, escapeTemplateLiteral as escapeTemplatePart, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
@@ -106,12 +106,15 @@ ${channelEventManifestEntries || '  // No channel events found'}
 async function collectChannelDefinitions(directory: string): Promise<ChannelDefinitionMap> {
   const definitions: ChannelDefinitionMap = new Map()
   const files = await listSourceFiles(directory)
+  // Parsed through parseSourceFile() with the file path: plugins come from the
+  // extension, and with jsx on a `.ts` file's `<Type>value` cast parses as an
+  // unterminated JSX element and the file silently contributes no channels.
   const parsed = await Promise.all(files.map(async (filePath) => ({ filePath, ast: parseSourceFile(await readFile(filePath, 'utf8'), filePath) })))
 
   // Read first: `broadcastEvent(new X())` may sit in a file before the one declaring X.
-  const eventClasses = new Map<string, BroadcastEventClass>()
+  const eventClasses = new BroadcastEventIndex()
   for (const { filePath, ast } of parsed) {
-    if (ast) readBroadcastEventClasses(ast.program.body, filePath, eventClasses)
+    if (ast) eventClasses.add(ast.program.body, filePath)
   }
   for (const { ast } of parsed) {
     if (ast) extractDefinitionsFromAst(ast, definitions, eventClasses)
@@ -143,13 +146,10 @@ async function listSourceFiles(directory: string): Promise<string[]> {
   return files
 }
 
-// Parsed through parseSourceFile() with the file path: plugins come from the
-// extension, and with jsx on a `.ts` file's `<Type>value` cast parses as an
-// unterminated JSX element and the file silently contributes no channels.
 function extractDefinitionsFromAst(
   ast: NonNullable<ReturnType<typeof parseSourceFile>>,
   definitions: ChannelDefinitionMap,
-  eventClasses: ReadonlyMap<string, BroadcastEventClass>,
+  eventClasses: BroadcastEventIndex,
 ): void {
   walk(ast.program, (node) => {
     if (node.type !== 'CallExpression') return
@@ -179,7 +179,8 @@ function extractDefinitionsFromAst(
       const [eventArg] = (node.arguments as unknown[]) ?? []
       const created = eventArg ? unwrapTypeAssertion(eventArg as BabelNode) : undefined
       const callee = created?.type === 'NewExpression' ? (created.callee as BabelNode) : undefined
-      const eventClass = callee?.type === 'Identifier' ? eventClasses.get(callee.name as string) : undefined
+      // A name two files declare is left out: which class the call means is the import's to say.
+      const eventClass = callee?.type === 'Identifier' ? eventClasses.unique(callee.name as string) : undefined
       if (!eventClass?.channels || eventClass.eventName === undefined) return
       const payloadType = renderPayloadType(eventClass.payload)
       for (const channel of eventClass.channels) {

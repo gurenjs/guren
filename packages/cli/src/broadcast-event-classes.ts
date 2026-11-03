@@ -13,10 +13,15 @@ type MemberBody = ClassActionMember['body']
 
 export interface BroadcastEventClass {
   name: string
+  /** Absolute path of the file declaring it. */
   filePath: string
-  /** `broadcastAs()` or a static `eventName`, so a bundle renaming the class cannot change the wire name. */
-  pinned: boolean
-  /** The literal name it is sent as; undefined when `broadcastAs()` computes it. */
+  /**
+   * `broadcastAs()` (own or inherited), an own static `eventName`, or an own
+   * instance `eventName`, so a bundle renaming the class cannot change the wire
+   * name. Undefined when a base class the reader cannot see might pin it.
+   */
+  pinned: boolean | undefined
+  /** The literal name it is sent as; undefined when computed or unknown. */
   eventName: string | undefined
   /** Channel patterns, a template's `${this.orderId}` as `{orderId}`; undefined when `broadcastOn()` is not one literal array. */
   channels: string[] | undefined
@@ -24,50 +29,113 @@ export interface BroadcastEventClass {
   payload: Node | undefined
 }
 
-/** Every class in the parsed statements that declares `broadcastOn()`, by class name. */
-export function readBroadcastEventClasses(
-  statements: readonly Statement[],
-  filePath: string,
-  into: Map<string, BroadcastEventClass> = new Map(),
-): Map<string, BroadcastEventClass> {
-  for (const statement of statements) {
-    const declaration = extractClassDeclaration(statement)
-    if (!declaration?.id) continue
-    const reading = readClass(declaration, filePath)
-    if (reading) into.set(reading.name, reading)
-  }
-  return into
+/** One class as declared, before its base classes are followed. */
+interface DeclaredClass {
+  name: string
+  filePath: string
+  /** The base class's name; `null` for a base the reader cannot name (`extends mixin(X)`). */
+  base: string | null | undefined
+  broadcastOn?: MemberBody
+  broadcastAs?: MemberBody
+  broadcastWith?: MemberBody
+  /** An own static or instance `eventName`, which `resolveEventName()` and `event.eventName` read. */
+  ownEventName?: { literal: string | undefined }
 }
 
-function readClass(declaration: ClassDeclaration, filePath: string): BroadcastEventClass | undefined {
-  const name = declaration.id!.name
-  let broadcastOn: MemberBody | undefined
-  let broadcastAs: MemberBody | undefined
-  let broadcastWith: MemberBody | undefined
-  let staticEventName: string | null | undefined
+/** The framework base: its `eventName` getter answers the class name, so it pins nothing. */
+const FRAMEWORK_EVENT = 'Event'
+
+/** Every class in a set of parsed files, by name; two files may declare one name. */
+export class BroadcastEventIndex {
+  private readonly declared = new Map<string, DeclaredClass[]>()
+
+  add(statements: readonly Statement[], filePath: string): void {
+    for (const statement of statements) {
+      const declaration = extractClassDeclaration(statement)
+      if (!declaration?.id) continue
+      const reading = declareClass(declaration, filePath)
+      this.declared.set(reading.name, [...(this.declared.get(reading.name) ?? []), reading])
+    }
+  }
+
+  /** The event classes declared under `name`, each with its base classes followed. */
+  lookup(name: string): BroadcastEventClass[] {
+    return (this.declared.get(name) ?? [])
+      .map((declared) => this.resolve(declared))
+      .filter((reading): reading is BroadcastEventClass => reading !== undefined)
+  }
+
+  /** The one event class of a name, or undefined when none or several are. */
+  unique(name: string): BroadcastEventClass | undefined {
+    const readings = this.lookup(name)
+    return readings.length === 1 ? readings[0] : undefined
+  }
+
+  private resolve(declared: DeclaredClass): BroadcastEventClass | undefined {
+    let { broadcastOn, broadcastAs, broadcastWith } = declared
+    let baseUnseen = false
+    const seen = new Set<DeclaredClass>([declared])
+    let current = declared
+    while (current.base !== undefined && (!broadcastOn || !broadcastAs || !broadcastWith)) {
+      if (current.base === FRAMEWORK_EVENT && !this.declared.has(FRAMEWORK_EVENT)) break
+      const parents = current.base === null ? [] : (this.declared.get(current.base) ?? [])
+      const parent = parents.length === 1 ? parents[0] : undefined
+      if (!parent || seen.has(parent)) {
+        baseUnseen = true
+        break
+      }
+      seen.add(parent)
+      broadcastOn ??= parent.broadcastOn
+      broadcastAs ??= parent.broadcastAs
+      broadcastWith ??= parent.broadcastWith
+      current = parent
+    }
+    if (!broadcastOn) return undefined
+
+    const pinned = broadcastAs !== undefined || declared.ownEventName !== undefined ? true : baseUnseen ? undefined : false
+    const eventName = broadcastAs
+      ? (literalString(returnedValue(broadcastAs)) ?? undefined)
+      : declared.ownEventName
+        ? declared.ownEventName.literal
+        : pinned === false
+          ? declared.name
+          : undefined
+    return {
+      name: declared.name,
+      filePath: declared.filePath,
+      pinned,
+      eventName,
+      channels: channelPatterns(returnedValue(broadcastOn)),
+      payload: broadcastWith ? objectReturned(broadcastWith) : undefined,
+    }
+  }
+}
+
+function declareClass(declaration: ClassDeclaration, filePath: string): DeclaredClass {
+  const superClass = declaration.superClass ? unwrapTypeAssertion(declaration.superClass) : undefined
+  const reading: DeclaredClass = {
+    name: declaration.id!.name,
+    filePath,
+    base: superClass === undefined ? undefined : superClass.type === 'Identifier' ? superClass.name : null,
+  }
 
   // Both member forms, as at runtime: `broadcastOn() {}` and `broadcastOn = () => […]`.
-  for (const { member, name: key, body } of classActionMembers(declaration)) {
-    if (member.static) continue
-    if (key === 'broadcastOn') broadcastOn = body
-    else if (key === 'broadcastAs') broadcastAs = body
-    else if (key === 'broadcastWith') broadcastWith = body
+  for (const { member, name, body } of classActionMembers(declaration)) {
+    if (name === 'eventName') {
+      // A `static get eventName()` is an own static `resolveEventName()` reads; an instance one is `event.eventName`.
+      reading.ownEventName = { literal: literalString(returnedValue(body)) ?? undefined }
+    } else if (member.static) {
+      continue
+    } else if (name === 'broadcastOn') reading.broadcastOn = body
+    else if (name === 'broadcastAs') reading.broadcastAs = body
+    else if (name === 'broadcastWith') reading.broadcastWith = body
   }
   for (const member of declaration.body.body) {
-    if (member.type !== 'ClassProperty' || !member.static) continue
-    if (memberKeyName(member) === 'eventName') staticEventName = member.value ? literalString(member.value) : null
+    if (member.type !== 'ClassProperty' || memberKeyName(member) !== 'eventName') continue
+    if (member.value?.type === 'ArrowFunctionExpression' || member.value?.type === 'FunctionExpression') continue
+    reading.ownEventName = { literal: member.value ? (literalString(member.value) ?? undefined) : undefined }
   }
-  if (!broadcastOn) return undefined
-
-  const asName = broadcastAs ? literalString(returnedValue(broadcastAs)) : null
-  return {
-    name,
-    filePath,
-    pinned: broadcastAs !== undefined || staticEventName !== undefined,
-    eventName: broadcastAs ? (asName ?? undefined) : staticEventName === undefined ? name : (staticEventName ?? undefined),
-    channels: channelPatterns(returnedValue(broadcastOn)),
-    payload: broadcastWith ? objectReturned(broadcastWith) : undefined,
-  }
+  return reading
 }
 
 /** The expression a member's single `return` hands back, or an arrow's expression body. */

@@ -121,6 +121,62 @@ describe('guren check live props', () => {
     expect(outermost.map((result) => result.message.match(/in (\w+\(\))/)?.[1])).toEqual(['always()', 'defer()'])
   })
 
+  it('reports an event it cannot resolve to a class as unverifiable, never as a pass', async () => {
+    const { results } = await liveResults({
+      [CONTROLLER]: controller('{ a: live(1, { on: event }), b: live(1, { on: [new Events.OrderUpdated(1)] }), c: live(1, { on: new Missing() }) }'),
+      [EVENTS]: EVENT_CLASSES,
+      [ROUTES]: SOCKET_ROUTE,
+    })
+
+    const unverifiable = results.filter((result) => result.key.startsWith('live-props:unverifiable'))
+    expect(unverifiable).toHaveLength(3)
+    expect(unverifiable.map((result) => result.message).join(' ')).toContain('Missing, whose class the check cannot find')
+    expect(results.some((result) => result.key.startsWith('live-props:event-name'))).toBe(false)
+  })
+
+  it('judges the class the controller imports when two files declare the name', async () => {
+    const pinned = 'export class OrderUpdated {\n  static eventName = "order.updated"\n  broadcastOn() { return ["orders"] }\n}\nexport class OrderShipped {}\n'
+    const unpinned = 'export class OrderUpdated {\n  broadcastOn() { return ["orders"] }\n}\n'
+    const imported = await liveResults({
+      [CONTROLLER]: controller('{ order: live(1, { on: new OrderUpdated(1) }) }'),
+      [EVENTS]: pinned,
+      'modules/billing/app/Events/OrderUpdated.ts': unpinned,
+      [ROUTES]: SOCKET_ROUTE,
+    })
+    expect(imported.results.filter((result) => result.key.startsWith('live-props:event-name'))).toEqual([])
+    expect(imported.results.filter((result) => result.key.startsWith('live-props:unverifiable'))).toEqual([])
+
+    const swapped = await liveResults({
+      [CONTROLLER]: controller('{ order: live(1, { on: new OrderUpdated(1) }) }'),
+      [EVENTS]: `${unpinned}export class OrderShipped {}\n`,
+      'modules/billing/app/Events/OrderUpdated.ts': pinned,
+      [ROUTES]: SOCKET_ROUTE,
+    })
+    expect(swapped.results.map((result) => result.key)).toContain('live-props:event-name:OrderController.show:OrderUpdated')
+  })
+
+  it('follows base classes the app declares, as the runtime does', async () => {
+    const events = [
+      'export class OrderEvent { broadcastOn() { return ["orders"] } }',
+      'export class Named extends OrderEvent { broadcastAs() { return "named" } }',
+      'export class OrderUpdated extends OrderEvent {}',
+      'export class OrderShipped extends Named {}',
+      'export class Getter { static get eventName() { return "getter" }\n broadcastOn() { return ["orders"] } }',
+      'export class Opaque extends ExternalBase { broadcastOn() { return ["orders"] } }',
+    ].join('\n')
+    const { results } = await liveResults({
+      [CONTROLLER]: controller('{ order: live(1, { on: [new OrderUpdated(1), new OrderShipped(1), new Getter(), new Opaque()] }) }')
+        .replace("import { OrderUpdated, OrderShipped } from '../../Events/OrderEvents'", "import { OrderUpdated, OrderShipped, Getter, Opaque } from '../../Events/OrderEvents'"),
+      [EVENTS]: events,
+      [ROUTES]: SOCKET_ROUTE,
+    })
+
+    expect(results.filter((result) => result.key.startsWith('live-props:event-name')).map((result) => result.key)).toEqual([
+      'live-props:event-name:OrderController.show:OrderUpdated',
+    ])
+    expect(results.find((result) => result.key.startsWith('live-props:unverifiable'))?.message).toContain('Opaque, whose base class the check cannot read')
+  })
+
   it('reports options it cannot read as unverifiable, never as a pass', async () => {
     const { results } = await liveResults({
       [CONTROLLER]: controller('{ order: live(1, options), other: live(1, { ...options }) }'),
