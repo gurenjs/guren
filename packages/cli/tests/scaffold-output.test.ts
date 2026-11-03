@@ -263,6 +263,11 @@ describe('generated sources parse', () => {
     await expectAllOutputsParse('guren-parse-controller-api-', () => makeController('Widget'), seedApiOnlyApp)
   })
 
+  // The chat page, its controller and routes, and the copied AgentChat with the UI components it imports.
+  it('make:ai-agent --chat', async () => {
+    await expectAllOutputsParse('guren-parse-ai-chat-', () => makeAiAgent('SupportBot', { chat: true }), seedInertiaApp)
+  })
+
   for (const [label, run] of singleFileCases) {
     it(label, async () => {
       await expectAllOutputsParse(`guren-parse-${label.replace(/[^a-z]+/g, '-')}-`, run)
@@ -285,6 +290,7 @@ describe('generated sources parse', () => {
     const prefixes = {
       'make:auth': 'guren-parse-auth-',
       'make:feature': 'guren-parse-feature-',
+      'make:ai-agent --chat': 'guren-parse-ai-chat-',
       'make:view': 'guren-parse-make-view-',
       'add admin': 'guren-parse-add-admin-',
       'add ui': 'guren-parse-add-ui-',
@@ -528,6 +534,7 @@ describe('blueprint scaffold templates are written by their blueprints', () => {
     attachments: 'its run installs the storage blueprint, which this shared workspace also runs; '
       + 'its templates are byte-pinned by the attachments fixture pin above',
     ai: 'not a registry blueprint (guren add ai takes --provider); pinned per provider by the add ai gate below',
+    'ai-chat': 'not a registry blueprint (make:ai-agent --chat copies it); pinned byte-identical in tests/make-ai-agent.test.ts',
     'browser-tests': 'not a registry blueprint (it reads the browser map); pinned byte-identical in tests/add-browser-tests.test.ts',
     ui: 'not a registry blueprint (guren add ui takes component names, --diff and --force); pinned byte-identical in tests/ui-components.test.ts',
   }

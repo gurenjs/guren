@@ -14,6 +14,7 @@ import { Application } from '../../src/http/Application'
 
 interface Frame {
   event: string
+  channel?: string
   data: Record<string, unknown>
 }
 
@@ -140,6 +141,23 @@ describe('WebSocket subscription flow', () => {
 
     const update = await waitFor(() => frames.find((frame) => frame.event === 'BoardUpdated'))
     expect(update.data).toEqual({ taskId: 7 })
+  })
+
+  test('names the channel on an event frame and a socket id in connected (RFC 0037)', async () => {
+    const manager = createManager()
+    manager.channel('announcements', () => true)
+    const url = await serve(manager)
+
+    const { frames, clientId } = await connect(url, { query: '?channels=announcements' })
+    const connected = frames.find((frame) => frame.event === 'connected')!
+    expect(connected.data.socketId).toMatch(/^s_[0-9a-f]{32}$/)
+    expect(connected.data.socketId).toBe(manager.getWebSocketClient(clientId)?.socketId)
+    expect(connected).not.toHaveProperty('channel')
+
+    await manager.broadcast('announcements', 'BoardUpdated', { taskId: 7 })
+
+    const update = await waitFor(() => frames.find((frame) => frame.event === 'BoardUpdated'))
+    expect(update).toEqual({ event: 'BoardUpdated', channel: 'announcements', data: { taskId: 7 } })
   })
 
   test('leaves unauthorized private channels requested up front unsubscribed', async () => {

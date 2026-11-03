@@ -33,6 +33,7 @@ type Bindings = ReturnType<typeof importBindings>
 interface PropHelperBindings {
   defer: Bindings
   always: Bindings
+  live: Bindings
 }
 
 function propHelperBindings(ast: File): PropHelperBindings {
@@ -46,18 +47,24 @@ function propHelperBindings(ast: File): PropHelperBindings {
     }
     return { locals, namespaces }
   }
-  return { defer: merged('defer'), always: merged('always') }
+  return { defer: merged('defer'), always: merged('always'), live: merged('live') }
 }
 
-/** `defer(…)`, or `always(defer(…))`, which the runtime announces as deferred too. */
+/**
+ * `defer(…)`, or `always(defer(…))` and `live(…)` around either, which the
+ * runtime announces as deferred too (RFC 0037: `live()` is always outermost).
+ */
 function isDeferCall(node: Node, bindings: PropHelperBindings): boolean {
   const value = unwrapTypeAssertion(node)
   if (value.type !== 'CallExpression') return false
   if (callsTarget(value, bindings.defer.locals, bindings.defer.namespaces, 'defer')) return true
   const wrapped = value.arguments[0]
+  if (wrapped === undefined) return false
+  if (callsTarget(value, bindings.live.locals, bindings.live.namespaces, 'live')) {
+    return isDeferCall(wrapped as Node, bindings)
+  }
   return (
-    wrapped !== undefined
-    && callsTarget(value, bindings.always.locals, bindings.always.namespaces, 'always')
+    callsTarget(value, bindings.always.locals, bindings.always.namespaces, 'always')
     && isDeferCall(wrapped as Node, bindings)
   )
 }

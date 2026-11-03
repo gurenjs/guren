@@ -8,6 +8,7 @@ import {
   assertWorkspaceBuilt,
   checkTypes,
   createTempWorkspace,
+  linkWorkspacePackage,
   renderedAppCompilerOptions,
   seedApiOnlyApp,
   seedInertiaApp,
@@ -23,6 +24,7 @@ import { camelCase, pascalCase } from '../src/utils'
 import { loadScaffoldTemplate } from '../src/scaffold-templates'
 import { generatePageTypes } from '../src/pages-types'
 import { buildRouteRegistrationHint, makeFeature, type MakeFeatureOptions } from '../src/make-feature'
+import { makeAiAgent } from '../src/make-ai-agent'
 import { makeChannel } from '../src/make-channel'
 import { makeCommand } from '../src/make-command'
 import { makeController } from '../src/make-controller'
@@ -219,6 +221,48 @@ describe('rendered make:feature output typechecks', () => {
       TSC_TIMEOUT,
     )
   }
+})
+
+describe('rendered make:ai-agent --chat output typechecks', () => {
+  it(
+    'the agent, its chat controller, routes and page, and the copied AgentChat',
+    async () => {
+      assertWorkspaceBuilt([...LINKED_DIST_ENTRIES, join(cliRoot, '../plugin-ai/dist/index.js')])
+      const workspace = await createTempWorkspace('guren-typecheck-ai-chat-')
+      try {
+        await seedInertiaApp(workspace.dir)
+        await prepareRenderedApp(workspace.dir)
+        // Route codegen imports the chat routes, which import the plugin's ChatTurnSchema.
+        await linkWorkspacePackage('plugin-ai', workspace.dir)
+
+        const { files } = await makeAiAgent('SupportBot', { chat: true, force: true })
+        const created = relativeToCwd(files)
+        for (const path of [
+          'app/Ai/Agents/SupportBot.ts',
+          'app/Http/Controllers/SupportBotChatController.ts',
+          'routes/support-bot-chat.ts',
+          'resources/js/pages/support-bot/Chat.tsx',
+          'resources/js/components/ai/AgentChat.tsx',
+        ]) {
+          expect(created).toContain(path)
+        }
+        expect(await readFile(join(workspace.dir, 'routes/web.ts'), 'utf8')).toContain('registerSupportBotChatRoutes(router)')
+
+        await runRouteCodegen(workspace.dir)
+        const rootNames = await collectFiles(workspace.dir, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)
+        const options = renderedAppCompilerOptions(workspace.dir)
+        options.paths = {
+          ...options.paths,
+          '@ai-sdk/react': [join(cliRoot, 'node_modules/@ai-sdk/react')],
+          ai: [join(cliRoot, '../plugin-ai/node_modules/ai')],
+        }
+        expect(checkTypes(rootNames, options)).toEqual([])
+      } finally {
+        await workspace.cleanup()
+      }
+    },
+    TSC_TIMEOUT,
+  )
 })
 
 /**

@@ -11,8 +11,12 @@ import type {
   SSEClient,
   WebSocketClient,
   BroadcastEvent,
+  BroadcastEventOptions,
+  BroadcastableEvent,
   PresenceMember,
 } from './types'
+import { broadcastChannelsOf, broadcastNameOf } from './event-target'
+import { isSenderUserId, isSocketId, markSender, readSender, stripSender } from './sender-envelope'
 import { Channel, PrivateChannel, PresenceChannel } from './channels'
 import { MemoryDriver } from './drivers'
 import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
@@ -203,7 +207,50 @@ export class BroadcastManager {
     event: string,
     data: unknown
   ): Promise<void> {
-    await this.driver().publish(channelName, event, data)
+    await this.driver().publish(channelName, event, stripSender(data))
+  }
+
+  /**
+   * Publishes `broadcastWith()` (else `{}`) as `broadcastNameOf(event)` on every
+   * channel `broadcastOn()` names: the name a `live()` prop listening for this
+   * event subscribes to.
+   */
+  async broadcastEvent(event: BroadcastableEvent, options: BroadcastEventOptions = {}): Promise<void> {
+    const name = broadcastNameOf(event)
+    const payload = stripSender(event.broadcastWith?.() ?? {})
+    const sender = options.except ? await this.resolveSender(options.except) : undefined
+    const data = sender ? markSender(payload, sender) : payload
+    for (const channel of broadcastChannelsOf(event)) {
+      await this.driver().publish(channel, name, data)
+    }
+  }
+
+  /** A sender is only worth marking with a socket id this manager could have issued and a user to bind it to. */
+  private async resolveSender(
+    except: NonNullable<BroadcastEventOptions['except']>,
+  ): Promise<{ socketId: string; userId: string | number } | undefined> {
+    const fromContext = 'req' in except
+    const socketId = fromContext ? except.req.header('X-Socket-Id') : except.socketId
+    if (!isSocketId(socketId)) return undefined
+    const user = fromContext ? await resolveRequestUser(except as Context, undefined) : except.user
+    const userId = resolveClientUserId(user)
+    return isSenderUserId(userId) ? { socketId, userId } : undefined
+  }
+
+  /**
+   * What one client receives of a delivered event: nothing when it is the
+   * sender's own socket, else the payload without the reserved fields. The ids
+   * compare strictly, as `authMiddleware()` compares an owner: `7` is not `'7'`.
+   */
+  private deliveryFor(client: SSEClient | WebSocketClient, data: unknown): { data: unknown } | undefined {
+    const sender = readSender(data)
+    const own =
+      sender !== undefined
+      && 'socketId' in client
+      && client.socketId === sender.socketId
+      && client.userId !== undefined
+      && client.userId === sender.userId
+    return own ? undefined : { data: stripSender(data) }
   }
 
   toChannel(name: string): Channel {
@@ -376,9 +423,9 @@ export class BroadcastManager {
   /**
    * A route that upgrades to a WebSocket carrying broadcast events, the socket
    * counterpart of `sseMiddleware()`; it needs `Application.listen()` on Bun.
-   * Frames are JSON. The server sends `{ event, data }`, first `connected` with
-   * `{ clientId, channels }`; the client sends `{ action: 'subscribe' | 'unsubscribe',
-   * channel }`, answered by a `subscription` event, and anything else is ignored.
+   * JSON frames: an event `{ event, channel, data }`, the server's own `{ event, data }`
+   * (first `connected` with `{ clientId, socketId, channels }`). The client sends
+   * `{ action: 'subscribe' | 'unsubscribe', channel }`, answered by `subscription`.
    */
   webSocketMiddleware(options: WebSocketMiddlewareOptions = {}): Middleware {
     const isAllowedOrigin = webSocketOriginCheck(options.allowedOrigins)
@@ -417,9 +464,11 @@ export class BroadcastManager {
       const { upgradeWebSocket } = await import('hono/bun')
       const upgrade = upgradeWebSocket(() => ({
         onOpen: (_event, ws) => {
-          const send = (event: string, data: unknown) => ws.send(JSON.stringify({ event, data }))
+          const send = (event: string, data: unknown, channel?: string) =>
+            ws.send(JSON.stringify(channel === undefined ? { event, data } : { event, channel, data }))
           clientId = this.registerWebSocketClient({ userId, send, close: () => ws.close() })
-          send('connected', { clientId, channels: authorizedChannels })
+          const { socketId } = this.wsClients.get(clientId)!
+          send('connected', { clientId, socketId, channels: authorizedChannels })
           for (const channelName of authorizedChannels) {
             this.subscribeWebSocketClient(clientId, channelName)
           }
@@ -534,9 +583,8 @@ export class BroadcastManager {
 
     client.channels.add(channel)
     this.openDriverSubscription(clientId, channel, (event) => {
-      if (client.channels.has(channel)) {
-        client.send(event.event, event.data)
-      }
+      const delivery = client.channels.has(channel) ? this.deliveryFor(client, event.data) : undefined
+      if (delivery) client.send(event.event, delivery.data, channel)
     })
 
     return true
@@ -593,11 +641,14 @@ export class BroadcastManager {
   }
 
   /** Returns the generated client ID. */
-  registerWebSocketClient(client: Omit<WebSocketClient, 'id' | 'channels'> & { userId?: string | number }): string {
+  registerWebSocketClient(client: Omit<WebSocketClient, 'id' | 'channels' | 'socketId'> & { userId?: string | number }): string {
     const clientId = this.generateClientId('ws')
     this.wsClients.set(clientId, {
       ...client,
       id: clientId,
+      // Never an input and never in another client's frame: knowing it lets a
+      // request skip deliveries, so it stays apart from the attachable clientId.
+      socketId: `s_${randomHex(16)}`,
       channels: new Set(),
     })
     return clientId
@@ -623,9 +674,8 @@ export class BroadcastManager {
 
     client.channels.add(channel)
     this.openDriverSubscription(clientId, channel, async (event) => {
-      if (client.channels.has(channel)) {
-        await client.send(event.event, event.data)
-      }
+      const delivery = client.channels.has(channel) ? this.deliveryFor(client, event.data) : undefined
+      if (delivery) await client.send(event.event, delivery.data, channel)
     })
 
     return true

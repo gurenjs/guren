@@ -2,7 +2,7 @@
  * `@guren/plugin-ai/client`: the browser half of `stream()` (RFC 0029 §4). Imports only `ai` and the
  * protocol constant, so a page bundle pulls in no server module.
  */
-import { DefaultChatTransport, type ChatTransport, type UIMessage } from 'ai'
+import { DefaultChatTransport, type ChatTransport, type HttpChatTransportInitOptions, type UIMessage, type UIMessageChunk } from 'ai'
 
 import type { ChatTurn } from './chat'
 import { CONVERSATION_HEADER } from './protocol'
@@ -18,7 +18,10 @@ const XSRF_HEADER = 'X-XSRF-TOKEN'
 export interface ChatTransportOptions {
   /** The conversation to continue, from the page props; absent, the first turn starts one. */
   conversation?: string | null
-  /** Called when the server names a conversation the transport did not hold, e.g. to update the URL. */
+  /**
+   * Called when the transport adopts a conversation the server named, e.g. to update the URL: once the
+   * turn's body has finished, since a turn stopped or failed before its answer stores no conversation.
+   */
   onConversation?: (id: string) => void
   headers?: Record<string, string>
   fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -33,18 +36,21 @@ export function createChatTransport<M extends UIMessage = UIMessage>(
   options: ChatTransportOptions = {},
 ): ChatTransport<M> {
   let conversation = options.conversation ?? null
-  return new DefaultChatTransport<M>({
+  const named = new WeakMap<object, string>()
+  return new ConversationTransport<M>(named, (id) => {
+    if (id === conversation) return
+    conversation = id
+    options.onConversation?.(id)
+  }, {
     api,
     credentials: 'same-origin',
     headers: () => ({ ...options.headers, ...xsrfHeader() }),
     // Bun's `typeof fetch` carries `preconnect`, which a wrapper has no reason to implement.
     fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
       const response = await (options.fetch ?? globalThis.fetch)(input, init)
-      const named = response.headers.get(CONVERSATION_HEADER)
-      if (named && named !== conversation) {
-        conversation = named
-        options.onConversation?.(named)
-      }
+      const id = response.headers.get(CONVERSATION_HEADER)
+      // Keyed by the body the transport parses next, so each turn's id stays with its own response.
+      if (id && response.body) named.set(response.body, id)
       return response
     }) as typeof globalThis.fetch,
     prepareSendMessagesRequest: ({ messages, trigger }) => {
@@ -53,6 +59,44 @@ export function createChatTransport<M extends UIMessage = UIMessage>(
       }
       const body: ChatTurn = { conversation, message: lastUserText(messages) }
       return { body }
+    },
+  })
+}
+
+class ConversationTransport<M extends UIMessage> extends DefaultChatTransport<M> {
+  constructor(
+    private readonly named: WeakMap<object, string>,
+    private readonly adopt: (id: string) => void,
+    init: HttpChatTransportInitOptions<M>,
+  ) {
+    super(init)
+  }
+
+  protected override processResponseStream(stream: ReadableStream<Uint8Array>): ReadableStream<UIMessageChunk> {
+    const chunks = super.processResponseStream(stream)
+    const id = this.named.get(stream)
+    return id === undefined ? chunks : chunks.pipeThrough(adoptOnFinish(() => this.adopt(id)))
+  }
+}
+
+/**
+ * Adopts the id only for a body read to its end after a `finish` chunk with no `error` or `abort`. The
+ * server stores a turn once the model answers (`onEnd`), and nothing for one aborted or failing before
+ * a step: adopting that id would fail every later turn. An `error` chunk is never adopted, since
+ * `useChat` stops reading at it, which cancels the body the server would store the turn at the end of.
+ * `flush` runs before the reader sees `done`, so `onConversation` precedes `useChat`'s `onFinish`.
+ */
+function adoptOnFinish(adopt: () => void): TransformStream<UIMessageChunk, UIMessageChunk> {
+  let finished = false
+  let failed = false
+  return new TransformStream({
+    transform(chunk, controller) {
+      if (chunk.type === 'finish') finished = true
+      else if (chunk.type === 'error' || chunk.type === 'abort') failed = true
+      controller.enqueue(chunk)
+    },
+    flush() {
+      if (finished && !failed) adopt()
     },
   })
 }

@@ -7,7 +7,7 @@ import type { ContainerLike } from "../../container/types";
 import { resolveOptional } from "../../container/resolve-optional";
 import { warnDeprecatedSetter } from "../../support/deprecate";
 import { INITIAL_PAGE_SELECTOR, initialPageElement } from "./initial-page";
-import { readPartialReload, resolveInertiaProps } from "./props";
+import { readPartialReload, resolveInertiaProps, type LivePropEntry } from "./props";
 import { withDefaultHeaders } from "../../support/default-headers";
 
 ensureErrorStackTracePolyfill();
@@ -49,6 +49,8 @@ export interface InertiaPagePayload {
   version?: string;
   /** Deferred prop keys by group, announced on a full visit and fetched by the client per group. */
   deferredProps?: Record<string, string[]>;
+  /** Live prop listeners by key (RFC 0037): every live prop on a full visit, the resolved ones on a partial reload. */
+  liveProps?: Record<string, LivePropEntry>;
 }
 
 export interface InertiaSsrContext {
@@ -297,6 +299,7 @@ export async function buildInertiaPage(
     url: options.url ?? inertiaPageUrl(options.request) ?? "",
     version: options.version,
     ...(resolved.deferredProps ? { deferredProps: resolved.deferredProps } : {}),
+    ...(resolved.liveProps ? { liveProps: resolved.liveProps } : {}),
   };
 }
 

@@ -180,7 +180,7 @@ export function registerBroadcastRoutes(router: Router): void {
 
 アップグレードには Bun のサーバーが必要で、それは `app.listen()` が用意します。`app.listen()` は、`hono/bun` の `upgradeWebSocket` が必要とする WebSocket ハンドラーを `Bun.serve` に渡すからです。アップグレードできないランタイム（Node 上の `app.fetch()`、Workers、Lambda）では、このルートは 501 を返します。
 
-フレームはすべて JSON です。サーバーは `{ event, data }` を送り、最初に届く `connected` イベントには、`clientId` と、`?channels=` で購読したチャンネルの一覧が入っています。クライアントは `{ action, channel }` を送って、購読と購読解除を行います。各メッセージは `POST /broadcasting/auth` へのリクエストと同じように認可され、その結果が `subscription` イベントで返ります。
+フレームはすべて JSON です。ブロードキャストされたイベントは `{ event, channel, data }` の形で届き、`channel` にはそのイベントが送られたチャンネルが入ります。そのため 1 本のソケットでも、`private-orders.1` の `OrderUpdated` と `private-orders.2` の `OrderUpdated` を区別できます。サーバー自身が送るフレームは `{ event, data }` です。最初に届く `connected` イベントには、`clientId`、`socketId`（[送信元を除く](#送信元を除く)を参照）、`?channels=` で購読したチャンネルの一覧が入っています。クライアントは `{ action, channel }` を送って、購読と購読解除を行います。各メッセージは `POST /broadcasting/auth` へのリクエストと同じように認可され、その結果が `subscription` イベントで返ります。
 
 ```ts
 const socket = new WebSocket(
@@ -237,7 +237,8 @@ broadcast.webSocketMiddleware({
 ```ts
 const clientId = broadcast.registerWebSocketClient({
   userId: user.id,
-  send: (event, data) => ws.send(JSON.stringify({ event, data })),
+  // `channel` is set for a broadcast event and absent for a control event
+  send: (event, data, channel) => ws.send(JSON.stringify({ event, channel, data })),
   close: () => ws.close(),
 })
 
@@ -428,7 +429,7 @@ await driver.publish('test-channel', 'TestEvent', data)
 
 ## イベントからのブロードキャスト
 
-イベントシステムとブロードキャスティングは組み合わせて使えます。
+`BroadcastableEvent` を実装したイベントクラスには、どのチャンネルにどの名前で送るかが書かれています。送るときは `broadcast.broadcastEvent()` を呼びます。
 
 ```ts
 import { Event } from '@guren/core'
@@ -458,17 +459,26 @@ export class OrderShipped extends Event {
   }
 }
 
-// 使用方法
-const event = new OrderShipped('123', 'ABC456')
-
-for (const channel of event.broadcastOn()) {
-  await broadcast.broadcast(
-    channel,
-    event.broadcastAs?.() ?? event.eventName,
-    event.broadcastWith?.() ?? {}
-  )
-}
+// broadcastWith() の内容を 'OrderShipped' として private-orders.123 に送る
+await broadcast.broadcastEvent(new OrderShipped('123', 'ABC456'))
 ```
+
+送るときのイベント名は `broadcastAs()` の戻り値で、無ければ `eventName`（宣言した `static eventName`、なければクラス名）になります。チャンネルは `broadcastOn()` が返すものです。`@guren/core` の `broadcastNameOf(event)` と `broadcastChannelsOf(event)` も同じ値を読むので、イベントを購読する側は送られる名前をそのまま使えます。`broadcastWith()` が無いときの payload は `{}` です。
+
+クラス名をそのままイベント名にしている場合は、`broadcastAs()` か `static eventName` で名前を固定してください。本番用のバンドルでは、別のモジュールに同じ名前のクラスがあるとクラス名が変わることがあり（`OrderShipped2`）、`OrderShipped` を待っているクライアントには何も届かなくなります。
+
+### 送信元を除く
+
+注文を保存したユーザーは、レスポンスで新しい状態を受け取っているので、同じ変更のブロードキャストを自分のタブで受け取る必要はありません。リクエストを `except` に渡すと、そのユーザーのソケットには送られなくなります。
+
+```ts
+// コントローラーのアクション内で
+await broadcast.broadcastEvent(new OrderShipped(order.id, tracking), { except: this.ctx })
+```
+
+ページは、ソケットの `connected` フレームで受け取った `socketId` を、変更を行うリクエストの `X-Socket-Id` ヘッダーに入れて送ります。マネージャーはそのヘッダーと、認証コンテキストにあるサインイン中のユーザーを読み、その両方に当てはまるソケットだけを除きます。つまり、その `socketId` を持ち、同じユーザーが開いたソケットです。ゲストのリクエストや、別のユーザーのソケットが持つ ID を名乗ったリクエストでは、どのソケットも除かれません。ほかの購読者には、payload がそのまま届きます。ソケットのルートが独自の `getUser` でユーザーを決めている場合や、リクエストの外で使う場合は、`{ except: { socketId, user } }` のように 2 つの値を直接渡してください。ユーザー ID は、チャンネルの追加と同じく型まで含めて比べるので、`7` と `'7'` は別のユーザーとして扱われます。
+
+送信元の情報は、payload の `__inertia.socketId` と `__inertia.userId` に入れて運びます。この 2 つのフィールドは予約済みです。マネージャーを通して公開する payload からも、クライアントに届ける前のイベントからも取り除かれます。`__inertia` のほかのキーはそのまま残ります。
 
 ## Presenceチャンネルメンバー
 

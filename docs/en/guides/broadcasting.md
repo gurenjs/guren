@@ -191,7 +191,7 @@ export function registerBroadcastRoutes(router: Router): void {
 
 The upgrade needs a Bun server, which `app.listen()` provides: it hands `Bun.serve` the WebSocket handler that `upgradeWebSocket` from `hono/bun` relies on. On a runtime that cannot upgrade (`app.fetch()` on Node, Workers, Lambda) the route answers 501.
 
-Every frame is JSON. The server sends `{ event, data }`, starting with a `connected` event that carries the `clientId` and the channels subscribed from `?channels=`. The client subscribes and unsubscribes by sending `{ action, channel }`. Each message is authorized like a `POST /broadcasting/auth` request and answered with a `subscription` event:
+Every frame is JSON. An event arrives as `{ event, channel, data }`, naming the channel it was broadcast on, so one socket can tell `OrderUpdated` on `private-orders.1` from the same event on `private-orders.2`. The server's own frames are `{ event, data }`, starting with a `connected` event that carries the `clientId`, a `socketId` (see [Skipping the sender](#skipping-the-sender)) and the channels subscribed from `?channels=`. The client subscribes and unsubscribes by sending `{ action, channel }`. Each message is authorized like a `POST /broadcasting/auth` request and answered with a `subscription` event:
 
 ```ts
 const socket = new WebSocket(
@@ -246,7 +246,8 @@ The lower-level helpers remain for a route with its own protocol. `subscribeWebS
 ```ts
 const clientId = broadcast.registerWebSocketClient({
   userId: user.id,
-  send: (event, data) => ws.send(JSON.stringify({ event, data })),
+  // `channel` is set for a broadcast event and absent for a control event
+  send: (event, data, channel) => ws.send(JSON.stringify({ event, channel, data })),
   close: () => ws.close(),
 })
 
@@ -431,7 +432,7 @@ await driver.publish('test-channel', 'TestEvent', data)
 
 ## Broadcasting from Events
 
-Integrate broadcasting with the event system:
+An event class that implements `BroadcastableEvent` says where and as what it is broadcast, and `broadcast.broadcastEvent()` sends it:
 
 ```ts
 import { Event } from '@guren/core'
@@ -461,17 +462,26 @@ export class OrderShipped extends Event {
   }
 }
 
-// Usage
-const event = new OrderShipped('123', 'ABC456')
-
-for (const channel of event.broadcastOn()) {
-  await broadcast.broadcast(
-    channel,
-    event.broadcastAs?.() ?? event.eventName,
-    event.broadcastWith?.() ?? {}
-  )
-}
+// Publishes broadcastWith() as 'OrderShipped' on private-orders.123
+await broadcast.broadcastEvent(new OrderShipped('123', 'ABC456'))
 ```
+
+The name an event is sent as is `broadcastAs()`, else its `eventName` (a `static eventName` you declare, or the class name), and its channels are what `broadcastOn()` returns. `broadcastNameOf(event)` and `broadcastChannelsOf(event)` from `@guren/core` read the same two values, so code that subscribes to an event can ask for exactly the name it is sent under. Without `broadcastWith()` the payload is `{}`.
+
+When the class name is the event's name, pin it with `broadcastAs()` or `static eventName`: a production bundle can rename a class whose name another module also declares (`OrderShipped2`), and a client listening for `OrderShipped` then hears nothing.
+
+### Skipping the sender
+
+A user who saves an order already has the new state from the response, so the broadcast of the same change is redundant in their own tab. Pass the request as `except` and their socket is left out:
+
+```ts
+// In a controller action
+await broadcast.broadcastEvent(new OrderShipped(order.id, tracking), { except: this.ctx })
+```
+
+The page sends the `socketId` from its socket's `connected` frame as the `X-Socket-Id` header of the request that makes the change. The manager reads that header and the request's signed-in user from the auth context, and skips only the socket that has both: that `socketId`, opened by that same user. A guest's request, or a socket id another user's socket holds, skips nothing, and every other subscriber receives the payload unchanged. When the socket route resolves its user with a `getUser` of its own, or outside a request, pass the two values yourself: `{ except: { socketId, user } }`. The user ids compare strictly, as channel attachment does, so `7` and `'7'` are different users.
+
+The manager carries the sender inside the payload, under `__inertia.socketId` and `__inertia.userId`. Those two fields are reserved: the manager removes them from every payload you publish through it, and from every event before a client receives it. Any other key under `__inertia` stays.
 
 ## Presence Channel Members
 

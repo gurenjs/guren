@@ -14,6 +14,8 @@ export type {
   WebSocketMiddlewareOptions,
   AuthMiddlewareOptions,
   BroadcastableEvent,
+  BroadcastEventOptions,
+  BroadcastSender,
 } from './types'
 
 export {
@@ -25,6 +27,8 @@ export {
 export {
   createTypedBroadcaster,
 } from './typed'
+export { broadcastChannelsOf, broadcastNameOf } from './event-target'
+export type { BroadcastTarget } from './event-target'
 export type {
   TypedBroadcaster,
   TypedChannelHandle,

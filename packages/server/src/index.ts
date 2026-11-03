@@ -224,10 +224,17 @@ export { approvalStatusNotFoundMessage, toApprovalStatusReport } from './agent/a
 export type { ApprovalStatusOutcome, ApprovalStatusReport } from './agent/approval-status'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia, setInertiaSsrRenderer, setInertiaDocument } from './mvc/inertia/InertiaEngine'
-export { always, defer, isAlwaysProp, isDeferredProp } from './mvc/inertia/props'
+export { always, defer, isAlwaysProp, isDeferredProp, isLiveProp, live } from './mvc/inertia/props'
 export type {
   AlwaysProp,
   DeferredProp,
+  LiveChannelType,
+  LiveEvent,
+  LiveListener,
+  LiveListenerInput,
+  LiveOptions,
+  LiveProp,
+  LivePropEntry,
   InertiaPropInput,
   InertiaPropsInput,
   ResolvedInertiaProp,
@@ -880,6 +887,8 @@ export {
   PresenceChannel,
   MemoryDriver as MemoryBroadcastDriver,
   RedisDriver as RedisBroadcastDriver,
+  broadcastChannelsOf,
+  broadcastNameOf,
 } from './broadcasting'
 export type {
   BroadcastEvent,
@@ -897,6 +906,9 @@ export type {
   WebSocketMiddlewareOptions,
   AuthMiddlewareOptions,
   BroadcastableEvent,
+  BroadcastEventOptions,
+  BroadcastSender,
+  BroadcastTarget,
   MemoryDriverOptions as BroadcastMemoryDriverOptions,
   RedisClient as BroadcastRedisClient,
   RedisDriverOptions as BroadcastRedisDriverOptions,

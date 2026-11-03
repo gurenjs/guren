@@ -1,5 +1,6 @@
 import { PORTABLE_AGENT_TOOL_NAME_PATTERN } from '@guren/server'
 import { AI_PLUGIN_PACKAGE } from './add-ai'
+import { agentChatEntries, assertChatPossible, finishAgentChat } from './make-ai-chat'
 import { CliError } from './cli-error'
 import { appDependsOn, readIfExists } from './discovery'
 import { detectRunner } from './make-test'
@@ -23,6 +24,8 @@ export interface MakeAiAgentOptions extends WriterOptions {
   output?: boolean
   /** Also write a test that scripts the agent through `app.fakeAi()`. */
   test?: boolean
+  /** Also write a streaming chat: routes, a controller and an Inertia page with the copied `AgentChat`. */
+  chat?: boolean
 }
 
 export interface MakeAiAgentResult {
@@ -48,6 +51,7 @@ export async function makeAiAgent(name: string, options: MakeAiAgentOptions = {}
     notes.push(`${AI_PLUGIN_PACKAGE} is not in package.json yet. Run: bunx guren add ai`)
   }
   if (options.test) notes.push(...(await testingNotes(cwd)))
+  if (options.chat) await assertChatPossible(cwd, { output: options.output, root: options.root })
 
   const root = options.root ? `modules/${safeModuleName(options.root)}/` : ''
   const agentPath = `${root}app/Ai/Agents/${className}.ts`
@@ -71,7 +75,14 @@ export async function makeAiAgent(name: string, options: MakeAiAgentOptions = {}
     })
   }
 
+  if (options.chat) entries.push(...agentChatEntries(className, fileName, agentPath))
+
   const files = await writeScaffoldFiles(entries, { ...writerOptionsFrom(options), subject: className })
+  if (options.chat) {
+    const chat = await finishAgentChat(cwd, { className, slug: fileName, force: options.force })
+    files.push(...chat.files)
+    notes.push(...chat.notes)
+  }
   return { files, notes }
 }
 

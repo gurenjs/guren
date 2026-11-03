@@ -289,11 +289,17 @@ from those classes rather than restated. Listeners are grouped per
 | `live(always(…), …)`                    | sent                               | sent on every partial reload     | every response              |
 | `live(always(defer(…)), …)`             | announced                          | sent on every partial reload     | every response              |
 
-`always(live(…))` throws when it is called, and `always()`'s parameter type
-excludes `LiveProp`. `defer()` takes a callback, so the form to refuse there is
-`defer(() => live(…))`: its callback's return type excludes `LiveProp`, and
+`always(live(…))` throws when it is called~~, and `always()`'s parameter type
+excludes `LiveProp`~~. `defer()` takes a callback, so the form to refuse there is
+`defer(() => live(…))`~~: its callback's return type excludes `LiveProp`, and~~**;**
 since the value only exists once the deferred request runs it, the resolver
-throws when a deferred callback, or a lazy function, returns a `LiveProp`. One
+throws when a deferred callback, or a lazy function, returns a `LiveProp`.
+**Amended in implementation:** the helpers' parameter types are unchanged.
+Excluding `LiveProp` there (an intersection with `{ [LIVE_BRAND]?: never }`)
+rejected `always()` of a `string | undefined`, `unknown` or `null` value and
+every generic pass-through, which the frontend guide's own `always(getFlash(…))`
+is. The type-level refusal is `InertiaPropInput`'s: `always(live(…))` is no
+input `this.inertia()` accepts for any prop. One
 spelling per combination is what lets `guren check` read them (§7). This mirrors `always(defer(…))`, where the
 modifier also wraps the value. The Laravel adapter's
 `Inertia::defer(…)->live(…)` chain is not copied, because Guren's prop helpers
@@ -317,18 +323,27 @@ with the adapter's rule:
   entries it already has for every other key.
 - **A key that stops being live.** The client merges `liveProps` shallowly over
   what it holds (`response.ts` in `@inertiajs/core`), so leaving a key out never
-  removes its listeners. A partial reload that resolves a key as a plain prop
+  removes its listeners. ~~A partial reload that resolves a key as a plain prop
   (a controller that makes `order` live only while the order is open) lists it
   as `{ listeners: [] }`, on which the client drops its subscriptions. The
   Laravel adapter does not do this; the entry costs a few bytes per selected
   key and is never sent on a full visit, where the client replaces the whole
-  map.
+  map.~~ **Amended in implementation:** no empty entry is sent, as in the
+  Laravel adapter. After a reconnect Inertia reloads every key it holds an
+  entry for, an empty one included, and a partial reload cannot tell a key that
+  stopped being live from one that never was: the client's own deferred-group
+  fetch would have left an empty entry for every plain deferred key, each then
+  reloaded on every reconnect. A key that stops being live keeps its listeners
+  until the next full visit, and each of its events costs one reload that
+  returns the plain value.
 
 `@guren/testing`'s controller mock builds its page through
 `buildInertiaPage()`, so the payload carries `liveProps` with no change there,
 and a test can assert on `page.liveProps.order.listeners`. The mock's module
 object lists its exports one by one (`packages/testing/src/controller.ts`), so
-`live` and `isLiveProp` are added to it, or a controller importing `live` from
+~~`live` and `isLiveProp` are added to it~~ **(amended in implementation:
+`always`, `defer` and `live` are added, since `always` and `defer` were missing
+too, and nothing in a controller calls `isLiveProp`)**, or a controller importing `live` from
 the mocked `@guren/core` fails to load. The prototype client
 (`@guren/inertia-client/prototype`, RFC 0021) answers fixtures without a
 server and never sees a live prop; its own partial-reload filter does not
@@ -469,7 +484,10 @@ stream is unowned (opened before sign-in, or by a user object with no `id`,
 held on the `WebSocketClient` record and accepted nowhere as an input. SSE
 clients get none, since the transport does not use them.
 
-`broadcastEvent(event, { except })` takes the request (or the header value),
+`broadcastEvent(event, { except })` takes ~~the request (or the header value)~~
+**the request's context (`this.ctx` in a controller), or `{ socketId, user }`
+given by hand (amended in implementation: a `Request` or a bare header value
+carries no signed-in user to bind the match to)**,
 reads `X-Socket-Id`, and publishes the payload as
 `{ ...payload, __inertia: { socketId, userId } }`, where `userId` is the
 requester's id read the way `resolveClientUserId()` reads a socket's owner.
@@ -483,6 +501,15 @@ Exclusion happens on the server, in the one delivery callback
   the manager added removed. Neither the socket id nor the user id leaves the
   server, and no driver changes: they ride inside `data`, which `MemoryDriver`
   and `RedisDriver` already carry opaquely across instances.
+
+**Amended in implementation:** the two fields are reserved. Every publish
+path the manager offers (`broadcast()`, `broadcastEvent()`, a `Channel`'s
+`broadcast()`) removes them from the payload the app hands it before adding its
+own, so a payload an app relays from a user cannot carry a forged mark, and
+delivery removes them, valid or not, from every event. The user ids compare
+strictly, as `authMiddleware()` compares a stream's owner, and a user id JSON
+cannot carry (`NaN`, an infinity) marks nothing. A payload that is not a plain
+object is marked as the JSON a client would receive.
 
 The header is client-supplied, and binding the match to the requester's user is
 what makes a guessed or leaked value harmless: a user can only suppress

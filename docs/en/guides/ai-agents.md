@@ -392,9 +392,9 @@ export default class SupportChatController extends Controller {
 
 `show()` renders the chat page. `history(id)` returns the stored conversation as `useChat` messages, under the same two checks as `continue()`. A conversation id another user started, or another agent's, returns `null` like an unknown one, so the page opens an empty chat instead of failing. Tool calls come back as `tool-<name>` parts with their results, the shape the live stream renders, and a failed tool shows the same masked error. A tool that defines `toModelOutput` comes back with the output the model saw. `toUIMessages()` from `@guren/plugin-ai` is the same conversion for history read some other way.
 
-In the page, `createChatTransport()` from `@guren/plugin-ai/client` posts one turn, `{ conversation, message }`, never the transcript. The history lives on the server, because a transcript sent by the browser would let it invent what the model or a tool "already said". The first turn sends `conversation: null`, the controller starts one, and the response names it in the `X-Guren-Conversation` header, which the transport keeps for later turns. The transport also sends the `XSRF-TOKEN` cookie back as the `X-XSRF-TOKEN` header, so the route stays behind CSRF protection.
+In the page, `createChatTransport()` from `@guren/plugin-ai/client` posts one turn, `{ conversation, message }`, never the transcript. The history lives on the server, because a transcript sent by the browser would let it invent what the model or a tool "already said". The first turn sends `conversation: null`, the controller starts one, and the response names it in the `X-Guren-Conversation` header. The transport keeps that id for later turns once the turn's answer has finished arriving. A first turn that is stopped, or fails before the model answers, stores no conversation, so the transport keeps no id and the next turn starts a new one. The transport also sends the `XSRF-TOKEN` cookie back as the `X-XSRF-TOKEN` header, so the route stays behind CSRF protection.
 
-A reload lands on `show()` with the id in the query, so the page starts from the stored history. `useChat({ id, messages })` displays it, and the next turn still sends only `{ conversation, message }`. The `key` remounts the chat when an Inertia visit opens another conversation, since the transport is created once per mount.
+With `?conversation=<id>` in its URL, the page starts from the stored history: `useChat({ id, messages })` displays it, and the next turn still sends only `{ conversation, message }`. The `key` remounts the chat when an Inertia visit opens another conversation, since the transport is created once per mount. This page keeps a new conversation's id in the transport alone, so a reload opens an empty chat. The page `make:ai-agent --chat` writes ([below](#scaffolding-a-chat-page)) also records the id and the turns in the URL and in Inertia's history entry, so a reload and Back return to the conversation.
 
 ```tsx
 // resources/js/pages/support/Chat.tsx
@@ -412,16 +412,12 @@ export default function Chat(props: Props) {
 }
 
 function Conversation({ conversationId, messages: initialMessages }: Props) {
-  const [transport] = useState(() =>
-    createChatTransport('/support/chat', {
-      conversation: conversationId,
-      onConversation: (id) => window.history.replaceState(null, '', `?conversation=${id}`),
-    }))
+  const [transport] = useState(() => createChatTransport('/support/chat', { conversation: conversationId }))
   const { messages, sendMessage } = useChat({ id: conversationId ?? undefined, messages: initialMessages, transport })
   const [draft, setDraft] = useState('')
 
   return (
-    <form onSubmit={(event) => { event.preventDefault(); void sendMessage({ text: draft }); setDraft('') }}>
+    <form method="post" action="/support/chat" onSubmit={(event) => { event.preventDefault(); void sendMessage({ text: draft }); setDraft('') }}>
       {messages.map((message) => (
         <p key={message.id}>
           {message.role}: {message.parts.map((part) => (part.type === 'text' ? part.text : '')).join('')}
@@ -440,6 +436,18 @@ Install `@ai-sdk/react` 4.x, the line that pairs with `ai` 7, in the app for `us
 - The transport refuses to regenerate a message, and refuses a user message with a file attached.
 
 A request aborted through `signal` stores nothing. A storage failure after the answer has started streaming is logged, since the status code has already been sent.
+
+### Scaffolding a chat page
+
+`make:ai-agent --chat` writes everything above for a new agent:
+
+```bash
+bunx guren make:ai-agent SupportBot --chat
+```
+
+Besides the agent, it writes `SupportBotChatController` with `show()` and `chat()`, `routes/support-bot-chat.ts` with `GET /support-bot` and `POST /support-bot/chat` behind sign-in (mounted in `routes/web.ts`), and the page `resources/js/pages/support-bot/Chat.tsx`. The page renders `resources/js/components/ai/AgentChat.tsx`, which shows the answer while it streams, a Stop button, an error, each tool call with its input and output, and the restored history after a reload. It is styled with Guren UI tokens and uses the `Alert`, `Button` and `Textarea` components from `guren add ui`, which the command copies when the app lacks them.
+
+`AgentChat.tsx` is copied into the app, which owns it from then on. A second `--chat` agent reuses the copy, `--force` replaces it, and `guren upgrade` never rewrites it. Install `@ai-sdk/react` 4.x if the command says the app lacks it, and configure `conversations` in `config/ai.ts`, since a chat needs a conversation store. The flag cannot be combined with `--output` or `--module`.
 
 ## Queueing a prompt
 

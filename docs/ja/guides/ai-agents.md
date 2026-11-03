@@ -416,11 +416,11 @@ export default class SupportChatController extends Controller {
 
 ページ側では、`@guren/plugin-ai/client` の `createChatTransport()` が 1 ターン分の `{ conversation, message }` だけを送り、それまでのやりとり全体は送りません。ブラウザから送られた記録を受け入れると、モデルやツールが「すでに言ったこと」をブラウザ側で捏造できてしまうため、履歴はサーバー側に置きます。
 
-最初のターンでは `conversation: null` を送ります。コントローラが会話を始め、レスポンスの `X-Guren-Conversation` ヘッダでその id を返すので、トランスポートはそれを覚えておき、以降のターンで送ります。
+最初のターンでは `conversation: null` を送ります。コントローラが会話を始め、レスポンスの `X-Guren-Conversation` ヘッダでその id を返します。トランスポートは答えが最後まで届いてからその id を覚え、以降のターンで送ります。最初のターンを止めたときや、モデルが答える前に失敗したときは会話が保存されないので、トランスポートは id を覚えず、次のターンで新しい会話が始まります。
 
 トランスポートは `XSRF-TOKEN` クッキーを `X-XSRF-TOKEN` ヘッダに入れて送り返すので、ルートは CSRF 保護の内側に置いたままで構いません。
 
-再読み込みするとクエリに会話の id が付いた状態で `show()` に戻るので、ページは保存済みの履歴から始まります。`useChat({ id, messages })` は履歴を表示するだけで、次のターンで送るのは `{ conversation, message }` だけです。トランスポートはマウントごとに一度だけ作るので、Inertia の遷移で別の会話を開いたときは `key` でチャットを作り直します。
+URL に `?conversation=<id>` が付いていれば、ページは保存済みの履歴から始まります。`useChat({ id, messages })` は履歴を表示するだけで、次のターンで送るのは `{ conversation, message }` だけです。トランスポートはマウントごとに一度だけ作るので、Inertia の遷移で別の会話を開いたときは `key` でチャットを作り直します。このページは新しい会話の id をトランスポートにしか持たないので、再読み込みすると空のチャットが開きます。`make:ai-agent --chat` が書き出すページ([後述](#チャットのページを生成する))は、id とターンを URL と Inertia の履歴にも記録するので、再読み込みでもブラウザの戻る操作でも会話に戻れます。
 
 ```tsx
 // resources/js/pages/support/Chat.tsx
@@ -438,16 +438,12 @@ export default function Chat(props: Props) {
 }
 
 function Conversation({ conversationId, messages: initialMessages }: Props) {
-  const [transport] = useState(() =>
-    createChatTransport('/support/chat', {
-      conversation: conversationId,
-      onConversation: (id) => window.history.replaceState(null, '', `?conversation=${id}`),
-    }))
+  const [transport] = useState(() => createChatTransport('/support/chat', { conversation: conversationId }))
   const { messages, sendMessage } = useChat({ id: conversationId ?? undefined, messages: initialMessages, transport })
   const [draft, setDraft] = useState('')
 
   return (
-    <form onSubmit={(event) => { event.preventDefault(); void sendMessage({ text: draft }); setDraft('') }}>
+    <form method="post" action="/support/chat" onSubmit={(event) => { event.preventDefault(); void sendMessage({ text: draft }); setDraft('') }}>
       {messages.map((message) => (
         <p key={message.id}>
           {message.role}: {message.parts.map((part) => (part.type === 'text' ? part.text : '')).join('')}
@@ -466,6 +462,18 @@ function Conversation({ conversationId, messages: initialMessages }: Props) {
 - トランスポートは、メッセージの再生成と、ファイルを添付したユーザーメッセージを受け付けません。
 
 `signal` で中断したリクエストは、何も保存しません。回答のストリーミングが始まった後で保存に失敗した場合は、ステータスコードをもう送ってしまっているので、ログに記録されます。
+
+### チャットのページを生成する
+
+`make:ai-agent --chat` を使うと、ここまでの内容を新しいエージェント用にまとめて書き出せます。
+
+```bash
+bunx guren make:ai-agent SupportBot --chat
+```
+
+エージェントのほかに、`show()` と `chat()` を持つ `SupportBotChatController`、ログインを必須にした `GET /support-bot` と `POST /support-bot/chat` を登録する `routes/support-bot-chat.ts`（`routes/web.ts` に組み込まれます）、ページの `resources/js/pages/support-bot/Chat.tsx` が書き出されます。ページが描画する `resources/js/components/ai/AgentChat.tsx` は、ストリーミング中の回答、停止ボタン、エラー、ツール呼び出しの入力と出力、再読み込み後に戻した履歴を表示します。見た目は Guren UI のトークンで整えてあり、`guren add ui` の `Alert`、`Button`、`Textarea` を使います。これらがアプリに無ければ、コマンドがコピーします。
+
+`AgentChat.tsx` はアプリにコピーされ、その後はアプリのファイルとして扱います。2 つ目のエージェントに `--chat` を付けたときは既存のコピーをそのまま使い、`--force` を付けたときだけ置き換えます。`guren upgrade` は書き換えません。`@ai-sdk/react` が無いと表示されたら 4.x をインストールし、チャットには会話ストアが必要なので `config/ai.ts` に `conversations` を設定してください。このフラグは `--output` や `--module` と一緒には使えません。
 
 ## プロンプトをキューに入れる
 
