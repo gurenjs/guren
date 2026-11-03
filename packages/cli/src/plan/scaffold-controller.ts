@@ -16,11 +16,11 @@ import { buildListenerSource } from '../make-listener'
 import { buildMailSource } from '../make-mail'
 import { buildNotificationSource } from '../make-notification'
 import { AUTH_ALIAS, authAliasLine, buildRoutesSource, routeCall } from '../make-route'
-import { quoteString } from '../schema-columns'
+import { isAutoIncrementPrimaryKey, quoteString } from '../schema-columns'
 import { camelCase, isBindingName, isIdentifier, pascalCase, quoteObjectKey, relativeImportPath } from '../utils'
 import { entityDocPath } from './close-docs'
 import type { PlanScaffoldUnwritten } from './scaffold-http'
-import type { PlanAction, PlanController, PlanDraft, PlanModel, PlanRoute, PlanSideEffect } from './schema'
+import type { PlanAction, PlanColumn, PlanController, PlanDraft, PlanModel, PlanRoute, PlanSideEffect } from './schema'
 
 const CONTRACT_FIELDS = ['params', 'query', 'body'] as const
 
@@ -139,13 +139,27 @@ function unfillableForeignKeys(model: PlanModel): string[] {
 
 /**
  * An added model whose planned `fillable` is empty, where `create()` refuses every key of the data:
- * the columns a write names in `set`, all but a single-column primary key, which the table generates.
+ * the columns a write names, all but a primary key the database fills (the integer key the table
+ * numbers, or one with a planned default). A key it does not fill has to be written.
  */
 function serverSetColumns(model: PlanModel): string[] | undefined {
   if (model.change.kind !== 'add' || model.fillable.length > 0) return undefined
   const kept = model.columns.filter((column) => column.change.kind !== 'drop')
-  const generated = kept.filter((column) => column.primaryKey).length === 1
-  return kept.filter((column) => !(generated && column.primaryKey)).map((column) => column.name)
+  const primaryKeys = kept.filter((column) => column.primaryKey).length
+  const filled = (column: PlanColumn): boolean => isAutoIncrementPrimaryKey(column, primaryKeys) || (column.primaryKey === true && column.default !== undefined)
+  return kept.filter((column) => !filled(column)).map((column) => column.name)
+}
+
+/**
+ * The comment for a write whose every column the server names. `create()` drops `id` from its data
+ * and refuses it in `set` (`Model.filterFillable()`), so a model writing `id` is created by `forceCreate()`.
+ */
+function serverSetNote(model: PlanModel, columns: readonly string[]): string {
+  const keys = columns.join(', ')
+  if (columns.includes('id')) {
+    return `${model.name}'s fillable is empty, and create() takes id from neither its data nor set: write the record with ${model.name}.forceCreate({ ${keys} }), naming each column and never spreading the request (RFC 0031)`
+  }
+  return `${model.name}'s fillable is empty, so create() refuses every key of its data: name each column it writes in set, as ${model.name}.create({}, { set: { ${keys} } }) (RFC 0031)`
 }
 
 function describeResponse(plan: PlanDraft, response: PlanAction['response']): string {
@@ -244,8 +258,7 @@ export class PlanHttpEmitter {
     const everyColumn = posted ? serverSetColumns(model) : undefined
     const serverSet = action.body && posted && !everyColumn ? unfillableForeignKeys(model) : []
     if (everyColumn && everyColumn.length > 0) {
-      const keys = everyColumn.join(', ')
-      notes.push(`${model.name}'s fillable is empty, so create() refuses every key of its data: name each column it writes in set, as ${model.name}.create({}, { set: { ${keys} } }) (RFC 0031)`)
+      notes.push(serverSetNote(model, everyColumn))
     } else if (serverSet.length > 0) {
       const keys = serverSet.join(', ')
       notes.push(`${keys} ${serverSet.length === 1 ? 'is' : 'are'} not fillable: write ${serverSet.length === 1 ? 'it' : 'them'} with ${model.name}.create(data, { set: { ${keys} } }) (RFC 0031)`)

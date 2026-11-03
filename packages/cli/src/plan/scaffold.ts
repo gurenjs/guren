@@ -10,7 +10,7 @@
 import { MODELS_DIR } from '../discovery'
 import { schemaIdentifierFor } from '../inflect'
 import { buildModelSource, type ModelRelationshipSource } from '../make-model'
-import { autoIncrementPrimaryKey, COLUMN_BUILDERS, MYSQL_UNINDEXABLE_TYPES, quoteString, TABLE_FACTORY, type ColumnCode } from '../schema-columns'
+import { autoIncrementPrimaryKey, COLUMN_BUILDERS, isAutoIncrementPrimaryKey, MYSQL_UNINDEXABLE_TYPES, quoteString, TABLE_FACTORY, type ColumnCode } from '../schema-columns'
 import type { SchemaDialect } from '../schema-parser'
 import { isBindingName, isIdentifier, pascalCase, propertyAccess, quoteObjectKey } from '../utils'
 import {
@@ -320,7 +320,7 @@ class Emitter {
 
     const lines = columns.map((column) => {
       const single = column.primaryKey === true && primary.length === 1
-      const autoIncrement = single && column.type === 'integer' && !column.references
+      const autoIncrement = isAutoIncrementPrimaryKey(column, primary.length)
       const parts: ColumnCode[] = [
         autoIncrement ? autoIncrementPrimaryKey(dialect, sqlNameOf(column)) : COLUMN_BUILDERS[dialect][column.type](sqlNameOf(column), column),
       ]

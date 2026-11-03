@@ -1380,6 +1380,32 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     expect(controller).not.toContain('are not fillable: write them')
   })
 
+  // create() drops id from its data and refuses it in set, so a key the database does not fill goes through forceCreate().
+  test('should name a uuid primary key the database does not fill, through forceCreate() when it is id', () => {
+    const storeNote = (document: WidgetsPlan): string | undefined => {
+      const controller = emitWidgets(document, 'pg').files.find((file) => file.path === 'app/Http/Controllers/WidgetController.ts')!.contents
+      return controller.split('\n').find((line) => line.includes("Widget's fillable is empty"))?.trim()
+    }
+    const uuidKey = (fields: Partial<ColumnInput>): WidgetsPlan => {
+      const document = widgetsPlan()
+      const widget = document.models[3]!
+      widget.fillable = []
+      widget.columns[0] = column('widget', fields.name ?? 'id', 'uuid', { primaryKey: true, ...fields })
+      return document
+    }
+    const rest = 'title, body, count, ratio, price, active, releasedOn, publishedAt, meta, token, postId, parentId'
+
+    expect(storeNote(uuidKey({}))).toBe(
+      `// Widget's fillable is empty, and create() takes id from neither its data nor set: write the record with Widget.forceCreate({ id, ${rest} }), naming each column and never spreading the request (RFC 0031)`,
+    )
+    expect(storeNote(uuidKey({ name: 'key' }))).toBe(
+      `// Widget's fillable is empty, so create() refuses every key of its data: name each column it writes in set, as Widget.create({}, { set: { key, ${rest} } }) (RFC 0031)`,
+    )
+    expect(storeNote(uuidKey({ default: 'gen_random_uuid()' }))).toBe(
+      `// Widget's fillable is empty, so create() refuses every key of its data: name each column it writes in set, as Widget.create({}, { set: { ${rest} } }) (RFC 0031)`,
+    )
+  })
+
   test('should name the columns set writes on a POST action with no body, when the planned fillable is empty', () => {
     const document = widgetsPlan()
     document.models[3]!.fillable = []
