@@ -97,7 +97,7 @@
     "@axe-core/playwright": "~4.14.0",
     "@babel/types": "^7.29.0",
     "@guren/core": "^1.26.0",
-    "@inertiajs/react": "^3.11.0",
+    "@inertiajs/react": "^3.6.1",
     "@modelcontextprotocol/client": "^2.0.0",
     "@playwright/test": "^1.58.2",
     "@types/node": "^20.14.10",
