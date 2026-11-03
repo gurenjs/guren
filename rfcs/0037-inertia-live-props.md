@@ -638,12 +638,17 @@ wrapper is Open Question 4.
   does, and `InertiaPropInput` admits them for a required prop for the same
   reason. The rule, its advisory severity and its unverifiable cases are
   otherwise unchanged; `live` joins `defer` and `always` in
-  `propHelperBindings()`, and a `live` import also activates the check.
+  `propHelperBindings()`~~, and a `live` import also activates the check~~
+  **(amended in implementation: activation stays on the `defer` import, since
+  a `live()` with no `defer()` inside has nothing deferred to report)**.
 - **Live props** (new, `packages/cli/src/live-props-check.ts`, advisory,
   content-activated on a controller importing `live` from `@guren/core`):
-  - no routes file mounts `webSocketMiddleware()` (from the introspected
-    routes when `guren check` introspects, else the routes source), so no
-    transport could ever connect;
+  - no routes file mounts `webSocketMiddleware()` (~~from the introspected
+    routes when `guren check` introspects, else the routes source~~
+    **amended in implementation: read from source only, as a
+    `.webSocketMiddleware(` call in a routes file, `app/` or `src/`; the
+    manifest names a route's handler, not the middleware factory that built
+    it**), so no transport could ever connect;
   - an event class passed to `live()` that neither defines `broadcastAs()` nor
     pins a static `eventName`, since its wire name is its class name (§1);
   - `always(live(…))`, or `defer(() => live(…))` whose callback returns the

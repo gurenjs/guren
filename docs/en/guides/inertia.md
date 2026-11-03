@@ -32,6 +32,7 @@ The page component lives under `resources/js/pages/users/Index.tsx` and declares
 | Lazy props (a function evaluated only when sent) | Supported | Pass `() => value`. The page's `Props` still declares the resolved type. |
 | Always props | Supported | `always(value)`. `errors` is shared this way. |
 | Deferred props with groups (`deferredProps`) | Supported | `defer(() => value, group)`. See [Deferred Props](./frontend.md#deferred-props). |
+| Live props (`liveProps`) | Supported | `live(value, { on: new SomeEvent(…) })` over the app's own broadcasting socket, with `liveTransport()` from `@guren/inertia-client/live`. Values carried by the event are not used. See [Live Props](./live-props.md). |
 | Rescued deferred props (`rescuedProps`) | Not supported | A deferred callback that throws fails the follow-up request. |
 | Optional props | Not supported | Use `defer()` where the data can arrive after the first render. |
 | Merge, prepend and deep merge props (`mergeProps`, `prependProps`, `deepMergeProps`, `matchPropsOn`) | Not supported | A partial reload replaces the prop. |

@@ -34,6 +34,7 @@ import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
 import { checkAgentRoutes } from './agent-route-check'
 import { checkDeferredProps } from './deferred-props-check'
+import { checkLiveProps } from './live-props-check'
 import { checkAiAgents } from './ai-agent-check'
 import { checkSessionsConfig, readSessionWiring } from './sessions-check'
 import { checkPrototypeRoutes } from './prototype-check'
@@ -513,6 +514,10 @@ async function collectCheckReport(options: RunCheckOptions): Promise<CheckReport
     // hands the component undefined. Not changed-filtered: the controller defers
     // and the page declares, and either file can be the one that changed.
     checks.push(...(await checkDeferredProps({ cwd, cache, files: allControllerFiles })))
+
+    // 2.6. `live()` props (RFC 0037): a socket route for the transport, a pinned
+    // event name, live() outermost. Not changed-filtered, for the same reason as 2.5.
+    checks.push(...(await checkLiveProps({ cwd, cache, files: allControllerFiles })))
 
     // The schema every check below reads, parsed once per run rather than per
     // model (checks 3 and 8 both consume it).
