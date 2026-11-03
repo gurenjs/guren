@@ -25,6 +25,60 @@ describe('buildChannelModuleContent', () => {
 })
 
 describe('generateChannelTypes', () => {
+  it('reads broadcastEvent(new X(…)) through the event class, declared in another file (RFC 0037)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-channel-types-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Events'), { recursive: true })
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/OrderController.ts'),
+        `export async function ship(broadcast: any, order: { id: number }) {
+  await broadcast.broadcastEvent(new OrderShipped(order.id))
+  await broadcast.broadcastEvent(new Pinged())
+  await broadcast.broadcastEvent(new Computed())
+}
+`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Events/OrderShipped.ts'),
+        `export class OrderShipped {
+  static eventName = 'order.shipped'
+  constructor(readonly orderId: number) {}
+  broadcastOn(): string[] {
+    return [\`private-orders.\${this.orderId}\`, 'shipments']
+  }
+  broadcastWith() {
+    return { carrier: 'post' }
+  }
+}
+
+export class Pinged {
+  broadcastOn() {
+    return ['pings']
+  }
+}
+
+export class Computed {
+  broadcastOn() {
+    return this.channels()
+  }
+}
+`,
+        'utf8',
+      )
+
+      const { outputPath, channels } = await generateChannelTypes({ appRoot: workspace.dir, force: true })
+
+      expect(channels).toEqual(['pings', 'private-orders.{orderId}', 'shipments'])
+      const content = await readFile(outputPath, 'utf8')
+      expect(content).toContain("'order.shipped': { carrier: string }")
+      expect(content).toContain("'Pinged': unknown")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('collects channels and events from providers and broadcast calls', async () => {
     const workspace = await createTempWorkspace('guren-cli-channel-types-')
     try {
