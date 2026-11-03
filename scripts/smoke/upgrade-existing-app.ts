@@ -4,6 +4,7 @@ import process from 'node:process'
 import { upgradeCanary } from '../../packages/cli/src/upgrade'
 import {
   assertSingleInstalledCopies,
+  declaredDependencies,
   ensureBuiltPackages,
   rewriteAppDependencies,
   vendorLocalPackages,
@@ -93,7 +94,8 @@ async function main(): Promise<void> {
         // `@guren/*` ranges, which resolve from npm and fail outright once a version bump
         // names a release npm does not have yet. `upgrade` has just written such a range
         // (FIXTURE_VERSION) to every @guren/* entry; the rewrite fails on any it misses.
-        const roots = await vendorLocalPackages(join(cwd, '.guren-vendor'))
+        const declared = declaredDependencies(JSON.parse(await readFile(join(cwd, 'package.json'), 'utf8')))
+        const roots = await vendorLocalPackages(join(cwd, '.guren-vendor'), Object.keys(declared))
         await rewriteAppDependencies(cwd, roots, 'The upgraded fixture app')
         await run(['bun', 'install'], cwd)
         await assertSingleInstalledCopies(cwd)

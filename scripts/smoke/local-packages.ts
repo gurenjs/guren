@@ -83,17 +83,23 @@ async function templateDependencies(): Promise<Set<string>> {
   return names
 }
 
-let cached: Promise<LocalPackage[]> | undefined
+const cached = new Map<string, Promise<LocalPackage[]>>()
 
 /**
  * The packages a scaffolded app resolves from this checkout: what the templates
  * declare, plus everything those packages depend on inside the workspace. An
  * optional peer is not followed: the app installs one only by declaring it.
+ * `appDependencies` seeds the `@guren/*` an app under test declares beyond the
+ * templates (the blog fixture's `@guren/plugin-mcp`).
  */
-export function collectLocalPackages(): Promise<LocalPackage[]> {
-  cached ??= (async () => {
+export function collectLocalPackages(appDependencies: Iterable<string> = []): Promise<LocalPackage[]> {
+  const extra = [...new Set(appDependencies)].filter((name) => name.startsWith('@guren/')).sort()
+  const key = extra.join(',')
+  const existing = cached.get(key)
+  if (existing) return existing
+  const collected = (async () => {
     const workspace = new Map((await collectPackages()).map((pkg) => [pkg.name, pkg]))
-    const seed = await templateDependencies()
+    const seed = new Set([...(await templateDependencies()), ...extra])
 
     // Naming the package rather than quietly shipping a shorter vendor set.
     const unknown = [...seed].filter((name) => !workspace.has(name))
@@ -134,7 +140,8 @@ export function collectLocalPackages(): Promise<LocalPackage[]> {
       .sort((a, b) => a.name.localeCompare(b.name))
   })()
 
-  return cached
+  cached.set(key, collected)
+  return collected
 }
 
 /**
@@ -176,8 +183,11 @@ function localSpecifier(fromDir: string, target: string): string {
  * optional peers: a `dependencies` range nests a *registry* copy under the tarball,
  * and no reference drops the package from `guren audit`'s CSRF scan (it reads peers).
  */
-export async function vendorLocalPackages(vendorRoot: string): Promise<Map<string, string>> {
-  const packages = await collectLocalPackages()
+export async function vendorLocalPackages(
+  vendorRoot: string,
+  appDependencies: Iterable<string> = [],
+): Promise<Map<string, string>> {
+  const packages = await collectLocalPackages(appDependencies)
   const versions = new Map(packages.map((pkg) => [pkg.name, pkg.version]))
 
   const tarballs = new Map<string, string>()
