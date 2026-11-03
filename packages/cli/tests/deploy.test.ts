@@ -23,6 +23,7 @@ const NOT_IN_PRODUCTION_IMAGE: Record<string, string> = {
   _gitignore: 'git only',
   '.github': 'CI only',
   '.oxlintrc.json': 'lint only',
+  'bunfig.toml': 'install only; both stages install from the lockfile',
   'README.md': 'documentation',
   docs: 'the docs viewer never mounts under NODE_ENV=production',
   resources: 'compiled into public/assets (and .guren/ssr) by the build',

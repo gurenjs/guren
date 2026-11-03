@@ -1,0 +1,16 @@
+# Bun skips package versions published less than minimumReleaseAge seconds
+# ago (3 days), so a compromised release has time to be found and pulled before
+# an install here picks it up. To take a fix that is newer than that, add its
+# exact version to the list below, for example "some-package@1.2.4".
+# The @guren packages are listed by name because Bun does not read "@guren/*",
+# and each release of this app's scaffold asks for the versions it shipped with.
+[install]
+minimumReleaseAge = 259200
+minimumReleaseAgeExcludes = [
+  "@guren/cli",
+  "@guren/core",
+  "@guren/inertia-client",
+  "@guren/orm",
+  "@guren/server",
+  "@guren/testing",
+]

@@ -133,11 +133,21 @@ the ranges, and `audit:template-deps` fails CI when they disagree.
 Excluding them means a compromised `@guren/*` publish is not delayed; that risk
 sits with the release process (provenance, 2FA), not with each app.
 
-The exact `drizzle-orm` and `drizzle-kit` pins hit the same wall: a release that
+~~The exact `drizzle-orm` and `drizzle-kit` pins hit the same wall: a release that
 adopts a drizzle version younger than the gate scaffolds apps that cannot
 install. `sync:template-deps` refuses such a pin by reading the version's
 publish time from the registry (the pin today, `1.0.0-rc.4`, was published on
-2026-06-27).
+2026-06-27).~~
+**Amended in implementation:** the wall is not drizzle's alone. On 2026-11-03
+the default template asked for `@inertiajs/react@^3.11.0`, which only a
+release from the day before satisfied. `sync-template-deps.ts --release`
+therefore checks every third-party range a scaffold resolves at the top of its
+tree (the templates' own, and the dependencies and required peers of each
+excluded `@guren/*` package) and refuses the release while one admits only
+versions younger than the gate, or when the registry cannot say. The check
+depends on the date, so it runs at release and not on every PR. The smokes that
+install this checkout's builds lift the gate in the scaffolded app, and
+`smoke:starter:npm`, which installs from the registry, keeps it.
 
 The gate also delays the fix for an advisory. §5 handles that by naming the
 exact `name@version` exclusion, never by turning the gate off.

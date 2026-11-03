@@ -8,7 +8,7 @@
  * against and `guren add lint` writes). `--check` backs `audit:template-deps`.
  */
 import { readFile, writeFile } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import process from 'node:process'
 import { templateManifests } from '../packages/create-app/src/blueprints'
 import {
@@ -18,6 +18,14 @@ import {
   type DrizzlePinDeclineReason,
   type OrmManifest,
 } from '../packages/cli/src/drizzle-pins'
+import {
+  TEMPLATE_BUNFIG,
+  cooldownExclusions,
+  fetchNpmPackument,
+  renderTemplateBunfig,
+  scaffoldThirdPartyRanges,
+  youngRanges,
+} from './template-cooldown'
 import { collectPackages, manifestAtRev, repoRoot, versionOf } from './workspace-packages'
 
 /**
@@ -202,20 +210,60 @@ async function collectMismatches(): Promise<TemplateManifest[]> {
   return templates
 }
 
+interface BunfigDrift {
+  path: string
+  file: string
+  expected: string
+}
+
+/** Each template's generated `bunfig.toml` that is missing or differs from what the gate's exclusions render. */
+async function bunfigDrift(): Promise<BunfigDrift[]> {
+  const expected = renderTemplateBunfig(await cooldownExclusions())
+  const drift: BunfigDrift[] = []
+  for (const manifest of await templateManifests()) {
+    const path = join(dirname(manifest), TEMPLATE_BUNFIG)
+    const actual = await readFile(path, 'utf8').catch(() => undefined)
+    if (actual !== expected) {
+      drift.push({ path, file: relative(repoRoot, path), expected })
+    }
+  }
+  return drift
+}
+
+/**
+ * Release-only, since the answer depends on the date: a scaffold installs under
+ * the gate it ships, so a release whose templates (or the `@guren/*` packages they
+ * install) ask for a range only young versions satisfy would scaffold apps that
+ * cannot install. An unreachable registry refuses the release too.
+ */
+async function assertScaffoldInstallsUnderGate(): Promise<void> {
+  const young = await youngRanges(await scaffoldThirdPartyRanges(await templateManifests()), fetchNpmPackument, Date.now())
+  if (young.length === 0) {
+    console.log('Every third-party range a scaffold resolves admits a version older than the release-age gate.')
+    return
+  }
+  throw new Error(
+    'A scaffold from this release could not install under its own release-age gate:\n' +
+    young.map((entry) => `  ${entry.name}@${entry.range} (${relative(repoRoot, entry.source) || entry.source}): ${entry.reason}`).join('\n') +
+    '\nWait until the versions clear the gate, or lower the range to a version that has.',
+  )
+}
+
 function describe(mismatch: Mismatch): string {
   return `  ${mismatch.file}: ${mismatch.dependency} declares ${mismatch.declared}, ${mismatch.because}`
 }
 
 async function check(): Promise<void> {
   const mismatches = (await collectMismatches()).flatMap((template) => template.mismatches)
-  if (mismatches.length === 0) {
-    console.log('Template dependency versions match the workspace.')
+  const bunfigs = await bunfigDrift()
+  if (mismatches.length === 0 && bunfigs.length === 0) {
+    console.log('Template dependency versions and release-age gates match the workspace.')
     return
   }
 
   throw new Error(
     'Template dependency versions have drifted from this workspace.\n' +
-    `${mismatches.map(describe).join('\n')}\n` +
+    `${[...mismatches.map(describe), ...bunfigs.map((drift) => `  ${drift.file}: the release-age gate differs from what the template's @guren packages render`)].join('\n')}\n` +
     'Run `bun run sync:template-deps`. These versions resolve from npm, not from the\n' +
     'workspace, so a stale @guren/* range scaffolds apps against a package line the\n' +
     'templates were never written for, and a stale drizzle pin installs a second copy\n' +
@@ -278,8 +326,16 @@ async function write(options: { release: boolean }): Promise<void> {
   }
 
   const changed = templates.filter((template) => template.mismatches.length > 0)
-  if (changed.length === 0) {
+  const bunfigs = await bunfigDrift()
+  for (const drift of bunfigs) {
+    await writeFile(drift.path, drift.expected, 'utf8')
+    console.log(`${drift.file}: release-age gate rewritten`)
+  }
+  if (changed.length === 0 && bunfigs.length === 0) {
     console.log('Template dependency versions already match the workspace.')
+    if (options.release) {
+      await assertScaffoldInstallsUnderGate()
+    }
     return
   }
 
@@ -295,6 +351,8 @@ async function write(options: { release: boolean }): Promise<void> {
   }
 
   if (options.release) {
+    // After the manifests are written: a drizzle pin this run moved is a range too.
+    await assertScaffoldInstallsUnderGate()
     await assertCreateAppRepublishes()
     return
   }
