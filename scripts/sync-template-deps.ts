@@ -18,14 +18,8 @@ import {
   type DrizzlePinDeclineReason,
   type OrmManifest,
 } from '../packages/cli/src/drizzle-pins'
-import {
-  TEMPLATE_BUNFIG,
-  cooldownExclusions,
-  fetchNpmPackument,
-  renderTemplateBunfig,
-  scaffoldThirdPartyRanges,
-  youngRanges,
-} from './template-cooldown'
+import { BUNFIG_FILE, renderReleaseAgeBunfig } from '../packages/cli/src/release-age'
+import { cooldownExclusions, fetchNpmPackument, scaffoldThirdPartyRanges, youngRanges } from './template-cooldown'
 import { collectPackages, manifestAtRev, repoRoot, versionOf } from './workspace-packages'
 
 /**
@@ -218,10 +212,10 @@ interface BunfigDrift {
 
 /** Each template's generated `bunfig.toml` that is missing or differs from what the gate's exclusions render. */
 async function bunfigDrift(): Promise<BunfigDrift[]> {
-  const expected = renderTemplateBunfig(await cooldownExclusions())
+  const expected = renderReleaseAgeBunfig(await cooldownExclusions())
   const drift: BunfigDrift[] = []
   for (const manifest of await templateManifests()) {
-    const path = join(dirname(manifest), TEMPLATE_BUNFIG)
+    const path = join(dirname(manifest), BUNFIG_FILE)
     const actual = await readFile(path, 'utf8').catch(() => undefined)
     if (actual !== expected) {
       drift.push({ path, file: relative(repoRoot, path), expected })

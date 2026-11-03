@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import { templateManifests } from '../packages/create-app/src/blueprints'
 import {
-  RELEASE_AGE_SECONDS,
   cooldownExclusions,
   isSemverRange,
-  renderTemplateBunfig,
   scaffoldThirdPartyRanges,
   youngRanges,
   type Packument,
@@ -26,17 +24,6 @@ function registry(packuments: Record<string, Packument>) {
     },
   }
 }
-
-describe('renderTemplateBunfig', () => {
-  it('writes the gate and every exclusion by exact name', () => {
-    const bunfig = renderTemplateBunfig(['@guren/core', '@guren/server'])
-
-    expect(bunfig).toContain('ago (3 days)')
-    expect(Bun.TOML.parse(bunfig)).toEqual({
-      install: { minimumReleaseAge: RELEASE_AGE_SECONDS, minimumReleaseAgeExcludes: ['@guren/core', '@guren/server'] },
-    })
-  })
-})
 
 describe('cooldownExclusions', () => {
   it('lists every published @guren package, plugins included, and nothing else', async () => {

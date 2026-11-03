@@ -77,4 +77,6 @@ minimumReleaseAgeExcludes = [
 ]
 ```
 
+`guren doctor` reports `supply-chain-cooldown` when `bunfig.toml` sets no `minimumReleaseAge`, or when the list leaves out a `@guren` package the app has. `guren upgrade` writes the block, or adds the missing names, unless the file has an `[install]` table or a list it did not write; doctor then prints the line to add.
+
 Run `guren audit` to see the advisories `bun audit` finds for the installed packages.

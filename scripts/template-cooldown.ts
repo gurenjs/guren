@@ -1,6 +1,7 @@
 /**
  * The release-age gate the scaffold templates ship (RFC 0039 §2): one generated
- * `bunfig.toml` per template, and the release check that every third-party range
+ * `bunfig.toml` per template, rendered by `packages/cli/src/release-age.ts` (the
+ * block `guren upgrade` writes too), and the release check that every third-party range
  * a fresh scaffold or a `guren add` resolves still admits a version older than the
  * gate. Bun 1.4.4 fails an install whose range only young versions satisfy, applies
  * the gate to transitive packages, and ignores a scope pattern in the exclusions
@@ -9,33 +10,10 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AI_PROVIDERS } from '../packages/cli/src/add-ai'
+import { RELEASE_AGE_SECONDS } from '../packages/cli/src/release-age'
 import { DATABASE_DEFAULTS } from '../packages/create-app/src/blueprints'
 import { collectLocalPackages, type DependencyManifest } from './smoke/local-packages'
 import { collectPackages, repoRoot } from './workspace-packages'
-
-/** RFC 0039 Open Question 2 is whether this becomes seven days. */
-export const RELEASE_AGE_SECONDS = 259_200
-
-export const TEMPLATE_BUNFIG = 'bunfig.toml'
-
-const RELEASE_AGE_DAYS = RELEASE_AGE_SECONDS / 86_400
-
-/** The scaffold's `bunfig.toml`, byte for byte; `sync:template-deps` writes it and `--check` compares. */
-export function renderTemplateBunfig(excludes: readonly string[]): string {
-  const entries = excludes.map((name) => `  ${JSON.stringify(name)},`).join('\n')
-  return `# Bun skips package versions published less than minimumReleaseAge seconds
-# ago (${RELEASE_AGE_DAYS} days), so a compromised release has time to be found and pulled
-# before an install here picks it up. To take a fix that is newer than that, add
-# its exact version to the list below, for example "some-package@1.2.4".
-# The @guren packages are listed one by one because Bun does not read "@guren/*",
-# and a Guren upgrade asks for releases newer than the gate allows.
-[install]
-minimumReleaseAge = ${RELEASE_AGE_SECONDS}
-minimumReleaseAgeExcludes = [
-${entries}
-]
-`
-}
 
 /**
  * Every `@guren/*` package this workspace publishes, not only the ones a scaffold
