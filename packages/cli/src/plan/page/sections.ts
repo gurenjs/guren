@@ -380,6 +380,7 @@ function renderAcceptance(acceptance: PlanAcceptance): HTMLDivElement {
   }
   gwt.appendChild(then)
   body.appendChild(gwt)
+  if (acceptance.alreadyHolds) body.appendChild(tel('p', 'note', 'acceptance.alreadyHoldsNote'))
   return body
 }
 
@@ -396,7 +397,10 @@ function renderTasks(host: HTMLElement, { plan }: PlanPagePayload): void {
           title: acceptance.description,
           sub: true,
           parent: node,
-          extraBadges: [el('span', 'badge badge-kind', acceptance.kind)],
+          extraBadges: [
+            el('span', 'badge badge-kind', acceptance.kind),
+            ...(acceptance.alreadyHolds ? [tel('span', 'badge badge-kind', 'acceptance.alreadyHolds')] : []),
+          ],
           body: renderAcceptance(acceptance),
         }),
       )

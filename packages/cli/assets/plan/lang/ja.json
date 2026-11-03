@@ -171,6 +171,8 @@
   "acceptance.has": "{table} に {values} がある",
   "acceptance.hasNo": "{table} に {values} がない",
   "acceptance.renders": "{page} を描画",
+  "acceptance.alreadyHolds": "すでに成り立つ",
+  "acceptance.alreadyHoldsNote": "この計画の作業より前から成り立っている振る舞いです。テストには先に失敗することを求めず、作業が終わった時点で通ることを求めます。",
 
   "breaking.tableDropped": "{table} テーブルを削除します。",
   "breaking.renamedFrom": "{from} から改名します。",

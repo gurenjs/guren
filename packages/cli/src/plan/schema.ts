@@ -296,6 +296,12 @@ export const AcceptanceSchema = z.strictObject({
   actor: NonEmptySchema,
   route: IdSchema,
   given: z.array(z.string()),
+  /**
+   * The behaviour holds before the plan's work (a guest is already sent to sign in), so its test
+   * guards it: `tests:fail` asks no failing run of it, and `tests` still needs it to pass. `true` or
+   * absent, so an unmarked plan hashes as it did before the field existed.
+   */
+  alreadyHolds: z.literal(true).optional(),
   input: z.array(PlanJsonValueSchema).optional(),
   expect: z.strictObject({
     status: z.number().int().min(100).max(599).optional(),

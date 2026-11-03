@@ -29,6 +29,7 @@ import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTar
 import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
 import { elementsAtPlannedEnd, judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
+import { planMayPassNow, routeAnswersBefore } from './scaffold-tests'
 import {
   findDuplicatePlanIds,
   hasBaseline,
@@ -44,6 +45,7 @@ import {
   type PlanFlowNode,
   type PlanRoute,
 } from './schema'
+import { derivePlanTasks } from './tasks'
 
 export interface PlanCheckResult extends CheckResult {
   /** The plan element the finding belongs beside; absent on a plan-wide finding. */
@@ -129,6 +131,7 @@ export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResul
   checkRouteAuthorization(plan, index, results)
   checkDataMigrations(plan, results)
   checkAcceptanceCoverage(plan, index, results)
+  checkRedRuns(plan, app, results)
   checkApiOnlyViews(plan, app, results)
 
   return results
@@ -188,6 +191,8 @@ const TITLES: Record<string, string> = {
   'plan:data-migration': 'Plan data migrations',
   'plan:rename-pair': 'Plan data migrations',
   'plan:acceptance': 'Plan acceptance coverage',
+  'plan:may-pass-now': 'Plan acceptance coverage',
+  'plan:already-holds': 'Plan acceptance coverage',
   'plan:flow-self-loop': 'Plan flows',
 }
 
@@ -784,6 +789,51 @@ function checkAcceptanceCoverage(plan: PlanDraft, index: PlanIndex, results: Pla
         finding('plan:acceptance', 'warn', `"${route.name}" ${because}, but no acceptance behaviour of kind "${kind}" names it.`, {
           elementId: route.id,
           section: 'routes',
+        }),
+      )
+    }
+  }
+}
+
+/**
+ * The behaviours whose test may pass before the implementation exists, as `plan:scaffold` reports
+ * them after approval, and a mark `alreadyHolds` on a behaviour no route answers for yet, which
+ * only gives up the red run (RFC 0030 §5). An unread model section reads the plan's root models.
+ */
+function checkRedRuns(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
+  const derivation = derivePlanTasks(plan, { apiOnly: app.apiOnly })
+  const rootModels = isUnreadable(app.models)
+    ? plan.models.filter((model) => !model.module && (model.change.kind === 'existing' || model.change.kind === 'alter')).map((model) => model.name)
+    : app.models.filter((model) => model.module === null).map((model) => model.name)
+  const routes = new Map(plan.routes.map((route) => [route.id, route]))
+
+  for (const { id, step, because } of planMayPassNow(plan, derivation, rootModels)) {
+    const name = routes.get(because.route)?.name ?? because.route
+    const answers = because.kind === 'exists' ? `"${name}" exists already (${because.change})` : `${because.task} mounts "${name}" before this behaviour's tests step`
+    results.push(
+      finding('plan:may-pass-now', 'warn', `Behaviour "${id}" may pass before its implementation exists: ${answers}, and its test has nothing to set up, so tests:fail would refuse ${step}.`, {
+        elementId: id,
+        section: 'acceptance',
+        suggestion:
+          because.kind === 'exists'
+            ? 'If it guards what the route does today, mark it "alreadyHolds": true; otherwise give it a setup or an expectation the route meets only once the work is done.'
+            : 'Move it to the task that adds the route, or mark it "alreadyHolds": true.',
+      }),
+    )
+  }
+
+  for (const task of derivation.tasks) {
+    const step = task.steps.find((candidate) => candidate.kind === 'tests')
+    if (!step?.verify.includes('tests:fail')) continue
+    for (const behaviour of plan.tasks.flatMap((intent) => intent.acceptance)) {
+      if (behaviour.alreadyHolds !== true || !step.acceptanceIds.includes(behaviour.id)) continue
+      const route = routes.get(behaviour.route)
+      if (!route || routeAnswersBefore(plan, derivation, task, route)) continue
+      results.push(
+        finding('plan:already-holds', 'warn', `Behaviour "${behaviour.id}" is marked "alreadyHolds", but nothing answers its route "${route.name}" before its tests step, so it cannot hold yet.`, {
+          elementId: behaviour.id,
+          section: 'acceptance',
+          suggestion: 'Drop the mark, so tests:fail sees its test fail before the implementation exists.',
         }),
       )
     }

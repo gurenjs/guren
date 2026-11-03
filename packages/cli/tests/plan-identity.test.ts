@@ -109,6 +109,21 @@ describe('planHash', () => {
     expect(planHash(edited)).not.toBe(planHash(plan))
   })
 
+  // Computed before `alreadyHolds` existed: a field that changed an unmarked plan's bytes would rename every approved plan.
+  test('should name an unmarked plan as it was named before a behaviour could be marked alreadyHolds', () => {
+    expect(planHash(validPlan())).toBe('800d39d1dd8e16bc327b09e65f31655ebf1a259b2e2ad7d6efa3a6cc35418d97')
+  })
+
+  test('should take alreadyHolds as true or absent, and name a marked plan apart', () => {
+    const document = { ...loadCommentsPlan(), baseline: TEST_BASELINE } as unknown as { tasks: Array<{ acceptance: Array<Record<string, unknown>> }> }
+    document.tasks[0]!.acceptance[2]!.alreadyHolds = true
+    const marked = PlanSchema.parse(document)
+    document.tasks[0]!.acceptance[2]!.alreadyHolds = false
+
+    expect(planHash(marked)).not.toBe(planHash(validPlan()))
+    expect(PlanSchema.safeParse(document).success).toBe(false)
+  })
+
   test('should change when only the baseline changes', () => {
     const plan = validPlan()
     const moved = structuredClone(plan)

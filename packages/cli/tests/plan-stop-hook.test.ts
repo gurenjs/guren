@@ -223,6 +223,17 @@ describe('planStopHookFindings', () => {
       expect(verdict.block).toBe(true)
     })
 
+    test('should not count a behaviour marked alreadyHolds among those no run can see fail', async () => {
+      const document = loadCommentsPlan() as { tasks: Array<{ acceptance: Array<Record<string, unknown>> }> }
+      document.tasks[0]!.acceptance[0]!.alreadyHolds = true
+      const app = await createApp('red-run-marked', { steps: { [HTTP]: record({ outcome: 'verified', incomplete: [] }) }, active: active({ step: TESTS }) }, document)
+
+      const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => report(TESTS, failed), now: NOW })
+
+      expect(verdict.block).toBe(true)
+      expect(verdict.message).not.toContain('already pass under the implementation')
+    })
+
     test('should send the agent back while no step has verified the implementation', async () => {
       const app = await createApp('red-run-unimplemented', { active: active({ step: TESTS }) })
 

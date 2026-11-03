@@ -724,6 +724,20 @@ describe('plan:next', () => {
       expect(json.reportVersion).toBe(1)
       expect(json.step).toMatchObject({ id: TESTS, kind: 'tests', acceptance: expect.arrayContaining([expect.objectContaining({ id: 'AC-comments-1' })]) })
     })
+
+    test('should say which behaviours of a tests step hold already, which tests:fail does not ask to fail', async () => {
+      const { app, plan } = await createApp('format-holds')
+      const document = loadCommentsPlan() as { tasks: Array<{ acceptance: Array<Record<string, unknown>> }> }
+      document.tasks[0]!.acceptance[2]!.alreadyHolds = true
+      await writeFile(plan, JSON.stringify(document))
+      await writeState(app, { steps: { [SCAFFOLD]: { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(document)) } } })
+
+      const text = formatPlanNext(await planNextFile(plan, { appRoot: app, now: NOW }), 'comments.plan.json')
+
+      expect(text).toContain(`Next: ${TESTS}\n`)
+      expect(text).toMatch(/\n {6}unauthenticated \(holds already\); actor guest; route route\.comments\.store;/)
+      expect(text).toContain('\n  A behaviour that holds already guards what the application does today: tests:fail does not ask it to fail, and the step that runs the tests needs it to pass.\n')
+    })
   })
 })
 

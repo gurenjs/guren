@@ -101,7 +101,8 @@ const TASKS = `## Tasks and acceptance behaviours
 
 - A task names an \`entity\`, a \`summary\`, the element ids it \`covers\`, and its \`acceptance\` behaviours. A task says what a slice must achieve, never when: ordering advice goes in \`hints\`.
 - Each behaviour's \`id\` starts with \`AC-\` and names the task (\`AC-comments-1\`). The implementation's tests carry it in brackets in their titles.
-- \`kind\` is \`success\`, \`validation\`, \`unauthenticated\`, \`forbidden\`, \`not-found\` or \`state\`. Cover the unwanted cases: a route whose action names a validator needs a \`validation\` behaviour, a route behind authentication an \`unauthenticated\` one, and an action that enforces a policy a \`forbidden\` one.
+- \`kind\` is \`success\`, \`validation\`, \`unauthenticated\`, \`forbidden\`, \`not-found\` or \`state\`. Cover the unwanted cases: a route whose action names a validator needs a \`validation\` behaviour, a route the plan adds or alters behind authentication an \`unauthenticated\` one, and an action that enforces a policy a \`forbidden\` one. Put each in the task that covers its route. An \`existing\` route needs no \`unauthenticated\` behaviour.
+- Mark a behaviour that holds before the plan's work with \`"alreadyHolds": true\`, such as an \`unauthenticated\` one on an altered route that is behind authentication today. The tests step runs every behaviour's test before the implementation exists and needs it to fail, and a test of what already holds passes then; a marked one is only asked to pass once the work is done. Leave the mark off when the plan adds the guard: that test fails today.
 - \`route\` is a route id. \`input\`, and the \`has\` and \`missing\` of \`expect.database\`, are lists of \`{ "name": "body", "json": "\\"Nice post\\"" }\`, the value written as JSON text.
 - Guren redirects a non-GET request with 303, so a behaviour that expects the redirect after a form post says \`"status": 303\`.`
 
