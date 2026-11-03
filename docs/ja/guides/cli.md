@@ -390,7 +390,7 @@ bunx guren openapi:generate --force
 | `--app` | カレントディレクトリ | アプリケーションルートディレクトリ |
 | `--force` | `false` | 既存ファイルを上書き |
 
-このコマンドは、ルートコントラクトから Zod スキーマと OpenAPI のメタデータ(`summary`、`description`、`tags`、`operationId`、`deprecated`)を取り出して、OpenAPI 3.1 の JSON ドキュメントを生成します。ルートへの注釈の付け方は、[ルーティング: OpenAPI](./routing.md#openapi-ドキュメント生成)を参照してください。
+このコマンドは、ルートコントラクトから Zod スキーマと OpenAPI のメタデータ(`summary`、`description`、`tags`、`operationId`、`deprecated`)を取り出して、OpenAPI 3.1 の JSON ドキュメントを生成します。ルートへの注釈の付け方は、[ルーティング: OpenAPI](./openapi.md)を参照してください。
 
 ## ルートコマンド
 
@@ -431,7 +431,7 @@ bunx guren route:list --format compact # コンパクトな1行形式
 
 ## エージェントツールコマンド
 
-`.agent()` メタデータを宣言したルートは、MCP ツールとして AI エージェントに公開されます([ルーティング](./routing.md)を参照)。ここで紹介するコマンドは、エージェントから何が見えるかを、ルートグラフから直接導出して表示します。`.guren/agents.gen.ts` は読まないので、このマニフェストがなかったり古かったりしても、正しい結果を返します。
+`.agent()` メタデータを宣言したルートは、MCP ツールとして AI エージェントに公開されます([エージェントツール](./route-contracts.md#エージェントツール)を参照)。ここで紹介するコマンドは、エージェントから何が見えるかを、ルートグラフから直接導出して表示します。`.guren/agents.gen.ts` は読まないので、このマニフェストがなかったり古かったりしても、正しい結果を返します。
 
 | コマンド | 説明 | 例 |
 |----------|------|----|

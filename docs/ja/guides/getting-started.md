@@ -157,7 +157,7 @@ bun run preview
 1. [アーキテクチャ](./architecture.md)
 2. [ルーティングガイド](./routing.md)
 3. [コントローラーガイド](./controllers.md)
-4. [データベースガイド](./database.md)
+4. [データベースガイド](./database.md)、続けて[モデル](./models.md)
 5. [フロントエンドガイド](./frontend.md)
 6. [認証ガイド](./authentication.md)
 7. [テストガイド](./testing.md)

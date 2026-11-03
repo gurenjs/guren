@@ -448,7 +448,7 @@ bunx guren openapi:generate --force
 | `--app` | Current directory | Application root directory |
 | `--force` | `false` | Overwrite existing files |
 
-The command extracts Zod schemas and OpenAPI metadata (`summary`, `description`, `tags`, `operationId`, `deprecated`) from route contracts and produces an OpenAPI 3.1 JSON document. See [Routing — OpenAPI](./routing.md#openapi-document-generation) for details on annotating routes.
+The command extracts Zod schemas and OpenAPI metadata (`summary`, `description`, `tags`, `operationId`, `deprecated`) from route contracts and produces an OpenAPI 3.1 JSON document. See [Routing — OpenAPI](./openapi.md) for details on annotating routes.
 
 ## Route Commands
 
@@ -489,7 +489,7 @@ bunx guren route:list --format compact # Compact single-line format
 
 ## Agent Tool Commands
 
-Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (see [Routing — Agent tools](./routing.md)). These commands report what an agent would see, derived live from your route graph rather than read from `.guren/agents.gen.ts`, so they answer correctly even when that manifest is missing or stale.
+Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (see [Agent Tools](./route-contracts.md#agent-tools)). These commands report what an agent would see, derived live from your route graph rather than read from `.guren/agents.gen.ts`, so they answer correctly even when that manifest is missing or stale.
 
 | Command | Description | Example |
 |---------|-------------|---------|

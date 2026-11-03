@@ -114,7 +114,7 @@ imported).
 
 ## Agent-exposed routes
 
-Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checked by `check` and treated more strictly by `audit`. The rules run in the normal `check` suite and are content-activated: an app with no agent routes contributes no findings, and no controller is scanned.
+Routes that declare `.agent()` metadata (see [Agent Tools](./route-contracts.md#agent-tools)) are checked by `check` and treated more strictly by `audit`. The rules run in the normal `check` suite and are content-activated: an app with no agent routes contributes no findings, and no controller is scanned.
 
 `check` **fails** on:
 

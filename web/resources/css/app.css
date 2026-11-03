@@ -76,6 +76,55 @@
   --animate-gradient-shift: gradient-shift 8s ease infinite;
 }
 
+/* inline: the utilities read --home-* where they are used, so a ground class
+   on a page wrapper re-themes everything inside it. */
+@theme inline {
+  --color-home-ground: var(--home-ground);
+  --color-home-raised: var(--home-raised);
+  --color-home-line: var(--home-line);
+  --color-home-line-strong: var(--home-line-strong);
+  --color-home-text: var(--home-text);
+  --color-home-text-2: var(--home-text-2);
+  --color-home-ink: var(--home-ink);
+  --color-home-light: var(--home-light);
+  --color-home-light-text: var(--home-light-text);
+  --color-home-light-text-2: var(--home-light-text-2);
+  --color-home-light-line: var(--home-light-line);
+}
+
+/* The home and /start ground: a warm near-black, so crimson is the signal
+   rather than the surface. Each text-2 must keep 4.5:1 on its own ground. */
+:root {
+  --home-ground: #141112;
+  --home-raised: #1c1819;
+  --home-line: rgb(255 240 240 / 0.08);
+  --home-line-strong: rgb(255 240 240 / 0.16);
+  --home-text: #f5f1f1;
+  --home-text-2: #aba2a3;
+  --home-ink: #0c0a0a;
+
+  /* the one light band */
+  --home-light: #f5f2f1;
+  --home-light-text: #1c1617;
+  --home-light-text-2: #5d5354;
+  --home-light-line: rgb(28 22 23 / 0.1);
+}
+
+/* Rays behind the agent terminal. Static, so reduced motion needs no case. */
+.home-burst {
+  background:
+    radial-gradient(60% 90% at 50% 100%, rgb(255 60 40 / 0.32), transparent 70%),
+    repeating-conic-gradient(from -90deg at 50% 115%, rgb(255 90 60 / 0.11) 0deg 1.2deg, transparent 1.2deg 5deg);
+  mask-image: linear-gradient(to bottom, transparent, #000 35%);
+}
+
+/* The frame's dot field behind the hero name. */
+.home-dots {
+  background-image: radial-gradient(circle at center, var(--home-line-strong) 1px, transparent 1.5px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(70% 70% at 50% 50%, #000 30%, transparent 100%);
+}
+
 /* The home hero's 紅蓮 waits hidden for BurningName to burn it in. If the
    script never runs, the fallback shows it anyway; reduced motion shows it
    at once, which is also what the component then settles on. */
@@ -130,9 +179,9 @@
 @keyframes vg-slide { from { opacity: 0; transform: translateX(-5.5rem); } 25% { opacity: 1; } }
 @keyframes vg-light {
   from {
-    border-color: color-mix(in srgb, var(--color-crimson-50) 15%, transparent);
+    border-color: var(--home-line-strong);
     background-color: transparent;
-    color: color-mix(in srgb, var(--color-smoke) 60%, transparent);
+    color: var(--home-text-2);
   }
 }
 

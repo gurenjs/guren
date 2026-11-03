@@ -331,7 +331,7 @@ router.query('/posts/search', {
 }, [PostController, 'search'])
 ```
 
-The generated API client then types `json()` for that route as `{ data: Data.Post[] }`. See [Resource Response Hints](./routing.md#resource-response-hints) for the hint syntax.
+The generated API client then types `json()` for that route as `{ data: Data.Post[] }`. See [Resource Response Hints](./route-contracts.md#resource-response-hints) for the hint syntax.
 
 ### Declaring the shape codegen reads
 

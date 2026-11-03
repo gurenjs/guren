@@ -103,7 +103,7 @@ const FilterQuerySchema = z.object({
 })
 ```
 
-This applies to `this.validateQuery()` and to `query:` schemas attached via [route contracts](./routing.md#route-contracts).
+This applies to `this.validateQuery()` and to `query:` schemas attached via [route contracts](./route-contracts.md).
 
 ## Route Contract Validation
 
@@ -121,7 +121,7 @@ export default class PostsController extends Controller {
 }
 ```
 
-On a controller action, a failure throws the same `ValidationException` (422) as the helpers, so Inertia forms display it unchanged. A route whose handler is an inline function answers the 422 itself, in the middleware's shape (see [Form Validation Errors](#form-validation-errors)). See [Reading Validated Input](./routing.md#reading-validated-input).
+On a controller action, a failure throws the same `ValidationException` (422) as the helpers, so Inertia forms display it unchanged. A route whose handler is an inline function answers the 422 itself, in the middleware's shape (see [Form Validation Errors](#form-validation-errors)). See [Reading Validated Input](./route-contracts.md#reading-validated-input).
 
 ## Middleware Validation
 

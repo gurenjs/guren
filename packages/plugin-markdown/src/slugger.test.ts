@@ -47,6 +47,21 @@ describe('createSlugger', () => {
     expect(slug).not.toMatch(/[<>"']/)
   })
 
+  test('should decode the entities marked emits before slugging', () => {
+    const slugify = createSlugger()
+    expect(slugify('The audit&#39;s policy rule')).toBe('the-audits-policy-rule')
+    expect(slugify('Inspection &amp; Audit Commands')).toBe('inspection-audit-commands')
+    expect(slugify('&quot;CSRF token mismatch&quot;')).toBe('csrf-token-mismatch')
+    expect(slugify('<code>Model&lt;T&gt;</code> API')).toBe('modelt-api')
+  })
+
+  test('should decode entities once and never turn them into markup', () => {
+    const slugify = createSlugger()
+    expect(slugify('a &amp;lt;b&amp;gt; c')).toBe('a-ltbgt-c')
+    expect(slugify('&lt;script&gt;x&lt;/script&gt; Title')).toBe('scriptxscript-title')
+    expect(slugify('&#0; &#x110000; &bogus; ok')).toBe('0-x110000-bogus-ok')
+  })
+
   test('should keep unclosed tag tails verbatim, matching the regex form', () => {
     const slugify = createSlugger()
     expect(slugify('a <b')).toBe('a-b')

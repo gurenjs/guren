@@ -208,7 +208,7 @@ export default class PostsController extends Controller {
 }
 ```
 
-`this.validated(routeName)` は、スキーマでパースした `{ params, query, body }` を返します。`guren codegen` を実行した後は、ルートコントラクトをもとに型が付きます。詳しくは[検証済み入力の読み取り](./routing.md#検証済み入力の読み取り)を参照してください。
+`this.validated(routeName)` は、スキーマでパースした `{ params, query, body }` を返します。`guren codegen` を実行した後は、ルートコントラクトをもとに型が付きます。詳しくは[検証済み入力の読み取り](./route-contracts.md#検証済み入力の読み取り)を参照してください。
 
 ### Zod スキーマヘルパー
 
