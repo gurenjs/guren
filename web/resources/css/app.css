@@ -1195,6 +1195,24 @@ details[open] > summary .doc-tree-chevron {
   color: var(--shiki-dark) !important;
 }
 
+/* rose-pine-moon's comment colour (#6e6a86) measures 3.57:1 on the ink; its
+   own subtle (#908caa) measures 5.72:1. Matched on the inline style, so it
+   also reaches blog HTML stored at save time and the home page's samples. */
+.shiki span[style*="#6e6a86" i],
+.docs-content .shiki span[style*="#6e6a86" i] {
+  color: #908caa !important;
+}
+
+/* The docs index title's accent: crimson on the light page, a lighter red in
+   the dark theme, where crimson-900 sinks into the ground. */
+.docs-index-accent {
+  background-image: linear-gradient(to bottom right, #db1b1b, #7f1d1d);
+}
+
+:root.dark .docs-index-accent {
+  background-image: linear-gradient(to bottom right, #ff7a6b, #eb6f92);
+}
+
 /* Lines a `highlight=` fence attribute names (MarkdownRenderer.ts). The band
    spans the block's padding (1.25rem, .shiki above). The surface is ink in both
    themes, so one tint serves light and dark. */
