@@ -2,7 +2,7 @@
 import { useChat } from '@ai-sdk/react'
 import { router } from '@inertiajs/react'
 import { createChatTransport, type UIMessage } from '@guren/plugin-ai/client'
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { memo, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Alert } from '@/resources/js/components/ui/Alert'
 import { Button } from '@/resources/js/components/ui/Button'
 import { Textarea } from '@/resources/js/components/ui/Textarea'
@@ -55,6 +55,8 @@ function Conversation({ api, conversationId, messages: initialMessages, placehol
     id: chatId,
     messages: initialMessages,
     transport,
+    // At most one render per 50 ms while the answer streams, rather than one per token.
+    throttle: 50,
     onFinish: ({ messages: shown, isAbort, isError }) => {
       // A first turn stopped or failed stores nothing, and the transport adopts no id for it.
       const id = conversationId ?? started.current
@@ -76,9 +78,10 @@ function Conversation({ api, conversationId, messages: initialMessages, placehol
   const end = useRef<HTMLDivElement>(null)
   const busy = status === 'submitted' || status === 'streaming'
 
+  // On a new message and when the answer ends, not per token, so a reader scrolled up is left there.
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' })
-  }, [messages])
+  }, [messages.length, status])
 
   const send = (event?: FormEvent) => {
     event?.preventDefault()
@@ -126,27 +129,20 @@ function Conversation({ api, conversationId, messages: initialMessages, placehol
   )
 }
 
-function Message({ message }: { message: UIMessage }) {
+// Memoized: a streamed update keeps every earlier message's identity, so only the last one renders.
+const Message = memo(function Message({ message }: { message: UIMessage }) {
   const user = message.role === 'user'
   return (
     <article className={user ? 'ml-auto max-w-[85%]' : 'max-w-[85%]'}>
-      <p className={user ? 'mb-1 text-right font-mono text-xs text-g-muted' : 'mb-1 font-mono text-xs text-g-muted'}>
-        {user ? 'You' : 'Agent'}
-      </p>
-      <div
-        className={
-          user
-            ? 'space-y-2 rounded-g-card bg-g-accent-tint px-4 py-3 text-g-text'
-            : 'space-y-2 rounded-g-card border border-g-line bg-g-panel px-4 py-3 text-g-text'
-        }
-      >
+      <p className={`mb-1 font-mono text-xs text-g-muted${user ? ' text-right' : ''}`}>{user ? 'You' : 'Agent'}</p>
+      <div className={`space-y-2 rounded-g-card px-4 py-3 text-g-text ${user ? 'bg-g-accent-tint' : 'border border-g-line bg-g-panel'}`}>
         {message.parts.map((part, index) => (
           <MessagePart key={index} part={part} />
         ))}
       </div>
     </article>
   )
-}
+})
 
 function MessagePart({ part }: { part: Part }) {
   if (part.type === 'text') return <p className="whitespace-pre-wrap">{part.text}</p>
@@ -159,9 +155,12 @@ function MessagePart({ part }: { part: Part }) {
     )
   }
   if (part.type === 'file') {
+    const label = part.filename ?? part.mediaType
+    // An empty url is a provider's reference to a file it holds, with nothing here to open.
+    if (!part.url) return <span className="text-sm text-g-muted">{label}</span>
     return (
       <a href={part.url} className="text-sm text-g-accent-text underline">
-        {part.filename ?? part.mediaType}
+        {label}
       </a>
     )
   }
