@@ -72,8 +72,12 @@ describe('interactive diagrams', () => {
     // The flowchart is the no-JS fallback: each subgraph's chain must list the diagram's steps in its order.
     const source = block![1].replace(/&gt;/gu, '>').replace(/&#39;/gu, "'").replace(/&quot;/gu, '"')
     const labels = new Map([...source.matchAll(/(\w+)\["([^"]*)"\]/gu)].map(([, node, label]) => [node, label]))
+    // Split on the arrow as a string: the chain is mermaid, not HTML.
     const chain = (prefix: string) =>
-      new RegExp(`^\\s*(${prefix}\\d(?:\\s*-->\\s*${prefix}\\d)+)\\s*$`, 'mu').exec(source)![1].split(/\s*-->\s*/u)
+      source
+        .split('\n')
+        .map((line) => line.split('-->').map((node) => node.trim()))
+        .find((nodes) => nodes.length > 1 && nodes.every((node) => new RegExp(`^${prefix}\\d$`, 'u').test(node)))!
     const token = (id: string) => MIDDLEWARE_STEPS[id].code.replace(/^\.middleware\((.*)\)$/u, '$1')
 
     const run = chain('A')
