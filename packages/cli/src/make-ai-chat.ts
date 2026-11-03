@@ -4,6 +4,7 @@
  * is copied into the app like `guren add ui`'s, so the AI SDK's React line is the app's to follow.
  */
 import { resolve } from 'node:path'
+import { configuresConversations } from './add-ai'
 import { assertNotApiOnly } from './app-surface'
 import { CliError } from './cli-error'
 import { appDependsOn, readIfExists } from './discovery'
@@ -11,15 +12,15 @@ import { ensureUiComponents, uiComponentsImportedBy } from './guren-css'
 import { buildControllerSource } from './make-controller'
 import { buildRoutesSource, routeCall } from './make-route'
 import { DEFAULT_ROUTES_FILE, wireRouteRegistrar } from './route-registrar'
-import { loadScaffoldTemplate } from './scaffold-templates'
-import { pagesAccessor, relativeImportPath, writeScaffoldFiles, type ScaffoldFileEntry } from './utils'
+import { scaffoldTemplateFile } from './scaffold-templates'
+import { importSpecifier, pagesAccessor, writeScaffoldFiles, type ScaffoldFileEntry } from './utils'
 
-export const AGENT_CHAT_COMPONENT_PATH = 'resources/js/components/ai/AgentChat.tsx'
-export const AI_SDK_REACT_PACKAGE = '@ai-sdk/react'
+const AGENT_CHAT_COMPONENT_PATH = 'resources/js/components/ai/AgentChat.tsx'
+const AI_SDK_REACT_PACKAGE = '@ai-sdk/react'
 
 const AUTH_MIDDLEWARE = "requireAuthenticated({ redirectTo: '/login' })"
 
-export interface AgentChatFiles {
+interface AgentChatFiles {
   controller: string
   routes: string
   page: string
@@ -27,7 +28,7 @@ export interface AgentChatFiles {
 }
 
 /** Where `--chat` writes for an agent, from its class and kebab-case names. */
-export function agentChatFiles(className: string, slug: string): AgentChatFiles {
+function agentChatFiles(className: string, slug: string): AgentChatFiles {
   return {
     controller: `app/Http/Controllers/${className}ChatController.ts`,
     routes: `routes/${slug}-chat.ts`,
@@ -54,10 +55,10 @@ export async function assertChatPossible(cwd: string, options: { output?: boolea
 export function agentChatEntries(className: string, slug: string, agentPath: string): ScaffoldFileEntry[] {
   const paths = agentChatFiles(className, slug)
   return [
-    { path: paths.controller, contents: chatControllerTemplate(className, slug, relativeImportPath(paths.controller, agentPath.replace(/\.ts$/u, '.js'))), flag: '--chat' },
-    { path: paths.routes, contents: chatRoutesTemplate(className, slug, paths), flag: '--chat' },
-    { path: paths.page, contents: chatPageTemplate(className, slug), flag: '--chat' },
-  ]
+    { path: paths.controller, contents: chatControllerTemplate(className, slug, importSpecifier(paths.controller, agentPath)) },
+    { path: paths.routes, contents: chatRoutesTemplate(className, slug, paths) },
+    { path: paths.page, contents: chatPageTemplate(className, slug) },
+  ].map((entry) => ({ ...entry, flag: '--chat' }))
 }
 
 /** After the batch: the shared component and the UI components it imports, then the routes wiring. */
@@ -65,16 +66,15 @@ export async function finishAgentChat(
   cwd: string,
   input: { className: string; slug: string; force?: boolean },
 ): Promise<{ files: string[]; notes: string[] }> {
-  const { className, slug } = input
   // Shared by every agent's chat page, so an existing copy, edited or not, is the app's unless --force.
-  const component: ScaffoldFileEntry = { path: AGENT_CHAT_COMPONENT_PATH, contents: loadScaffoldTemplate(`ai-chat/${AGENT_CHAT_COMPONENT_PATH}`) }
+  const component = scaffoldTemplateFile('ai-chat', AGENT_CHAT_COMPONENT_PATH)
   const files = await writeScaffoldFiles([component], { cwd, skipExisting: true, force: Boolean(input.force) })
   // Announces its own writes, as for make:feature's pages.
   await ensureUiComponents(cwd, uiComponentsImportedBy([component]))
 
-  const { registrar } = agentChatFiles(className, slug)
+  const { registrar, routes } = agentChatFiles(input.className, input.slug)
   const routesFile = resolve(cwd) === process.cwd() ? DEFAULT_ROUTES_FILE : resolve(cwd, DEFAULT_ROUTES_FILE)
-  await wireRouteRegistrar(registrar, `import { ${registrar} } from './${slug}-chat.js'`, routesFile)
+  await wireRouteRegistrar(registrar, `import { ${registrar} } from '${importSpecifier(DEFAULT_ROUTES_FILE, routes)}'`, routesFile)
 
   return { files, notes: await chatNotes(cwd) }
 }
@@ -85,7 +85,7 @@ async function chatNotes(cwd: string): Promise<string[]> {
     notes.push(`The chat page uses useChat() from ${AI_SDK_REACT_PACKAGE}, the 4.x line that pairs with ai 7. Run: bun add ${AI_SDK_REACT_PACKAGE}@^4`)
   }
   const config = await readIfExists(cwd, 'config/ai.ts')
-  if (config !== null && !/\bconversations\s*:/u.test(config)) {
+  if (config !== null && !configuresConversations(config)) {
     notes.push('A chat keeps its history in a conversation store, and config/ai.ts configures none. Set `conversations` there (guren add ai writes one unless --no-conversations).')
   }
   return notes
@@ -100,11 +100,11 @@ function chatControllerTemplate(className: string, slug: string, agentImport: st
       "import { pages } from '@/.guren/pages.gen'",
       `import { ${className} } from '${agentImport}'`,
     ],
-    declarations: ['const ChatPageQuerySchema = z.object({ conversation: z.string().min(1).optional() })'],
+    declarations: ['const ChatPageQuerySchema = z.object({ conversation: z.string().optional() })'],
     actions: [
       {
         name: 'show',
-        comment: ['The chat page. `?conversation=` reopens one; an id this user cannot read opens an empty chat.'],
+        comment: ['The chat page. `?conversation=` reopens one; an empty or unreadable id opens an empty chat.'],
         body: `    const { conversation } = this.validateQuery(ChatPageQuerySchema)
     const user = await this.auth.userOrFail<{ id: string | number }>()
     const messages = conversation ? await this.make('ai').agent(${className}).as(user).history(conversation) : null
@@ -129,19 +129,20 @@ function chatControllerTemplate(className: string, slug: string, agentImport: st
   })
 }
 
+// Under `/<slug>/chat` and named `<slug>.chat` / `<slug>.send`, apart from the names and paths a resource uses.
 function chatRoutesTemplate(className: string, slug: string, paths: AgentChatFiles): string {
   const controller = `${className}ChatController`
-  const show = routeCall('router', 'get', `/${slug}`, `[${controller}, 'show']`, {
-    contract: `{ name: '${slug}.show', middlewares: [${AUTH_MIDDLEWARE}] }`,
+  const show = routeCall('router', 'get', `/${slug}/chat`, `[${controller}, 'show']`, {
+    contract: `{ name: '${slug}.chat', middlewares: [${AUTH_MIDDLEWARE}] }`,
   })
-  const chat = routeCall('router', 'post', `/${slug}/chat`, `[${controller}, 'chat']`, {
-    contract: `{ name: '${slug}.chat', body: ChatTurnSchema, middlewares: [${AUTH_MIDDLEWARE}] }`,
+  const send = routeCall('router', 'post', `/${slug}/chat`, `[${controller}, 'chat']`, {
+    contract: `{ name: '${slug}.send', body: ChatTurnSchema, middlewares: [${AUTH_MIDDLEWARE}] }`,
   })
   return buildRoutesSource({
     coreImports: ['requireAuthenticated'],
-    imports: ["import { ChatTurnSchema } from '@guren/plugin-ai'", `import ${controller} from '../app/Http/Controllers/${controller}.js'`],
+    imports: ["import { ChatTurnSchema } from '@guren/plugin-ai'", `import ${controller} from '${importSpecifier(paths.routes, paths.controller)}'`],
     registrar: paths.registrar,
-    body: [show, chat],
+    body: [show, send],
   })
 }
 
@@ -166,7 +167,7 @@ export default function ${className}Chat({ conversationId, messages }: Props) {
           <span aria-hidden className="h-7 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
           ${title}
         </h1>
-        <AgentChat api={route('${slug}.chat')} conversationId={conversationId} messages={messages} />
+        <AgentChat api={route('${slug}.send')} conversationId={conversationId} messages={messages} />
       </div>
     </main>
   )

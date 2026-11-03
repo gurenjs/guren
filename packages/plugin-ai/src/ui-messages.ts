@@ -3,7 +3,7 @@
  * `convertToModelMessages()`, which the SDK does not ship. One turn's assistant and tool messages
  * become one assistant message with a `step-start` per model call, the shape the live stream builds.
  */
-import { convertDataContentToBase64String, type ModelMessage, type UIMessage } from 'ai'
+import { convertDataContentToBase64String, type FileUIPart, type ModelMessage, type ToolCallPart, type UIMessage } from 'ai'
 
 type UIPart = UIMessage['parts'][number]
 type AssistantPart = Exclude<Extract<ModelMessage, { role: 'assistant' }>['content'], string>[number]
@@ -24,10 +24,7 @@ export interface ToUIMessagesOptions {
 }
 
 interface ToolCallState {
-  toolName: string
-  toolCallId: string
-  input: unknown
-  providerExecuted?: boolean
+  call: ToolCallPart
   request?: ToolApprovalRequest
   response?: ToolApprovalResponse
   result?: ToolResult
@@ -42,13 +39,32 @@ interface ToolCallState {
 export function toUIMessages(messages: readonly ModelMessage[], options: ToUIMessagesOptions = {}): UIMessage[] {
   const prefix = options.idPrefix ?? 'message'
   const out: UIMessage[] = []
-  let assistant: { parts: Array<UIPart | ToolCallState> } | undefined
-  let calls = new Map<string, ToolCallState>()
+  let parts: Array<UIPart | ToolCallState> | undefined
+  // One turn's calls, by tool call id and by approval id: a result or a response may come in a later message.
+  const calls = new Map<string, ToolCallState>()
+  const approvals = new Map<string, ToolCallState>()
 
   const flush = () => {
-    if (assistant) out.push({ id: `${prefix}-${out.length}`, role: 'assistant', parts: assistant.parts.map(finalPart) })
-    assistant = undefined
-    calls = new Map()
+    if (!parts) return
+    out.push({ id: `${prefix}-${out.length}`, role: 'assistant', parts: parts.map(finalPart) })
+    parts = undefined
+    calls.clear()
+    approvals.clear()
+  }
+
+  const track = (part: ToolResult | ToolApprovalRequest | ToolApprovalResponse) => {
+    if (part.type === 'tool-approval-response') {
+      const call = approvals.get(part.approvalId)
+      if (call) call.response = part
+      return
+    }
+    const call = calls.get(part.toolCallId)
+    if (!call) return
+    if (part.type === 'tool-result') call.result = part
+    else {
+      call.request = part
+      approvals.set(part.approvalId, call)
+    }
   }
 
   for (const message of messages) {
@@ -57,11 +73,10 @@ export function toUIMessages(messages: readonly ModelMessage[], options: ToUIMes
         break
       case 'user': {
         flush()
-        const content = typeof message.content === 'string' ? [{ type: 'text' as const, text: message.content }] : message.content
         out.push({
           id: `${prefix}-${out.length}`,
           role: 'user',
-          parts: content.map((part): UIPart => {
+          parts: textOrParts(message.content).map((part): UIPart => {
             if (part.type === 'text') return { type: 'text', text: part.text, state: 'done' }
             if (part.type === 'image') return fileUIPart(part.image, part.mediaType ?? 'image')
             return fileUIPart(part.data, part.mediaType, part.filename)
@@ -70,81 +85,58 @@ export function toUIMessages(messages: readonly ModelMessage[], options: ToUIMes
         break
       }
       case 'assistant': {
-        assistant ??= { parts: [] }
-        assistant.parts.push({ type: 'step-start' })
-        const content = typeof message.content === 'string' ? [{ type: 'text' as const, text: message.content }] : message.content
-        for (const part of content) {
+        parts ??= []
+        parts.push({ type: 'step-start' })
+        for (const part of textOrParts(message.content)) {
           switch (part.type) {
             case 'text':
-              assistant.parts.push({ type: 'text', text: part.text, state: 'done' })
+              parts.push({ type: 'text', text: part.text, state: 'done' })
               break
             case 'reasoning':
-              assistant.parts.push({ type: 'reasoning', text: part.text, state: 'done' })
+              parts.push({ type: 'reasoning', text: part.text, state: 'done' })
               break
             case 'custom':
-              assistant.parts.push({ type: 'custom', kind: part.kind })
+              parts.push({ type: 'custom', kind: part.kind })
               break
             case 'file':
-              assistant.parts.push(fileUIPart(part.data, part.mediaType, part.filename))
+              parts.push(fileUIPart(part.data, part.mediaType, part.filename))
               break
-            case 'reasoning-file': {
-              const { url } = fileUIPart(part.data, part.mediaType) as Extract<UIPart, { type: 'file' }>
-              assistant.parts.push({ type: 'reasoning-file', mediaType: part.mediaType, url })
+            case 'reasoning-file':
+              parts.push({ type: 'reasoning-file', mediaType: part.mediaType, url: fileUIPart(part.data, part.mediaType).url })
               break
-            }
             case 'tool-call': {
-              const call: ToolCallState = {
-                toolName: part.toolName,
-                toolCallId: part.toolCallId,
-                input: part.input,
-                ...(part.providerExecuted !== undefined ? { providerExecuted: part.providerExecuted } : {}),
-              }
+              const call: ToolCallState = { call: part }
               calls.set(part.toolCallId, call)
-              assistant.parts.push(call)
+              parts.push(call)
               break
             }
-            case 'tool-result': {
-              const call = calls.get(part.toolCallId)
-              if (call) call.result = part
-              break
-            }
-            case 'tool-approval-request': {
-              const call = calls.get(part.toolCallId)
-              if (call) call.request = part
-              break
-            }
+            default:
+              track(part)
           }
         }
         break
       }
-      case 'tool': {
-        const approvals = new Map<string, ToolApprovalResponse>()
-        for (const part of message.content) {
-          if (part.type === 'tool-approval-response') approvals.set(part.approvalId, part)
-        }
-        for (const call of calls.values()) {
-          if (call.request && approvals.has(call.request.approvalId)) call.response = approvals.get(call.request.approvalId)
-        }
-        for (const part of message.content) {
-          if (part.type === 'tool-result') {
-            const call = calls.get(part.toolCallId)
-            if (call) call.result = part
-          }
-        }
+      case 'tool':
+        for (const part of message.content) track(part)
         break
-      }
     }
   }
   flush()
   return out
 }
 
+function textOrParts<P>(content: string | P[]): Array<P | { type: 'text'; text: string }> {
+  return typeof content === 'string' ? [{ type: 'text', text: content }] : content
+}
+
 function finalPart(part: UIPart | ToolCallState): UIPart {
   if ('type' in part) return part
+  const { call } = part
+  const input = call.input
   const base = {
-    type: `tool-${part.toolName}` as const,
-    toolCallId: part.toolCallId,
-    ...(part.providerExecuted !== undefined ? { providerExecuted: part.providerExecuted } : {}),
+    type: `tool-${call.toolName}` as const,
+    toolCallId: call.toolCallId,
+    ...(call.providerExecuted !== undefined ? { providerExecuted: call.providerExecuted } : {}),
   }
   const request = part.request
     ? {
@@ -154,34 +146,34 @@ function finalPart(part: UIPart | ToolCallState): UIPart {
         ...(part.request.signature !== undefined ? { signature: part.request.signature } : {}),
       }
     : undefined
-  const responded = part.response
-    ? { ...request!, approved: part.response.approved, ...(part.response.reason !== undefined ? { reason: part.response.reason } : {}) }
+  const responded = request && part.response
+    ? { ...request, approved: part.response.approved, ...(part.response.reason !== undefined ? { reason: part.response.reason } : {}) }
     : undefined
   const output = part.result?.output
   if (!output) {
-    if (responded) return { ...base, state: 'approval-responded', input: part.input, approval: responded }
-    if (request) return { ...base, state: 'approval-requested', input: part.input, approval: request }
-    return { ...base, state: 'input-available', input: part.input }
+    if (responded) return { ...base, state: 'approval-responded', input, approval: responded }
+    if (request) return { ...base, state: 'approval-requested', input, approval: request }
+    return { ...base, state: 'input-available', input }
   }
   const approved = responded?.approved === true ? { approval: { ...responded, approved: true as const } } : {}
   switch (output.type) {
     case 'text':
     case 'json':
     case 'content':
-      return { ...base, state: 'output-available', input: part.input, output: output.value, ...approved }
+      return { ...base, state: 'output-available', input, output: output.value, ...approved }
     case 'error-text':
     case 'error-json': {
       // A provider's own tool error is sent unmasked live too, as `toUIMessageStream()` does.
       const shown = typeof output.value === 'string' ? output.value : JSON.stringify(output.value)
-      return { ...base, state: 'output-error', input: part.input, errorText: part.providerExecuted ? shown : MASKED_ERROR_TEXT, ...approved }
+      return { ...base, state: 'output-error', input, errorText: call.providerExecuted ? shown : MASKED_ERROR_TEXT, ...approved }
     }
     case 'execution-denied':
       return {
         ...base,
         state: 'output-denied',
-        input: part.input,
+        input,
         approval: {
-          ...(request ?? { id: part.toolCallId }),
+          ...(request ?? { id: call.toolCallId }),
           approved: false,
           ...(output.reason !== undefined ? { reason: output.reason } : {}),
         },
@@ -193,7 +185,7 @@ function finalPart(part: UIPart | ToolCallState): UIPart {
  * A stored file's data is a base64 string or a URL's href after `storableMessages()`, a tagged
  * `FileData` as written, or a provider reference, which has no URL to show.
  */
-function fileUIPart(data: unknown, mediaType: string, filename?: string): UIPart {
+function fileUIPart(data: unknown, mediaType: string, filename?: string): FileUIPart {
   const named = filename !== undefined ? { filename } : {}
   const url = (value: string) => ({ type: 'file' as const, mediaType, url: value, ...named })
   if (data instanceof URL) return url(data.href)
@@ -212,8 +204,9 @@ function fileUIPart(data: unknown, mediaType: string, filename?: string): UIPart
   return url('')
 }
 
+/** Any scheme: base64 never holds a colon, and `storable()` stores every `URL` as its href. */
 function isUrl(value: string): boolean {
-  return /^(?:https?|data|blob):/i.test(value)
+  return /^[a-z][a-z\d+.-]*:/i.test(value)
 }
 
 function dataUrl(mediaType: string, base64: string): string {

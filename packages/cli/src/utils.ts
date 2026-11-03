@@ -485,6 +485,11 @@ export function relativeImportPath(fromFile: string, toPath: string): string {
   return normalized.startsWith('.') ? normalized : `./${normalized}`
 }
 
+/** The specifier an app file imports another by, with the runtime extension the scaffolds write. */
+export function importSpecifier(from: string, to: string): string {
+  return relativeImportPath(from, to).replace(/\.tsx?$/u, '.js')
+}
+
 /** A generated doc comment over `lines`, an empty line written as a bare ` *`. */
 export function docComment(lines: readonly string[]): string {
   return `/**\n${lines.map((line) => (line ? ` * ${line}` : ' *')).join('\n')}\n */\n`

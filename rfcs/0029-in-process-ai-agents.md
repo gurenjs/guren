@@ -901,8 +901,9 @@ the tool descriptions get the right answer out of the model is §10's job.
     `?conversation=` and renders the page with `history(id) ?? []`, and
     `chat()` validates `ChatTurnSchema` and returns `stream()`, both behind
     `userOrFail()`.
-  - `routes/name-chat.ts` exporting `registerNameChatRoutes`: `GET /name`
-    (`name.show`) and `POST /name/chat` (`name.chat`, `body: ChatTurnSchema`),
+  - `routes/name-chat.ts` exporting `registerNameChatRoutes`: `GET /name/chat`
+    (`name.chat`) and `POST /name/chat` (`name.send`, `body: ChatTurnSchema`),
+    names and paths a resource of the same slug does not use,
     each with `requireAuthenticated({ redirectTo: '/login' })`, mounted in
     `routes/web.ts` through the patch every scaffolder uses.
   - `resources/js/pages/name/Chat.tsx`, a thin page around
