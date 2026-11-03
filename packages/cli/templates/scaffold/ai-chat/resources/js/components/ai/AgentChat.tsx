@@ -4,8 +4,6 @@ import { router } from '@inertiajs/react'
 import { createChatTransport, type UIMessage } from '@guren/plugin-ai/client'
 import { memo, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Alert } from '@/resources/js/components/ui/Alert'
-import { Button } from '@/resources/js/components/ui/Button'
-import { Textarea } from '@/resources/js/components/ui/Textarea'
 
 type Part = UIMessage['parts'][number]
 type ToolPart = Extract<Part, { toolCallId: string }>
@@ -111,19 +109,33 @@ function Conversation({ api, conversationId, messages: initialMessages, placehol
       <p role="status" className="sr-only">{busy ? 'The agent is answering.' : ''}</p>
       {error ? <Alert tone="danger">The agent could not answer. Try again.</Alert> : null}
       {/* method and action: a submit before hydration posts to the chat route, never a GET with the text in the URL. */}
-      <form method="post" action={api} onSubmit={send} className="flex flex-col gap-2 sm:flex-row sm:items-end">
-        <Textarea
+      <form
+        method="post"
+        action={api}
+        onSubmit={send}
+        className="flex items-end gap-2 rounded-g-card border border-g-line-strong bg-g-panel py-2 pr-2 pl-4 shadow-g-card transition focus-within:border-g-accent"
+      >
+        <textarea
           aria-label="Message"
-          rows={2}
+          rows={1}
           value={draft}
           placeholder={placeholder}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
+          className="max-h-48 min-h-9 flex-1 resize-none bg-transparent py-1.5 text-g-text outline-none [field-sizing:content] placeholder:text-g-muted"
         />
-        <div className="flex justify-end gap-2">
-          <Button type="submit" disabled={busy || !draft.trim()}>Send</Button>
-          <Button variant="secondary" disabled={!busy} onClick={() => void stop()}>Stop</Button>
-        </div>
+        {/* One element for both, so focus stays on it when sending turns it into Stop. */}
+        <button
+          type={busy ? 'button' : 'submit'}
+          aria-label={busy ? 'Stop' : 'Send'}
+          disabled={!busy && !draft.trim()}
+          onClick={busy ? () => void stop() : undefined}
+          className={`inline-flex size-9 shrink-0 items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-45 ${
+            busy ? 'bg-g-heading text-g-page hover:opacity-85' : 'bg-g-accent text-g-on-accent hover:bg-g-accent-down'
+          }`}
+        >
+          {busy ? <StopIcon /> : <SendIcon />}
+        </button>
       </form>
     </div>
   )
@@ -206,4 +218,20 @@ function ToolField({ label, tone = '', children }: { label: string; tone?: strin
 
 function json(value: unknown): string {
   return value === undefined ? '' : JSON.stringify(value, null, 2)
+}
+
+function SendIcon() {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 19V5M5 12l7-7 7 7" />
+    </svg>
+  )
+}
+
+function StopIcon() {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" className="size-3.5" fill="currentColor">
+      <rect x="5" y="5" width="14" height="14" rx="2.5" />
+    </svg>
+  )
 }

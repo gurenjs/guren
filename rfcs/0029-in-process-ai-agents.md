@@ -917,8 +917,9 @@ the tool descriptions get the right answer out of the model is §10's job.
     `templates/scaffold/ai-chat/` (so `typecheck:templates` checks it). It
     holds the `useChat` state: streaming and a stop button, a masked error,
     each tool call with its state, input and output, and the restored history.
-    It styles with Guren UI tokens and imports the `Alert`, `Button` and
-    `Textarea` that `guren add ui` ships, which are copied when missing.
+    Send and Stop are one icon button inside the message box. It styles with
+    Guren UI tokens and imports the `Alert` that `guren add ui` ships, which
+    is copied when missing.
 
   The component is copied, as RFC 0036's are, and is not exported from
   `@guren/inertia-client`: `@ai-sdk/react` and `ai` move together and often,

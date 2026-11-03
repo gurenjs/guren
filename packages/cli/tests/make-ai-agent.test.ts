@@ -209,7 +209,7 @@ describe('guren make:ai-agent', () => {
       ])
       expect(await readFile(resolve('resources/js/components/ai/AgentChat.tsx'), 'utf8'))
         .toBe(loadScaffoldTemplate('ai-chat/resources/js/components/ai/AgentChat.tsx'))
-      expect(await fileExists(process.cwd(), 'resources/js/components/ui/Textarea.tsx')).toBe(true)
+      expect(await fileExists(process.cwd(), 'resources/js/components/ui/Alert.tsx')).toBe(true)
       const routes = await readFile(resolve('routes/web.ts'), 'utf8')
       expect(routes).toContain("import { registerSupportBotChatRoutes } from './support-bot-chat.js'")
       expect(routes).toContain('registerSupportBotChatRoutes(router)')
