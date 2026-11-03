@@ -49,7 +49,7 @@ bun run dev
 ![ブラウザに表示されるウェルカムページ。「Welcome to My Blog!」の見出しと、Routing & Controllers、Eloquent-style ORM、Inertia + React、Auth & Sessions、Queue & Mail、Zero-config SQLite の 6 枚のカードが並んでいる](../../images/welcome-page.png)
 
 > [!TIP]
-> 開発サーバーはフロントエンドのアセット用に Vite も自動で起動するので、React のページを変更するとすぐに反映されます。サーバー自体も `bun --hot` で動いているため、コントローラー、ルート、モデルといったバックエンドの変更も再起動なしで反映されます。Vite を自分で起動したい場合は `GUREN_DEV_VITE=0` を、スクリプトから実行するときにバナーを出したくない場合は `GUREN_DEV_BANNER=0` を設定してください。
+> 開発サーバーはフロントエンドのアセット用に Vite も自動で起動するので、React のページを変更するとすぐに反映されます。サーバー自体も `bun --hot` で動いているため、コントローラー、ルート、モデルといったバックエンドの変更も再起動なしで反映されます。Vite を自分で起動したい場合は `GUREN_DEV_VITE=0` を、5173 以外のポートで起動したい場合は `GUREN_VITE_PORT` を、スクリプトから実行するときにバナーを出したくない場合は `GUREN_DEV_BANNER=0` を設定してください。
 
 ### 4. プロジェクトの知識グラフを見る
 

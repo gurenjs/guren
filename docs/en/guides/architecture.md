@@ -258,6 +258,10 @@ export class Post extends defineModel(posts) {
    Pass `portFallback: false` (or set `GUREN_STRICT_PORT=1`) to fail fast on
    `EADDRINUSE` instead of moving to another port.
 
+   Both cover the app server's port. The Vite dev server `listen()` starts
+   begins at `GUREN_VITE_PORT` (5173 when unset) and moves on by itself, and
+   the banner names the port it bound; see [Hot Reloading](./frontend.md#hot-reloading).
+
 This process runs under Bun as a native module and is triggered by `bun run dev`.
 
 ### Stopping the Server

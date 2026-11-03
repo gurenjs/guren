@@ -49,7 +49,7 @@ A crimson ASCII banner in the terminal with the Guren version and URLs, and the 
 ![The welcome page in the browser: a "Welcome to My Blog!" heading above six cards — Routing & Controllers, Eloquent-style ORM, Inertia + React, Auth & Sessions, Queue & Mail, and Zero-config SQLite](../../images/welcome-page.png)
 
 > [!TIP]
-> The dev server spawns Vite automatically for frontend assets, so edits to your React pages appear instantly. Backend changes (controllers, routes, models) are picked up too, without a restart, since the dev server runs under `bun --hot`. Set `GUREN_DEV_VITE=0` to run Vite yourself, or `GUREN_DEV_BANNER=0` to silence the banner in scripts.
+> The dev server spawns Vite automatically for frontend assets, so edits to your React pages appear instantly. Backend changes (controllers, routes, models) are picked up too, without a restart, since the dev server runs under `bun --hot`. Set `GUREN_DEV_VITE=0` to run Vite yourself, `GUREN_VITE_PORT` to start it on another port than 5173, or `GUREN_DEV_BANNER=0` to silence the banner in scripts.
 
 ### 4. Explore the project knowledge graph
 

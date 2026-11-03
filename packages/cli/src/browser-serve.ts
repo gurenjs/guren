@@ -2,8 +2,8 @@
  * `guren browser:serve` (RFC 0033 §3): one instance for a verification session, started only
  * after the introspected app shows its database is local. Codegen runs first, since a fresh
  * clone's entry cannot import before it. The child binds loopback on a strict port with the
- * runtime-error collector on; it is ready only once it reports binding that port itself, so a
- * stranger already answering there is never mistaken for it.
+ * runtime-error collector on, and starts Vite on the port after it; it is ready only once it
+ * reports binding that port itself, so a stranger already answering there is never mistaken for it.
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -60,6 +60,16 @@ export function reportedPort(output: string): number | undefined {
   const plain = output.replace(/\u001b\[[0-9;]*m/gu, '')
   const match = /Bound address\s*:\s*http:\/\/127\.0\.0\.1:(\d+)/u.exec(plain)
   return match ? Number(match[1]) : undefined
+}
+
+/**
+ * The Vite port the app is handed: the one after its own, so it does not land on another
+ * app's 5173, unless the caller already chose one. The server reads it in
+ * packages/server/src/http/vite-dev-server.ts (`VITE_PORT_ENV`).
+ */
+export function vitePortEnv(port: number, env: Readonly<Record<string, string | undefined>> = process.env): Record<string, string> {
+  if (env.GUREN_VITE_PORT?.trim() || port >= 65535) return {}
+  return { GUREN_VITE_PORT: String(port + 1) }
 }
 
 /** The checks of RFC 0033 §3 before anything starts; throws the refusal, naming its remedy. */
@@ -134,7 +144,7 @@ export async function startBrowserServe(options: BrowserServeOptions): Promise<B
     cwd,
     detached: GROUPED,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, ...env, PORT: String(port), HOST, GUREN_STRICT_PORT: '1', GUREN_MCP: '1', GUREN_DEV_BANNER: '1', GUREN_BROWSER_SEED: '1', FORCE_COLOR: '0', NO_COLOR: '1' },
+    env: { ...process.env, ...env, ...vitePortEnv(port), PORT: String(port), HOST, GUREN_STRICT_PORT: '1', GUREN_MCP: '1', GUREN_DEV_BANNER: '1', GUREN_BROWSER_SEED: '1', FORCE_COLOR: '0', NO_COLOR: '1' },
   })
   const forward = (chunk: Buffer): void => {
     process.stderr.write(chunk)
