@@ -126,6 +126,10 @@ function widgetsPlan(): WidgetsPlan {
           { name: 'contact', type: 'string', required: true, rules: ['email', 'max 255'] },
           { name: 'site', type: 'string', required: false, rules: ['url'] },
           { name: 'ref', type: 'string', required: true, rules: ['uuid'] },
+          // A blank form field arrives as "", which a required string without a planned min must refuse.
+          { name: 'code', type: 'string', required: true, rules: [] },
+          { name: 'summary', type: 'text', required: true, rules: ['max 280'] },
+          { name: 'note', type: 'string', required: true, rules: ['min 0'] },
         ],
       },
       {
@@ -136,6 +140,7 @@ function widgetsPlan(): WidgetsPlan {
           { name: 'page', type: 'integer', required: false, rules: ['min 1'] },
           { name: 'perPage', type: 'integer', required: true, rules: ['max 50'] },
           { name: 'archived', type: 'boolean', required: false, rules: [] },
+          { name: 'q', type: 'string', required: true, rules: [] },
         ],
       },
     ],
@@ -738,12 +743,16 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
           contact: z.email().max(255),
           site: z.url().nullable().optional(),
           ref: z.uuid(),
+          code: z.string().min(1),
+          summary: z.string().min(1).max(280),
+          note: z.string().min(0),
         })
 
         export const WidgetListQuerySchema = z.object({
           page: z.coerce.number().int().min(1).nullable().optional(),
           perPage: z.coerce.number().int().max(50),
           archived: z.stringbool().nullable().optional(),
+          q: z.string().min(1),
         })
         "
       `)

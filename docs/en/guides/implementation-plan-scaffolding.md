@@ -44,6 +44,8 @@ export const CommentPayloadSchema = z.object({
 })
 ```
 
+A required `string` or `text` field that plans no `min` and no format also gets `.min(1)`, because a blank form field arrives as `""` and `z.string()` alone accepts it. Plan `min 0` to keep the empty string. Query and params validators get the same bound, since a GET form sends a blank field as `""` too.
+
 A validator an action takes its `query` or `params` from gets `z.coerce.number()` and `z.stringbool()` for numbers and booleans, since those values arrive as text. A rule written in prose, or one that does not fit the field's type (a bound on a boolean), is not written, and the report lists it.
 
 Each resource whose model the step adds is written as a `Resource` subclass with the planned payload type, which `guren codegen` reads for `data.gen.ts`. A field is copied from the model's column when the planned type admits every value the column reads back as, a date-time column is serialized with `toISOString()` for a planned `string`, and a JSON column is cast to the planned type. Any other field calls a stub that throws until you map it, and the report lists it:
