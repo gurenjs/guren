@@ -6,6 +6,8 @@
 
 一連の流れを通して体験したい場合は、[エージェントと作る](../agent-course/00-overview.md) を読んでください。Claude Code と一緒に 2 本の計画を依頼からクローズまで進める講座で、判断が必要な場面ごとにチェック表を用意しています。
 
+<!-- interactive: plan-lifecycle -->
+
 ```mermaid
 flowchart LR
   Write["plan.json<br/>written by you or your agent"]

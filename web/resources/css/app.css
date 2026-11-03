@@ -576,6 +576,246 @@ body.docs-theme {
   height: auto;
 }
 
+/* Interactive diagrams (pages/Docs/Show.tsx, components/diagrams/): the
+   mermaid fence inside stays visible until the component has mounted. */
+.docs-content .doc-interactive[data-interactive-mounted] > pre.mermaid {
+  display: none;
+}
+
+.plan-lifecycle {
+  --plan-gap: 0.75rem;
+  margin: 1.5rem 0;
+  padding: 1.25rem;
+  border: 1px solid var(--docs-border-soft);
+  border-radius: var(--g-r-card);
+  background: var(--docs-surface-raised);
+}
+
+.plan-lifecycle-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.docs-content .plan-lifecycle-intro {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--docs-text-secondary);
+}
+
+.plan-lifecycle-play {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--g-r-ctl);
+  background: var(--g-accent);
+  color: var(--g-on-accent);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.plan-lifecycle-play:hover {
+  background: var(--g-accent-down);
+}
+
+.docs-content .plan-lifecycle-track {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--plan-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.docs-content .plan-lifecycle-track > li {
+  margin: 0;
+  padding: 0;
+}
+
+.docs-content .plan-lifecycle-track > li::marker {
+  content: none;
+}
+
+.plan-lifecycle-stage {
+  position: relative;
+}
+
+/* Below 640px the track is a column, and the loop note sits between
+   plan:verify and plan:close. */
+.plan-lifecycle-stage:nth-child(6) {
+  order: 2;
+}
+
+.plan-lifecycle-loop {
+  order: 1;
+}
+
+.plan-lifecycle-node {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--docs-border-strong);
+  border-radius: var(--g-r-ctl);
+  background: var(--docs-surface-panel);
+  color: var(--docs-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.docs-content .plan-lifecycle-node code,
+.docs-content .plan-lifecycle-detail-title code {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--docs-heading);
+  font-weight: 600;
+  font-size: 0.875rem;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.plan-lifecycle-index {
+  font-size: 0.75rem;
+  color: var(--docs-text-muted);
+}
+
+.plan-lifecycle-actor {
+  font-size: 0.75rem;
+  color: var(--docs-text-secondary);
+}
+
+.plan-lifecycle-stage[data-state='done'] .plan-lifecycle-node {
+  border-color: var(--docs-accent);
+}
+
+.plan-lifecycle-stage[data-state='current'] .plan-lifecycle-node {
+  border-color: var(--docs-accent);
+  background: var(--docs-accent-tint);
+  box-shadow: 0 0 0 3px var(--docs-accent-tint);
+}
+
+.plan-lifecycle-node:focus-visible,
+.plan-lifecycle-play:focus-visible {
+  outline: 2px solid var(--docs-accent);
+  outline-offset: 2px;
+}
+
+.plan-lifecycle-loop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem 0.5rem;
+  border: 1px dashed var(--docs-border-strong);
+  border-radius: var(--g-r-ctl);
+  font-size: 0.75rem;
+  color: var(--docs-text-secondary);
+}
+
+.plan-lifecycle-loop[data-active='true'] {
+  border-color: var(--docs-accent);
+  color: var(--docs-accent-strong);
+}
+
+.plan-lifecycle-detail {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--docs-border-soft);
+}
+
+.docs-content .plan-lifecycle-detail p {
+  margin: 0 0 0.5rem;
+}
+
+.plan-lifecycle-detail-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.plan-lifecycle-detail-title .plan-lifecycle-actor,
+.plan-lifecycle-step {
+  padding: 0.05rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--docs-text-secondary);
+  border-radius: 999px;
+  background: var(--docs-surface-panel);
+  border: 1px solid var(--docs-border-soft);
+}
+
+.plan-lifecycle-detail-title .plan-lifecycle-actor[data-actor='person'] {
+  border-color: var(--docs-accent);
+  color: var(--docs-accent-strong);
+}
+
+.plan-lifecycle-detail-title .plan-lifecycle-actor[data-actor='agent'] {
+  border-color: var(--g-ok-chip);
+  color: var(--g-ok);
+}
+
+.docs-content .plan-lifecycle-writes {
+  font-size: 0.875rem;
+  color: var(--docs-text-secondary);
+}
+
+@media (min-width: 640px) {
+  .docs-content .plan-lifecycle-track {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .plan-lifecycle-stage:nth-child(6),
+  .plan-lifecycle-loop {
+    order: 0;
+  }
+
+  /* The loop note spans plan:next and plan:verify, under them. */
+  .plan-lifecycle-loop {
+    grid-column: 4 / 6;
+    grid-row: 2;
+  }
+
+  .plan-lifecycle-stage:not(:nth-child(6))::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: calc(var(--plan-gap) * -1);
+    width: var(--plan-gap);
+    height: 2px;
+    background: var(--docs-border-strong);
+  }
+
+  .plan-lifecycle-stage[data-state='done']::after {
+    background: var(--docs-accent);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .plan-lifecycle-node,
+  .plan-lifecycle-stage::after,
+  .plan-lifecycle-loop {
+    transition: background-color 0.3s, border-color 0.3s, box-shadow 0.3s, color 0.3s;
+  }
+
+  .plan-lifecycle-stage[data-state='current'] .plan-lifecycle-node {
+    animation: plan-lifecycle-arrive 0.4s ease-out;
+  }
+}
+
+@keyframes plan-lifecycle-arrive {
+  from {
+    transform: translateY(-3px);
+    box-shadow: 0 0 0 6px var(--docs-accent-tint);
+  }
+}
+
 .docs-content a {
   color: var(--docs-accent-strong);
   text-decoration: none;
