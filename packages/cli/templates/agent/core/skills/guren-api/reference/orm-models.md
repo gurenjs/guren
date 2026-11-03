@@ -30,7 +30,9 @@ carries no request data (see Mass assignment below).
 `find(id)` → record | null · `findOrFail(id)` throws `ModelNotFoundException` (renders 404) ·
 `first(where?)` → record | null · `all()` · `create(data, { set? })` · `forceCreate(data)` ·
 `update(where, data, { set? })` · `forceUpdate(where, data)` · `delete(where)` ·
-`paginate(options?)` · `transaction(async (trx) => ...)`
+`paginate(options?)` · `transaction(async (trx, scope) => ...)` ·
+`inTransaction(trx)` (the same `scope` for any model: `all`, `find`, `findOrFail`,
+`first`, `where`, `newQuery`, `create`, `update`, `delete`, `paginate`)
 
 ## Where clauses
 

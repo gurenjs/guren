@@ -90,7 +90,7 @@ export async function generateGuidelines(options: GuidelinesOptions = {}): Promi
     lines.push('- Policies in app/Policies/ — enforce with `await this.authorize(ability, [Model, record])` in controllers')
     lines.push(`- Available: ${policies.join(', ')}`)
   } else {
-    lines.push("- No policies found. Scaffold with `bunx guren make:policy <Model>` and register from a provider's boot() via `this.container.make('gate').policy(Model, ModelPolicy)`")
+    lines.push("- No policies found. Scaffold with `bunx guren make:policy <Model>` and register it with `this.container.make('gate').policy(Model, ModelPolicy)` in a provider's boot(); a new provider (`bunx guren make:provider <Name>`) also declares `register(): void {}`, which ServiceProvider leaves abstract, and is listed in `createApp({ providers })`")
   }
   lines.push('')
 

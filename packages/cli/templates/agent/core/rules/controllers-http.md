@@ -29,9 +29,17 @@ return this.inertia(pages.posts.Show, { post })   // props compile-checked again
 ```
 
 If props don't type-check after editing a page's `Props`, re-run `bunx guren codegen`.
-**No global shared props by default**: a fresh scaffold never calls
-`shareInertiaProps()`, so `usePage<{ auth: … }>()` type-checks and is `undefined`
-at runtime. Pass everything a page needs through `this.inertia(page, { … })`.
+**Shared props**: the framework shares flashed validation `errors`, and `_i18n`
+when `createApp({ i18n })` is set (unless `i18n.share` is `false`). Anything
+else comes from a registered resolver: `createApp({ inertia: { share } })` or
+`shareInertiaProps()` in a listed provider's `boot()`. The auth scaffold
+(`guren add auth`, `create-guren-app --auth`, the blog starter) lists an
+`AuthProvider` that shares `{ auth: { user } }`, `user` being `null` for a guest.
+Check what `src/app.ts` and its providers actually share before reading a prop
+with `usePage()`: an unshared one type-checks and is `undefined` at runtime.
+Pass page data through `this.inertia(page, { … })`; a prop every page needs goes
+in `shareInertiaProps(fn, this.container)`, which merges with the others. Do not
+share `auth` a second time.
 
 ## Responses
 
@@ -51,10 +59,24 @@ at runtime. Pass everything a page needs through `this.inertia(page, { … })`.
 `await this.can('update', [Post, post])` → boolean ·
 `this.apiToken()` → `{ userId, abilities }` or throws 401.
 An ability with no record (`create`, `viewAny`) takes the bare class:
-`await this.authorize('create', Post)`. The policy must be registered, or
-every check is denied: `bunx guren make:policy Post`, then in a provider's `boot()`
-`this.container.make('gate').policy(Post, PostPolicy)`, with that provider
-listed in `createApp({ providers })`.
+`await this.authorize('create', Post)`. To give such an ability data, pass a
+plain object as the record: `await this.authorize('create', [Comment, { postLocked }])`
+calls `CommentPolicy.create(user, { postLocked })`, so widen the stub's
+`create(user)` to take it. Abilities may be `async`, and may return
+`this.deny(msg?)`, `this.denyWithStatus(status, msg?)` or
+`this.denyAsNotFound()` instead of `false`; after the last, `authorize()`
+throws a 404 and `can()` returns `false`. The stubs annotate each ability
+`: boolean`, so widen it to `boolean | AuthorizationResponse` (a type from
+`@guren/core`; `Promise<…>` when async) or drop the annotation.
+
+The policy must be registered, or every check is denied: after
+`bunx guren make:policy Post`, call
+`this.container.make('gate').policy(Post, PostPolicy)` in the `boot()` of a
+provider the app already has, or of a new one
+(`bunx guren make:provider Authorization`) listed in `createApp({ providers })`.
+`register()` is abstract, so declare `register(): void {}` even when the
+provider only boots. The full provider: `__SKILLS_DIR__/guren-api/SKILL.md`
+(Authorization).
 
 ## Exceptions
 
@@ -62,6 +84,12 @@ Throw from the action; the global handler renders them by `statusCode`:
 `HttpException.badRequest/unauthorized/forbidden/notFound/conflict/unprocessable(msg?)`,
 `AuthorizationException.deny('Comment')` (403, for ownership checks outside policies),
 `ValidationException.withMessages({...})` (422). `Model.findOrFail()` throws a 404 on its own.
+
+## Transactions
+
+Writes that must land together: `await Order.transaction(async (trx, txOrder) => { … })`
+(a throw rolls back), other models through `OrderLine.inTransaction(trx)`.
+The ORM models rule (Transactions) has the rest.
 
 ## Middleware
 
