@@ -604,7 +604,13 @@ const { messages, sendMessage } = useChat({
   messages.~~ (Part 2e: the page passes `useChat({ id, messages })` the history its props carry.) The transport refuses
   `regenerate-message`, since the server holds the history, and a user message with a file part, which
   a text turn would drop. It is a `DefaultChatTransport` with
-  `prepareSendMessagesRequest` and a `fetch` that reads the header.
+  `prepareSendMessagesRequest` and a `fetch` that reads the header. It adopts the header's id, and
+  calls `onConversation`, only once the body has been read to its end after a `finish` chunk with no
+  `error` or `abort`. A turn stopped or failed before the model answered stores no conversation, and an
+  id adopted from it would fail every later turn with "cannot continue conversation". An `error` chunk is
+  never adopted, since `useChat` stops reading there and cancels the body the server stores the turn at
+  the end of; a turn the server did store is then left unadopted, and the next turn starts a new
+  conversation. A storage failure still finishes the body, so that id is adopted with no row behind it.
 - **`fakeAi()`:** `simulateStreamingMiddleware()` answers `doStream` from its script, and a streamed
   call's `toolCalls` fill in as the body is read.
 - **`broadcast()`:** it moves after `queue()` (Part 2c) into Part 2d, below.
@@ -923,9 +929,9 @@ the tool descriptions get the right answer out of the model is §10's job.
   not `history.replaceState()`, so the history entry Back restores carries
   the id and the transcript without a request; a mount keeps its key when
   the props name the conversation it started, so neither a draft nor a turn
-  in flight is torn down. An aborted or failed first turn, which stored
-  nothing while the transport already holds the id the response named,
-  remounts with a fresh transport instead.
+  in flight is torn down. An aborted or failed first turn needs nothing of
+  its own: the transport adopts no id for it, so the next turn starts the
+  conversation.
   The command notes a missing `@ai-sdk/react` (4.x, the line that pairs with
   `ai` 7) and a `config/ai.ts` with no `conversations`, which a chat needs.
   It refuses `--output` (such an agent cannot stream), `--module` (a module's

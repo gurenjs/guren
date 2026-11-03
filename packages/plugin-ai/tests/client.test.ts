@@ -1,7 +1,7 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
-import type { UIMessage, UIMessageChunk } from 'ai'
+import { createUIMessageStreamResponse, type UIMessage, type UIMessageChunk } from 'ai'
 
 import { Agent, ChatTurnSchema } from '../src'
 import { createChatTransport } from '../src/client'
@@ -108,6 +108,123 @@ describe('createChatTransport', () => {
 
     expect(h.bodies.at(-1)).toEqual({ conversation: id, message: 'after the reload' })
     expect(announced).toEqual([])
+  })
+
+  test('should start afresh after a first turn that failed before the model answered', async () => {
+    const h = await bootChat()
+    const model = h.script([{ text: 'after the failure' }])
+    const answer = model.doStream
+    let calls = 0
+    model.doStream = async (options) => {
+      if (++calls === 1) throw new Error('provider down')
+      return answer(options)
+    }
+    const fetch = browser(h)
+    await fetch('/posts')
+    const named: string[] = []
+    const transport = createChatTransport('/chat', { fetch, onConversation: (id) => named.push(id) })
+    const error = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const failed = await send(transport, 'first question')
+      expect(failed).toContainEqual(expect.objectContaining({ type: 'error' }))
+      expect(named).toEqual([])
+
+      await send(transport, 'second question')
+    } finally {
+      error.mockRestore()
+    }
+
+    expect(h.bodies).toEqual([
+      { conversation: null, message: 'first question' },
+      { conversation: null, message: 'second question' },
+    ])
+    expect(named).toHaveLength(1)
+    const stored = await h.app.container.make('ai').conversations().load(named[0]!, USER)
+    expect(stored!.messages.map((message) => message.role)).toEqual(['user', 'assistant'])
+  })
+
+  test('should not adopt the conversation of a turn whose reader stopped mid-answer', async () => {
+    const h = await bootChat()
+    const model = h.script([{ text: 'after the stop' }])
+    const answer = model.doStream
+    let calls = 0
+    model.doStream = async (options) => {
+      if (++calls > 1) return answer(options)
+      // Never closes: the turn ends only when the reader cancels it.
+      return {
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: 'stream-start', warnings: [] })
+            controller.enqueue({ type: 'text-start', id: 't' })
+            controller.enqueue({ type: 'text-delta', id: 't', delta: 'partial' })
+          },
+        }),
+      }
+    }
+    const fetch = browser(h)
+    await fetch('/posts')
+    const named: string[] = []
+    const transport = createChatTransport('/chat', { fetch, onConversation: (id) => named.push(id) })
+
+    const stopped = await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat',
+      messageId: undefined,
+      abortSignal: undefined,
+      messages: [{ id: 'first', role: 'user', parts: [{ type: 'text', text: 'first question' }] }],
+    })
+    const reader = stopped.getReader()
+    while (true) {
+      const { value } = await reader.read()
+      if (value?.type === 'text-delta') break
+    }
+    await reader.cancel()
+    expect(named).toEqual([])
+
+    await send(transport, 'second question')
+
+    expect(h.bodies.at(-1)).toEqual({ conversation: null, message: 'second question' })
+    expect(named).toHaveLength(1)
+  })
+
+  test('should adopt only a turn that finished with no error or abort chunk, read to its end', async () => {
+    const text: UIMessageChunk[] = [
+      { type: 'start' },
+      { type: 'text-start', id: 't' },
+      { type: 'text-delta', id: 't', delta: 'hello' },
+      { type: 'text-end', id: 't' },
+    ]
+    const turns: Array<[string, UIMessageChunk[]]> = [
+      // Read here to its end; `useChat` would have stopped at the error.
+      ['errored', [...text, { type: 'error', errorText: 'failed' }, { type: 'finish', finishReason: 'error' }]],
+      ['aborted', [...text, { type: 'abort' }]],
+      ['unfinished', text],
+      ['answered', [...text, { type: 'finish', finishReason: 'stop' }]],
+      ['answered', [...text, { type: 'finish', finishReason: 'stop' }]],
+    ]
+    const posted: unknown[] = []
+    const named: string[] = []
+    const transport = createChatTransport('/chat', {
+      onConversation: (id) => named.push(id),
+      fetch: async (_input, init) => {
+        posted.push(JSON.parse(String(init?.body)))
+        const [id, chunks] = turns[posted.length - 1]!
+        return createUIMessageStreamResponse({
+          headers: { 'X-Guren-Conversation': id },
+          stream: new ReadableStream<UIMessageChunk>({
+            start(controller) {
+              for (const chunk of chunks) controller.enqueue(chunk)
+              controller.close()
+            },
+          }),
+        })
+      },
+    })
+
+    for (const [index] of turns.entries()) await send(transport, `turn ${index}`)
+
+    expect(named).toEqual(['answered'])
+    expect(posted.map((body) => (body as { conversation: unknown }).conversation)).toEqual([null, null, null, null, 'answered'])
   })
 
   test('should fail the first turn in an app with no conversation store, rather than chat without history', async () => {
