@@ -86,13 +86,32 @@ class ArchivedInvoice extends Error {
   }
 }
 
-/** A 404 whose `message` is a getter with no setter, so writing it throws in strict mode. */
-class GetterOnlyNotFound extends HttpException {
+/** A 404 thrown with no message whose `toResponse()` writes a message of its own. */
+class ExpiredInvitation extends HttpException {
+  constructor() {
+    super(404, '')
+  }
+
+  override toResponse() {
+    return { status: 404, body: { message: 'This invitation has expired' } }
+  }
+}
+
+/** A 404 whose `message` is an accessor over hidden state, which a write to it would change. */
+const backedMessages = new WeakMap<object, string>()
+class BackedNotFound extends HttpException {
   constructor() {
     super(404, undefined as unknown as string)
   }
 }
-Object.defineProperty(GetterOnlyNotFound.prototype, 'message', { get: () => '' })
+Object.defineProperty(BackedNotFound.prototype, 'message', {
+  get(this: object) {
+    return backedMessages.get(this) ?? ''
+  },
+  set(this: object, value: string) {
+    backedMessages.set(this, value)
+  },
+})
 
 /**
  * Driven through `createApp()` and `app.fetch()`: each 404 below is thrown where a
@@ -118,8 +137,14 @@ async function appWithDebug(debug: boolean) {
       router.get('/frozen', () => {
         throw Object.freeze(NotFoundHttpException.forModel('Project', 99999))
       })
-      router.get('/getter-only', () => {
-        throw new GetterOnlyNotFound()
+      router.get('/backed', () => {
+        throw new BackedNotFound()
+      })
+      router.get('/expired', () => {
+        throw new ExpiredInvitation()
+      })
+      router.get('/expired-frozen', () => {
+        throw Object.freeze(new ExpiredInvitation())
       })
       router.get('/invitation', () => {
         throw new InvitationNotFound(12)
@@ -210,22 +235,34 @@ describe('404 bodies outside debug', () => {
     expect(JSON.parse(archived.body)).toEqual({ message: 'Invoice 12 was archived' })
   })
 
-  it("replaces only the message in a subclass's toResponse() shape", async () => {
+  // The nested value is the error's own message, empty here, so it names no record.
+  it("replaces only the top-level message in a subclass's toResponse() shape", async () => {
     const app = await appWithDebug(false)
 
     const response = await fetchBody(app, '/envelope', JSON_CALLER)
 
     expect(JSON.parse(response.body)).toEqual({
       message: 'Not Found',
-      errors: { record: ['Not Found'] },
+      errors: { record: [''] },
       trace: 'trace-2',
     })
   })
 
-  it('replaces the message in the body of an error whose message cannot be written', async () => {
+  it("keeps a message toResponse() writes itself, frozen or not", async () => {
     const app = await appWithDebug(false)
 
-    for (const path of ['/frozen', '/getter-only']) {
+    for (const path of ['/expired', '/expired-frozen']) {
+      const response = await fetchBody(app, path, JSON_CALLER)
+
+      expect(response.status).toBe(404)
+      expect(JSON.parse(response.body)).toEqual({ message: 'This invitation has expired' })
+    }
+  })
+
+  it('answers the generic body for a frozen error and an accessor-backed message', async () => {
+    const app = await appWithDebug(false)
+
+    for (const path of ['/frozen', '/backed']) {
       const response = await fetchBody(app, path, JSON_CALLER)
 
       expect(response.status).toBe(404)
@@ -266,17 +303,19 @@ describe('404 messages on the exception', () => {
     expect(() => abort(404)).toThrow(HttpException.notFound().message)
   })
 
-  it('leaves the detailed message on an exception the handler rendered', async () => {
+  it('leaves the message of an exception the handler rendered untouched', async () => {
     const handler = createExceptionHandler({ debug: false })
     const forModel = NotFoundHttpException.forModel('Project', 99999)
-    const envelope = new EnvelopeNotFound()
+    const frozen = Object.freeze(NotFoundHttpException.forModel('Project', 99999))
+    const backed = new BackedNotFound()
     const ctx = { json: (body: unknown, status: number) => Response.json(body, { status }) }
 
-    const responses = await Promise.all([handler.handle(forModel, ctx as never), handler.handle(envelope, ctx as never)])
+    const responses = await Promise.all([forModel, frozen, backed].map((error) => handler.handle(error, ctx as never)))
 
-    expect(await responses[0]!.json()).toEqual({ message: 'Not Found' })
+    for (const response of responses) expect(await response.json()).toEqual({ message: 'Not Found' })
     expect(forModel.message).toBe('Project with ID 99999 not found.')
-    expect(envelope.message).toBe('')
-    expect(Object.keys(forModel)).not.toContain('message')
+    expect(frozen.message).toBe('Project with ID 99999 not found.')
+    expect(backed.message).toBe('')
+    expect(backedMessages.has(backed)).toBe(false)
   })
 })

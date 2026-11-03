@@ -134,7 +134,9 @@ export class ExceptionHandler {
 
     let body: ErrorResponse
     if (HttpException.isHttpException(error)) {
-      body = replacement === undefined ? error.toResponse(debug).body : bodyWithMessage(error, replacement, debug)
+      body = error.toResponse(debug).body
+      // The error is never written to; a `toResponse()` that writes a message of its own keeps it.
+      if (replacement !== undefined && body.message === error.message) body = { ...body, message: replacement }
     } else {
       body = { message: replacement ?? (statusCode < 500 || debug ? error.message : 'Internal Server Error') }
       if (debug) {
@@ -191,29 +193,6 @@ function hasComposedNotFoundMessage(error: Error): boolean {
   return hasComposedMessage(error)
     || (error.name === 'ModelNotFoundException' && typeof (error as { modelName?: unknown }).modelName === 'string')
     || error.message === ''
-}
-
-/**
- * `toResponse()`'s body with `message` in place of the error's own, set on the error
- * and put back after: a subclass's `toResponse()` may read private fields a copy
- * lacks. A message that cannot be written (a frozen error, a getter with no setter)
- * is replaced in the body instead.
- */
-function bodyWithMessage(error: HttpException, message: string, debug: boolean): ErrorResponse {
-  const own = Object.getOwnPropertyDescriptor(error, 'message')
-  try {
-    error.message = message
-  } catch {
-    return { ...error.toResponse(debug).body, message }
-  }
-
-  try {
-    // A setter may accept the write and keep another value.
-    return error.message === message ? error.toResponse(debug).body : { ...error.toResponse(debug).body, message }
-  } finally {
-    if (own) Object.defineProperty(error, 'message', own)
-    else delete (error as { message?: string }).message
-  }
 }
 
 /**
