@@ -42,6 +42,13 @@ describe('readAgentUiPages', () => {
     expect(readAgentUiPages(app({ '.guren/agents.gen.ts': AGENTS }))).toEqual(['posts/Show'])
     expect(readAgentUiPages(app({}))).toEqual([])
   })
+
+  it('reads a page id holding a bracket and refuses a declaration it cannot read', () => {
+    const bracketed = 'export const agentUiPages = ["Show","posts/[id]"] as const\n'
+    expect(readAgentUiPages(app({ '.guren/agents.gen.ts': bracketed }))).toEqual(['Show', 'posts/[id]'])
+    const broken = 'export const agentUiPages = [\n  "Show",\n] as const\n'
+    expect(() => readAgentUiPages(app({ '.guren/agents.gen.ts': broken }))).toThrow('cannot read agentUiPages')
+  })
 })
 
 describe('renderPageDocument', () => {

@@ -42,10 +42,14 @@ export function readAgentUiPages(root: string): string[] {
   } catch {
     return []
   }
-  const literal = /export const agentUiPages = (\[[^\]]*\]) as const/u.exec(source)?.[1]
-  if (!literal) return []
-  const parsed: unknown = JSON.parse(literal)
-  return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+  if (!source.includes('export const agentUiPages')) return []
+  // Codegen writes the array with JSON.stringify on one line, so a page id holding
+  // `]` (`posts/[id]`) is inside a string, never the end of the line.
+  const literal = /^export const agentUiPages = (\[.*\]) as const$/mu.exec(source)?.[1]
+  const parsed: unknown = literal === undefined ? undefined : JSON.parse(literal)
+  // An unreadable declaration fails the build: an empty result would delete every built view.
+  if (!Array.isArray(parsed)) throw new Error(`mcp-app: cannot read agentUiPages in ${AGENTS_MODULE}; run \`guren codegen\`.`)
+  return parsed.filter((id): id is string => typeof id === 'string')
 }
 
 /** The page module an id names, by the rule `pages.gen.ts` is written with: `pages/<id>` under the resources directory. */
