@@ -9,12 +9,13 @@ const LOCK = `{
   "workspaces": {
     "": {
       "name": "app",
-      "dependencies": { "@guren/core": "^1.26.0", "marked": "^16.0.0", "react-dom": "^19.0.0" },
+      "dependencies": { "@guren/core": "^1.26.0", "marked": "^16.0.0", "react-dom": "^19.0.0", "zod": "^4.0.0" },
       "devDependencies": { "vitest": "^5.0.0" },
     },
   },
   "packages": {
-    "@guren/core": ["@guren/core@1.26.0", "", { "dependencies": { "hono": "^4.13.0" } }, "sha512-a=="],
+    "@guren/core": ["@guren/core@1.26.0", "", { "dependencies": { "hono": "^4.13.0", "zod": "^4.0.0" } }, "sha512-a=="],
+    "zod": ["zod@4.6.7", "", {}, "sha512-g=="],
     "hono": ["hono@4.13.13", "", {}, "sha512-b=="],
     "marked": ["marked@16.4.2", "", { "dependencies": { "entities": "^4.0.0" } }, "sha512-c=="],
     "entities": ["entities@4.5.0", "", {}, "sha512-d=="],
@@ -80,6 +81,10 @@ describe('placementOf', () => {
     ['scripts/seed.ts', ['build']],
     ['tests/controllers/PostController.test.ts', ['test']],
     ['app/Models/Post.test.ts', ['test']],
+    ['e2e/auth.setup.ts', ['test']],
+    ['guren.arch.ts', ['build']],
+    ['resources/js/lib/storage.browser.ts', ['client']],
+    ['app/contests/Entry.ts', ['server']],
   ] as const)('places %p', (file, expected) => {
     expect(placementOf(file, new Set())).toEqual([...expected])
   })
@@ -143,7 +148,7 @@ describe('joinExposure', () => {
       graph: graph(),
     })
 
-    expect(entry(exposure, 'hono@4.13.13')).toMatchObject({ attribution: 'framework', importedBy: [], routes: [] })
+    expect(entry(exposure, 'hono@4.13.13')).toMatchObject({ attribution: 'framework', viaFramework: true, importedBy: [], routes: [] })
     expect(entry(exposure, '@guren/core@1.26.0').attribution).toBe('routes')
   })
 
@@ -157,11 +162,47 @@ describe('joinExposure', () => {
     expect(entry(exposure, 'vitest@5.0.5')).toMatchObject({ attribution: 'none-found', placement: [{ at: 'test', evidence: 'import' }] })
   })
 
-  it('reads a served import with no route as unknown while the graph is incomplete, and none-found once it is complete', () => {
-    const imports = scan({ 'app/Jobs/Digest.ts': { packages: [{ name: 'marked', specifier: 'marked', line: 1 }] } })
+  it('reads a served file no graph node reaches as unknown, with a reason, never as unreached', () => {
+    const imports = scan({ 'src/app.ts': { packages: [{ name: 'marked', specifier: 'marked', line: 3 }] } })
 
-    expect(entry(joinExposure({ tree: tree(), imports, graph: graph(false) }), 'marked@16.4.2').attribution).toBe('unknown')
-    expect(entry(joinExposure({ tree: tree(), imports, graph: graph() }), 'marked@16.4.2').attribution).toBe('none-found')
+    const exposure = joinExposure({ tree: tree(), imports, graph: graph() })
+
+    expect(entry(exposure, 'marked@16.4.2').attribution).toBe('unknown')
+    expect(exposure.coverage.graph).toEqual({
+      status: 'partial',
+      reasons: [{ code: 'unowned-file', message: 'src/app.ts is served but no graph node or entry reaches it, so the routes running it are unknown.', file: 'src/app.ts' }],
+    })
+  })
+
+  it('finds no route for an unimported package when every reader is complete', () => {
+    const exposure = joinExposure({ tree: tree(), imports: scan({}), graph: graph() })
+
+    expect(entry(exposure, 'marked@16.4.2').attribution).toBe('none-found')
+  })
+
+  it('keeps what the framework reaches for a package the app also declares, imports only in tests, or imports in one place', () => {
+    const exposure = joinExposure({
+      tree: tree(),
+      imports: scan({
+        'tests/schema.test.ts': { packages: [{ name: 'zod', specifier: 'zod', line: 1 }] },
+        'app/Http/Controllers/PostController.ts': { packages: [{ name: 'hono', specifier: 'hono', line: 1 }] },
+      }),
+      graph: graph(),
+    })
+
+    expect(entry(exposure, 'zod@4.6.7')).toMatchObject({ attribution: 'framework', viaFramework: true })
+    expect(entry(exposure, 'hono@4.13.13')).toMatchObject({ attribution: 'routes', viaFramework: true, note: 'Also brought in by @guren packages, which every route runs through.' })
+  })
+
+  it('reports a bare name no installed package answers, but not a Node builtin', () => {
+    const exposure = joinExposure({
+      tree: tree(),
+      imports: scan({ 'app/Services/Paths.ts': { packages: [{ name: '~', specifier: '~/lib/paths', line: 2 }, { name: 'path', specifier: 'path', line: 1 }] } }),
+      graph: graph(),
+    })
+
+    expect(exposure.coverage.imports.reasons.map((reason) => reason.code)).toEqual(['not-installed'])
+    expect(exposure.coverage.imports.reasons[0]?.message).toContain('app/Services/Paths.ts:2 imports ~')
   })
 
   it('reads every package as unknown rather than unreached when the import scan is incomplete', () => {

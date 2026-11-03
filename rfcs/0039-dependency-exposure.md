@@ -324,13 +324,26 @@ collected.
   to every route that renders a page (`importedBy[].entries` names the entry).
 - An import of a `@guren` package does not count as importing what it brings in;
   without that, every package behind `@guren/core` reached every route of
-  `examples/blog` and none read as `framework`.
+  `examples/blog`. Whether a `@guren` package brings it in at all is its own
+  flag, `viaFramework`, so `postgres` behind `@guren/orm` reads `framework`
+  even though the app declares it, and `hono` imported by one controller keeps
+  the note that every route reaches it.
+- A served file that no graph node and no entry reaches (`src/app.ts`, `config/*`,
+  providers, middleware files, whose graph nodes carry no file) makes the
+  packages it imports `unknown`, with an `unowned-file` reason in the graph's
+  coverage, never `none-found`.
+- A bare name no installed package answers (a tsconfig alias other than `@/`, a
+  `package.json` `imports` entry) is a `not-installed` reason, Node builtins and
+  Vite's virtual modules aside. A glob that matches no file and an import of a code
+  file the scan does not cover are reasons too. A leading `/` in a glob is read
+  from the project root, as Vite reads it.
 - `none-found` rests on the tree and the import scan alone when every importer
-  is a test or build file, since no route serves those. Otherwise an incomplete
-  graph makes it `unknown`. On `examples/blog`, whose graph reads
-  `validates` and `usesMiddleware` partially, 482 instances split into 18
-  `routes`, 58 `framework`, 291 `none-found` and 115 `unknown`, the last
-  mostly reached only by `resources/js/dev-entry.ts` and build configuration.
+  is a test or build file (`tests/`, `e2e/`, `*.test|spec|setup.*`, build
+  configuration, `scripts/`), since no route serves those. Anything else is
+  placed `server` unless it sits in `resources/js/`, which errs towards
+  reaching more. On `examples/blog`, whose graph reads `validates` and
+  `usesMiddleware` partially, 482 instances split into 18 `routes`, 264
+  `framework`, 164 `none-found` and 36 `unknown`.
 - Placement evidence is `import` only for now: the Vite build manifest is not read
   yet. `coverage.runtime` stays `unavailable` until §6's check lands, and
   `guren_get_dependency_exposure` ships with the audit integration of §5.

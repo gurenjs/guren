@@ -72,6 +72,31 @@ describe('scanImports', () => {
     expect(scanned.get('resources/js/app.tsx')?.files).toEqual(['resources/js/pages/posts/Index.tsx'])
   })
 
+  it('reads a root-absolute glob from the project root and reports one that matches nothing', async () => {
+    const files = await write({
+      'resources/js/app.tsx': "const widgets = import.meta.glob('/resources/js/widgets/*.tsx')\nconst none = import.meta.glob('./nothing/*.tsx')",
+      'resources/js/widgets/Chart.tsx': 'export const Chart = 1',
+    })
+
+    const { files: scanned, reasons } = await scan(files)
+
+    expect(scanned.get('resources/js/app.tsx')?.files).toEqual(['resources/js/widgets/Chart.tsx'])
+    expect(reasons.map((reason) => reason.message)).toEqual(['resources/js/app.tsx globs ./nothing/*.tsx, which matches no file this reader scans.'])
+  })
+
+  it('reports an import of a code file outside the scan, but not of a stylesheet', async () => {
+    const files = await write({
+      'app/main.ts': "import './build/generated'\nimport '../resources/css/app.css'",
+      'resources/css/app.css': 'body {}',
+    })
+    await mkdir(join(root, 'app/build'), { recursive: true })
+    await writeFile(join(root, 'app/build/generated.ts'), "export const x = 1", 'utf8')
+
+    const { reasons } = await scan(files.filter((file) => file.endsWith('.ts')))
+
+    expect(reasons.map((reason) => reason.code)).toEqual(['outside-scan'])
+  })
+
   it('reports every construct it cannot follow instead of reading the file as importing nothing', async () => {
     const files = await write({
       'app/loader.ts': [

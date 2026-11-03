@@ -28,9 +28,10 @@ async function fingerprint(paths: readonly string[]): Promise<string> {
 
 /**
  * The exposure of every installed package in the app at `cwd`, read as one
- * snapshot (RFC 0032's rule, applied to the tree and the import scan too): the
- * lockfile, the manifest and every scanned file are fingerprinted before and
- * after collection, and a change in between, or one the graph saw, is `changed`.
+ * snapshot (RFC 0032's rule, applied to the tree and the import scan too): every
+ * scanned file is fingerprinted before and after collection, the tree and the file
+ * list are read again at the end, and any difference, or one the graph saw, is
+ * `changed`.
  */
 export async function loadDependencyExposure(options: { cwd: string; introspect?: boolean }): Promise<DependencyExposure> {
   const cwd = resolve(options.cwd)
@@ -48,6 +49,10 @@ export async function loadDependencyExposure(options: { cwd: string; introspect?
   }
 
   const after = await fingerprint(watched)
+  const treeAfter = await loadDependencyTree(cwd)
+  const filesAfter = await collectProjectFiles(cwd, IMPORTABLE_EXTENSIONS)
+  const treeKey = (loaded: typeof tree) => JSON.stringify([loaded.lockfile, loaded.coverage.status, loaded.packages.map((instance) => [instance.id, instance.integrity ?? null])])
+  const unchanged = before === after && treeKey(tree) === treeKey(treeAfter) && filesAfter.join('\n') === files.join('\n')
   const joined = joinExposure({ tree, imports, graph })
   const content = JSON.stringify({
     graph: graph?.snapshot.id ?? null,
@@ -61,7 +66,7 @@ export async function loadDependencyExposure(options: { cwd: string; introspect?
       id: createHash('sha256').update(content).digest('hex'),
       graph: graph?.snapshot.id ?? null,
       capturedAt: new Date().toISOString(),
-      consistency: before === after && graph?.snapshot.consistency !== 'changed' ? 'stable' : 'changed',
+      consistency: unchanged && graph?.snapshot.consistency !== 'changed' ? 'stable' : 'changed',
     },
     lockfile: tree.lockfile,
     workspace: tree.workspace,

@@ -10,7 +10,7 @@ import { posix } from 'node:path'
 import type { Expression, Node, Statement } from '@babel/types'
 import type { GraphCoverage } from './application-graph'
 import { literalString, unwrapTypeAssertion, walk } from './ast-walk'
-import { toPosixRelative } from './discovery'
+import { IMPORTABLE_EXTENSIONS, toPosixRelative } from './discovery'
 import { isBareSpecifier, packageNameFromSpecifier, resolveImportPath, type FileProbe } from './import-resolution'
 import type { ParseCache } from './parse-cache'
 import { specifierBase } from './schema-binding'
@@ -116,6 +116,7 @@ export async function scanImports(cwd: string, cache: ParseCache, files: readonl
   const scanned = new Map<string, FileImports>()
   const reasons: GraphCoverage['reasons'] = []
   const projectFiles = files.map((absolute) => toPosixRelative(cwd, absolute))
+  const scannedFiles = new Set(projectFiles)
 
   for (const absolute of files) {
     const file = toPosixRelative(cwd, absolute)
@@ -127,9 +128,14 @@ export async function scanImports(cwd: string, cache: ParseCache, files: readonl
     const imports: FileImports = { packages: [], files: [] }
     const { found, globs } = runtimeSpecifiers(parsed.ast.program.body, file, reasons)
     for (const pattern of globs) {
-      const glob = new Bun.Glob(posix.join(posix.dirname(file), pattern))
-      for (const candidate of projectFiles) {
-        if (candidate !== file && glob.match(candidate) && !imports.files.includes(candidate)) imports.files.push(candidate)
+      // Vite reads a leading `/` from the project root, anything else from the importer.
+      const glob = new Bun.Glob(pattern.startsWith('/') ? pattern.slice(1) : posix.join(posix.dirname(file), pattern))
+      const matched = projectFiles.filter((candidate) => candidate !== file && glob.match(candidate))
+      if (matched.length === 0) {
+        reasons.push({ code: 'unfollowed-import', message: `${file} globs ${pattern}, which matches no file this reader scans.`, file })
+      }
+      for (const candidate of matched) {
+        if (!imports.files.includes(candidate)) imports.files.push(candidate)
       }
     }
     for (const { specifier, line } of found) {
@@ -144,6 +150,10 @@ export async function scanImports(cwd: string, cache: ParseCache, files: readonl
         continue
       }
       const relative = toPosixRelative(cwd, target)
+      // `.guren/` holds generated maps of the app's own files, which are scanned already; a stylesheet or asset imports no package.
+      if (!scannedFiles.has(relative) && !relative.startsWith('.guren/') && IMPORTABLE_EXTENSIONS.has(posix.extname(relative))) {
+        reasons.push({ code: 'outside-scan', message: `${file}:${line} imports ${relative}, which this reader does not scan, so its imports are unknown.`, file })
+      }
       if (!imports.files.includes(relative)) imports.files.push(relative)
     }
     scanned.set(file, imports)

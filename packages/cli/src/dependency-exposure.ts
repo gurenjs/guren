@@ -6,6 +6,7 @@
  * whose files import them, and the nodes through their relations to routes.
  * `importedBy` means an import exists on that path, not that vulnerable code runs.
  */
+import { builtinModules } from 'node:module'
 import type { GraphCoverage, GraphNode, GurenApplicationGraph } from './application-graph'
 import type { DependencyInstance, DependencyTree } from './dependency-tree'
 import type { ImportScan } from './import-scan'
@@ -27,6 +28,8 @@ export interface ExposedPackage {
   installedAs: string[]
   placement: Array<{ at: Placement; evidence: 'import' }>
   attribution: Attribution
+  /** An @guren package also brings it in, and every route runs through those. */
+  viaFramework: boolean
   note?: string
   importedBy: Array<{
     file: string
@@ -55,10 +58,12 @@ export interface ExposureJoin {
 }
 
 const SSR_ENTRIES = ['resources/js/ssr.tsx', 'resources/js/ssr.ts', 'resources/js/ssr.jsx', 'resources/js/ssr.js']
+/** Bare names that resolve to no installed package by design: Node builtins and Vite's virtual modules. */
+const NOT_A_PACKAGE = new Set([...builtinModules, 'bun', '@vite/client', '@vite/env'])
 const PAGE_ENTRY = /^resources\/js\/(?:app|ssr)\.[cm]?[jt]sx?$/u
-const BUILD_FILE = /^(?:vite|drizzle|playwright[\w.-]*|vitest)\.config\.[cm]?[jt]sx?$/u
-const TEST_DIRECTORY = /(?:^|\/)tests?\//u
-const TEST_SUFFIX = /\.(?:test|spec|browser)\.[cm]?[jt]sx?$/u
+const BUILD_FILE = /^(?:(?:vite|drizzle|playwright[\w.-]*|vitest)\.config|guren\.arch)\.[cm]?[jt]sx?$/u
+const TEST_DIRECTORY = /(?:^|\/)(?:tests?|e2e)\//u
+const TEST_SUFFIX = /\.(?:test|spec|setup)\.[cm]?[jt]sx?$/u
 
 /** Where a file runs, by where it sits; `ssrReach` is every file the SSR entry imports. */
 export function placementOf(file: string, ssrReach: ReadonlySet<string>): Placement[] {
@@ -169,8 +174,20 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
     .filter((node) => node.kind === 'page')
     .flatMap((node) => (routes.get(node.id) ?? []).map((route) => [route.node, route] as const)))
 
+  const installed = new Set(tree.packages.flatMap((instance) => [instance.name, ...instance.installedAs]))
+  const importReasons: GraphCoverage['reasons'] = [...imports.reasons]
+  for (const [name, sites] of importers) {
+    if (installed.has(name) || NOT_A_PACKAGE.has(name) || name.startsWith('virtual:')) continue
+    for (const site of sites) {
+      importReasons.push({ code: 'not-installed', message: `${site.file}:${site.line} imports ${name}, which no installed package or app file answers (an alias this reader does not resolve?).`, file: site.file })
+    }
+  }
+
+  // A served file no graph node and no entry reaches may run on any route; the graph cannot say which.
+  const unowned = new Map<string, GraphCoverage['reasons'][number]>()
+
   // Whether an import exists rests on the tree and the scan; which route it reaches rests on the graph too.
-  const importsComplete = tree.coverage.status === 'complete' && imports.reasons.length === 0
+  const importsComplete = tree.coverage.status === 'complete' && importReasons.length === 0
   const graphComplete = graph !== null && Object.values(graph.coverage).every((coverage) => coverage.status === 'complete')
 
   const packages = tree.packages.map((instance): ExposedPackage => {
@@ -195,12 +212,19 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
     }
     const placements = new Set(importedBy.flatMap((site) => placementOf(site.file, ssrReach)))
     // A test or build file is never served, so no route can reach a package only those import.
-    const servedImport = [...placements].some((at) => at !== 'test' && at !== 'build')
+    const served = (file: string) => placementOf(file, ssrReach).some((at) => at !== 'test' && at !== 'build')
+    const servedImport = importedBy.some((site) => served(site.file))
+    let unattributed = false
+    for (const site of importedBy) {
+      if (!served(site.file) || site.nodes.length > 0 || site.entries.length > 0) continue
+      unattributed = true
+      unowned.set(site.file, { code: 'unowned-file', message: `${site.file} is served but no graph node or entry reaches it, so the routes running it are unknown.`, file: site.file })
+    }
     const placement = [...placements].sort().map((at) => ({ at, evidence: 'import' as const }))
-    const viaFramework = importedBy.length === 0 && headsOf(instance).length > 0 && headsOf(instance).every(isFramework)
+    const viaFramework = headsOf(instance).some(isFramework)
     const attribution: Attribution = reached.size > 0 ? 'routes'
       : viaFramework ? 'framework'
-      : importsComplete && (!servedImport || graphComplete) ? 'none-found'
+      : importsComplete && !unattributed && (!servedImport || graphComplete) ? 'none-found'
       : 'unknown'
     return {
       id: instance.id,
@@ -208,7 +232,8 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
       installedAs: instance.installedAs,
       placement,
       attribution,
-      ...(attribution === 'framework' ? { note: 'Brought in only by @guren packages, which every route runs through.' } : {}),
+      viaFramework,
+      ...(viaFramework ? { note: attribution === 'framework' ? 'Brought in by @guren packages, which every route runs through.' : 'Also brought in by @guren packages, which every route runs through.' } : {}),
       importedBy,
       routes: [...reached.values()].sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method)),
     }
@@ -217,13 +242,16 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
   return {
     coverage: {
       tree: tree.coverage,
-      imports: { status: imports.reasons.length === 0 ? 'complete' : 'partial', reasons: imports.reasons },
+      imports: { status: importReasons.length === 0 ? 'complete' : 'partial', reasons: importReasons },
       placement: { status: 'complete', reasons: [] },
       graph: graph === null
         ? { status: 'unavailable', reasons: [{ code: 'no-graph', message: 'The Application Graph could not be collected, so no route is attributed.' }] }
         : {
-            status: Object.values(graph.coverage).every((coverage) => coverage.status === 'complete') ? 'complete' : 'partial',
-            reasons: Object.entries(graph.coverage).flatMap(([key, coverage]) => coverage.status === 'complete' ? [] : coverage.reasons.map((reason) => ({ ...reason, message: `${key}: ${reason.message}` }))),
+            status: graphComplete && unowned.size === 0 ? 'complete' : 'partial',
+            reasons: [
+              ...Object.entries(graph.coverage).flatMap(([key, coverage]) => coverage.status === 'complete' ? [] : coverage.reasons.map((reason) => ({ ...reason, message: `${key}: ${reason.message}` }))),
+              ...[...unowned.values()].sort((a, b) => a.message.localeCompare(b.message)),
+            ],
           },
       runtime: { status: 'unavailable', reasons: [{ code: 'not-implemented', message: 'The runtime advisory check (RFC 0039 §6) is not implemented yet.' }] },
     },

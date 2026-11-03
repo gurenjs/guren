@@ -101,12 +101,20 @@ export const depsExposureCommand = defineCommand({
     introspect: { type: 'boolean', default: true, description: 'Disable registration introspection with --no-introspect.' },
   },
   async run({ args }) {
-    const exposure = await loadDependencyExposure({ cwd: args.app ?? process.cwd(), introspect: args.introspect !== false })
+    let exposure: DependencyExposure
+    try {
+      exposure = await loadDependencyExposure({ cwd: args.app ?? process.cwd(), introspect: args.introspect !== false })
+    } catch (error) {
+      markCommandFailed()
+      const message = `Dependency exposure could not be collected (${error instanceof Error ? error.message : String(error)}).`
+      console.log(args.json ? JSON.stringify({ schemaVersion: 1, error: { code: 'collection-failed', message } }) : message)
+      return
+    }
     const filter = args.package === undefined ? undefined : String(args.package)
-    if (!isCompleteExposure(exposure)) markCommandFailed()
     const document = filter === undefined
       ? exposure
       : { ...exposure, packages: exposure.packages.filter((entry) => (entry.name === filter || entry.installedAs.includes(filter))) }
+    if (!isCompleteExposure(exposure) || (filter !== undefined && document.packages.length === 0)) markCommandFailed()
     console.log(args.json ? JSON.stringify(document) : renderDepsExposure(exposure, filter))
   },
 })

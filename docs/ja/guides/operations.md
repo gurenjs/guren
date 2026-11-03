@@ -79,4 +79,4 @@ minimumReleaseAgeExcludes = [
 
 `bunfig.toml` に `minimumReleaseAge` がないときや、アプリが入れている `@guren` のパッケージが一覧から漏れているときは、`guren doctor` が `supply-chain-cooldown` として知らせます。`guren upgrade` を実行すると、この設定を書き足すか、漏れている名前を一覧に加えます。ただし、自分で書いた `[install]` の表や、1 行に 1 つずつではない形の一覧があるファイルには手を加えず、doctor が足すべき行を表示します。
 
-インストール済みのパッケージに脆弱性情報があるかどうかは、`guren audit` を実行すると `bun audit` の結果として表示されます。指摘されたパッケージがどの直接の依存から入っていて、本番の install でも入るかどうかは、`guren deps:why <パッケージ名>` で確かめられます。どの route から届くのか、サーバーとブラウザのどちらで動くのかは、`guren deps:exposure --package <パッケージ名>` で分かります。
+インストール済みのパッケージに脆弱性情報があるかどうかは、`guren audit` を実行すると `bun audit` の結果として表示されます。指摘されたパッケージがどの直接の依存から入っていて、本番の install でも入るかどうかは、`guren deps:why <パッケージ名>` で確かめられます。どのルートから届くのか、サーバーとブラウザのどちらで動くのかは、`guren deps:exposure --package <パッケージ名>` で分かります。
