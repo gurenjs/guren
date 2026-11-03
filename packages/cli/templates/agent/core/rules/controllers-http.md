@@ -29,9 +29,15 @@ return this.inertia(pages.posts.Show, { post })   // props compile-checked again
 ```
 
 If props don't type-check after editing a page's `Props`, re-run `bunx guren codegen`.
-**No global shared props by default**: a fresh scaffold never calls
-`shareInertiaProps()`, so `usePage<{ auth: … }>()` type-checks and is `undefined`
-at runtime. Pass everything a page needs through `this.inertia(page, { … })`.
+**Shared props**: the framework shares flashed validation `errors`, and `_i18n`
+when `createApp({ i18n })` is set. `auth` is shared only when
+`app/Providers/AuthProvider.ts` exists (`guren add auth`, `make:auth`,
+`create-guren-app --auth`, the blog starter): its `boot()` calls
+`shareInertiaProps()` with `{ auth: { user } }`, `user` being `null` for a guest.
+Without that file, `usePage<{ auth: … }>()` type-checks and is `undefined` at
+runtime. Pass anything else through `this.inertia(page, { … })`; a prop every
+page needs goes in a provider's `boot()` as `shareInertiaProps(fn, this.container)`,
+which merges with the others. Do not share `auth` a second time.
 
 ## Responses
 
@@ -51,10 +57,33 @@ at runtime. Pass everything a page needs through `this.inertia(page, { … })`.
 `await this.can('update', [Post, post])` → boolean ·
 `this.apiToken()` → `{ userId, abilities }` or throws 401.
 An ability with no record (`create`, `viewAny`) takes the bare class:
-`await this.authorize('create', Post)`. The policy must be registered, or
-every check is denied: `bunx guren make:policy Post`, then in a provider's `boot()`
-`this.container.make('gate').policy(Post, PostPolicy)`, with that provider
-listed in `createApp({ providers })`.
+`await this.authorize('create', Post)`. To give such an ability data, pass a
+plain object as the record: `await this.authorize('create', [Comment, { postLocked }])`
+calls `CommentPolicy.create(user, { postLocked })`, so widen the stub's
+`create(user)` to take it. Abilities may be `async`, and may return
+`this.deny(msg?)`, `this.denyWithStatus(status, msg?)` or
+`this.denyAsNotFound()` instead of `false`; after the last, `authorize()`
+throws a 404 and `can()` returns `false`.
+
+The policy must be registered, or every check is denied. After
+`bunx guren make:policy Post`, register it in the `boot()` of a provider the app
+already has, or of a new one (`bunx guren make:provider Authorization`) listed in
+`createApp({ providers })`. `register()` is abstract on `ServiceProvider`, so a
+boot-only provider still declares it:
+
+```typescript
+// app/Providers/AuthorizationProvider.ts
+import { ServiceProvider } from '@guren/core'
+import { Post } from '../Models/Post.js'
+import { PostPolicy } from '../Policies/PostPolicy.js'
+
+export default class AuthorizationProvider extends ServiceProvider {
+  register(): void {}
+  boot(): void {
+    this.container.make('gate').policy(Post, PostPolicy)
+  }
+}
+```
 
 ## Exceptions
 

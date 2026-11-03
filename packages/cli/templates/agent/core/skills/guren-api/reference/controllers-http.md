@@ -20,8 +20,10 @@ protected validateParamsSafe<T>(schema): SafeValidationResult<T>
 
 `this.inertia('posts/Show', { post })` is the untyped string overload. An optional
 third argument takes `InertiaResponseOptions`, e.g. `{ status: 422 }`.
-`shareInertiaProps(resolverFn)` from `@guren/core` injects props (e.g. `auth.user`)
-into every Inertia response; read them with `usePage()` only once it is wired.
+`shareInertiaProps(resolverFn, this.container)` from `@guren/core`, called in a
+provider's `boot()`, injects props into every Inertia response and merges with
+earlier resolvers; read them with `usePage()` only once one is wired (the
+`AuthProvider` that `guren add auth` writes shares `auth.user`).
 
 ## Server-rendered content pages (`this.view()`)
 
