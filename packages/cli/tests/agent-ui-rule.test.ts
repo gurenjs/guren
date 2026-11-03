@@ -32,23 +32,45 @@ it('every class string the ui rule lists is one the generators emit', async () =
 const repoRoot = join(import.meta.dir, '../../..')
 const PAGE_SOURCES = ['packages/cli/templates/scaffold', 'packages/create-app/templates', 'examples/agents/resources/js']
 
-// Tailwind v4's `outline-none` sets the style variable `outline-2` reads, so the ring needs its own style.
-it('every class list that drops the outline gives its focus state a solid one', async () => {
+/** Every page and component the scaffolds ship, and the generators that write pages as strings. */
+function readPageSources(): Promise<string[]> {
   const pages = PAGE_SOURCES.flatMap((dir) =>
     [...new Bun.Glob('**/*.tsx').scanSync({ cwd: join(repoRoot, dir) })].map((path) => join(repoRoot, dir, path)),
   )
-  const sources = await Promise.all([
-    readRule(),
+  return Promise.all([
     read('src/make-feature.ts'),
     read('src/make-auth.ts'),
     ...pages.map((path) => readFile(path, 'utf8')),
   ])
+}
+
+// Tailwind v4's `outline-none` sets the style variable `outline-2` reads, so the ring needs its own style.
+it('every class list that drops the outline gives its focus state a solid one', async () => {
+  const sources = [await readRule(), ...(await readPageSources())]
   // A class list has spaces; the rule's prose names `outline-none` alone.
   const strings = sources
     .flatMap((text) => [...text.matchAll(/[`'"]([^`'"\n]*\boutline-none\b[^`'"\n]*)[`'"]/g)].map((match) => match[1]!))
     .filter((classes) => classes.includes(' '))
   expect(strings.length).toBeGreaterThan(3)
   expect(strings.filter((classes) => !classes.split(' ').includes('focus:outline-solid'))).toEqual([])
+})
+
+// axe's link-in-text-block: a link that shares its paragraph with words is told apart by more than color.
+it('every link inside a sentence on a shipped page uses the underlined class string', async () => {
+  const [rule, sources] = await Promise.all([readRule(), readPageSources()])
+  const inSentence = section(rule, 'The shared class strings').match(/^\| Text link inside a sentence \| `([^`]+)`/m)?.[1]
+  expect(inSentence).toContain('underline ')
+
+  const paragraphs = sources.flatMap((text) => [...text.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/g)].map((match) => match[1]!))
+  const sentencesWithLinks = paragraphs.filter((body) => {
+    const words = body
+      .replace(/<(Link|a)\b[\s\S]*?<\/\1>/g, '')
+      .replace(/\{[^}]*\}/g, '')
+      .replace(/<[^>]*>/g, '')
+    return /<(?:Link|a)\b/.test(body) && /[A-Za-z]/.test(words)
+  })
+  expect(sentencesWithLinks.length).toBeGreaterThan(2)
+  expect(sentencesWithLinks.filter((body) => !body.includes(`className="${inSentence}"`))).toEqual([])
 })
 
 it('the ui rule describes the full-width submit as the Button component builds its block variant', async () => {

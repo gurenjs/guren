@@ -73,11 +73,17 @@ a new input or button style:
 | Full-width submit | the primary button plus `w-full` first and `disabled:cursor-not-allowed disabled:opacity-45` last |
 | Secondary button | `rounded-g-ctl border border-g-line-strong bg-g-panel px-4 py-2 text-sm font-bold text-g-text transition hover:border-g-muted` |
 | Destructive button | `rounded-g-ctl border border-g-danger-chip px-3 py-1 text-sm font-bold text-g-danger transition hover:bg-g-danger-tint` |
-| Text link | `text-g-accent-text transition hover:underline` |
+| Text link on its own | `text-g-accent-text transition hover:underline` |
+| Text link inside a sentence | `text-g-accent-text underline underline-offset-2 transition hover:no-underline` |
 | Card | `rounded-g-card border border-g-line bg-g-panel p-4 shadow-g-card` |
 
 When a page repeats one of these, lift it into a constant or a component in
 the app rather than letting the copies diverge.
+
+A link inside a sentence ("Don't have an account? Sign up") is underlined
+before anyone hovers it: its color alone does not set it apart from the words
+around it, which axe reports as `link-in-text-block`. A link on a line or in a
+row of its own (a nav item, "Back", "Edit") keeps the plain text link style.
 
 A control that sets `outline-none` needs `focus:outline-solid` beside its
 `focus:outline-2`: in Tailwind v4 `outline-none` sets the outline style to

@@ -42,7 +42,7 @@ export default function Register({ errors = {} }: Props) {
 
         <p className="mt-6 text-center text-sm text-g-text-2">
           Already have an account?{' '}
-          <Link href="/login" className="text-g-accent-text transition hover:underline">
+          <Link href="/login" className="text-g-accent-text underline underline-offset-2 transition hover:no-underline">
             Sign in
           </Link>
         </p>
