@@ -403,6 +403,28 @@ describe('plan:scaffold on a tests step', () => {
     expect(emitted(document as unknown as Json, { modelFiles: { Post: 'app/Models/Post.ts' } }).mayPassNow).toEqual([])
   })
 
+  test('should count a model an earlier task adds from that task on, scaffolded or not, as it is on disk then', () => {
+    const document = guestIndexPlan() as { routes: Array<{ id: string; change: Json }>; sideEffects?: Json[]; tasks: Array<Json & { covers: string[]; acceptance: Json[] }> }
+    document.routes.find((route) => route.id === 'route.comments.index')!.change = { kind: 'existing' }
+    const behaviour = document.tasks[0]!.acceptance.pop()!
+    document.sideEffects = [{ id: 'effect.comments.audit', change: { kind: 'add' }, kind: 'job', name: 'AuditCommentReads', trigger: 'A comment list is read.', description: 'Records who read the comments.' }]
+    document.tasks.push({
+      id: 'task.audit',
+      entity: 'Audit trail',
+      summary: 'Record who reads the comments.',
+      covers: ['effect.comments.audit'],
+      acceptance: [{ ...behaviour, id: 'AC-audit-1', expect: { redirect: '/login', database: [{ table: 'comments', missing: [{ name: 'body', json: '"spam"' }] }] } }],
+    })
+    const plan = parsePlanDocument(document as unknown as Json)
+    // API-only: no scaffold step, so Comment exists once the comments task's data step has run, before the story's tests step.
+    const derivation = derivePlanTasks(plan, { apiOnly: true })
+    const story = findPlanStep(derivation, 'task/story/task.audit/tests')!
+    const onDisk = { entry: 'src/app.ts', modelFiles: { Comment: 'app/Models/Comment.ts', Post: 'app/Models/Post.ts' } }
+
+    expect(emitPlanTests(plan, derivation, story.task, story.step, { slug: 'comments', planFile: PLAN_FILE }, onDisk).mayPassNow).toEqual(['AC-audit-1'])
+    expect(planMayPassNow(plan, derivation, ['Post']).map(({ id, step }) => [id, step])).toEqual([['AC-audit-1', 'task/story/task.audit/tests']])
+  })
+
   test('should match the exact message withCsrf() throws when no CSRF middleware issued a token', async () => {
     const source = await readFile(TESTING_SOURCE, 'utf8')
     expect(source).toContain('`withCsrf(): GET ${path} did not set an XSRF-TOKEN cookie. `')

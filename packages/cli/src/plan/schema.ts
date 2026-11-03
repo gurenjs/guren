@@ -298,8 +298,8 @@ export const AcceptanceSchema = z.strictObject({
   given: z.array(z.string()),
   /**
    * The behaviour holds before the plan's work (a guest is already sent to sign in), so its test
-   * guards it: `tests:fail` asks no failing run of it, and `tests` still needs it to pass. `true` or
-   * absent, so an unmarked plan hashes as it did before the field existed.
+   * guards it: `tests:fail` asks no failing run of it, and `tests` still needs it to pass. Absent,
+   * never `false`: an unmarked behaviour must hash as one without the field (`plan-identity.test.ts`).
    */
   alreadyHolds: z.literal(true).optional(),
   input: z.array(PlanJsonValueSchema).optional(),

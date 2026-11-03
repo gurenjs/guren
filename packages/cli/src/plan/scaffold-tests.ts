@@ -437,24 +437,30 @@ function writeTests(plan: PlanDraft, derivation: PlanTaskDerivation, task: PlanD
 }
 
 /**
- * Every behaviour whose test, as `plan:scaffold` writes it, may pass before its task's implementation
- * exists, so `tests:fail` refuses its step: its route answers already ({@link routeAnswersBefore}), the
- * test has no `given()` or `unwritten()` call, and the behaviour is not marked `alreadyHolds`. The one
- * rule the scaffold reports and the §2 checks warn on before approval. `rootModels` are the root's
- * model classes now; each root model a scaffold step adds is counted from that step on, as it is on disk.
+ * Every behaviour whose test, as `plan:scaffold` writes it, may pass before its implementation exists:
+ * a route that answers already ({@link routeAnswersBefore}), no `given()` or `unwritten()` call, no
+ * `alreadyHolds` mark. The scaffold reports it, the §2 checks warn on it before approval. `rootModels`
+ * are the root's model classes now; a tests step finds them as the tasks ahead left them (each root
+ * model they own added, renamed or dropped) plus those its own task's scaffold step wrote.
  */
 export function planMayPassNow(plan: PlanDraft, derivation: PlanTaskDerivation, rootModels: Iterable<string>): PlanMayPassNow[] {
   const present = new Set(rootModels)
+  const models = plan.models.filter((model) => !model.module)
   const found: PlanMayPassNow[] = []
   for (const task of derivation.tasks) {
-    for (const step of task.steps.filter((candidate) => candidate.kind === 'scaffold')) {
-      for (const model of plan.models) if (!model.module && step.generates.includes(model.id)) present.add(model.name)
-    }
     const step = task.steps.find((candidate) => candidate.kind === 'tests')
-    if (!step) continue
-    const modelFiles = Object.fromEntries([...present].map((name) => [name, `${MODELS_DIR}/${name}.ts`]))
-    const { emitter } = writeTests(plan, derivation, task, step, planTestsFilePath('plan', task), { entry: 'src/app.ts', modelFiles })
-    found.push(...emitter.mayPassNow.map(({ id, because }) => ({ id, step: step.id, because })))
+    if (step) {
+      const scaffolded = task.steps.filter((candidate) => candidate.kind === 'scaffold').flatMap((candidate) => candidate.generates)
+      const names = [...present, ...models.filter((model) => scaffolded.includes(model.id)).map((model) => model.name)]
+      const modelFiles = Object.fromEntries(names.map((name) => [name, `${MODELS_DIR}/${name}.ts`]))
+      const { emitter } = writeTests(plan, derivation, task, step, planTestsFilePath('plan', task), { entry: 'src/app.ts', modelFiles })
+      found.push(...emitter.mayPassNow.map(({ id, because }) => ({ id, step: step.id, because })))
+    }
+    for (const model of models.filter((candidate) => task.steps.some((owner) => owner.elementIds.includes(candidate.id)))) {
+      if (model.change.kind === 'drop') present.delete(model.name)
+      else if (model.change.kind === 'rename') present.delete(model.change.from)
+      if (model.change.kind === 'add' || model.change.kind === 'rename') present.add(model.name)
+    }
   }
   return found
 }

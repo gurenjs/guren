@@ -404,7 +404,7 @@ function formatPlanTestsScaffold(report: PlanScaffoldTestsReport, planArgument: 
   )
   if (report.mayPassNow.length > 0) {
     lines.push('', `On a route that answers already (it exists, or an earlier task mounts it), with nothing to set up, so the test may pass now and plan:verify refuse the step: ${report.mayPassNow.join(', ')}.`)
-    lines.push('  Make each fail before its implementation: set up what the behaviour changes, or assert what the route does not do yet. A behaviour that guards what holds already takes "alreadyHolds": true in the plan, through plan:revise and a new approval.')
+    lines.push('  Make each fail before its implementation: set up what the behaviour changes, or assert what the route does not do yet. One on a route an earlier task adds belongs to that task; one that guards what an existing route does today takes "alreadyHolds": true in the plan, through plan:revise and a new approval.')
   }
   if (report.unwritten.length > 0) {
     lines.push('', 'Expectations written as an unwritten() call, to write as assertions:')

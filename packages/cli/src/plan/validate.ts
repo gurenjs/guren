@@ -797,8 +797,8 @@ function checkAcceptanceCoverage(plan: PlanDraft, index: PlanIndex, results: Pla
 
 /**
  * The behaviours whose test may pass before the implementation exists, as `plan:scaffold` reports
- * them after approval, and a mark `alreadyHolds` on a behaviour no route answers for yet, which
- * only gives up the red run (RFC 0030 §5). An unread model section reads the plan's root models.
+ * them after approval, and a mark `alreadyHolds` on a behaviour that does not hold before the plan's
+ * work, which only gives up the red run (RFC 0030 §5). An unread model section reads the plan's root models.
  */
 function checkRedRuns(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
   const derivation = derivePlanTasks(plan, { apiOnly: app.apiOnly })
@@ -806,6 +806,7 @@ function checkRedRuns(plan: PlanDraft, app: PlanAppState, results: PlanCheckResu
     ? plan.models.filter((model) => !model.module && (model.change.kind === 'existing' || model.change.kind === 'alter')).map((model) => model.name)
     : app.models.filter((model) => model.module === null).map((model) => model.name)
   const routes = new Map(plan.routes.map((route) => [route.id, route]))
+  const actions = new Map(plan.controllers.flatMap((controller) => controller.actions.map((action) => [action.id, action] as const)))
 
   for (const { id, step, because } of planMayPassNow(plan, derivation, rootModels)) {
     const name = routes.get(because.route)?.name ?? because.route
@@ -816,8 +817,8 @@ function checkRedRuns(plan: PlanDraft, app: PlanAppState, results: PlanCheckResu
         section: 'acceptance',
         suggestion:
           because.kind === 'exists'
-            ? 'If it guards what the route does today, mark it "alreadyHolds": true; otherwise give it a setup or an expectation the route meets only once the work is done.'
-            : 'Move it to the task that adds the route, or mark it "alreadyHolds": true.',
+            ? 'If it guards what the route does today, mark it "alreadyHolds": true (not where the plan adds that guard, whose test fails today); otherwise give it a setup or an expectation the route meets only once the work is done.'
+            : `Move it to ${because.task}, which adds the route: its tests step sees the test fail before that work exists.`,
       }),
     )
   }
@@ -828,16 +829,34 @@ function checkRedRuns(plan: PlanDraft, app: PlanAppState, results: PlanCheckResu
     for (const behaviour of plan.tasks.flatMap((intent) => intent.acceptance)) {
       if (behaviour.alreadyHolds !== true || !step.acceptanceIds.includes(behaviour.id)) continue
       const route = routes.get(behaviour.route)
-      if (!route || routeAnswersBefore(plan, derivation, task, route)) continue
-      results.push(
-        finding('plan:already-holds', 'warn', `Behaviour "${behaviour.id}" is marked "alreadyHolds", but nothing answers its route "${route.name}" before its tests step, so it cannot hold yet.`, {
-          elementId: behaviour.id,
-          section: 'acceptance',
-          suggestion: 'Drop the mark, so tests:fail sees its test fail before the implementation exists.',
-        }),
-      )
+      if (!route) continue
+      const before = routeAnswersBefore(plan, derivation, task, route)
+      const unheld = (why: string, suggestion: string): void => {
+        results.push(finding('plan:already-holds', 'warn', `Behaviour "${behaviour.id}" is marked "alreadyHolds", but ${why}.`, { elementId: behaviour.id, section: 'acceptance', suggestion }))
+      }
+      const dropTheMark = 'Drop the mark, so tests:fail sees its test fail before the implementation exists.'
+      if (!before) unheld(`nothing answers its route "${route.name}" before its tests step, so it cannot hold yet`, dropTheMark)
+      else if (before.kind === 'wired') {
+        unheld(`its route "${route.name}" is added by ${before.task}, so it holds only through this plan's work`, `Move it to ${before.task} and drop the mark: that task's tests step sees it fail before the route exists.`)
+      } else if (behaviour.kind === 'unauthenticated' && addsAuthentication(route, actions.get(route.action), app)) {
+        unheld(`the plan puts authentication on "${route.name}", which the application's route does not apply now, so its test fails today`, dropTheMark)
+      }
     }
   }
+}
+
+/**
+ * Whether the plan puts authentication on a route that lacks it now, read from the registered route
+ * the detail holds (`plan:approve` reads it for a plan that alters anything). `false` without that
+ * evidence: an `existing` route, no detail, a route that is not there once, or an inline middleware.
+ */
+function addsAuthentication(route: PlanRoute, action: PlanAction | undefined, app: PlanAppState): boolean {
+  if (route.change.kind === 'existing' || !app.detail || isUnreadable(app.detail.routes)) return false
+  if (!classifyMiddleware([...route.middleware, ...(action?.authorization.middleware ?? [])]).authenticates) return false
+  const name = route.change.kind === 'rename' ? route.change.from : route.name
+  const registered = app.detail.routes.filter((candidate) => candidate.name === name)
+  if (registered.length !== 1 || registered[0]!.hasInlineMiddleware) return false
+  return !classifyMiddleware(registered[0]!.middleware).authenticates
 }
 
 function checkApiOnlyViews(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
