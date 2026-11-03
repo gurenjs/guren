@@ -146,8 +146,9 @@ repository bare numbers belong to when the `origin` remote is not it. The
 machine). It renders the whole bundle as an interactive relation graph
 (documents, entities, and code paths as nodes, validated links as
 edges), and clicking a node opens the document with its frontmatter,
-trust tier, and link verdicts. Diagrams render when `mermaid` is in
-your `devDependencies` (new apps ship with it).
+trust tier, and link verdicts. A new app does not include `mermaid`, so
+the viewer shows each diagram as its source with a hint below it; run
+`bun add -d mermaid` and reload the page to render them.
 
 What a closed [implementation plan](./implementation-plans.md) leaves
 behind reads the same way. A plan's document is drawn in its own color

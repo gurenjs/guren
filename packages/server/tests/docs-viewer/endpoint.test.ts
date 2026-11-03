@@ -191,6 +191,29 @@ describe('docs viewer integration', () => {
     expect(unknown.status).toBe(404)
   })
 
+  // Looked up through Bun's module resolver, the second request would still be a 404:
+  // the resolver remembers a miss for the life of the process.
+  test('names the install command while the app has no mermaid, and serves it once installed', async () => {
+    process.env.NODE_ENV = 'development'
+    process.env.GUREN_DOCS = '1'
+    const app = await bootWorkspaceApp()
+    await mkdir(join(dir!, 'node_modules'))
+    const asset = () => app.fetch(new Request(`http://localhost${DOCS_VIEWER_PATH}/assets/mermaid.js`), loopbackEnv)
+
+    const missing = await asset()
+    expect(missing.status).toBe(404)
+    expect((await missing.json()).message).toContain('bun add -d mermaid')
+
+    await mkdir(join(dir!, 'node_modules/mermaid/dist'), { recursive: true })
+    await writeFile(join(dir!, 'node_modules/mermaid/package.json'), '{"name":"mermaid","version":"11.0.0"}', 'utf8')
+    await writeFile(join(dir!, 'node_modules/mermaid/dist/mermaid.min.js'), 'window.mermaid = {}', 'utf8')
+
+    const installed = await asset()
+    expect(installed.status).toBe(200)
+    expect(installed.headers.get('content-type')).toBe('text/javascript')
+    expect(await installed.text()).toBe('window.mermaid = {}')
+  })
+
   test('rejects cross-origin requests to the mounted endpoint', async () => {
     process.env.NODE_ENV = 'development'
     process.env.GUREN_DOCS = '1'

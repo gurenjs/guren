@@ -57,7 +57,7 @@ Keep the dev server running and open [http://localhost:3333/_guren/docs](http://
 
 ![The local Docs Graph viewer: document, spec, and code nodes joined by edges, with concept and relation counts and node-kind filters in the top-left](../../images/docs-graph.png)
 
-The viewer is read-only, enabled by `GUREN_DOCS=1` in the scaffold's `dev` script, restricted to your local machine, and never mounted in production. The default full-stack scaffold includes Mermaid for generated diagrams; without it, diagram source remains readable as a code block. The [Spec-Anchored Development guide](./spec-anchored.md) explains how to generate spec views and connect decisions to code.
+The viewer is read-only, enabled by `GUREN_DOCS=1` in the scaffold's `dev` script, restricted to your local machine, and never mounted in production. A new app does not include Mermaid, so generated diagrams show as their source until you add it with `bun add -d mermaid`. The [Spec-Anchored Development guide](./spec-anchored.md) explains how to generate spec views and connect decisions to code.
 
 ### Add your first feature
 
