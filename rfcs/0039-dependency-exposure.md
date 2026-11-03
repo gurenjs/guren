@@ -166,11 +166,19 @@ For existing apps:
   choice and passes.
 - `guren upgrade` offers to add the block, as it does for other configuration
   autofixes. `guren doctor --fix` stays limited to generated files.
-- An app's exclusion list is the closure of the first-party packages it
+- ~~An app's exclusion list is the closure of the first-party packages it
   installs, which grows past the template's set once it adds a plugin. `guren
   upgrade` (which moves every installed `@guren/*` dependency), `guren add` and
   `guren plugin` rewrite the list from the installed manifests, and
-  `supply-chain-cooldown` reports a first-party package missing from it.
+  `supply-chain-cooldown` reports a first-party package missing from it.~~
+  **Amended in implementation:** the scaffold lists every published `@guren`
+  package, so `guren add` and `guren plugin` leave the file alone.
+  `supply-chain-cooldown` reports any `@guren` package the app declares or has
+  under `node_modules/@guren` that the list leaves out, and `guren upgrade` adds
+  it, or writes the whole block when the app has no `bunfig.toml` or no
+  `[install]` table. An `[install]` table the scaffold did not write, or a list
+  written other than one entry per line, is left to the author with the line to
+  add (`packages/cli/src/release-age.ts`).
 
 The Renovate `minimumReleaseAge` and Dependabot `cooldown` settings govern bot
 PRs only. The bunfig gate also covers `bun add` from a person or an agent, so
