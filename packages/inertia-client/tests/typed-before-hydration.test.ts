@@ -21,7 +21,7 @@ const doc = {
 type Control = Parameters<typeof typedValueOf>[0]
 
 const input = (fields: Partial<Control>): Control => ({ tagName: 'INPUT', type: 'text', value: '', defaultValue: '', ownerDocument: doc, ...fields })
-const option = (defaultSelected = false, disabled = false) => ({ defaultSelected, disabled })
+const option = (value: string, defaultSelected = false, disabled = false) => ({ value, defaultSelected, disabled })
 
 function field(contract: FieldContract, value: unknown, as?: 'hidden') {
   const writes: unknown[] = []
@@ -29,7 +29,9 @@ function field(contract: FieldContract, value: unknown, as?: 'hidden') {
   return { state, writes }
 }
 
-const typed = (fields: Partial<TypedValue>): TypedValue => ({ kind: 'input', type: 'text', value: '', valueAsNumber: Number.NaN, checked: false, files: null, ...fields })
+const typed = (fields: Partial<TypedValue>): TypedValue => ({
+  kind: 'input', type: 'text', value: '', valueAsNumber: Number.NaN, checked: false, files: null, markup: '', optionValues: [], ...fields,
+})
 
 describe('typedValueOf', () => {
   it('reads a control whose value left its markup', () => {
@@ -48,13 +50,19 @@ describe('typedValueOf', () => {
   })
 
   it('judges a select by the option its markup selects, or the first enabled one', () => {
-    const select = (selectedIndex: number, options: { defaultSelected: boolean; disabled: boolean }[]) =>
-      typedValueOf({ tagName: 'SELECT', value: String(selectedIndex), selectedIndex, options, ownerDocument: doc })
+    const select = (selectedIndex: number, options: ReturnType<typeof option>[], size?: number) =>
+      typedValueOf({ tagName: 'SELECT', value: String(selectedIndex), selectedIndex, options, size, ownerDocument: doc })
 
-    expect(select(1, [option(), option(true)])).toBeUndefined()
-    expect(select(0, [option(), option(true)])).toMatchObject({ kind: 'select', value: '0' })
-    expect(select(1, [option(false, true), option()])).toBeUndefined()
-    expect(select(2, [option(false, true), option(), option()])).toMatchObject({ kind: 'select' })
+    expect(select(1, [option(''), option('0', true)])).toBeUndefined()
+    expect(select(0, [option(''), option('0', true)])).toMatchObject({ kind: 'select', markup: '0', optionValues: ['', '0'] })
+    expect(select(1, [option('', false, true), option('0')])).toBeUndefined()
+    expect(select(2, [option('', false, true), option('0'), option('1')])).toMatchObject({ kind: 'select', markup: '0' })
+    expect(select(-1, [option('0'), option('1')], 4)).toBeUndefined()
+  })
+
+  it('skips an option a disabled group holds', () => {
+    const grouped = { ...option('0'), matches: (selectors: string) => selectors === ':disabled' }
+    expect(typedValueOf({ tagName: 'SELECT', value: '1', selectedIndex: 1, options: [grouped, option('1')], ownerDocument: doc })).toBeUndefined()
   })
 
   it('reads no radio, hidden or button input, and nothing that is not a control', () => {
@@ -85,19 +93,29 @@ describe('adoptTypedValue', () => {
 
     adoptTypedValue(text.state, typed({ value: 'typed' }))
     adoptTypedValue(number.state, typed({ type: 'number', value: '7', valueAsNumber: 7 }))
-    adoptTypedValue(checkbox.state, typed({ kind: 'checkbox', type: 'checkbox', checked: true }))
-    adoptTypedValue(select.state, typed({ kind: 'select', type: 'select-one', value: '1' }))
+    adoptTypedValue(checkbox.state, typed({ kind: 'checkbox', type: 'checkbox', checked: true, markup: false }))
+    adoptTypedValue(select.state, typed({ kind: 'select', type: 'select-one', value: '1', markup: '0', optionValues: ['', '0', '1'] }))
 
     expect([text.writes, number.writes, checkbox.writes, select.writes]).toEqual([['typed'], [7], [true], [20]])
+  })
+
+  it('leaves a control an app rendered its own way to the app', () => {
+    const text = field({ type: 'string', required: true }, 'stored')
+    const select = field({ type: 'string', required: true, enum: ['draft', 'published'] }, 'draft')
+
+    adoptTypedValue(text.state, typed({ value: 'typed', markup: 'Stored (formatted)' }))
+    adoptTypedValue(select.state, typed({ kind: 'select', type: 'select-one', value: 'published', markup: 'draft', optionValues: ['draft', 'published'] }))
+
+    expect([...text.writes, ...select.writes]).toEqual([])
   })
 
   it('ignores a value read off another kind of control, and a hidden field', () => {
     const text = field({ type: 'string', required: true }, 'stored')
     const hidden = field({ type: 'string', required: true }, 'stored', 'hidden')
 
-    adoptTypedValue(text.state, typed({ type: 'email', value: 'a@example.com' }))
-    adoptTypedValue(text.state, typed({ kind: 'select', type: 'select-one', value: '0' }))
-    adoptTypedValue(hidden.state, typed({ value: 'other' }))
+    adoptTypedValue(text.state, typed({ type: 'email', value: 'a@example.com', markup: 'stored' }))
+    adoptTypedValue(text.state, typed({ kind: 'select', type: 'select-one', value: '0', markup: 'stored' }))
+    adoptTypedValue(hidden.state, typed({ value: 'other', markup: 'stored' }))
 
     expect([...text.writes, ...hidden.writes]).toEqual([])
   })
