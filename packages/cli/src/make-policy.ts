@@ -31,8 +31,12 @@ function policyTemplate(className: string): string {
     className,
     declarations: `interface ${modelName}Like {\n  userId?: string | number\n}\n`,
     abilities: [
-      { signature: 'viewAny(_user: AuthUser | null)', body: 'return true' },
-      { signature: `view(_user: AuthUser | null, _${variableName}: ${modelName}Like)`, body: 'return true' },
+      { comment: 'Signed-in users only. Return true to let guests list them too.', signature: 'viewAny(user: AuthUser | null)', body: 'return user !== null' },
+      {
+        comment: `Signed-in users only. Return true for guests too, or compare user.id with ${variableName}.userId, as update() does, for the owner only.`,
+        signature: `view(user: AuthUser | null, _${variableName}: ${modelName}Like)`,
+        body: 'return user !== null',
+      },
       { signature: 'create(user: AuthUser | null)', body: 'return user !== null' },
       { signature: `update(user: AuthUser | null, ${variableName}: ${modelName}Like)`, body: `return user !== null && user.id === ${variableName}.userId` },
       { signature: `delete(user: AuthUser | null, ${variableName}: ${modelName}Like)`, body: `return user !== null && user.id === ${variableName}.userId` },

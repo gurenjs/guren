@@ -198,7 +198,7 @@ Guren では、認可のルールを**ポリシー**に書きます。ポリシ�
 bunx guren make:policy Post
 ```
 
-生成された骨組みは所有者の列を `userId` と想定していますが、このアプリでは `authorId` です。`app/Policies/PostPolicy.ts` を次の内容に置き換えてください。
+生成された骨組みは所有者の列を `userId` と想定していますが、このアプリでは `authorId` です。また、骨組みはゲストに投稿を見せませんが、このブログの投稿は誰でも読めるものなので、`viewAny` と `view` は `true` を返すようにします。`app/Policies/PostPolicy.ts` を次の内容に置き換えてください。
 
 ```ts file=app/Policies/PostPolicy.ts
 import { Policy, type AuthUser } from '@guren/core'
