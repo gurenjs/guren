@@ -7,7 +7,6 @@
  * hence running after the data generator. An app with no derivable tools gets no
  * file, and a stale one is removed.
  */
-import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { deriveAgentTools, type DerivedAgentTool, type RouteDefinition } from '@guren/server'
@@ -175,9 +174,12 @@ export async function generateAgentTypes(
  */
 async function ensureMcpAppPagesModule(appRoot: string): Promise<void> {
   const file = resolve(appRoot, MCP_APP_MODULE)
-  if (existsSync(file)) return
   await mkdir(dirname(file), { recursive: true })
-  await writeFile(file, renderPagesModule({}))
+  try {
+    await writeFile(file, renderPagesModule({}), { flag: 'wx' })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  }
 }
 
 export interface BuildAgentToolsOptions {
