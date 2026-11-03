@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { CheckStatus } from '../src/check-result'
-import type { PlanAppDetail } from '../src/plan/app-detail'
 import { loadPlanAppState, type PlanAppState } from '../src/plan/app-state'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { validatePlan, type PlanCheckResult } from '../src/plan/validate'
@@ -880,10 +879,9 @@ describe('behaviours whose test may pass before the implementation exists', () =
     return draft
   }
 
-  /** The application registering `comments.index` with `middleware`, read with detail as `plan:approve` reads a plan that alters anything. */
-  function registered(middleware: string[]): PlanAppState {
-    const route = { name: 'comments.index', method: 'GET', path: '/comments', action: 'CommentController.index', middleware, hasInlineMiddleware: false, bindings: {}, module: null, contractSchemas: [] }
-    return appState({ detail: { routes: [route] } as unknown as PlanAppDetail })
+  /** The application registering `comments.index` with `middleware`, as `loadPlanAppState()` reads it for `plan:render`. */
+  function registered(middleware: string[], extra: { hasInlineMiddleware?: boolean; authenticationRequired?: boolean } = {}): PlanAppState {
+    return appState({ routes: [{ name: 'comments.index', method: 'GET', path: '/comments', middleware, hasInlineMiddleware: false, authenticationRequired: false, ...extra }] })
   }
 
   test('should warn about a behaviour on a route an earlier task mounts, and send it to that task rather than to the mark', () => {
@@ -916,12 +914,23 @@ describe('behaviours whose test may pass before the implementation exists', () =
     const result = expectResult(validatePlan(marked, registered([])), 'plan:already-holds', 'AC-comments-5', 'warn')
 
     expect(result.message).toBe('Behaviour "AC-comments-5" is marked "alreadyHolds", but the plan puts authentication on "comments.index", which the application\'s route does not apply now, so its test fails today.')
-    // Behind authentication already, or read without the detail that says, the mark stands.
+    // Behind authentication already, by name or by a group's declared capability, or not read as one route, the mark stands.
     expect(find(validatePlan(marked, registered(['auth'])), 'plan:already-holds')).toBeUndefined()
+    expect(find(validatePlan(marked, registered([], { authenticationRequired: true })), 'plan:already-holds')).toBeUndefined()
+    expect(find(validatePlan(marked, registered([], { hasInlineMiddleware: true })), 'plan:already-holds')).toBeUndefined()
     expect(find(validatePlan(marked, appState()), 'plan:already-holds')).toBeUndefined()
     // The action's own middleware is part of the guard the plan puts on the route.
     const throughAction = guestIndex({ kind: 'alter' }, { alreadyHolds: true })
     throughAction.routes.find((route) => route.id === 'route.comments.index')!.middleware = []
     expect(find(validatePlan(throughAction, registered([])), 'plan:already-holds', 'AC-comments-5')).toBeDefined()
+  })
+
+  test('should warn about the same mark on an existing route whose altered action adds the authentication, and not where the plan restates it', () => {
+    const marked = guestIndex({ kind: 'existing' }, { alreadyHolds: true })
+    marked.routes.find((route) => route.id === 'route.comments.index')!.middleware = []
+    marked.controllers[0]!.actions.find((action) => action.id === 'action.comments.index')!.change = { kind: 'alter' }
+
+    expect(expectResult(validatePlan(marked, registered([])), 'plan:already-holds', 'AC-comments-5', 'warn').message).toContain('the plan puts authentication on "comments.index"')
+    expect(find(validatePlan(guestIndex({ kind: 'existing' }, { alreadyHolds: true }), registered(['auth'])), 'plan:already-holds')).toBeUndefined()
   })
 })

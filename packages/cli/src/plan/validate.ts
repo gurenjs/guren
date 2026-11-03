@@ -846,17 +846,19 @@ function checkRedRuns(plan: PlanDraft, app: PlanAppState, results: PlanCheckResu
 }
 
 /**
- * Whether the plan puts authentication on a route that lacks it now, read from the registered route
- * the detail holds (`plan:approve` reads it for a plan that alters anything). `false` without that
- * evidence: an `existing` route, no detail, a route that is not there once, or an inline middleware.
+ * Whether the plan puts authentication on a route that lacks it now: the route's or its action's
+ * middleware authenticates, and the registered route (`loadPlanAppState()` reads its middleware) does
+ * not. `false` without that evidence: no route read once by its current name, an inline middleware.
+ * An existing route counts too, since the scaffold writes an altered action's middleware onto it.
  */
 function addsAuthentication(route: PlanRoute, action: PlanAction | undefined, app: PlanAppState): boolean {
-  if (route.change.kind === 'existing' || !app.detail || isUnreadable(app.detail.routes)) return false
+  if (isUnreadable(app.routes)) return false
   if (!classifyMiddleware([...route.middleware, ...(action?.authorization.middleware ?? [])]).authenticates) return false
   const name = route.change.kind === 'rename' ? route.change.from : route.name
-  const registered = app.detail.routes.filter((candidate) => candidate.name === name)
-  if (registered.length !== 1 || registered[0]!.hasInlineMiddleware) return false
-  return !classifyMiddleware(registered[0]!.middleware).authenticates
+  const registered = app.routes.filter((candidate) => candidate.name === name)
+  const found = registered.length === 1 ? registered[0]! : undefined
+  if (!found?.middleware || found.hasInlineMiddleware || found.authenticationRequired) return false
+  return !classifyMiddleware(found.middleware).authenticates
 }
 
 function checkApiOnlyViews(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {

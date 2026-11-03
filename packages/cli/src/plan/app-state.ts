@@ -102,6 +102,12 @@ export interface PlanAppRoute {
   name?: string
   method: string
   path: string
+  /** The aliases and groups the registered route names (`RouteDefinition.middlewareNames`); absent where no route was read. */
+  middleware?: string[]
+  /** A route-local middleware with no name, which may guard the route unseen. */
+  hasInlineMiddleware?: boolean
+  /** A middleware on its chain, group-scoped ones included, declares required authentication. */
+  authenticationRequired?: boolean
 }
 
 export interface PlanAppState {
@@ -174,7 +180,16 @@ export async function loadPlanAppState(
     policies,
     pages,
     validators: validators.names,
-    routes: isUnreadable(routes.routes) ? routes.routes : routes.entries.map(({ node, route }) => ({ name: route.name, method: node.route.method.toUpperCase(), path: node.route.path })),
+    routes: isUnreadable(routes.routes)
+      ? routes.routes
+      : routes.entries.map(({ node, route }) => ({
+          name: route.name,
+          method: node.route.method.toUpperCase(),
+          path: node.route.path,
+          middleware: route.middlewareNames ?? [],
+          hasInlineMiddleware: route.hasInlineMiddleware === true,
+          authenticationRequired: route.capabilities?.authentication?.mode === 'required',
+        })),
     tables,
     apiOnly,
   }
