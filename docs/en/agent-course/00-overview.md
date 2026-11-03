@@ -30,6 +30,8 @@ The agent never reports its own progress. `guren plan:verify` reads it from the 
 
 Every plan goes through the same five stages. Chapters 2 to 5 take the first plan through them, chapters 6 and 7 the second.
 
+<!-- interactive: course-loop -->
+
 ```mermaid
 flowchart LR
   Ask["1. Ask<br/>a request, then answers"]

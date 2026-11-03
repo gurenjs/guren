@@ -76,6 +76,55 @@
   --animate-gradient-shift: gradient-shift 8s ease infinite;
 }
 
+/* inline: the utilities read --home-* where they are used, so a ground class
+   on a page wrapper re-themes everything inside it. */
+@theme inline {
+  --color-home-ground: var(--home-ground);
+  --color-home-raised: var(--home-raised);
+  --color-home-line: var(--home-line);
+  --color-home-line-strong: var(--home-line-strong);
+  --color-home-text: var(--home-text);
+  --color-home-text-2: var(--home-text-2);
+  --color-home-ink: var(--home-ink);
+  --color-home-light: var(--home-light);
+  --color-home-light-text: var(--home-light-text);
+  --color-home-light-text-2: var(--home-light-text-2);
+  --color-home-light-line: var(--home-light-line);
+}
+
+/* The home and /start ground: a warm near-black, so crimson is the signal
+   rather than the surface. Each text-2 must keep 4.5:1 on its own ground. */
+:root {
+  --home-ground: #141112;
+  --home-raised: #1c1819;
+  --home-line: rgb(255 240 240 / 0.08);
+  --home-line-strong: rgb(255 240 240 / 0.16);
+  --home-text: #f5f1f1;
+  --home-text-2: #aba2a3;
+  --home-ink: #0c0a0a;
+
+  /* the one light band */
+  --home-light: #f5f2f1;
+  --home-light-text: #1c1617;
+  --home-light-text-2: #5d5354;
+  --home-light-line: rgb(28 22 23 / 0.1);
+}
+
+/* Rays behind the agent terminal. Static, so reduced motion needs no case. */
+.home-burst {
+  background:
+    radial-gradient(60% 90% at 50% 100%, rgb(255 60 40 / 0.32), transparent 70%),
+    repeating-conic-gradient(from -90deg at 50% 115%, rgb(255 90 60 / 0.11) 0deg 1.2deg, transparent 1.2deg 5deg);
+  mask-image: linear-gradient(to bottom, transparent, #000 35%);
+}
+
+/* The frame's dot field behind the hero name. */
+.home-dots {
+  background-image: radial-gradient(circle at center, var(--home-line-strong) 1px, transparent 1.5px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(70% 70% at 50% 50%, #000 30%, transparent 100%);
+}
+
 /* The home hero's 紅蓮 waits hidden for BurningName to burn it in. If the
    script never runs, the fallback shows it anyway; reduced motion shows it
    at once, which is also what the component then settles on. */
@@ -130,9 +179,9 @@
 @keyframes vg-slide { from { opacity: 0; transform: translateX(-5.5rem); } 25% { opacity: 1; } }
 @keyframes vg-light {
   from {
-    border-color: color-mix(in srgb, var(--color-crimson-50) 15%, transparent);
+    border-color: var(--home-line-strong);
     background-color: transparent;
-    color: color-mix(in srgb, var(--color-smoke) 60%, transparent);
+    color: var(--home-text-2);
   }
 }
 
@@ -633,8 +682,8 @@ body.docs-theme {
   display: none;
 }
 
-.plan-lifecycle {
-  --plan-gap: 0.75rem;
+/* Shared by every interactive diagram (components/diagrams/); each adds only its layout. */
+.doc-diagram {
   margin: 1.5rem 0;
   padding: 1.25rem;
   border: 1px solid var(--docs-border-soft);
@@ -642,7 +691,7 @@ body.docs-theme {
   background: var(--docs-surface-raised);
 }
 
-.plan-lifecycle-head {
+.doc-diagram-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -651,13 +700,13 @@ body.docs-theme {
   margin-bottom: 1rem;
 }
 
-.docs-content .plan-lifecycle-intro {
+.docs-content .doc-diagram-intro {
   margin: 0;
   font-size: 0.875rem;
   color: var(--docs-text-secondary);
 }
 
-.plan-lifecycle-play {
+.doc-diagram-play {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -669,26 +718,114 @@ body.docs-theme {
   font-weight: 600;
 }
 
-.plan-lifecycle-play:hover {
+.doc-diagram-play:hover {
   background: var(--g-accent-down);
+}
+
+.doc-diagram button:focus-visible {
+  outline: 2px solid var(--docs-accent);
+  outline-offset: 2px;
+}
+
+.docs-content .doc-diagram-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.docs-content .doc-diagram-list > li {
+  margin: 0;
+  padding: 0;
+}
+
+.doc-diagram-node {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--docs-border-strong);
+  border-radius: var(--g-r-ctl);
+  background: var(--docs-surface-panel);
+  color: var(--docs-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+[data-state='done'] > .doc-diagram-node {
+  border-color: var(--docs-accent);
+}
+
+[data-state='current'] > .doc-diagram-node {
+  border-color: var(--docs-accent);
+  background: var(--docs-accent-tint);
+  box-shadow: 0 0 0 3px var(--docs-accent-tint);
+}
+
+.docs-content .doc-diagram-node code,
+.docs-content .doc-diagram-detail-title code {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--docs-heading);
+  font-weight: 600;
+  font-size: 0.875rem;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.doc-diagram-index {
+  font-size: 0.75rem;
+  color: var(--docs-text-muted);
+}
+
+.doc-diagram-chip {
+  padding: 0.05rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--docs-text-secondary);
+  border-radius: 999px;
+  background: var(--docs-surface-panel);
+  border: 1px solid var(--docs-border-soft);
+}
+
+.doc-diagram-chip[data-tone='accent'] {
+  border-color: var(--docs-accent);
+  color: var(--docs-accent-strong);
+}
+
+.doc-diagram-chip[data-tone='ok'] {
+  border-color: var(--g-ok-chip);
+  color: var(--g-ok);
+}
+
+.doc-diagram-detail {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--docs-border-soft);
+}
+
+.docs-content .doc-diagram-detail p {
+  margin: 0 0 0.5rem;
+}
+
+.doc-diagram-detail-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .doc-diagram-node {
+    transition: background-color 0.3s, border-color 0.3s, box-shadow 0.3s, color 0.3s;
+  }
+}
+
+.plan-lifecycle {
+  --plan-gap: 0.75rem;
 }
 
 .docs-content .plan-lifecycle-track {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--plan-gap);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.docs-content .plan-lifecycle-track > li {
-  margin: 0;
-  padding: 0;
-}
-
-.docs-content .plan-lifecycle-track > li::marker {
-  content: none;
 }
 
 .plan-lifecycle-stage {
@@ -707,56 +844,15 @@ body.docs-theme {
 
 .plan-lifecycle-node {
   display: flex;
-  width: 100%;
   height: 100%;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.25rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--docs-border-strong);
-  border-radius: var(--g-r-ctl);
-  background: var(--docs-surface-panel);
-  color: var(--docs-text-primary);
-  text-align: left;
-  cursor: pointer;
-}
-
-.docs-content .plan-lifecycle-node code,
-.docs-content .plan-lifecycle-detail-title code {
-  padding: 0;
-  background: none;
-  border: 0;
-  color: var(--docs-heading);
-  font-weight: 600;
-  font-size: 0.875rem;
-  overflow-wrap: normal;
-  word-break: normal;
-}
-
-.plan-lifecycle-index {
-  font-size: 0.75rem;
-  color: var(--docs-text-muted);
 }
 
 .plan-lifecycle-actor {
   font-size: 0.75rem;
   color: var(--docs-text-secondary);
-}
-
-.plan-lifecycle-stage[data-state='done'] .plan-lifecycle-node {
-  border-color: var(--docs-accent);
-}
-
-.plan-lifecycle-stage[data-state='current'] .plan-lifecycle-node {
-  border-color: var(--docs-accent);
-  background: var(--docs-accent-tint);
-  box-shadow: 0 0 0 3px var(--docs-accent-tint);
-}
-
-.plan-lifecycle-node:focus-visible,
-.plan-lifecycle-play:focus-visible {
-  outline: 2px solid var(--docs-accent);
-  outline-offset: 2px;
 }
 
 .plan-lifecycle-loop {
@@ -773,43 +869,6 @@ body.docs-theme {
 .plan-lifecycle-loop[data-active='true'] {
   border-color: var(--docs-accent);
   color: var(--docs-accent-strong);
-}
-
-.plan-lifecycle-detail {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--docs-border-soft);
-}
-
-.docs-content .plan-lifecycle-detail p {
-  margin: 0 0 0.5rem;
-}
-
-.plan-lifecycle-detail-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-
-.plan-lifecycle-detail-title .plan-lifecycle-actor,
-.plan-lifecycle-step {
-  padding: 0.05rem 0.5rem;
-  font-size: 0.75rem;
-  color: var(--docs-text-secondary);
-  border-radius: 999px;
-  background: var(--docs-surface-panel);
-  border: 1px solid var(--docs-border-soft);
-}
-
-.plan-lifecycle-detail-title .plan-lifecycle-actor[data-actor='person'] {
-  border-color: var(--docs-accent);
-  color: var(--docs-accent-strong);
-}
-
-.plan-lifecycle-detail-title .plan-lifecycle-actor[data-actor='agent'] {
-  border-color: var(--g-ok-chip);
-  color: var(--g-ok);
 }
 
 .docs-content .plan-lifecycle-writes {
@@ -849,10 +908,9 @@ body.docs-theme {
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .plan-lifecycle-node,
   .plan-lifecycle-stage::after,
   .plan-lifecycle-loop {
-    transition: background-color 0.3s, border-color 0.3s, box-shadow 0.3s, color 0.3s;
+    transition: background-color 0.3s, border-color 0.3s, color 0.3s;
   }
 
   .plan-lifecycle-stage[data-state='current'] .plan-lifecycle-node {
@@ -864,6 +922,234 @@ body.docs-theme {
   from {
     transform: translateY(-3px);
     box-shadow: 0 0 0 6px var(--docs-accent-tint);
+  }
+}
+
+.doc-diagram-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.doc-diagram-switch {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--docs-border-strong);
+  border-radius: var(--g-r-ctl);
+  background: var(--docs-surface-panel);
+}
+
+.doc-diagram-switch button {
+  padding: 0.35rem 0.75rem;
+  border-radius: calc(var(--g-r-ctl) - 2px);
+  font-size: 0.875rem;
+  color: var(--docs-text-secondary);
+}
+
+.doc-diagram-switch button[aria-pressed='true'] {
+  background: var(--docs-accent-tint);
+  color: var(--docs-accent-strong);
+  font-weight: 600;
+}
+
+.docs-content .doc-diagram-rows {
+  --chip-col: 9rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+/* The positioned parent makes each row's offsetTop list-relative (MiddlewareOrder.tsx). */
+.docs-content .middleware-order-list {
+  --chip-col: 5.5rem;
+  position: relative;
+}
+
+.doc-diagram-row > .doc-diagram-node {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: 'chip note' 'code code';
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+
+.doc-diagram-row[data-muted='true'] > .doc-diagram-node {
+  border-style: dashed;
+}
+
+.doc-diagram-row .doc-diagram-index {
+  display: none;
+  grid-area: index;
+}
+
+.doc-diagram-row .doc-diagram-chip {
+  grid-area: chip;
+  justify-self: start;
+}
+
+.docs-content .doc-diagram-row code,
+.doc-diagram-row .doc-diagram-label {
+  grid-area: code;
+}
+
+.doc-diagram-label {
+  color: var(--docs-heading);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.doc-diagram-row .doc-diagram-note {
+  grid-area: note;
+  justify-self: end;
+}
+
+.doc-diagram-note {
+  font-size: 0.75rem;
+  color: var(--docs-text-secondary);
+}
+
+@media (min-width: 640px) {
+  .doc-diagram-row > .doc-diagram-node {
+    grid-template-columns: 1.5rem var(--chip-col) minmax(0, 1fr) auto;
+    grid-template-areas: 'index chip code note';
+  }
+
+  .doc-diagram-row .doc-diagram-index {
+    display: block;
+  }
+}
+
+/* ─── File trees: ```tree fences, drawn by app/Services/doc-tree.ts ─── */
+.docs-content pre.doc-tree {
+  white-space: normal;
+  word-break: normal;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--docs-border-soft);
+  border-radius: var(--g-r-card);
+  background: var(--docs-surface-raised);
+  color: var(--docs-text-primary);
+  font-family: var(--font-family-display);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.docs-content .doc-tree ul {
+  display: block;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.docs-content .doc-tree ul ul {
+  margin-left: 1.05rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--docs-border-soft);
+}
+
+.docs-content .doc-tree li {
+  padding: 0;
+  line-height: inherit;
+}
+
+.doc-tree-row {
+  display: flex;
+  align-items: center;
+  column-gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--g-r-ctl);
+}
+
+summary.doc-tree-row {
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.doc-tree-row::-webkit-details-marker {
+  display: none;
+}
+
+summary.doc-tree-row:hover {
+  background: color-mix(in srgb, var(--docs-text-primary) 6%, transparent);
+}
+
+summary.doc-tree-row:focus-visible {
+  outline: 2px solid var(--docs-accent-strong);
+  outline-offset: -2px;
+}
+
+/* a leaf has no chevron, so it starts where a folder's icon does */
+.doc-tree-row--leaf {
+  padding-left: 2rem;
+}
+
+.doc-tree-chevron,
+.doc-tree-icon,
+.doc-tree-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.doc-tree-chevron {
+  width: 1rem;
+  color: var(--docs-text-muted);
+  transition: transform 150ms ease;
+}
+
+details[open] > summary .doc-tree-chevron {
+  transform: rotate(90deg);
+}
+
+.doc-tree svg {
+  width: 100%;
+  height: 100%;
+}
+
+.doc-tree-icon {
+  color: var(--docs-text-secondary);
+}
+
+.doc-tree-badge {
+  font-family: var(--g-font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--docs-text-secondary);
+}
+
+.doc-tree-badge--ts { color: #2f6db5; }
+.doc-tree-badge--js { color: #a16207; }
+:root.dark .doc-tree-badge--ts { color: #7aaef0; }
+:root.dark .doc-tree-badge--js { color: #f6c177; }
+
+.doc-tree-name {
+  flex-shrink: 0;
+  color: var(--docs-heading);
+}
+
+/* a long note wraps inside its own right-aligned column */
+.doc-tree-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: 1.5rem;
+  color: var(--docs-text-secondary);
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+/* narrow screens: the note drops under the name instead of squeezing it */
+@media (max-width: 640px) {
+  .doc-tree-row {
+    flex-wrap: wrap;
+  }
+
+  .doc-tree-note {
+    flex-basis: 100%;
+    margin-left: 1.6rem;
+    padding-left: 0;
+    text-align: left;
   }
 }
 
@@ -907,6 +1193,40 @@ body.docs-theme {
 .docs-content .shiki,
 .docs-content .shiki span {
   color: var(--shiki-dark) !important;
+}
+
+/* Lines a `highlight=` fence attribute names (MarkdownRenderer.ts). The band
+   spans the block's padding (1.25rem, .shiki above). The surface is ink in both
+   themes, so one tint serves light and dark. */
+.docs-content .shiki .line.highlighted {
+  display: inline-block;
+  box-sizing: border-box;
+  width: calc(100% + 2.5rem);
+  margin: 0 -1.25rem;
+  padding: 0 1.25rem;
+  /* An empty line has no inline content to give it height. */
+  min-height: 1lh;
+  background: rgba(235, 111, 146, 0.14);
+  box-shadow: inset 3px 0 0 var(--g-accent);
+}
+
+/* The rest dims only where a pointer can hover it back to full strength; on
+   touch nothing could undo it, so the band alone marks the lines there. */
+@media (hover: hover) {
+  .docs-content .shiki.has-highlighted .line:not(.highlighted) {
+    opacity: 0.55;
+  }
+
+  .docs-content .shiki.has-highlighted:hover .line,
+  .docs-content .shiki.has-highlighted:focus-within .line {
+    opacity: 1;
+  }
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .docs-content .shiki.has-highlighted .line {
+    transition: opacity 0.2s;
+  }
 }
 
 /* Neutral, so a code span never reads as a link: links own the accent. */
@@ -1195,14 +1515,25 @@ pre:hover .docs-copy-btn,
 }
 
 /* ─── Doc card hover ─── */
-.docs-card {
-  transition: all 0.2s ease;
+/* ─── Docs index: the three ways in, and the directory of pages ─── */
+.docs-entry,
+.docs-index-link {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: background-color 150ms ease, outline-color 150ms ease;
 }
 
-.docs-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--docs-shadow-floating);
-  border-color: var(--docs-accent-strong) !important;
+.docs-entry:hover {
+  background-color: var(--docs-surface-raised);
+}
+
+.docs-index-link:hover {
+  background-color: var(--docs-accent-tint);
+}
+
+.docs-entry:focus-visible,
+.docs-index-link:focus-visible {
+  outline-color: var(--docs-accent-strong);
 }
 
 /* Color-mode toggle icons on server-rendered content pages (app/View/Header):

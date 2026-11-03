@@ -375,7 +375,7 @@ Add the create form for posts. `GET /posts/create`, named `posts.create`, render
 
 **手元にエージェントが無い場合は、** 次の 3 ファイルを書きます。コントローラーにはアクションが 2 つ増えます。
 
-```ts file=app/Http/Controllers/PostController.ts fallback
+```ts file=app/Http/Controllers/PostController.ts fallback highlight=2,6-9,28-30,32-36
 import { Controller } from '@guren/core'
 import { z } from 'zod'
 import { pages } from '@/.guren/pages.gen'

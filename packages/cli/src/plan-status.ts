@@ -71,7 +71,7 @@ export async function planStatusFile(planPath: string, options: PlanStatusFileOp
   } satisfies Pick<PlanStatusReport, 'reportVersion' | 'plan'>
   const judged = { ...(hasBaseline(plan) ? { freshness: judgeFreshness(plan, app) } : {}), ...(approval ? { approval } : {}) }
   if (options.appRoot === undefined) return { ...head, ...status, ...judged }
-  const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivation, { waivers: options.waivers })
+  const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivation, { waivers: options.waivers, approval })
   return { ...head, ...overlaid.status, verification: overlaid.verification, ...judged }
 }
 

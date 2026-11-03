@@ -37,6 +37,12 @@ const PlanApprovalSchema = z.object({
    * hash, so a re-approval can add the ones missing; it never replaces one.
    */
   readings: z.object({ baseline: z.string(), properties: z.array(PlanPropertyReadingSchema) }).optional(),
+  /**
+   * The elements no behaviour can reach (`planElementsWithoutBehaviour()`), which approving
+   * accepted as complete on their step's verified run alone (RFC 0030 §4). Outside the hash and
+   * never carried to another one; absent on an approval recorded before plan:approve wrote it.
+   */
+  acceptedWithoutBehaviour: z.array(z.string()).optional(),
 })
 
 const PlanApprovalsSchema = z.object({
@@ -73,14 +79,15 @@ export function approvalAt(approvals: PlanApprovals, hash: string): PlanApproval
 
 /**
  * Appends in the order approvals were given. A hash already approved keeps its entry, and gains
- * only the readings `approval` carries that it lacks; nothing is written when it lacks none.
+ * only the readings and accepted elements `approval` carries that it lacks; nothing is written
+ * when it lacks none.
  */
 export async function recordPlanApproval(
   planPath: string,
   approvals: PlanApprovals,
   approval: PlanApproval,
   options: { dryRun?: boolean } = {},
-): Promise<{ existing?: PlanApproval; readingsAdded: PlanPropertyReading[] }> {
+): Promise<{ existing?: PlanApproval; readingsAdded: PlanPropertyReading[]; acceptedAdded: string[] }> {
   const path = planApprovalsPath(planPath)
   const write = async (entries: PlanApproval[]) => {
     if (!options.dryRun) await writeFileAtomic(path, `${JSON.stringify({ ...approvals, approvals: entries }, null, 2)}\n`)
@@ -88,14 +95,20 @@ export async function recordPlanApproval(
   const existing = approvalAt(approvals, approval.hash)
   if (!existing) {
     await write([...approvals.approvals, approval])
-    return { readingsAdded: approval.readings?.properties ?? [] }
+    return { readingsAdded: approval.readings?.properties ?? [], acceptedAdded: approval.acceptedWithoutBehaviour ?? [] }
   }
   const held = existing.readings?.properties ?? []
-  const added = (approval.readings?.properties ?? []).filter((reading) => !held.some((entry) => sameReading(entry, reading)))
-  if (!approval.readings || added.length === 0) return { existing, readingsAdded: [] }
-  const updated: PlanApproval = { ...existing, readings: { baseline: approval.readings.baseline, properties: [...held, ...added] } }
+  const added = approval.readings ? approval.readings.properties.filter((reading) => !held.some((entry) => sameReading(entry, reading))) : []
+  const accepted = existing.acceptedWithoutBehaviour ?? []
+  const acceptedAdded = (approval.acceptedWithoutBehaviour ?? []).filter((id) => !accepted.includes(id))
+  if (added.length === 0 && acceptedAdded.length === 0) return { existing, readingsAdded: [], acceptedAdded: [] }
+  const updated: PlanApproval = {
+    ...existing,
+    ...(added.length > 0 && approval.readings ? { readings: { baseline: approval.readings.baseline, properties: [...held, ...added] } } : {}),
+    ...(acceptedAdded.length > 0 ? { acceptedWithoutBehaviour: [...accepted, ...acceptedAdded] } : {}),
+  }
   await write(approvals.approvals.map((entry) => (entry === existing ? updated : entry)))
-  return { existing: updated, readingsAdded: added }
+  return { existing: updated, readingsAdded: added, acceptedAdded }
 }
 
 /** Names the baseline a reading was taken under: readings carry over only within one, since another is another plan's start. */
@@ -161,6 +174,15 @@ export function heldAlters(plan: PlanDraft | Plan, current: readonly PlanPropert
  */
 export function approvedReadings(standing: PlanApprovalStanding | undefined): PlanPropertyReading[] | undefined {
   return standing?.state === 'approved' ? (standing.approval.readings?.properties ?? []) : undefined
+}
+
+/**
+ * What the approval of the plan's current hash accepted as complete without a behaviour, which the
+ * verification overlay lifts on its step's run: none for an approval that recorded none, `undefined`
+ * without one. Never another hash's: a revision accepts at its own approval.
+ */
+export function approvedAcceptance(standing: PlanApprovalStanding | undefined): ReadonlySet<string> | undefined {
+  return standing?.state === 'approved' ? new Set(standing.approval.acceptedWithoutBehaviour ?? []) : undefined
 }
 
 /** The commands that refuse a plan no approval names; `plan:status` names them rather than refusing. */

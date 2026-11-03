@@ -21,7 +21,7 @@ import { readPlanFile } from './plan-render'
 import { planScaffoldTargets, type PlanScaffoldTargets } from './plan-scaffold'
 import { planStatusFile } from './plan-status'
 import { loadPlanAppState, type PlanAppState } from './plan/app-state'
-import { requirePlanApproval, type PlanApprovedStanding } from './plan/approvals'
+import { approvedAcceptance, requirePlanApproval, type PlanApprovedStanding } from './plan/approvals'
 import { planBesideExclusions } from './plan/beside'
 import { describeCloseBlockers, formatCloseBlocker, type CloseBlocker } from './plan/close-remedy'
 import { PLAN_COMMAND_FORM, refusedPlanCommands } from './plan/command-allowlist'
@@ -32,6 +32,7 @@ import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElement
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall, type PlanStepRecord } from './plan/state'
 import { planScaffoldCommandLine, planScaffoldCoverage, planScaffoldMountCommandLine, planScaffoldMounts } from './plan/scaffold'
+import { closesPlan } from './plan/status'
 import { derivePlanTasks, describePlanTask, listPlanSteps, planLaterRelationships, type PlanDerivedStep, type PlanLaterRelationship, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
@@ -228,8 +229,8 @@ async function unverifiedElements(
 ): Promise<Pick<PlanNextReport, 'unverified' | 'unverifiedUnreadable'>> {
   try {
     const status = await planStatusFile(path, { app: options.statusApp ?? (() => loadPlanAppState(root, { detail: true })), appRoot: root, read: { path, plan }, waivers, approval })
-    const open = status.elements.filter((element) => element.change !== 'existing' && element.state !== 'verified' && element.state !== 'waived')
-    return { unverified: describeCloseBlockers(plan, derivation, open, options.planArgument) }
+    const open = status.elements.filter((element) => !closesPlan(element))
+    return { unverified: describeCloseBlockers(plan, derivation, open, options.planArgument, approvedAcceptance(approval)) }
   } catch (error) {
     return { unverifiedUnreadable: error instanceof Error ? error.message : String(error) }
   }
@@ -556,7 +557,7 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     if (report.unverifiedUnreadable) {
       lines.push(`Every step is verified. The elements were not judged, so plan:status may still list some that plan:close refuses: ${report.unverifiedUnreadable}`)
     } else if (open.length > 0) {
-      lines.push('Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.')
+      lines.push('Every step is verified, and these elements are not: plan:close refuses the plan until each is verified, accepted at approval, or waived.')
       lines.push(...open.map(formatCloseBlocker))
     } else {
       lines.push('Every step is verified. Nothing is left to implement.')

@@ -3,6 +3,7 @@ import {
   AuthServiceProvider as CoreAuthServiceProvider,
 } from '@guren/core'
 import { redirectToCanonicalHost } from '../app/Http/Middleware/canonical-host.js'
+import { redirectToCanonicalPath } from '../app/Http/Middleware/canonical-path.js'
 import { recordSiteAnalytics } from '../app/Http/Middleware/site-analytics.js'
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import {
@@ -50,6 +51,7 @@ const app = createApp({
 // Both hostnames are routed to this worker, so the redirect lives here
 // rather than in DNS.
 app.use('*', redirectToCanonicalHost)
+app.use('*', redirectToCanonicalPath)
 
 // After the canonical redirect, so www.-redirect responses are not counted.
 app.use('*', recordSiteAnalytics)

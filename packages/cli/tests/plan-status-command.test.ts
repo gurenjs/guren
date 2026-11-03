@@ -286,7 +286,7 @@ throw new Error('DATABASE_URL is not set')
     expect(output).toContain('Routes\n')
     expect(output).toMatch(/drifted\s+add\s+comments\.store\s+route\.comments\.store/)
     expect(output).toContain('differs: middleware auth (planned applied, found not applied)')
-    expect(output).toMatch(/planned \d+, present \d+, wired \d+, verified \d+, drifted \d+, unjudged \d+, blocked \d+, waived \d+/)
+    expect(output).toMatch(/planned \d+, present \d+, wired \d+, verified \d+, accepted \d+, drifted \d+, unjudged \d+, blocked \d+, waived \d+/)
     expect(output).toContain('Planned, not checkable:')
   })
 

@@ -369,7 +369,7 @@ describe('GUREN_API_DIGEST', () => {
 
   for (const [guideFile, tokens] of Object.entries({
     'health-checks.md': ['createHealthManager', 'health.middleware(', 'DatabaseCheck(db,'],
-    'authentication.md': ['createRedirectSafetyMiddleware', 'allowedHosts'],
+    'oauth.md': ['createRedirectSafetyMiddleware', 'allowedHosts'],
     'api-tokens.md': ['createBearerTokenMiddleware', 'DatabaseApiTokenStore', 'deleteExpired()', "abilitiesMode: 'text'", 'getApiToken(ctx)'],
     'rate-limiting.md': ['createRateLimitMiddleware', 'keyGenerator', 'trustProxy: true', 'keyPrefix'],
   })) {

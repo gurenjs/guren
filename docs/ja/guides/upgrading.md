@@ -93,7 +93,7 @@ export class SyncInvoiceJob extends Job<{ url: string }> {
 
 - **何が変わったか**: `Model.query()` に `@deprecated` が付き、モデルごとに 1 回だけ警告が出ます。`@guren/orm` 3.0.0 まではこれまでどおり動きます。あわせてクエリビルダーに `sum()`、`avg()`、`min()`、`max()`、`exists()`、`toSql()`、`toDrizzle()` を追加しました。いずれもモデルのグローバルスコープを適用します。
 - **誰に影響するか**: `Post.query()` や `Post.query(db)` を呼んでいるコードです。このクエリはグローバルスコープをすべて素通りするため、`SoftDeletes` やテナントのスコープを持つモデルでは、ゴミ箱に入った行やほかのテナントの行まで読んでいました。
-- **移行方法**: `bunx guren upgrade --check-only` で呼び出し箇所を確認してください。何に置き換えるかはクエリの中身によるので、codemod は用意していません。集計はビルダーに、結合は `toDrizzle()` に移します。詳しくは[Drizzle に渡す](./database.md#drizzle-に渡すtodrizzle)を参照してください。
+- **移行方法**: `bunx guren upgrade --check-only` で呼び出し箇所を確認してください。何に置き換えるかはクエリの中身によるので、codemod は用意していません。集計はビルダーに、結合は `toDrizzle()` に移します。詳しくは[Drizzle に渡す](./models.md#drizzle-に渡すtodrizzle)を参照してください。
 
 ```ts
 // Before
@@ -171,7 +171,7 @@ export class User extends defineModel(users, { base: AuthenticatableModel }) {
 
 - **何が変わったか**: `fillable` を定義したモデルで、許可リストにないフィールドを `create()` / `update()` に渡すと、`MassAssignmentException` が投げられるようになりました。以前は、余分なフィールドは黙って捨てられていました。
 - **誰に影響するか**: 絞り込んでいないオブジェクト（スプレッドしたリクエストボディや、デフォルト値をマージしたものなど）を `create()` / `update()` に渡しているコードです。
-- **移行方法**: データには許可リストにあるフィールドだけを渡してください。著者のようにサーバーが決めるカラムは `set` オプションで渡します（[サーバーが決めるカラム](./database.md#サーバーが決めるカラム)）。シーダーやシステム用のレコードなど、リクエストのデータを含まない書き込みには `forceCreate()` / `forceUpdate()` を使います。
+- **移行方法**: データには許可リストにあるフィールドだけを渡してください。著者のようにサーバーが決めるカラムは `set` オプションで渡します（[サーバーが決めるカラム](./models.md#サーバーが決めるカラム)）。シーダーやシステム用のレコードなど、リクエストのデータを含まない書き込みには `forceCreate()` / `forceUpdate()` を使います。
 
 ```ts
 // Before: authorId silently dropped when not in fillable

@@ -125,7 +125,7 @@ Input
 | 優先度 | 供給元 | ツールが得るもの |
 |---|---|---|
 | 1 | ルートの `output` スキーマ | JSON Schema の `outputSchema` と、成功呼び出しごとの `structuredContent` |
-| 2 | [`resource` ヒント](./routing.md#resource-レスポンスヒント) | スキーマはなし。`bunx guren codegen` が Resource から取り出した型をテキストとしてツールの説明文に埋め込みます |
+| 2 | [`resource` ヒント](./route-contracts.md#resource-レスポンスヒント) | スキーマはなし。`bunx guren codegen` が Resource から取り出した型をテキストとしてツールの説明文に埋め込みます |
 | 3 | どちらもなし | 出力の形はまったく提示されません。`guren check` が警告します |
 
 両方が宣言されている場合は `output` が優先されます。実行時に検証される形は `output` スキーマだけです。両方を持たせると、1 つのレスポンスに 2 つの記述ができ、その 2 つが食い違わないように保つ仕組みがなくなってしまいます。
@@ -519,7 +519,7 @@ Guren には以前から MCP エンドポイントがありますが、ここま
 
 ## 関連
 
-- [ルーティング: エージェントツール](./routing.md#エージェントツール): ほかのルートコントラクトと `.agent()` の関係
+- [ルーティング: エージェントツール](./route-contracts.md#エージェントツール): ほかのルートコントラクトと `.agent()` の関係
 - [エージェントツールの権限と監査](./agent-tool-governance.md): トークンのスコープ、承認ゲート、監査ログ
 - [API トークン](./api-tokens.md): MCP エンドポイントが bearer を検証するときに使うストア
 - [認可](./authorization.md): 呼び出し主体に何を許可するかを決めるポリシー

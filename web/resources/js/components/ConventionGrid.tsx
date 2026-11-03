@@ -10,7 +10,7 @@ function Panel({ children }: { children: ReactNode }) {
   return (
     <div
       aria-hidden
-      className="relative flex h-36 flex-col justify-center overflow-hidden rounded-md border border-white/10 bg-ink px-4 font-mono text-[12px] leading-relaxed text-smoke"
+      className="relative flex h-36 flex-col justify-center overflow-hidden rounded-md border border-home-line bg-home-ink px-4 font-mono text-[12px] leading-relaxed text-home-text-2"
     >
       {children}
     </div>
@@ -38,8 +38,8 @@ function ControllerAnswers() {
     <Panel>
       {rows.map(([call, code], i) => (
         <div key={call} className="flex items-center gap-3 py-0.5">
-          <span className="text-crimson-50">{call}</span>
-          <span className="h-px flex-1 border-t border-dashed border-white/15" />
+          <span className="text-home-text">{call}</span>
+          <span className="h-px flex-1 border-t border-dashed border-home-line-strong" />
           <Status code={code} delay={0.3 + i * 0.35} />
         </div>
       ))}
@@ -50,23 +50,23 @@ function ControllerAnswers() {
 function RenameBreaksBuild() {
   return (
     <Panel>
-      <p className="text-[11px] text-smoke/60">routes/web.ts</p>
+      <p className="text-[11px] text-home-text-2">routes/web.ts</p>
       <p>
         .name(&apos;posts.
         <span className="relative inline-block">
-          <span className="vg-out text-crimson-50" style={step(0.4)}>
+          <span className="vg-out text-home-text" style={step(0.4)}>
             show
           </span>
-          <span className="vg-in absolute left-0 top-0 text-crimson-50" style={step(0.55)}>
+          <span className="vg-in absolute left-0 top-0 text-home-text" style={step(0.55)}>
             view
           </span>
         </span>
         &apos;)
       </p>
-      <p className="mt-2 text-[11px] text-smoke/60">pages/posts/Index.tsx</p>
+      <p className="mt-2 text-[11px] text-home-text-2">pages/posts/Index.tsx</p>
       <p>
         route(
-        <span className="relative text-crimson-50">
+        <span className="relative text-home-text">
           &apos;posts.show&apos;
           <span
             className="vg-grow absolute inset-x-0 -bottom-0.5 h-[2px] origin-left bg-[repeating-linear-gradient(135deg,var(--color-crimson-400)_0_2px,transparent_2px_4px)]"
@@ -85,8 +85,8 @@ function RenameBreaksBuild() {
 function QueryToSql() {
   return (
     <Panel>
-      <p className="text-crimson-50">Post.where(&apos;published&apos;, true).get()</p>
-      <p className="vg-in my-1.5 text-smoke/60" style={step(0.4)}>
+      <p className="text-home-text">Post.where(&apos;published&apos;, true).get()</p>
+      <p className="vg-in my-1.5 text-home-text-2" style={step(0.4)}>
         ↓ drizzle
       </p>
       <p className="vg-reveal text-foam" style={step(0.6)}>
@@ -100,7 +100,7 @@ function PropsHandOff() {
   return (
     <Panel>
       <div className="flex items-center justify-between">
-        <span className="shrink-0 rounded border border-white/15 px-2 py-1 text-crimson-50">PostController</span>
+        <span className="shrink-0 rounded border border-home-line-strong px-2 py-1 text-home-text">PostController</span>
         <span className="relative mx-1 h-px min-w-24 flex-1 bg-white/15">
           <span
             className="vg-slide absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded bg-crimson-900 px-1.5 text-[11px] text-crimson-300"
@@ -109,11 +109,11 @@ function PropsHandOff() {
             {'{ posts }'}
           </span>
         </span>
-        <span className="vg-light shrink-0 rounded border px-2 py-1 text-crimson-50" style={step(1.1)}>
+        <span className="vg-light shrink-0 rounded border px-2 py-1 text-home-text" style={step(1.1)}>
           Index.tsx
         </span>
       </div>
-      <p className="vg-in mt-4 text-center text-[11px] text-smoke/70" style={step(1.2)}>
+      <p className="vg-in mt-4 text-center text-[11px] text-home-text-2" style={step(1.2)}>
         props: Data.Post[], no fetch in between
       </p>
     </Panel>
@@ -129,7 +129,7 @@ function Batteries() {
         {BATTERIES.map((name, i) => (
           <span
             key={name}
-            className="vg-light rounded border py-1 text-center text-crimson-50"
+            className="vg-light rounded border py-1 text-center text-home-text"
             style={step(0.2 + i * 0.12)}
           >
             {name}
@@ -147,11 +147,11 @@ function PrototypeToController() {
       <div className="flex items-center">
         <div className="flex shrink-0 flex-col gap-5">
           <span className="vg-dim block" style={step(1.75)}>
-            <span className="vg-in block rounded border border-dashed border-white/30 px-2 py-1 text-smoke" style={step(0.2)}>
+            <span className="vg-in block rounded border border-dashed border-white/30 px-2 py-1 text-home-text-2" style={step(0.2)}>
               fixture
             </span>
           </span>
-          <span className="vg-in block rounded border border-white/15 px-2 py-1 text-crimson-50" style={step(1.2)}>
+          <span className="vg-in block rounded border border-home-line-strong px-2 py-1 text-home-text" style={step(1.2)}>
             PostController
           </span>
         </div>
@@ -162,7 +162,7 @@ function PrototypeToController() {
           <path className="vg-draw" pathLength={1} d="M0 61 C 22 61, 18 37, 40 37" style={step(1.35)} />
         </svg>
         <div className="vg-light min-w-0 flex-1 rounded border p-2.5" style={step(1.75)}>
-          <p className="truncate text-[11px] text-smoke/70">posts/Index</p>
+          <p className="truncate text-[11px] text-home-text-2">posts/Index</p>
           {[88, 64, 76].map((width, i) => (
             <span
               key={width}
@@ -261,7 +261,7 @@ export function ConventionGrid() {
   }, [])
 
   return (
-    <div className="vg mt-14 grid grid-cols-1 gap-x-10 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="vg grid grid-cols-1 gap-px border-t border-home-line bg-home-line sm:grid-cols-2 lg:grid-cols-3">
       {FEATURES.map(({ title, body, Visual }, index) => (
         <div
           key={title}
@@ -269,10 +269,11 @@ export function ConventionGrid() {
             items.current[index] = item
           }}
           data-phase={phases[index]}
+          className="bg-home-ground px-6 py-8 sm:px-8"
         >
           <Visual />
-          <h3 className="mt-5 text-lg font-bold leading-snug text-crimson-50">{title}</h3>
-          <p className="mt-2 text-[0.9375rem] leading-[1.6] text-smoke">{body}</p>
+          <h3 className="mt-5 text-lg font-bold leading-snug text-home-text">{title}</h3>
+          <p className="mt-2 text-[0.9375rem] leading-[1.6] text-home-text-2">{body}</p>
         </div>
       ))}
     </div>

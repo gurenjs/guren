@@ -1,8 +1,21 @@
-# Cloudflare Workers Deployment
+# Deploy a Fullstack Bun App to Cloudflare Workers
 
-Guren runs on Cloudflare Workers via `@guren/plugin-cloudflare`, with D1 as the database. This guide covers the full path from an empty account to a deployed app.
+You develop a Guren app on Bun and deploy the same code to Cloudflare Workers, with D1 as the database and R2 for files.
 
-Workers is a different shape of runtime from a long-lived server: there is no filesystem, no shared memory between requests, and a CPU budget measured in milliseconds. Most of this guide is about the handful of places where that changes how an app is configured.
+`@guren/plugin-cloudflare` builds the worker from your controllers, models and Inertia + React pages, and stages the static assets and D1 migrations beside it. This guide covers the full path from an empty account to a deployed app. The site you are reading, guren.dev, is a Guren app deployed this way.
+
+Workers is a different shape of runtime from a long-lived server: there is no filesystem, no shared memory between requests, and a CPU budget measured in milliseconds. Most of this guide is about the handful of places where that changes how an app is configured:
+
+| In your app | On Workers | Where |
+|---|---|---|
+| Database | D1 | [Database (D1)](#database-d1) |
+| Sessions and OAuth state | A table in D1 | [Sessions and OAuth State](#sessions-and-oauth-state-must-be-database-backed) |
+| File storage | R2, through `R2Driver` | [Storage (R2)](#storage-r2) |
+| `APP_KEY` and other secrets | `wrangler secret put` | [Secrets](#secrets) |
+| `public/` | Workers Static Assets | [Static Assets](#static-assets) |
+| `lang/` | Baked into the worker at build time | [Translations](#translations) |
+| Tasks registered with `createScheduler()` | Cron Triggers | [Scheduled Tasks](#scheduled-tasks) |
+| Durable agents | Durable Objects | [Durable Agents](#durable-agents) |
 
 ## Install
 
@@ -296,7 +309,7 @@ Two limits shape what an app can do:
 
 Cloudflare removed the compressed size limits (3 MB Free, 10 MB Paid) on 2026-09-04; only the uncompressed bundle counts now. Measure yours with `bunx guren cloudflare:size` (or `cloudflare:build --report-size`): it runs wrangler's dry run and lists the largest sources by package, which is where a bundle that grew unnoticed shows up. Two limits the number does not cover: startup time (1 s, `wrangler check startup`) and memory (128 MB per isolate), both of which large bundled data also eats.
 
-The CPU budget rules out password hashing entirely: a deliberately slow operation cannot fit in 10 ms. Apps on the free plan should authenticate through OAuth rather than passwords. See [Authentication](./authentication.md) for the OAuth flow.
+The CPU budget rules out password hashing entirely: a deliberately slow operation cannot fit in 10 ms. Apps on the free plan should authenticate through OAuth rather than passwords. See the [OAuth guide](./oauth.md) for the OAuth flow.
 
 The same budget rewards moving work off the request path: render Markdown when content is saved rather than when it is read, and prerender static content at build time. The paid plan lifts the CPU limit if your workload genuinely needs it.
 

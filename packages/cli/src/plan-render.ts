@@ -12,6 +12,7 @@ import type { PlanAppState } from './plan/app-state'
 import { planOutputPath, writeFileAtomic } from './plan/beside'
 import { isPlanLocale, matchPlanLocale, PLAN_LOCALES, type PlanLocale } from './plan/locales'
 import { planChangesExisting, planImpact } from './plan/impact'
+import { groupElementsWithoutBehaviour, planElementsWithoutBehaviour } from './plan/reach'
 import { renderPlanHtml } from './plan/render'
 import { settleBuiltFindings, validatePlan, type PlanCheckResult } from './plan/validate'
 import { planSchemaFor, type Plan, type PlanDraft } from './plan/schema'
@@ -96,12 +97,32 @@ export async function readPlanFile(planPath: string, cwd: string = process.cwd()
   return { path: absolutePlan, plan: parsePlanDocument(document), document }
 }
 
+/**
+ * What approving the plan accepts (RFC 0030 §4), pinned to the page so the person reads it before
+ * approving: the elements no behaviour can reach. Advisory, since it asks nothing to be fixed; the
+ * Dev Center's review serves this page, so it shows the same list.
+ */
+export function withoutBehaviourCheck(plan: PlanDraft | Plan): PlanCheckResult | undefined {
+  const elements = planElementsWithoutBehaviour(plan)
+  if (elements.length === 0) return undefined
+  return {
+    key: 'plan:without-behaviour',
+    title: 'Completes without a behaviour',
+    status: 'warn',
+    advisory: true,
+    message: `No behaviour can reach ${elements.length === 1 ? 'this element' : `these ${elements.length} elements`}, so approving the plan accepts each as complete on its step's verified run, with no waiver at plan:close: ${groupElementsWithoutBehaviour(elements).join('; ')}.`,
+    suggestion: "plan:approve records the acceptance for this plan hash only, and plan:status reports each one accepted once its step's run holds.",
+  }
+}
+
 export async function renderPlanFile(planPath: string, options: RenderPlanFileOptions): Promise<RenderedPlanFile> {
   const cwd = options.cwd ?? process.cwd()
   const { path: absolutePlan, plan } = await readPlanFile(planPath, cwd)
   const app = typeof options.app === 'function' ? await options.app(plan) : options.app
   // RFC 0030 §3: a failing check is pinned to the top of the page, never a reason to render nothing.
-  const { checks } = settleBuiltFindings(plan, app, validatePlan(plan, app))
+  const settled = settleBuiltFindings(plan, app, validatePlan(plan, app)).checks
+  const withoutBehaviour = withoutBehaviourCheck(plan)
+  const checks = withoutBehaviour ? [...settled, withoutBehaviour] : settled
   // `null` draws no Impact, for a page with no application read; `[]` is a plan that changes nothing existing.
   const nothingExistingChanges = !planChangesExisting(plan)
   const impact = app.impact ? planImpact(plan, app.impact) : nothingExistingChanges ? [] : null

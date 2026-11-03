@@ -120,6 +120,8 @@ A route's middleware runs in this order:
 
 Names run before functions across groups as well as within one `.middleware()` call. So an inline handler on an outer group runs *after* a name on an inner group, the reverse of how the code reads:
 
+<!-- interactive: middleware-order -->
+
 ```mermaid
 flowchart LR
   subgraph Written["As written"]
@@ -168,7 +170,7 @@ app.use('*', createSessionMiddleware())
 
 Read the session with `getSessionFromContext(ctx)` or `ctx.get('guren:session')`.
 
-`store` accepts a `SessionStore` or a function returning one. The function runs on every request, so a store that needs a runtime binding (Workers) or a connection (Redis) is not built at boot; memoize it yourself if building is expensive. To declare several stores and pick one per environment, use a `SessionManager` (see [Authentication](./authentication.md#selecting-a-store-with-sessionmanager)).
+`store` accepts a `SessionStore` or a function returning one. The function runs on every request, so a store that needs a runtime binding (Workers) or a connection (Redis) is not built at boot; memoize it yourself if building is expensive. To declare several stores and pick one per environment, use a `SessionManager` (see [Authentication](./sessions.md#selecting-a-store-with-sessionmanager)).
 
 ### Auth Guards
 

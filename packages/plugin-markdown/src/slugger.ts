@@ -25,6 +25,31 @@ function stripHtmlTagsOnce(html: string): string {
   return out
 }
 
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+}
+
+/**
+ * Decodes the entities marked's inline output carries (`&#39;`, `&amp;`, …) in
+ * one pass, so `&amp;lt;` stays `&lt;`. Runs after tag stripping: a decoded `<`
+ * must never be read as markup, and the charset filter drops it anyway.
+ */
+function decodeHtmlEntities(text: string): string {
+  return text.replace(/&(#\d+|#x[\da-f]+|[a-z]+);/gi, (entity, body: string) => {
+    if (body[0] !== '#') {
+      return NAMED_ENTITIES[body] ?? entity
+    }
+    const hex = body[1] === 'x' || body[1] === 'X'
+    const code = Number.parseInt(body.slice(hex ? 2 : 1), hex ? 16 : 10)
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity
+  })
+}
+
 /**
  * Returns a slugify function whose uniqueness state is scoped to one render:
  * repeated headings get `-1`, `-2`, … suffixes, skipping any a literal heading
@@ -43,7 +68,7 @@ export function createSlugger(): (text: string) => string {
       stripped = stripHtmlTagsOnce(stripped)
     } while (stripped !== previous)
 
-    let slug = stripped
+    let slug = decodeHtmlEntities(stripped)
       .toLowerCase()
       .trim()
       .replace(/\s+/g, '-')

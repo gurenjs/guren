@@ -149,7 +149,7 @@ export default class PostsController extends Controller {
 }
 ```
 
-`this.validated(routeName)` returns `{ params, query, body }` as the schemas parsed them, typed from the route contract once `guren codegen` has run. See [Reading Validated Input](./routing.md#reading-validated-input) for the details.
+`this.validated(routeName)` returns `{ params, query, body }` as the schemas parsed them, typed from the route contract once `guren codegen` has run. See [Reading Validated Input](./route-contracts.md#reading-validated-input) for the details.
 
 ### Zod Schema Helpers
 

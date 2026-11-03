@@ -30,6 +30,8 @@ flowchart LR
 
 どの計画も、同じ 5 つの段階を順にたどります。1 本目の計画は第 2 章から第 5 章で、2 本目の計画は第 6 章と第 7 章で、この流れを通します。
 
+<!-- interactive: course-loop -->
+
 ```mermaid
 flowchart LR
   Ask["1. 依頼<br/>依頼して質問に答える"]

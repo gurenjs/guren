@@ -369,7 +369,7 @@ This chapter's harness lever is the **`scaffold` skill** in `.claude/skills/scaf
 
 **No agent handy?** Three files. The controller gains two actions:
 
-```ts file=app/Http/Controllers/PostController.ts fallback
+```ts file=app/Http/Controllers/PostController.ts fallback highlight=2,6-9,28-30,32-36
 import { Controller } from '@guren/core'
 import { z } from 'zod'
 import { pages } from '@/.guren/pages.gen'

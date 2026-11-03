@@ -3,6 +3,8 @@ import type { Authenticatable, AuthContext } from '../../auth/types'
 import { AUTH_CONTEXT_KEY, getAuthContext } from '../../auth/context'
 import { jsonResponse } from './index'
 import { stampCapabilities } from './capabilities'
+import { renderErrorPage } from '../../errors/error-page'
+import { wantsHtmlResponse } from '../../errors/wants-html'
 import { isAgentToolRequest } from '../../internal/agent-request'
 export type { AuthContext } from '../../auth/types'
 
@@ -70,13 +72,27 @@ export function attachAuthContext(contextFactory: (ctx: Context) => AuthContext)
   }
 }
 
-function refuse(ctx: Context, options: RequireAuthOptions, status: number, message: string): Response {
+function refuse(
+  ctx: Context,
+  options: RequireAuthOptions,
+  status: number,
+  message: string,
+  pageMessage?: string,
+): Response {
   if (options.redirectTo) {
     // A tool caller cannot follow a redirect, and the dispatcher maps a 3xx to
     // a success result; `responseFactory` is skipped, since it may redirect too.
     return isAgentToolRequest(ctx) ? jsonResponse({ message }, status) : ctx.redirect(options.redirectTo)
   }
-  return options.responseFactory ? options.responseFactory() : jsonResponse({ message }, status)
+  if (options.responseFactory) return options.responseFactory()
+  // A browser navigation reads a page, as a CSRF refusal does; every other caller keeps the JSON.
+  if (!isAgentToolRequest(ctx) && wantsHtmlResponse(ctx)) {
+    return new Response(renderErrorPage(status, pageMessage), {
+      status,
+      headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+    })
+  }
+  return jsonResponse({ message }, status)
 }
 
 export function requireAuthenticated(options: RequireAuthOptions = {}): MiddlewareHandler {
@@ -108,7 +124,7 @@ export function requireGuest(options: RequireAuthOptions = {}): MiddlewareHandle
     }
 
     if (!(await auth.guest())) {
-      return refuse(ctx, options, status, 'Already authenticated')
+      return refuse(ctx, options, status, 'Already authenticated', 'You are already signed in.')
     }
 
     await next()

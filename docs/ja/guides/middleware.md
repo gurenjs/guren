@@ -120,6 +120,8 @@ router.middleware('api', 'auth').group((group) => {
 
 名前で指定したものが関数より先に動く規則は、1 回の `.middleware()` の中でも、グループをまたいでも同じです。そのため、外側のグループに書いたインラインハンドラーは、内側のグループの名前付きミドルウェアより**後**に実行され、コードの見た目とは逆の順になります。
 
+<!-- interactive: middleware-order -->
+
 ```mermaid
 flowchart LR
   subgraph Written["書いた順"]
@@ -168,7 +170,7 @@ app.use('*', createSessionMiddleware())
 
 セッションは `getSessionFromContext(ctx)` か `ctx.get('guren:session')` で取り出します。
 
-`store` には `SessionStore` そのものか、それを返す関数を渡します。関数はリクエストのたびに呼ばれるので、ランタイムのバインディング（Workers）や接続（Redis）が必要なストアを起動時に組み立てずに済みます。組み立てが重い場合は自分でメモ化してください。複数のストアを宣言して環境ごとに切り替えるには `SessionManager` を使います（[認証](./authentication.md#sessionmanager-でストアを選ぶ)を参照）。
+`store` には `SessionStore` そのものか、それを返す関数を渡します。関数はリクエストのたびに呼ばれるので、ランタイムのバインディング（Workers）や接続（Redis）が必要なストアを起動時に組み立てずに済みます。組み立てが重い場合は自分でメモ化してください。複数のストアを宣言して環境ごとに切り替えるには `SessionManager` を使います（[認証](./sessions.md#sessionmanager-でストアを選ぶ)を参照）。
 
 ### 認証ガード
 

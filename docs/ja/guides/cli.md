@@ -117,7 +117,7 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 
 ### `add browser-tests`
 
-`add browser-tests` は、Playwright のブラウザテストを導入します。テストはアプリを `bunx guren browser:serve` 経由で起動するので、本番環境や、ローカルだと確かめられないデータベースでは起動しません。このコマンドは `playwright.browser.config.ts`(アプリを `127.0.0.1:4317` で起動する設定)と `tests/browser/support.ts` を書き出してから `bunx guren browser:map` を実行します。以後は `browser:map` が、`tests/browser/generated/` の下に次の 2 種類の spec を保ちます。
+`add browser-tests` は、Playwright のブラウザテストを導入します。テストはアプリを `bunx guren browser:serve` 経由で起動するので、本番環境や、ローカルだと確かめられないデータベースでは起動しません。このコマンドは `playwright.browser.config.ts`(アプリを `127.0.0.1:4317` で、その Vite dev サーバーをポート 4318 から起動する設定)と `tests/browser/support.ts` を書き出してから `bunx guren browser:map` を実行します。Vite のポートは、`GUREN_VITE_PORT` を設定していなければ `browser:serve` がアプリのポートの次の番号にします。以後は `browser:map` が、`tests/browser/generated/` の下に次の 2 種類の spec を保ちます。
 
 - `smoke.browser.ts`: ブラウザマップの機能ごとに 1 つのテストで、パスパラメーターのない最初のページが 200 を返し、ルートが描画するはずのコンポーネントを表示することを確かめます
 - `plans/<plan>.browser.ts`: ビューを持つ承認済みの計画ごとに 1 つのファイルで、計画がビューに定めたフォームのラベルとアクション名が、そのビューを描画するパスパラメーターのない最初のページに表示されることを確かめます
@@ -390,7 +390,7 @@ bunx guren openapi:generate --force
 | `--app` | カレントディレクトリ | アプリケーションルートディレクトリ |
 | `--force` | `false` | 既存ファイルを上書き |
 
-このコマンドは、ルートコントラクトから Zod スキーマと OpenAPI のメタデータ(`summary`、`description`、`tags`、`operationId`、`deprecated`)を取り出して、OpenAPI 3.1 の JSON ドキュメントを生成します。ルートへの注釈の付け方は、[ルーティング: OpenAPI](./routing.md#openapi-ドキュメント生成)を参照してください。
+このコマンドは、ルートコントラクトから Zod スキーマと OpenAPI のメタデータ(`summary`、`description`、`tags`、`operationId`、`deprecated`)を取り出して、OpenAPI 3.1 の JSON ドキュメントを生成します。ルートへの注釈の付け方は、[ルーティング: OpenAPI](./openapi.md)を参照してください。
 
 ## ルートコマンド
 
@@ -431,7 +431,7 @@ bunx guren route:list --format compact # コンパクトな1行形式
 
 ## エージェントツールコマンド
 
-`.agent()` メタデータを宣言したルートは、MCP ツールとして AI エージェントに公開されます([ルーティング](./routing.md)を参照)。ここで紹介するコマンドは、エージェントから何が見えるかを、ルートグラフから直接導出して表示します。`.guren/agents.gen.ts` は読まないので、このマニフェストがなかったり古かったりしても、正しい結果を返します。
+`.agent()` メタデータを宣言したルートは、MCP ツールとして AI エージェントに公開されます([エージェントツール](./route-contracts.md#エージェントツール)を参照)。ここで紹介するコマンドは、エージェントから何が見えるかを、ルートグラフから直接導出して表示します。`.guren/agents.gen.ts` は読まないので、このマニフェストがなかったり古かったりしても、正しい結果を返します。
 
 | コマンド | 説明 | 例 |
 |----------|------|----|

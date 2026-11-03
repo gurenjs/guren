@@ -1,4 +1,5 @@
 import { consola } from 'consola'
+import { OAUTH_CONTROLLER_PATH } from './blueprint-samples'
 import { CliError } from './cli-error'
 import { registerConsoleCommand } from './console-registrar'
 import { fileExists, readIfExists } from './discovery'
@@ -32,7 +33,7 @@ export async function addOAuth(options: WriterOptions = {}): Promise<string[]> {
     definition
       ? definitionTemplateFile('oauth', 'config/oauth.ts')
       : scaffoldTemplateFile('oauth', 'app/Providers/OAuthProvider.ts'),
-    scaffoldTemplateFile('oauth', 'app/Http/Controllers/Auth/OAuthController.ts'),
+    scaffoldTemplateFile('oauth', OAUTH_CONTROLLER_PATH),
     scaffoldTemplateFile('oauth', 'routes/oauth.ts'),
   ], options)
 

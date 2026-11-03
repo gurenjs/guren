@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { runCommand } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
-import { planApproveFile, type PlanApproveReport } from '../src/plan-approve'
+import { formatPlanApprove, planApproveFile, type PlanApproveReport } from '../src/plan-approve'
 import { renderPlanFile } from '../src/plan-render'
 import { formatPlanStatus, planStatusFile } from '../src/plan-status'
 import { loadPlanAppState } from '../src/plan/app-state'
@@ -13,6 +13,7 @@ import { planApprovalsPath, readPlanApprovals } from '../src/plan/approvals'
 import { writeFileAtomic } from '../src/plan/beside'
 import { stampContextHash } from '../src/plan/freshness'
 import { planHash } from '../src/plan/identity'
+import type { PlanElementWithoutBehaviour } from '../src/plan/reach'
 import { PlanDraftSchema, PlanSchema } from '../src/plan/schema'
 import { runCaptured, type CapturedExec } from '../src/subprocess'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
@@ -139,6 +140,46 @@ describe('guren plan:approve', () => {
     expect((await readPlanApprovals(plan)).value).toBeUndefined()
     const real = await planApproveFile(plan, { app: planAppState(), appRoot: app, now: NOW })
     expect(real.plan.hash).toBe(report.plan.hash)
+  })
+
+  test('should accept the elements no behaviour can reach in the approval it records, and print them, a dry run included', async () => {
+    const withoutBehaviour = {
+      ...answeredPlan(),
+      sideEffects: [{ id: 'mail.comment-posted', change: { kind: 'add' }, kind: 'mail', name: 'CommentPostedMail', trigger: 'a comment is stored', description: 'Tells the author.' }],
+      commands: [{ id: 'command.mail', command: 'guren make:mail CommentPostedMail', reason: 'the mail class' }],
+    }
+    const { app, plan } = await createApp('without-behaviour', withoutBehaviour)
+    const expected: PlanElementWithoutBehaviour[] = [
+      { id: 'mail.comment-posted', section: 'sideEffects' },
+      { id: 'command.mail', section: 'commands' },
+    ]
+
+    const dry = await planApproveFile(plan, { app: planAppState(), appRoot: app, now: NOW, dryRun: true })
+    expect(dry.acceptedWithoutBehaviour).toEqual(expected)
+    expect(formatPlanApprove(dry)).toContain("Would accept as complete on their step's verified run, since no behaviour can reach them")
+
+    const report = await planApproveFile(plan, { app: planAppState(), appRoot: app, now: NOW })
+    expect(report.acceptedWithoutBehaviour).toEqual(expected)
+    expect(report.acceptanceRecorded).toBeUndefined()
+    expect(report.approval.acceptedWithoutBehaviour).toEqual(['mail.comment-posted', 'command.mail'])
+    expect((await readPlanApprovals(plan)).value!.approvals).toEqual([report.approval])
+    expect(formatPlanApprove(report)).toContain('  commands: command.mail\n  side effects: mail.comment-posted')
+  })
+
+  test('should record the acceptance an approval of the same hash lacks, as for its readings, and nothing once it has it', async () => {
+    const { app, plan } = await createApp('accept-later', { ...answeredPlan(), commands: [{ id: 'command.mail', command: 'guren make:mail CommentPostedMail', reason: 'the mail class' }] })
+    const first = await planApproveFile(plan, { app: planAppState(), appRoot: app, now: NOW })
+    const { acceptedWithoutBehaviour: _accepted, ...before } = first.approval
+    await writeFile(planApprovalsPath(plan), `${JSON.stringify({ approvalsVersion: 1, approvals: [before] }, null, 2)}\n`)
+
+    const again = await planApproveFile(plan, { app: planAppState(), appRoot: app, now: () => new Date('2026-09-23T00:00:00.000Z') })
+    expect(again).toMatchObject({ alreadyApproved: true, acceptanceRecorded: ['command.mail'], approval: { ...before, acceptedWithoutBehaviour: ['command.mail'] } })
+    expect(formatPlanApprove(again)).toContain('recorded the acceptance below, which it lacked, in comments.approvals.json.')
+
+    const bytes = await readFile(planApprovalsPath(plan), 'utf8')
+    const third = await planApproveFile(plan, { app: planAppState(), appRoot: app, now: NOW })
+    expect(third.acceptanceRecorded).toBeUndefined()
+    expect(await readFile(planApprovalsPath(plan), 'utf8')).toBe(bytes)
   })
 
   test('should still refuse a dirty tree under --dry-run', async () => {

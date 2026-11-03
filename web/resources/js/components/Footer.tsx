@@ -43,53 +43,55 @@ export function Footer({ variant }: FooterProps) {
   }
 
   return (
-    <footer className="border-t border-white/10 bg-[#2b0606] font-home">
-      <div className="mx-auto grid max-w-6xl gap-10 px-6 py-16 sm:grid-cols-2 lg:grid-cols-4">
+    <footer className="bg-home-ground font-home">
+      <div className="mx-auto grid max-w-6xl gap-10 border-home-line px-6 py-16 sm:grid-cols-2 sm:px-10 lg:grid-cols-4 lg:border-x">
         <div>
           <div className="mb-4 flex items-center gap-3">
-            <img src="/logo.svg" alt="Guren" className="size-9 rounded-xl p-0.5" />
-            <span className="text-lg font-bold text-white">Guren</span>
+            <img src="/logo.svg" alt="" className="size-8 rounded-lg p-0.5" />
+            <span className="text-[1.0625rem] font-bold text-home-text">Guren</span>
           </div>
-          <p className="text-sm leading-relaxed text-smoke">
+          <p className="text-sm leading-relaxed text-home-text-2">
             The Bun-first fullstack TypeScript framework, built for coding agents.
           </p>
         </div>
         <div>
-          <h4 className="mb-4 text-sm font-bold text-crimson-50">Resources</h4>
-          <nav className="flex flex-col gap-2.5 text-sm text-smoke">
-            <Link href="/docs" className="no-underline transition hover:text-white">Documentation</Link>
-            <Link href="/docs/guides/getting-started" className="no-underline transition hover:text-white">Getting Started</Link>
-            <Link href="/docs/tutorials/00-overview" className="no-underline transition hover:text-white">Tutorials</Link>
-            <Link href="/docs/agent-course/00-overview" className="no-underline transition hover:text-white">Agent Course</Link>
-            <Link href="/blog" className="no-underline transition hover:text-white">Blog</Link>
-            <a href="/blog/rss.xml" className="no-underline transition hover:text-white">RSS</a>
-            <a href="/llms.txt" className="no-underline transition hover:text-white">llms.txt</a>
+          <p className="mb-4 font-mono text-xs uppercase tracking-[0.14em] text-home-text-2">Resources</p>
+          <nav aria-label="Resources" className="flex flex-col gap-2.5 text-sm text-home-text">
+            <Link href="/docs" className="no-underline transition hover:text-crimson-300">Documentation</Link>
+            <Link href="/docs/guides/getting-started" className="no-underline transition hover:text-crimson-300">Getting Started</Link>
+            <Link href="/docs/tutorials/00-overview" className="no-underline transition hover:text-crimson-300">Tutorials</Link>
+            <Link href="/docs/agent-course/00-overview" className="no-underline transition hover:text-crimson-300">Agent Course</Link>
+            <Link href="/blog" className="no-underline transition hover:text-crimson-300">Blog</Link>
+            <a href="/blog/rss.xml" className="no-underline transition hover:text-crimson-300">RSS</a>
+            <a href="/llms.txt" className="no-underline transition hover:text-crimson-300">llms.txt</a>
           </nav>
         </div>
         <div>
-          <h4 className="mb-4 text-sm font-bold text-crimson-50">Community</h4>
-          <nav className="flex flex-col gap-2.5 text-sm text-smoke">
-            <a href="https://github.com/gurenjs/guren" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-white">GitHub</a>
-            <a href="https://github.com/gurenjs/guren/issues" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-white">Issues</a>
-            <a href="https://github.com/gurenjs/guren/discussions" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-white">Discussions</a>
+          <p className="mb-4 font-mono text-xs uppercase tracking-[0.14em] text-home-text-2">Community</p>
+          <nav aria-label="Community" className="flex flex-col gap-2.5 text-sm text-home-text">
+            <a href="https://github.com/gurenjs/guren" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-crimson-300">GitHub</a>
+            <a href="https://github.com/gurenjs/guren/issues" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-crimson-300">Issues</a>
+            <a href="https://github.com/gurenjs/guren/discussions" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-crimson-300">Discussions</a>
           </nav>
         </div>
         <div>
-          <h4 className="mb-4 text-sm font-bold text-crimson-50">Legal</h4>
-          <nav className="flex flex-col gap-2.5 text-sm text-smoke">
+          <p className="mb-4 font-mono text-xs uppercase tracking-[0.14em] text-home-text-2">Legal</p>
+          <nav aria-label="Legal" className="flex flex-col gap-2.5 text-sm text-home-text">
             <a
               href={`${GITHUB_URL}/blob/main/LICENSE`}
               target="_blank"
               rel={OWN_REPO_LINK_REL}
-              className="no-underline transition hover:text-white"
+              className="no-underline transition hover:text-crimson-300"
             >
               MIT License
             </a>
           </nav>
         </div>
       </div>
-      <div className="border-t border-white/10 px-6 py-5 text-center text-sm text-smoke/80">
-        &copy; {year} Guren Framework &middot; MIT License
+      <div className="border-t border-home-line">
+        <div className="mx-auto max-w-6xl border-home-line px-6 py-5 font-mono text-xs text-home-text-2 sm:px-10 lg:border-x">
+          &copy; {year} Guren Framework &middot; MIT License
+        </div>
       </div>
     </footer>
   )

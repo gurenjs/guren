@@ -331,7 +331,7 @@ router.query('/posts/search', {
 }, [PostController, 'search'])
 ```
 
-生成される API クライアントでは、このルートの `json()` の型が `{ data: Data.Post[] }` になります。ヒントの書き方は [Resource レスポンスヒント](./routing.md#resource-レスポンスヒント)を参照してください。
+生成される API クライアントでは、このルートの `json()` の型が `{ data: Data.Post[] }` になります。ヒントの書き方は [Resource レスポンスヒント](./route-contracts.md#resource-レスポンスヒント)を参照してください。
 
 ### コード生成が読む形を宣言する
 

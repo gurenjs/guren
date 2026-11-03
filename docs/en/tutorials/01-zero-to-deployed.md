@@ -50,7 +50,7 @@ Keep the dev server running in this terminal. Run everything below in a second o
 
 A fresh app is small enough to read in one sitting. These are the files this chapter touches:
 
-```text
+```tree
 guren-blog/
 ├── app/Http/Controllers/HomeController.ts   # the one controller
 ├── resources/js/pages/Home.tsx              # the one page
@@ -185,7 +185,7 @@ Open `.claude/settings.json`. The part that matters is the three hooks:
 ```
 
 - **`SessionStart`** injects the output of `bunx guren context` into the agent's context before its first turn: a map of every model, route, controller and page, ending with a digest of the framework's API signatures. The agent starts knowing what the project is, without reading `node_modules`.
-- **`PostToolUse`** runs after every file edit. If the file is a route, controller, model, schema or page, `.claude/hooks/check-after-edit.ts` runs `guren check` and hands any findings straight back to the agent, so the fix happens in the same turn.
+- **`PostToolUse`** runs after every file edit. If the file is a route, controller, model, schema or page, `.claude/hooks/check-after-edit.ts` runs `guren check` and hands any findings back to the agent with the edit's result, so the fix happens in the same turn. It never blocks the edit, because a change that spans several files looks unfinished between its edits; whether the turn may end is the `Stop` hook's call.
 - **`Stop`** runs when the agent tries to end a turn with uncommitted changes. `.claude/hooks/gate-on-stop.ts` runs `guren gate`; if any stage fails, the stop is blocked once and the findings come back. The agent cannot declare a change done while the gate is red.
 
 Claude Code runs a hook in the session's current directory, which moves whenever the agent runs `cd`. Each command therefore starts from `${CLAUDE_PROJECT_DIR}`, the directory the session opened in.

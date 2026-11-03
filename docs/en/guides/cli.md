@@ -135,7 +135,7 @@ A re-run writes only the components that are missing and lists the ones it left 
 
 ### `add browser-tests`
 
-`add browser-tests` sets up Playwright browser tests. They start your app through `bunx guren browser:serve`, which refuses production and any database it cannot show is local. The command writes `playwright.browser.config.ts`, which starts the app on `127.0.0.1:4317`, and `tests/browser/support.ts`, then runs `bunx guren browser:map`, which from then on keeps two kinds of spec under `tests/browser/generated/`:
+`add browser-tests` sets up Playwright browser tests. They start your app through `bunx guren browser:serve`, which refuses production and any database it cannot show is local. The command writes `playwright.browser.config.ts`, which starts the app on `127.0.0.1:4317` and its Vite dev server from port 4318 (`browser:serve` sets `GUREN_VITE_PORT` to the port after the app's unless you set it), and `tests/browser/support.ts`, then runs `bunx guren browser:map`, which from then on keeps two kinds of spec under `tests/browser/generated/`:
 
 - `smoke.browser.ts`, one test per feature in the browser map: the feature's first page without a path parameter must answer 200 with the component its route renders;
 - `plans/<plan>.browser.ts` for each approved plan with views: every form label and action name the plan gives a view must be visible on the first page without a path parameter that renders it.
@@ -448,7 +448,7 @@ bunx guren openapi:generate --force
 | `--app` | Current directory | Application root directory |
 | `--force` | `false` | Overwrite existing files |
 
-The command extracts Zod schemas and OpenAPI metadata (`summary`, `description`, `tags`, `operationId`, `deprecated`) from route contracts and produces an OpenAPI 3.1 JSON document. See [Routing — OpenAPI](./routing.md#openapi-document-generation) for details on annotating routes.
+The command extracts Zod schemas and OpenAPI metadata (`summary`, `description`, `tags`, `operationId`, `deprecated`) from route contracts and produces an OpenAPI 3.1 JSON document. See [Routing — OpenAPI](./openapi.md) for details on annotating routes.
 
 ## Route Commands
 
@@ -489,7 +489,7 @@ bunx guren route:list --format compact # Compact single-line format
 
 ## Agent Tool Commands
 
-Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (see [Routing — Agent tools](./routing.md)). These commands report what an agent would see, derived live from your route graph rather than read from `.guren/agents.gen.ts`, so they answer correctly even when that manifest is missing or stale.
+Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (see [Agent Tools](./route-contracts.md#agent-tools)). These commands report what an agent would see, derived live from your route graph rather than read from `.guren/agents.gen.ts`, so they answer correctly even when that manifest is missing or stale.
 
 | Command | Description | Example |
 |---------|-------------|---------|

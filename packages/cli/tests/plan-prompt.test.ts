@@ -42,6 +42,7 @@ const RULES = [
   'the value written as JSON text',
   '`"status": 303`',
   'an absolute path or a `..` segment fails the check',
+  'Keep `commands` for what the plan does not declare',
   'Do not run `plan:approve`',
 ]
 

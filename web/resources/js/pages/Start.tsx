@@ -65,7 +65,7 @@ type Tab = (typeof TABS)[number]
 // Safari throttles history.replaceState to about 100 calls per 10 seconds.
 const URL_SYNC_DELAY_MS = 250
 
-const FIELDSET = 'border-t border-white/10 pt-6'
+const FIELDSET = 'border-t border-home-line pt-6'
 const LEGEND = 'text-sm font-bold uppercase tracking-[0.08em] text-crimson-300'
 
 function Choice({
@@ -88,10 +88,10 @@ function Choice({
   return (
     <label
       className={`flex cursor-pointer flex-col gap-1 rounded-md border px-4 py-3 transition has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-crimson-300 ${
-        checked ? 'border-crimson-400 bg-crimson-900/40' : 'border-white/15 hover:border-white/35'
+        checked ? 'border-crimson-400 bg-crimson-900/40' : 'border-home-line-strong hover:border-white/35'
       }`}
     >
-      <span className="flex items-center gap-2 font-bold text-crimson-50">
+      <span className="flex items-center gap-2 font-bold text-home-text">
         <input
           type={type}
           name={name}
@@ -102,7 +102,7 @@ function Choice({
         />
         {label}
       </span>
-      {detail ? <span className="text-sm leading-snug text-smoke">{detail}</span> : null}
+      {detail ? <span className="text-sm leading-snug text-home-text-2">{detail}</span> : null}
     </label>
   )
 }
@@ -183,8 +183,8 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
         {n}
       </span>
       <div>
-        <h3 className="font-bold leading-7 text-crimson-50">{title}</h3>
-        <div className="mt-3 space-y-3 text-[0.9375rem] leading-[1.65] text-smoke">{children}</div>
+        <h3 className="font-bold leading-7 text-home-text">{title}</h3>
+        <div className="mt-3 space-y-3 text-[0.9375rem] leading-[1.65] text-home-text-2">{children}</div>
       </div>
     </li>
   )
@@ -242,7 +242,7 @@ function Pills<T extends string>({
 }) {
   return (
     <div role="radiogroup" aria-label={label} className="flex flex-wrap items-center gap-2">
-      <span className="mr-1 text-sm text-smoke">{label}</span>
+      <span className="mr-1 text-sm text-home-text-2">{label}</span>
       {items.map((item) => (
         <button
           key={item.value}
@@ -251,7 +251,7 @@ function Pills<T extends string>({
           aria-checked={item.value === value}
           onClick={() => onChange(item.value)}
           className={`rounded-full border px-3 py-1 text-sm transition ${
-            item.value === value ? 'border-crimson-400 bg-crimson-900/40 text-crimson-50' : 'border-white/15 text-smoke hover:border-white/35'
+            item.value === value ? 'border-crimson-400 bg-crimson-900/40 text-home-text' : 'border-home-line-strong text-home-text-2 hover:border-white/35'
           }`}
         >
           {item.label}
@@ -276,7 +276,7 @@ function AgentPanel({ options }: { options: StartOptions }) {
 
   if (!active) {
     return (
-      <p className="text-[0.9375rem] leading-[1.65] text-smoke">
+      <p className="text-[0.9375rem] leading-[1.65] text-home-text-2">
         Choose at least one coding agent on the left. The app then ships the instructions, skills and
         checks that agent reads.
       </p>
@@ -290,13 +290,13 @@ function AgentPanel({ options }: { options: StartOptions }) {
   const firstPrompt = (n: number) => (
     <Step n={n} title="Send this prompt">
       <label className="block">
-        <span className="text-sm text-smoke">What do you want to build first? (optional)</span>
+        <span className="text-sm text-home-text-2">What do you want to build first? (optional)</span>
         <textarea
           value={goal}
           onChange={(event) => setGoal(event.target.value)}
           rows={2}
           placeholder="A page where members list the books they have read"
-          className="mt-2 w-full rounded-md border border-white/15 bg-ink px-3 py-2 font-home text-[0.9375rem] text-crimson-50 placeholder:text-smoke/50 focus-visible:outline-2 focus-visible:outline-crimson-300"
+          className="mt-2 w-full rounded-md border border-home-line-strong bg-home-ink px-3 py-2 font-home text-[0.9375rem] text-home-text placeholder:text-home-text-2/50 focus-visible:outline-2 focus-visible:outline-crimson-300"
         />
       </label>
       <CopyBlock text={buildAgentPrompt(options, active, goal)} label="the prompt" prompt />
@@ -421,7 +421,7 @@ export default function Start({ initial }: Props) {
         description="Choose a starter, a database and a rendering mode, then copy the create-guren-app command or a prompt for your coding agent."
         path="/start"
       />
-      <div className="min-h-dvh bg-crimson-950 font-home text-crimson-50 antialiased">
+      <div className="min-h-dvh bg-home-ground font-home text-home-text antialiased">
         <Header variant="home" />
 
         <main className="mx-auto max-w-6xl px-6 pb-24 pt-14 md:pt-20">
@@ -429,7 +429,7 @@ export default function Start({ initial }: Props) {
           <h1 className="mt-5 text-balance text-[2.25rem] font-bold leading-[1.08] tracking-[-0.03em] md:text-[3rem]">
             Start a new app
           </h1>
-          <p className="mt-5 max-w-[38rem] text-lg leading-[1.65] text-smoke">
+          <p className="mt-5 max-w-[38rem] text-lg leading-[1.65] text-home-text-2">
             Pick what the app needs and the command updates as you go. The defaults already work:
             SQLite needs no setup.
           </p>
@@ -450,9 +450,9 @@ export default function Start({ initial }: Props) {
                   autoComplete="off"
                   aria-invalid={nameInvalid}
                   aria-describedby="start-name-help"
-                  className="mt-3 w-full rounded-md border border-white/15 bg-ink px-4 py-3 font-mono text-crimson-50 focus-visible:outline-2 focus-visible:outline-crimson-300"
+                  className="mt-3 w-full rounded-md border border-home-line-strong bg-home-ink px-4 py-3 font-mono text-home-text focus-visible:outline-2 focus-visible:outline-crimson-300"
                 />
-                <span id="start-name-help" className={`mt-2 block text-sm ${nameInvalid ? 'text-crimson-300' : 'text-smoke'}`}>
+                <span id="start-name-help" className={`mt-2 block text-sm ${nameInvalid ? 'text-crimson-300' : 'text-home-text-2'}`}>
                   {nameInvalid
                     ? `Use lowercase letters, digits, dots, dashes and underscores. Using "${DEFAULT_START_OPTIONS.name}" until then.`
                     : 'The directory the app is created in.'}
@@ -499,7 +499,7 @@ export default function Start({ initial }: Props) {
               ) : null}
 
               <Field legend="Coding agents">
-                <p className="mt-2 text-sm text-smoke">
+                <p className="mt-2 text-sm text-home-text-2">
                   The app ships instructions, skills and checks for each agent you pick.
                 </p>
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -525,7 +525,7 @@ export default function Start({ initial }: Props) {
             </form>
 
             <section id="start-output" aria-label="How to start" className="scroll-mt-24 lg:sticky lg:top-24 lg:self-start">
-              <div role="tablist" aria-label="How to start" onKeyDown={moveTab} className="flex gap-1 border-b border-white/15">
+              <div role="tablist" aria-label="How to start" onKeyDown={moveTab} className="flex gap-1 border-b border-home-line-strong">
                 {TABS.map((t) => (
                   <button
                     key={t}
@@ -537,7 +537,7 @@ export default function Start({ initial }: Props) {
                     tabIndex={tab === t ? 0 : -1}
                     onClick={() => setTab(t)}
                     className={`-mb-px border-b-2 px-4 py-3 text-[0.9375rem] font-bold transition ${
-                      tab === t ? 'border-crimson-400 text-crimson-50' : 'border-transparent text-smoke hover:text-crimson-50'
+                      tab === t ? 'border-crimson-400 text-home-text' : 'border-transparent text-home-text-2 hover:text-home-text'
                     }`}
                   >
                     {t === 'command' ? 'Run it yourself' : 'With a coding agent'}

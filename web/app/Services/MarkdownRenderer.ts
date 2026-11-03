@@ -1,9 +1,10 @@
 import { posix } from 'node:path'
 
-import { codeToHtml } from 'shiki'
+import { codeToHtml, type ShikiTransformer } from 'shiki'
 
 import { createMarkdownRenderer, escapeHtml } from '@guren/plugin-markdown'
 
+import { codeLineCount, fenceAttribute, parseHighlightLines } from '../../config/code-highlight.js'
 import { MARKDOWN_CODE_THEMES, SITE_ALERT_LABELS } from '../../config/markdown.js'
 import { docPaths, GITHUB_URL } from '../../config/site.js'
 import {
@@ -17,6 +18,7 @@ import {
 } from './docs-config.js'
 import { expandFeatureLists } from './doc-features.js'
 import { renderInteractiveDiagrams } from './doc-interactive.js'
+import { renderFileTree } from './doc-tree.js'
 
 const DEFAULT_LANGUAGE = 'text'
 
@@ -113,16 +115,10 @@ export function rewriteDocImage(src: string, context: DocLinkContext): string {
 }
 
 /**
- * The path a tutorial fence names (```` ```ts file=app/Models/Post.ts ````), or
- * null. The grammar is `scripts/smoke/tutorial-blocks.ts`'s; this reads the one
- * attribute a reader benefits from seeing and ignores the rest.
+ * Above this, a listing is capped and scrolls rather than owning the page. A
+ * listing with highlighted lines is never capped: the dimming already says
+ * where to look, and a cap would hide the lines it points at.
  */
-function fencePath(info: string | undefined): string | null {
-  const match = /(?:^|\s)file=(\S+)/u.exec(info ?? '')
-  return match ? match[1]! : null
-}
-
-/** Above this, a listing is capped and scrolls rather than owning the page. */
 const LONG_LISTING_LINES = 28
 
 /**
@@ -130,15 +126,36 @@ const LONG_LISTING_LINES = 28
  * block through untouched and the copy button keeps its positioning context.
  * Sticky in CSS, so it stays legible while a long listing scrolls.
  */
-function withFileCaption(html: string, path: string, lines: number): string {
+function withFileCaption(html: string, path: string, capped: boolean): string {
   const openTag = /^<pre([^>]*)>/u.exec(html)
   if (!openTag) return html
 
-  const long = lines > LONG_LISTING_LINES ? ' doc-file--long' : ''
+  const long = capped ? ' doc-file--long' : ''
   const attributes = openTag[1]!.replace(/class="([^"]*)"/u, (_, value: string) => `class="${value} doc-file${long}"`)
   const opened = attributes === openTag[1] ? `<pre${openTag[1]} class="doc-file${long}">` : `<pre${attributes}>`
   const caption = `<span class="doc-file-head" data-path="${escapeHtml(path)}">${escapeHtml(path)}</span>`
   return `${opened}${caption}${html.slice(openTag[0].length)}`
+}
+
+/**
+ * Marks the lines a `highlight=` fence attribute names, and the `<pre>` as having
+ * some, which app.css reads to dim the rest. A range the block does not have
+ * fails the render rather than highlighting nothing.
+ */
+function highlightTransformers(value: string, lineCount: number, info: string): ShikiTransformer[] {
+  const result = parseHighlightLines(value, lineCount)
+  if ('error' in result) throw new Error(`${result.error} (fence: ${info})`)
+  const { lines } = result
+  return [
+    {
+      pre(node) {
+        this.addClassToHast(node, 'has-highlighted')
+      },
+      line(node, line) {
+        if (lines.has(line)) this.addClassToHast(node, 'highlighted')
+      },
+    },
+  ]
 }
 
 // The full shiki entry rather than the plugin's fine-grained adapter, because
@@ -152,15 +169,25 @@ async function highlightDocsCode(code: string, lang?: string, info?: string): Pr
   if (normalizedLang === 'mermaid') {
     return `<pre class="mermaid">${escapeHtml(code)}</pre>`
   }
+  if (normalizedLang === 'tree') {
+    return renderFileTree(code)
+  }
+  const lineCount = codeLineCount(code)
+  const highlight = fenceAttribute(info, 'highlight')
+  const options = {
+    themes: MARKDOWN_CODE_THEMES,
+    defaultColor: 'light' as const,
+    transformers: highlight === null ? [] : highlightTransformers(highlight, lineCount, info ?? ''),
+  }
   let html: string
   try {
-    html = await codeToHtml(code, { lang: normalizedLang, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
+    html = await codeToHtml(code, { lang: normalizedLang, ...options })
   } catch {
-    html = await codeToHtml(code, { lang: DEFAULT_LANGUAGE, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
+    html = await codeToHtml(code, { lang: DEFAULT_LANGUAGE, ...options })
   }
 
-  const path = fencePath(info)
-  return path ? withFileCaption(html, path, code.split('\n').length) : html
+  const path = fenceAttribute(info, 'file')
+  return path ? withFileCaption(html, path, highlight === null && lineCount > LONG_LISTING_LINES) : html
 }
 
 export async function renderMarkdownToHtml(

@@ -4,6 +4,8 @@ Cross-Site Request Forgery (CSRF) protection prevents malicious websites from su
 
 The token spans two requests: it is issued on the GET that renders the form, and matched on the POST that submits it.
 
+<!-- interactive: csrf-exchange -->
+
 ```mermaid
 sequenceDiagram
   participant B as Browser

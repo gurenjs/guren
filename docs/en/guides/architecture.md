@@ -11,18 +11,24 @@ Guren reimagines Laravel's design principles in TypeScript, tying together Bun, 
 6. **Application boot**: `Application` initialises the container, runs providers, mounts routes, and starts the Bun/Hono server.
 
 ## Project Layout
-- `app/Http/Controllers/`: Home for your controllers.
-- `app/Http/Requests/`: Optional legacy `FormRequest` classes for compatibility-heavy apps.
-- `app/Models/`: Drizzle-backed models extending `Model<T>`.
-- `app/Providers/`: ServiceProvider classes for registering services.
-- `app/Events/`: Event classes.
-- `app/Listeners/`: Event listener classes.
-- `app/Jobs/`: Queue job classes.
-- `config/`: Application and database configuration files.
-- `db/`: Schema definitions, migrations, and seeders.
-- `resources/js/pages/`: React pages rendered via Inertia.
-- `routes/`: Route declarations (`routes/web.ts`).
-- `src/`: Application bootstrapping (`src/main.ts`, `src/app.ts`).
+
+```tree
+my-app/
+├── app/
+│   ├── Http/
+│   │   ├── Controllers/   # Home for your controllers
+│   │   └── Requests/      # Optional legacy `FormRequest` classes for compatibility-heavy apps
+│   ├── Models/            # Drizzle-backed models extending `Model<T>`
+│   ├── Providers/         # ServiceProvider classes for registering services
+│   ├── Events/            # Event classes
+│   ├── Listeners/         # Event listener classes
+│   └── Jobs/              # Queue job classes
+├── config/                # Application and database configuration files
+├── db/                    # Schema definitions, migrations, and seeders
+├── resources/js/pages/    # React pages rendered via Inertia
+├── routes/                # Route declarations (`routes/web.ts`)
+└── src/                   # Application bootstrapping (`src/main.ts`, `src/app.ts`)
+```
 
 ## Naming Conventions
 - Files that export a single class or type (e.g. controllers, models, HTTP application) use `PascalCase.ts` so the filename mirrors the exported identifier.
@@ -251,6 +257,10 @@ export class Post extends defineModel(posts) {
 
    Pass `portFallback: false` (or set `GUREN_STRICT_PORT=1`) to fail fast on
    `EADDRINUSE` instead of moving to another port.
+
+   Both cover the app server's port. The Vite dev server `listen()` starts
+   begins at `GUREN_VITE_PORT` (5173 when unset) and moves on by itself, and
+   the banner names the port it bound; see [Hot Reloading](./frontend.md#hot-reloading).
 
 This process runs under Bun as a native module and is triggered by `bun run dev`.
 

@@ -157,6 +157,8 @@ related symbols and evidence, or filter by symbol kind, name, file or module.
 Coverage and unresolved relationships remain visible when a reader cannot
 establish a relationship. A snapshot marked as changed needs another read.
 
+![The Dev Center's application graph with the route list filtered to posts and posts.store selected. The detail panel shows the route's method, path, action and required authentication, the evidence that it was registered, and its relationships: validates PostPayloadSchema, handles PostController and usesMiddleware auth](../../images/dev-center-graph.png)
+
 The page reads once when opened. **Refresh graph** starts a fresh scan, which
 can import application modules as described in
 [How the graph is collected](#how-the-graph-is-collected); **Refresh errors**
@@ -164,6 +166,8 @@ replaces the displayed retention window. Neither button runs verification
 commands. A failed read shows unavailable data and clears the previous result.
 An empty error window means no retained exceptions, not that the application is
 healthy.
+
+![The Runtime errors panel with one retained error: a 500 on GET /reports/monthly, tied to the reports.monthly route, with the stack location routes/web.ts:24:15. The exception message is not shown](../../images/dev-center-runtime-errors.png)
 
 **Docs & plans** opens the docs viewer at `/_guren/docs`, including its
 plan views. That viewer requires `GUREN_DOCS=1`. The Dev Center itself requires
@@ -200,6 +204,8 @@ own terminal. A waiver's reason is quoted into that command in the page and neve
 sent to the server. The page never runs the command itself: the Dev Center cannot
 tell you from an agent's browser pointed at the same server, so approving,
 waiving and closing stay commands you run.
+
+![A plan page waiting on a person after a review was saved. The Approve section offers Check plan:approve, and the Review section counts the saved review and gives the message to send the agent](../../images/agent-course-dev-center-review.png)
 
 Each step on the plan page has an **Evidence** section, so you can judge the
 step without asking the agent:
@@ -250,6 +256,8 @@ inputs with an error, each Alert tone, and Field with several inputs, a hint and
 an error. The preview is a page the app's Vite dev server serves at
 `/__guren/ui-catalog`, framed in the Dev Center, so the copies render through the
 app's own Tailwind build and `resources/css/app.css`, which imports `guren.css`.
+
+![The Components preview rendering the app's own copies: Alert in its ok, warn and danger tones, then Button in the primary, secondary and danger variants at both sizes and disabled](../../images/dev-center-components.png)
 
 The preview needs `routeTypesPlugin()` from `@guren/cli/vite` in
 `vite.config.ts`, which scaffolded apps already list, and a running Vite dev

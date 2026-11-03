@@ -7,6 +7,7 @@ import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
 import { ChevronRightIcon } from '../../components/icons.js'
+import { clientVisitHref } from '../../lib/doc-link.js'
 import { breadcrumbJsonLd, techArticleJsonLd } from '../../lib/structured-data.js'
 import { useColorMode } from './theme.js'
 
@@ -298,6 +299,38 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     }
   }, [])
 
+  // Rendered markdown links are plain anchors, so without this every link in a
+  // doc body is a full page load. Delegated on the container, which survives
+  // client-side visits between docs.
+  const hasDoc = Boolean(doc)
+  useEffect(() => {
+    if (!hasDoc) return
+
+    const container = document.querySelector('.docs-content')
+    if (!container) return
+
+    const handleClick = (event: Event) => {
+      if (!(event instanceof MouseEvent)) return
+      if (event.defaultPrevented || event.button !== 0) return
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+
+      const anchor = event.target instanceof Element ? event.target.closest('a') : null
+      if (!anchor || !container.contains(anchor)) return
+
+      const href = clientVisitHref(
+        { href: anchor.getAttribute('href'), target: anchor.target, download: anchor.hasAttribute('download') },
+        window.location,
+      )
+      if (!href) return
+
+      event.preventDefault()
+      router.visit(href)
+    }
+
+    container.addEventListener('click', handleClick)
+    return () => container.removeEventListener('click', handleClick)
+  }, [hasDoc])
+
   // Mermaid: the build-time renderer leaves ```mermaid fences as <pre class="mermaid">
   // (shiki has no grammar for them); the library loads lazily, client-only, and only
   // on pages that have one.
@@ -437,10 +470,10 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     container.querySelectorAll('.docs-copy-btn').forEach((btn) => btn.remove())
 
     const blocks = container.querySelectorAll<HTMLPreElement>('pre')
-    // `pre.mermaid` holds diagram source that becomes an <svg> below — there
-    // is nothing there a reader would want on their clipboard.
+    // `pre.mermaid` holds diagram source that becomes an <svg> below, and
+    // `pre.doc-tree` a drawn directory listing: nothing a reader would paste.
     const topLevelBlocks = Array.from(blocks).filter(
-      (pre) => !pre.closest('pre pre') && !pre.classList.contains('mermaid'),
+      (pre) => !pre.closest('pre pre') && !pre.classList.contains('mermaid') && !pre.classList.contains('doc-tree'),
     )
     const cleanups: Array<() => void> = []
 

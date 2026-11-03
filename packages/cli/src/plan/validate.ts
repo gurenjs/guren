@@ -27,9 +27,11 @@ import {
 } from './app-state'
 import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
 import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
+import { planCommandTargets, type PlanCommandTargetHit } from './command-targets'
 import { elementsAtPlannedEnd, judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
 import { planMayPassNow, routeAnswersBefore } from './scaffold-tests'
+import { derivePlanTasks, type PlanTaskDerivation } from './tasks'
 import {
   findDuplicatePlanIds,
   hasBaseline,
@@ -45,7 +47,6 @@ import {
   type PlanFlowNode,
   type PlanRoute,
 } from './schema'
-import { derivePlanTasks } from './tasks'
 
 export interface PlanCheckResult extends CheckResult {
   /** The plan element the finding belongs beside; absent on a plan-wide finding. */
@@ -124,6 +125,7 @@ export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResul
 
   checkDuplicateIds(plan, results)
   checkCommands(plan, results)
+  checkCommandTargets(plan, app, results)
   checkInternalReferences(plan, index, results)
   checkChangeConsistency(plan, results)
   checkAgainstApp(plan, app, results)
@@ -178,6 +180,7 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 const TITLES: Record<string, string> = {
   'plan:duplicate-id': 'Plan element ids',
   'plan:command': 'Plan commands',
+  'plan:command-target': 'Plan commands',
   'plan:reference': 'Plan references',
   'plan:change-consistency': 'Plan change consistency',
   'plan:app-collision': 'Plan against the application',
@@ -228,6 +231,64 @@ function checkCommands(plan: PlanDraft, results: PlanCheckResult[]): void {
       }),
     )
   }
+}
+
+/**
+ * The commands run before every step that builds what the plan adds or renames. A command breaks the
+ * plan where `plan:scaffold` then refuses a target it left, where it declares a table the data step
+ * declares (some blueprints with a migration), or where its output imports what no step has written
+ * yet, which fails the commands step's own typecheck. Any other write is a stub its step edits.
+ */
+function checkCommandTargets(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
+  let derived: PlanTaskDerivation | undefined
+  const derivation = (): PlanTaskDerivation => (derived ??= derivePlanTasks(plan, { apiOnly: app.apiOnly }))
+  for (const { id, quoted, hits } of planCommandTargets(plan, app, derivation)) {
+    const commandsStep = derivation().tasks.flatMap((task) => task.steps).find((step) => step.kind === 'commands')?.id
+    results.push(
+      finding('plan:command-target', 'fail', `The command ${quoted} runs before the steps that build what the plan adds: ${targetClauses(hits, commandsStep).join('; ')}.`, {
+        elementId: id,
+        section: 'commands',
+        suggestion: '`commands` are for what the plan does not declare. Drop this command: the step that owns each element writes it, and a factory or seeder for an element belongs in a step after the element exists.',
+      }),
+    )
+  }
+}
+
+function targetClauses(hits: readonly PlanCommandTargetHit[], commandsStep: string | undefined): string[] {
+  const later = (step: PlanCommandTargetHit['step']): string => (step === undefined ? 'a later step' : `step ${step.id}`)
+  const typecheck = `so the commands step${commandsStep === undefined ? '' : ` (${commandsStep})`} fails its typecheck`
+  const named = (hit: PlanCommandTargetHit): string => `${hit.label} (${hit.elementId})`
+  return [
+    ...groupByStep(hits.filter((hit) => hit.problem.kind === 'scaffold')).map(({ step, hits: group }) =>
+      `it writes ${listHits(group)}, which plan:scaffold writes at ${later(step)}, refusing a target that already exists`),
+    ...hits.flatMap(({ problem, ...hit }) =>
+      problem.kind === 'table'
+        ? [`it declares ${hit.label} (${hit.elementId}) in db/schema.ts${problem.migration ? ' and generates a migration for it' : ''}, before ${later(hit.step)} declares that table`]
+        : []),
+    ...groupByStep(hits.filter((hit) => hit.problem.kind === 'imports')).map(({ step, hits: group }) =>
+      `it imports ${listHits(group)}, which ${later(step)} writes, ${typecheck}`),
+    ...hits.flatMap((hit) => {
+      const { problem } = hit
+      if (problem.kind === 'schema') return [`it writes ${named(hit)} importing \`${problem.identifier}\` from db/schema, which does not declare it yet, ${typecheck}`]
+      if (problem.kind === 'page') return [`it writes ${named(hit)} rendering the page ${problem.page}, which the application does not have, ${typecheck}`]
+      return []
+    }),
+  ]
+}
+
+function listHits(hits: readonly PlanCommandTargetHit[]): string {
+  const names = hits.map((hit) => `${hit.label} (${hit.elementId})`)
+  return names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+}
+
+function groupByStep(hits: readonly PlanCommandTargetHit[]): Array<{ step: PlanCommandTargetHit['step']; hits: PlanCommandTargetHit[] }> {
+  const groups = new Map<string | undefined, { step: PlanCommandTargetHit['step']; hits: PlanCommandTargetHit[] }>()
+  for (const hit of hits) {
+    const group = groups.get(hit.step?.id) ?? { step: hit.step, hits: [] }
+    group.hits.push(hit)
+    groups.set(hit.step?.id, group)
+  }
+  return [...groups.values()]
 }
 
 /**

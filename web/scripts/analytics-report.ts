@@ -35,6 +35,8 @@ const READING = `blob2 IN ('docs', 'blog', 'markdown') AND blob1 NOT IN ('/blog/
 // www.guren.dev 301s to the apex, so no page there can send this referrer; only
 // clients that forge it do.
 const FORGED_REFERRER = 'www.guren.dev'
+// site-analytics.ts SAME_SITE_REFERRER; points written before it carry '' instead.
+const SAME_SITE = 'self'
 const AGENT_OK = `blob3 = 'ai-agent' AND double1 >= 200 AND double1 < 300`
 
 const queries: Array<{ title: string; sql: string }> = [
@@ -61,8 +63,19 @@ const queries: Array<{ title: string; sql: string }> = [
     title: 'Top referrers (readers)',
     sql: `SELECT blob4 AS referrer, SUM(_sample_interval) AS requests
           FROM ${DATASET} WHERE ${WINDOW} AND ${READER}
-            AND blob4 != '' AND blob4 != '${FORGED_REFERRER}'
+            AND blob4 NOT IN ('', '${SAME_SITE}', '${FORGED_REFERRER}')
           GROUP BY referrer ORDER BY requests DESC LIMIT 15`,
+  },
+  {
+    // How much reading is a second page: an Inertia visit, or a same-site link
+    // followed as a full load. The rest arrived from outside or with no referrer.
+    title: 'How reader pages were reached',
+    sql: `SELECT IF(blob8 = 'inertia', 'in-site (inertia)',
+                   IF(blob4 = '${SAME_SITE}', 'in-site (full load)',
+                     IF(blob4 = '', 'direct or unknown', 'external referrer'))) AS arrival,
+                 SUM(_sample_interval) AS requests
+          FROM ${DATASET} WHERE ${WINDOW} AND ${READER} AND ${READING}
+          GROUP BY arrival ORDER BY requests DESC`,
   },
   {
     title: 'Landings by ref tag (readers)',

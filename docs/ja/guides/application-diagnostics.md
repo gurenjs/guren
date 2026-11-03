@@ -98,9 +98,13 @@ GUREN_MCP=1 GUREN_DOCS=1 bun run dev
 
 Dev Center には、`guren graph` と同じアプリケーショングラフと、`guren runtime:errors` と同じ保持中のエラーが表示されます。ルートを選ぶと関連するシンボルと根拠が表示され、種類、名前、ファイル、モジュールで絞り込めます。関係を確定できない場合も、取得範囲と未解決の関係は表示されたままです。読み取り中に変更されたスナップショットは、再取得が必要です。
 
+![Dev Center のアプリケーショングラフ。ルートの一覧を posts で絞り込み、posts.store を選んでいます。右側には、メソッド、パス、アクション、認証が必要なことと、登録済みであることを示す根拠、関係（PostPayloadSchema への validates、PostController への handles、auth への usesMiddleware）が表示されています](../../images/dev-center-graph.png)
+
 画面を開くと一度読み取ります。**Refresh graph**（グラフ更新）を押すと、[グラフの集め方](#グラフの集め方)で説明した条件でアプリのモジュールを読み込み直します。**Refresh errors**（エラー更新）を押すと、保持中のエラー一覧が置き換わります。どちらのボタンも検証コマンドは実行しません。
 
 取得に失敗すると前回の結果が消え、取得できなかったことが表示されます。エラー一覧が空でも、保持中の例外がないことを示すだけで、アプリ全体が正常だとは限りません。
+
+![Runtime errors（実行時エラー）の欄に、保持中のエラーが 1 件表示されています。GET /reports/monthly の 500 で、reports.monthly ルートに結び付けられ、スタックの位置は routes/web.ts:24:15 です。例外メッセージは表示されません](../../images/dev-center-runtime-errors.png)
 
 **Docs & plans**（ドキュメントと計画）からは、計画表示を含む `/_guren/docs` のドキュメントビューアーを開けます。この画面には `GUREN_DOCS=1` が必要です。Dev Center 自体は `GUREN_MCP=1` で有効になり、MCP エンドポイントと同じループバックの制限がかかります。本番環境では無効です。画面の配信機能がない古い CLI では MCP ツールだけが有効になるので、`/_guren` が 404 を返す場合は Guren を更新してください。
 
@@ -120,6 +124,8 @@ Dev Center には、`guren graph` と同じアプリケーショングラフと�
 
 コマンドそのものをページが実行することはありません。操作しているのが人か、同じサーバーを開いたエージェントのブラウザかを、Dev Center は区別できないためです。承認、免除、クローズは、これまでどおりターミナルで実行するコマンドです。
 
+![レビューを保存した後の、人の判断を待っている計画のページ。Approve の欄に Check plan:approve のボタンがあり、Review の欄には保存したレビューの件数とエージェントに送る依頼文が表示されています](../../images/agent-course-dev-center-review.png)
+
 計画のページでは、ステップごとに **Evidence**（根拠）の欄が開けます。エージェントに尋ねなくても、ステップの出来をここで判断できます。
 
 - **Runtime errors**（実行時エラー）: 開発サーバーが保持しているサーバーエラーのうち、登録されたルートのメソッドとパスが、そのステップに関わるルートと一致するものです。ルートは計画だけから求めます。ステップ自身のルート、ステップのアクションやコントローラーへのルート、ステップのビューを表示するルートと送信先のルート、振る舞い（behaviour）が使うルートが対象です。関わるルートがないステップにはその旨が表示され、収集側が 1 つのルートに結び付けられなかったエラーは数えません。
@@ -137,5 +143,7 @@ Dev Center には、`guren graph` と同じアプリケーショングラフと�
 以前のリリースのままのコピーは `guren upgrade` が置き換えます。編集済みのコピーは upgrade では変わらないので、`guren add ui <name> --diff` でテンプレートとの差分を確かめてください。この判定には、doctor の `guren-ui-components` チェックや `guren upgrade` と同じテンプレートのハッシュ一覧を使っています。
 
 一覧の下には、アプリにあるコピーが、テンプレートの props で選べる variant と状態ごとに描画されます。Button の variant とサイズ、無効状態のボタン、エラー状態の入力欄、Alert の各 tone、ヒントやエラーを付けた複数の入力欄の Field などです。このプレビューはアプリの Vite 開発サーバーが `/__guren/ui-catalog` で配信するページで、Dev Center の画面には iframe で埋め込まれます。そのため、アプリ自身の Tailwind のビルドと、`guren.css` を import している `resources/css/app.css` で描画されます。
+
+![Components のプレビュー。アプリにあるコピーを描画していて、Alert は ok、warn、danger の各 tone、Button は primary、secondary、danger の各 variant を 2 つのサイズと無効状態で並べています](../../images/dev-center-components.png)
 
 プレビューを表示するには、`vite.config.ts` に `@guren/cli/vite` の `routeTypesPlugin()` があり（scaffold したアプリには最初からあります）、Vite 開発サーバーが動いている必要があります。API 専用のアプリでは一覧だけが表示されます。例はテンプレートの props に合わせて書かれているので、編集済みのコピーに足した variant は表示されません。コンポーネントを export しなくなったコピーや描画中に例外を投げたコピーでは、例の代わりにその理由が表示されます。

@@ -44,11 +44,25 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
   },
   {
     title: { en: 'The Basics', ja: '基本' },
-    slugs: ['routing', 'controllers', 'middleware', 'csrf', 'validation', 'error-handling', 'database', 'frontend', 'inertia', 'views'],
+    slugs: [
+      'routing',
+      'route-contracts',
+      'controllers',
+      'middleware',
+      'csrf',
+      'validation',
+      'error-handling',
+      'database',
+      'models',
+      'relationships',
+      'frontend',
+      'inertia',
+      'views',
+    ],
   },
   {
     title: { en: 'Security', ja: 'セキュリティ' },
-    slugs: ['authentication', 'oauth', 'authorization', 'api-tokens', 'password-reset', 'email-verification', 'encryption'],
+    slugs: ['authentication', 'sessions', 'oauth', 'authorization', 'api-tokens', 'password-reset', 'email-verification', 'encryption'],
   },
   {
     title: { en: 'Digging Deeper', ja: '応用機能' },
@@ -68,6 +82,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'health-checks',
       'i18n',
       'api-resources',
+      'openapi',
       'markdown',
     ],
   },
@@ -87,6 +102,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'agent-interface',
       'agent-tool-governance',
       'ai-agents',
+      'ai-agents-testing',
       'durable-agents',
       'agent-harness',
       'application-diagnostics',
@@ -228,6 +244,11 @@ export function docCategoryTitle(category: DocCategory, locale: DocLocale): stri
 
 export function docCategoryDir(category: DocCategory): string {
   return DOC_CATEGORY_CONFIG[category].dir
+}
+
+/** The page a bare `/docs/<category>` lands on: the first in the sidebar order. */
+export function docCategoryLanding(category: DocCategory): string {
+  return DOC_CATEGORY_CONFIG[category].order[0]
 }
 
 export function docLocaleDir(locale: DocLocale): string {

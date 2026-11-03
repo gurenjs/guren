@@ -5,7 +5,7 @@ import { getWorkersEnv } from '@guren/plugin-cloudflare'
  * Cookie-less, server-side analytics into Workers Analytics Engine: this audience
  * blocks beacons and agents run no JavaScript. No cookies, IPs, full referrers or
  * full user agents are stored, so no consent banner. SQL API: index1 ua class;
- * blob1..10 path, content, ua class, referrer host ('' = direct/same-site), language,
+ * blob1..10 path, content, ua class, referrer host ('' direct, 'self' same-site), language,
  * country, method, initial|inertia, UA token, ref tag; double1..2 status, ms.
  */
 
@@ -61,11 +61,14 @@ export function classifyContent(pathname: string): string {
 const MAX_PATH_LENGTH = 512
 const MAX_HOST_LENGTH = 256
 
+// A doc-body link is a full page load, so its click shows up only as this.
+export const SAME_SITE_REFERRER = 'self'
+
 export function referrerHost(referrer: string | undefined, ownHost: string): string {
   if (!referrer) return ''
   try {
     const host = new URL(referrer).hostname
-    return host === ownHost ? '' : host.slice(0, MAX_HOST_LENGTH)
+    return host === ownHost ? SAME_SITE_REFERRER : host.slice(0, MAX_HOST_LENGTH)
   } catch {
     return ''
   }

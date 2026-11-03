@@ -275,6 +275,39 @@ describe('plan:close', () => {
     expect(report.waivers.map((waiver) => waiver.elementId)).not.toContain(element.id)
   })
 
+  test('should close on an element the approval accepted without a behaviour, once its step verified it, and refuse it before', async () => {
+    const document = { ...loadApprovedCommentsPlan(), commands: [{ id: 'command.mail', command: 'guren make:mail CommentPostedMail', reason: 'the mail class' }] }
+    const plan = PlanSchema.parse(document)
+    const app = await createClosableApp('accepted', { document, open: ['command.mail'], approve: false })
+    const hash = planHash(plan)
+    await writeFile(planApprovalsPath(app.plan), JSON.stringify({ approvalsVersion: 1, approvals: [{ hash, approvedAt: APPROVED_AT, acceptedWithoutBehaviour: ['command.mail'] }] }), 'utf8')
+    const step = derivePlanTasks(plan, { apiOnly: false }).tasks.flatMap((task) => task.steps).find((entry) => entry.elementIds.includes('command.mail'))!
+
+    // No record yet: the acceptance replaces the behaviour, never the step's run.
+    await expect(close(app)).rejects.toThrow(`Run \`bunx guren plan:verify ${app.plan} --step ${step.id}\`; or waive it`)
+
+    const record: PlanStepRecord = {
+      outcome: 'verified',
+      planDigest: planDigest(plan),
+      ranAt: '2026-09-22T11:00:00.000Z',
+      durationMs: 1,
+      commands: [],
+      acceptance: [],
+      incomplete: [],
+      waived: [],
+      fingerprint: { files: {}, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'test' } },
+    }
+    await writeWorkspaceFiles(app.dir, { '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [step.id]: record } }) })
+
+    const report = await close(app)
+
+    expect(report.accepted).toEqual(['command.mail'])
+    expect(report.adrCommands.some((command) => command.includes('command.mail'))).toBe(false)
+    const doc = await read(app.dir, 'docs/plans/comments.md')
+    expect(doc).toContain('| `command.mail` | add | accepted |')
+    expect(doc).toContain("- Accepted at approval as complete on their step's verified run, since no behaviour can reach them: `command.mail`")
+  })
+
   test('should leave output check --docs passes, with no warning either', async () => {
     const app = await createClosableApp('docs-check')
     await close(app)
