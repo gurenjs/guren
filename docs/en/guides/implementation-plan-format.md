@@ -125,7 +125,7 @@ A behaviour that holds before the plan's work carries `"alreadyHolds": true`. Th
 
 The `tests` step asks every behaviour's test to fail before the implementation exists, which a test of what already holds cannot do. A marked behaviour is asked for its test only, and the step that runs the tests still needs it to pass. Leave the mark off when the plan adds the guard itself: that test fails until the work is done. An `existing` route needs no `unauthenticated` behaviour at all.
 
-`plan:render` warns about a behaviour whose test may pass before its implementation exists: one with nothing to set up, on a route that exists already or that an earlier task mounts. Mark it if it guards what already holds, move it to the task that adds its route, or give it a setup or an expectation that only the planned work meets. A mark on a behaviour whose route nothing answers yet is a warning too.
+`plan:render` warns about a behaviour whose test may pass before its implementation exists: one with nothing to set up, on a route that exists already or that an earlier task mounts. On a route that exists, mark it if it guards what already holds, or give it a setup or an expectation that only the planned work meets. On a route an earlier task adds, move it to that task, whose tests step sees it fail. A mark is a warning too where the behaviour cannot hold yet: nothing answers its route, an earlier task of the plan adds the route, or `plan:approve` reads the route without the authentication the plan puts on it.
 
 ## Questions
 

@@ -297,7 +297,10 @@ could not carry a nested request body.
 `alreadyHolds: true`, the field being `true` or absent, so a plan without it
 hashes as it did before the field existed. It says the behaviour holds before
 the plan's work, as a guest is already sent to sign in on a route that is
-behind authentication today, so its test guards what exists. `tests:fail` asks
+behind authentication today, so its test guards what exists. Only a route the
+plan does not add can carry such a behaviour: one an earlier task of the plan
+adds holds only through the plan's work, whose own tests step is where it is
+seen to fail. `tests:fail` asks
 no failing run of it, and the step that runs `tests` still needs it to pass
 (§5, §6). The name states the fact rather than the mechanism, in the schema's
 adjective style (`readOnly`, `nullable`): what the verifier does with a marked
@@ -355,10 +358,15 @@ plan and the application's current context (`generateContext()`,
 - (amended, `alreadyHolds`) a behaviour whose test, as `plan:scaffold` would
   write it, may pass before its implementation exists (§5's `mayPassNow`,
   through the same `planMayPassNow()`), and a behaviour marked
-  `alreadyHolds` whose route nothing answers before its `tests` step. Both
-  are warnings, the first one for the person to settle while the plan can
-  still change: mark the behaviour, move it to the task adding its route, or
-  give it a setup or an expectation only the work meets.
+  `alreadyHolds` that does not hold before the plan's work: its route is
+  answered by nothing before its `tests` step, or added by an earlier task
+  of the plan, or, for an `unauthenticated` behaviour, given authentication
+  by the plan where the registered route applies none now (read from the
+  detail `plan:approve` loads for a plan that alters anything; without it no
+  verdict). All are warnings, the first one for the person to settle while
+  the plan can still change: on a route that exists, mark the behaviour or
+  give it a setup or an expectation only the work meets; on one an earlier
+  task adds, move it to that task.
 
 **Amended in implementation:** a check against the application reads the app root
 the plan element names (`module`, absent meaning the project root), for models,
@@ -1565,9 +1573,12 @@ the other emitters.
   (`routeAnswersBefore()`: one the plan does not add, or one a task ahead of
   it mounts, owning the route, or owning its action and none of that action's
   routes). Before approval the skeleton is written as the scaffold would write
-  it, a root model counted from the scaffold step that writes it. A behaviour
-  that guards what holds already is marked rather than rewritten to fail; one
-  that should fail first gets a setup or an expectation only the work meets.
+  it, against the root models as the tasks ahead leave them (each model they
+  own added, renamed or dropped) and as the step's own scaffold step writes
+  them. A behaviour on a route that exists and guards what holds already is
+  marked rather than rewritten to fail; one on a route an earlier task adds
+  moves to that task; one that should fail first gets a setup or an
+  expectation only the work meets.
   A step that runs `tests` alone asks its behaviours to pass, so none of its
   behaviours is listed. (b) stays open.
 - The file compiles: the helpers, `expect` and each model import are written
