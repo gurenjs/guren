@@ -1,5 +1,6 @@
 ---
 '@guren/server': minor
+'@guren/core': patch
 '@guren/plugin-mcp': minor
 '@guren/cli': minor
 ---

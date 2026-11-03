@@ -552,7 +552,7 @@ export class Controller {
   }
 }
 
-/** Shared props narrowed to an App MCP allowlist; unlisted values are dropped before any lazy one resolves. */
+/** Shared props narrowed to an App MCP allowlist, after every resolver ran; a lazy value under a dropped key never resolves. */
 function projectSharedProps(
   shared: ResolvedSharedInertiaProps,
   allowed: ReadonlySet<string> | undefined,

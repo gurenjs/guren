@@ -315,6 +315,8 @@ function readOnlyHonestyFinding(route: AgentRoute): CheckResult | undefined {
  */
 function outputFinding(route: AgentRoute): CheckResult | undefined {
   if (describesOutput(route.definition)) return undefined
+  // A `ui` page's Inertia response is the declared design, and `agent-route-ui-output` refuses the output schema this would suggest (RFC 0038 §2).
+  if (declaresUiPage(route)) return undefined
 
   const title = `${route.label} agent tool`
   const suggestion =
@@ -440,6 +442,11 @@ function approvalStoreFinding(
 // `body` key — needs the merged schema `deriveAgentTools()` builds, and is
 // therefore left to the PR that lands that derivation.
 
+function declaresUiPage(route: AgentRoute): boolean {
+  const ui = route.agent.ui === undefined ? undefined : deriveAgentToolUi(route.agent.ui)
+  return typeof ui === 'object' && ui.page !== undefined
+}
+
 /** A `defer(…)` call in a comment- and string-blanked body. */
 const DEFER_CALL_PATTERN = /\bdefer\s*\(/
 
@@ -557,10 +564,7 @@ async function uiFindings(route: AgentRoute, cwd: string): Promise<Finding[]> {
  * the plugin then has no built pages and lists every such tool without a view.
  */
 async function uiPagesModuleFinding(routes: AgentRoute[], cwd: string, cache: ParseCache): Promise<CheckResult | undefined> {
-  const withPage = routes.filter((route) => {
-    const ui = route.agent.ui === undefined ? undefined : deriveAgentToolUi(route.agent.ui)
-    return typeof ui === 'object' && ui.page !== undefined
-  })
+  const withPage = routes.filter(declaresUiPage)
   if (withPage.length === 0) return undefined
 
   const calls = await scanPluginCalls(cwd, cache, MCP_PLUGIN_EXPORT)

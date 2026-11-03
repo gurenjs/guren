@@ -206,8 +206,9 @@ whose `ui` is malformed is left out of the derived set, with a warning naming
 the route, and `guren check` fails on it.
 
 `.guren/agents.gen.ts` carries `ui` like every other derived field, so
-`guren tool:list` and `guren tool:inspect` show it and the WebMCP client
-ignores it. Codegen also writes the set of UI pages the MCP App build needs (§4)
+~~`guren tool:list` and `guren tool:inspect` show it and~~ the WebMCP client
+ignores it. **Amended in implementation (Phase 1):** `tool:list` and
+`tool:inspect` print `ui` in Phase 3, with the rest of the developer surface. Codegen also writes the set of UI pages the MCP App build needs (§4)
 into the same file, as `agentUiPages`, so the build reads one generated input
 and never loads the routes file. The manifest itself is never bundled into a
 view (§5).
@@ -576,7 +577,9 @@ view, the same reason `DerivedAgentTool.warnings` exists beside the prefixed
 lines.
 
 **`dev.guren/inertia-page`** is present when the response carries
-`X-Inertia: true`, with the app-relative `url` of §5.
+`X-Inertia: true`, with the app-relative `url` of §5. **Amended in
+implementation (Phase 1):** only for a tool whose `ui` names a page. A page no
+view renders is not handed to a third-party frame.
 
 **What props leave the application.** The page object goes to the host and into
 a third-party iframe, and today the same props already reach the model as text.
@@ -588,7 +591,11 @@ here rather than left to `share()`:
 - On a request the agent dispatch makes (the agent surface header, which App MCP
   sets on its own in-process request), `Controller.inertia()` resolves **only
   the shared props named in `mcpPlugin({ ui: { sharedProps: [...] } })`**,
-  default none. Unlisted lazy shared props are never evaluated.
+  default none. ~~Unlisted lazy shared props are never evaluated.~~
+  **Amended in implementation (Phase 1):** every `share()` resolver still runs,
+  since one resolver returns several keys; the projection drops the unlisted
+  keys afterwards, so only a lazy value nested inside a dropped key is never
+  evaluated. Filtering per resolver would need resolvers to declare their keys.
 - The action's own props are sent; the controller chose them for that page.
 - The text `content` is the same projected `page.props`, so the model reads no
   more than the view receives.

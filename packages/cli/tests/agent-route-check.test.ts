@@ -1071,6 +1071,12 @@ ${body}
     expect(keys(results).filter((key) => key.startsWith('agent-route-ui-'))).toEqual([])
   })
 
+  it('does not ask a ui page route for the output schema it refuses', async () => {
+    await writeApp("    return this.inertia('posts/Show', {})")
+    const results = await run([showRoute({ ui: 'posts/Show' })], tempDir)
+    expect(keys(results).filter((key) => key.startsWith('agent-route-inertia') || key.startsWith('agent-route-output'))).toEqual([])
+  })
+
   it('fails ui.page together with an output schema', async () => {
     await writeApp("    return this.inertia('posts/Show', {})")
     const results = await run([showRoute({ ui: 'posts/Show' }, OUTPUT)], tempDir)

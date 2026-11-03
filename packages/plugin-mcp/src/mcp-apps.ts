@@ -57,7 +57,7 @@ export interface McpUiConfig {
   domain?: string
   /**
    * Shared Inertia props an App MCP tool call carries, to the model and to a
-   * view alike. Default none: every other shared prop is dropped before it resolves.
+   * view alike. Default none: every other key is dropped once the `share()` resolvers ran.
    */
   sharedProps?: readonly string[]
 }
