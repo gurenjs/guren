@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
+import { resolveBunImages, type BunImages } from './docker-image'
 import { assertCwdUnsupported, kebabCase, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
 export type DeployTarget = 'docker' | 'fly' | 'railway' | 'cloudflare' | 'all'
@@ -8,6 +9,10 @@ export interface DeployOptions extends WriterOptions {
   target?: DeployTarget
   appName?: string
   port?: number
+  /** Resolves the `oven/bun` images; tests pass one that never reaches Docker Hub. */
+  resolveImages?: () => Promise<BunImages>
+  /** Collects why an image is less pinned than `name:version@digest`. */
+  notes?: string[]
 }
 
 function normalizePort(port?: number): number {
@@ -49,13 +54,13 @@ export const DOCKER_RUNTIME_DIRECTORIES = ['bin', 'src', 'app', 'config', 'route
 /** `tsconfig.json` carries the `@/` alias, which Bun resolves from it at runtime. */
 export const DOCKER_RUNTIME_FILES = ['tsconfig.json'] as const
 
-function dockerfileTemplate(port: number): string {
+function dockerfileTemplate(port: number, images: BunImages): string {
   const copies = [...DOCKER_RUNTIME_FILES, ...DOCKER_RUNTIME_DIRECTORIES]
     .map((entry) => `COPY --from=builder /app/${entry} ./${entry}`)
     .join('\n')
 
   return `# Build stage — includes devDependencies for Vite/TypeScript
-FROM oven/bun:1 AS builder
+FROM ${images.builder} AS builder
 WORKDIR /app
 
 COPY bun.lock package.json ./
@@ -68,7 +73,7 @@ RUN bun run build
 RUN mkdir -p ${DOCKER_RUNTIME_DIRECTORIES.join(' ')}
 
 # Production stage — runtime only
-FROM oven/bun:1-slim
+FROM ${images.runtime}
 WORKDIR /app
 
 COPY --from=builder /app/package.json /app/bun.lock ./
@@ -203,24 +208,27 @@ function cloudflareTarget(appName: string | undefined, manifest: AppManifest): C
   }
 }
 
-function filesForTarget(target: DeployTarget, appName: string, port: number, cloudflare?: CloudflareTarget): ScaffoldFileEntry[] {
-  const dockerFile: ScaffoldFileEntry = { path: 'Dockerfile', contents: dockerfileTemplate(port) }
+function filesForTarget(target: DeployTarget, appName: string, port: number, images: BunImages | undefined, cloudflare?: CloudflareTarget): ScaffoldFileEntry[] {
+  const dockerFile = (): ScaffoldFileEntry => {
+    if (!images) throw new Error(`Deploy target ${target} writes a Dockerfile but no images were resolved.`)
+    return { path: 'Dockerfile', contents: dockerfileTemplate(port, images) }
+  }
   const flyFile: ScaffoldFileEntry = { path: 'fly.toml', contents: flyTomlTemplate(appName, port) }
   const railwayFile: ScaffoldFileEntry = { path: 'railway.json', contents: railwayJsonTemplate() }
   switch (target) {
     case 'docker':
-      return [dockerFile]
+      return [dockerFile()]
     case 'fly':
-      return [dockerFile, flyFile]
+      return [dockerFile(), flyFile]
     case 'railway':
-      return [dockerFile, railwayFile]
+      return [dockerFile(), railwayFile]
     case 'cloudflare':
       return [{
         path: '.github/workflows/deploy-cloudflare.yml',
         contents: cloudflareWorkflowTemplate(cloudflare?.worker ?? appName, cloudflare?.mcpOAuth ?? false),
       }]
     case 'all':
-      return [dockerFile, flyFile, railwayFile]
+      return [dockerFile(), flyFile, railwayFile]
     default: {
       const exhaustive: never = target
       throw new Error(`Unsupported deploy target: ${exhaustive}`)
@@ -235,6 +243,10 @@ export async function scaffoldDeploy(options: DeployOptions = {}): Promise<strin
   const manifest = await readAppManifest()
   const appName = sanitizeFlyAppName(options.appName ?? (manifest.name?.trim() || basename(process.cwd())))
   const cloudflare = target === 'cloudflare' ? cloudflareTarget(options.appName, manifest) : undefined
-  const files = filesForTarget(target, appName, port, cloudflare)
+  const images = target === 'cloudflare'
+    ? undefined
+    : await (options.resolveImages ?? (() => resolveBunImages(process.versions.bun)))()
+  options.notes?.push(...(images?.notes ?? []))
+  const files = filesForTarget(target, appName, port, images, cloudflare)
   return writeScaffoldFiles(files, { force: Boolean(options.force), overwritten: options.overwritten })
 }
