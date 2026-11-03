@@ -1,5 +1,22 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import {
+  documentFromBundle,
+  MCP_APP_DRIVER_ID,
+  MCP_APP_ENTRY_ID,
+  MCP_APP_MODE,
+  MCP_APP_BUNDLER_ENV,
+  MCP_APP_OUT_DIR,
+  MCP_APP_PAGE_ENV,
+  MCP_APP_SETUP_FILE,
+  pageDocumentFile,
+  renderPageEntry,
+  resolvePageFile,
+  runMcpAppBuild,
+  type BundleItem,
+  type GurenMcpAppOptions,
+  type McpAppBuildContext,
+} from './mcp-app'
 
 export interface GurenVitePluginOptions {
   /** Alias prefix for application imports such as `@/.guren/routes.gen` (defaults to `@`). */
@@ -30,6 +47,8 @@ export interface GurenVitePluginOptions {
   assetFileNames?: string
   /** Prototype mode (`vite --mode prototype`, RFC 0021): the static, server-less build. */
   prototype?: GurenPrototypeOptions
+  /** MCP App mode (`vite build --mode mcp-app`, RFC 0038): one inlined document per `.agent({ ui })` page. */
+  mcpApp?: GurenMcpAppOptions
 }
 
 export interface GurenPrototypeOptions {
@@ -51,8 +70,8 @@ export const PROTOTYPE_SHELL_FILE = '.guren/prototype/index.html'
 export const PROTOTYPE_SHELL_OVERRIDE = 'resources/js/prototype/index.html'
 export const PROTOTYPE_MODE = 'prototype'
 
-/** Every option defaulted except `prototype`, which is absent for the ordinary build. */
-type ResolvedOptions = Required<Omit<GurenVitePluginOptions, 'prototype'>> & Pick<GurenVitePluginOptions, 'prototype'>
+/** Every option defaulted except the two modes, which are absent for the ordinary build. */
+type ResolvedOptions = Required<Omit<GurenVitePluginOptions, 'prototype' | 'mcpApp'>> & Pick<GurenVitePluginOptions, 'prototype' | 'mcpApp'>
 
 const defaultOptions: ResolvedOptions = {
   appAlias: '@',
@@ -73,22 +92,66 @@ const defaultOptions: ResolvedOptions = {
 export function gurenVitePlugin(options: GurenVitePluginOptions = {}) {
   const resolved = { ...defaultOptions, ...options }
   let prototype: ResolvedPrototype | undefined
+  let mcpApp: ResolvedMcpApp | undefined
 
   return {
     name: 'guren:vite-config',
     enforce: 'pre' as const,
     config(config: Record<string, any>, env: Record<string, any>) {
+      mcpApp = undefined
       if (env?.mode === PROTOTYPE_MODE) {
         prototype = ensurePrototype(config, resolved)
         return
       }
       prototype = undefined
+      if (env?.mode === MCP_APP_MODE) {
+        mcpApp = ensureMcpApp(config, resolved, process.env[MCP_APP_PAGE_ENV])
+        return
+      }
       ensureDefaults(config, resolved, env)
     },
     configResolved(config: Record<string, any>) {
       if (prototype) {
         prototype.outDir = path.resolve(config.root ?? prototype.root, config.build?.outDir ?? prototype.outDir)
       }
+      if (mcpApp) {
+        mcpApp.configFile = config.configFile
+        mcpApp.logLevel = config.logLevel
+      }
+    },
+    resolveId(id: string) {
+      if (mcpApp && (id === MCP_APP_ENTRY_ID || id === MCP_APP_DRIVER_ID)) return id
+      return null
+    },
+    load(id: string) {
+      if (!mcpApp) return null
+      if (id === MCP_APP_DRIVER_ID) return 'export {}\n'
+      if (id === MCP_APP_ENTRY_ID && mcpApp.page) return renderPageEntry(mcpApp.page.id, mcpApp.page.setupFile, mcpApp.page.pageFile)
+      return null
+    },
+    generateBundle: {
+      // After Vite's own CSS plugin, which emits the stylesheet in this same hook.
+      order: 'post' as const,
+      handler(this: { warn(message: string): void }, _output: unknown, bundle: Record<string, BundleItem>) {
+        const page = mcpApp?.page
+        if (!page) return
+        const { html, leftovers } = documentFromBundle(Object.values(bundle))
+        if (leftovers.length > 0) {
+          this.warn(`mcp-app: ${page.id} produced files a view cannot load, left out of its document: ${leftovers.join(', ')}`)
+        }
+        const file = pageDocumentFile(mcpApp!.context.root, page.id)
+        mkdirSync(path.dirname(file), { recursive: true })
+        writeFileSync(file, html)
+      },
+    },
+    async closeBundle() {
+      const driver = mcpApp
+      if (!driver || driver.page) return
+      await runMcpAppBuild({
+        context: driver.context,
+        buildPage: (id) => buildMcpAppPage(driver, id),
+        log: (message) => console.log(message),
+      })
     },
     configureServer(server: ViteDevServerLike) {
       if (!prototype) return
@@ -116,6 +179,89 @@ export function gurenVitePlugin(options: GurenVitePluginOptions = {}) {
       if (prototype) finishPrototypeBuild(prototype)
     },
   }
+}
+
+interface ResolvedMcpApp {
+  context: McpAppBuildContext
+  /** Set in a nested build, which makes this one page. */
+  page?: { id: string; setupFile: string; pageFile: string }
+  configFile?: string | false
+  logLevel?: string
+}
+
+/**
+ * Both builds own `build` outright: nothing is written by Vite itself (the
+ * page build's `generateBundle` writes its document), and a page build is one
+ * entry with every dynamic import, stylesheet and asset inlined.
+ */
+function ensureMcpApp(config: Record<string, any>, options: ResolvedOptions, pageId: string | undefined): ResolvedMcpApp {
+  const root = resolveRoot(config.root)
+  const context: McpAppBuildContext = {
+    root,
+    resourcesDir: options.resourcesDir,
+    setupFile: options.mcpApp?.entry ?? MCP_APP_SETUP_FILE,
+  }
+  config.define ??= {}
+  config.define['import.meta.env.GUREN_PROTOTYPE'] ??= 'false'
+  ensureAliases(config, options, root)
+  config.publicDir = false
+
+  const shared = {
+    outDir: path.resolve(root, MCP_APP_OUT_DIR, 'build'),
+    write: false,
+    emptyOutDir: false,
+    copyPublicDir: false,
+    manifest: false,
+    ssrManifest: false,
+  }
+  if (pageId === undefined) {
+    config.build = { ...config.build, ...shared, rollupOptions: { input: MCP_APP_DRIVER_ID } }
+    return { context }
+  }
+
+  const pageFile = resolvePageFile(context, pageId)
+  if (!pageFile) throw new Error(`mcp-app: no page file for "${pageId}" under ${options.resourcesDir}/pages/.`)
+  config.build = {
+    ...config.build,
+    ...shared,
+    cssCodeSplit: false,
+    assetsInlineLimit: () => true,
+    modulePreload: false,
+    rollupOptions: {
+      input: MCP_APP_ENTRY_ID,
+      // Rolldown (Vite 8) spells it `codeSplitting: false` and warns on Rollup's
+      // `inlineDynamicImports`; the driver names the bundler it imported.
+      output: process.env[MCP_APP_BUNDLER_ENV] === 'rolldown'
+        ? { format: 'es', codeSplitting: false }
+        : { format: 'es', inlineDynamicImports: true },
+    },
+  }
+  return { context, page: { id: pageId, setupFile: path.resolve(root, context.setupFile), pageFile } }
+}
+
+/** A nested build of the app's own Vite config, so its plugins (React, Tailwind) apply to the view as to the app. */
+async function buildMcpAppPage(driver: ResolvedMcpApp, id: string): Promise<void> {
+  const vite = (await import('vite')) as typeof import('vite') & { rolldownVersion?: string }
+  const previous = process.env[MCP_APP_PAGE_ENV]
+  const previousBundler = process.env[MCP_APP_BUNDLER_ENV]
+  process.env[MCP_APP_PAGE_ENV] = id
+  process.env[MCP_APP_BUNDLER_ENV] = vite.rolldownVersion ? 'rolldown' : 'rollup'
+  try {
+    await vite.build({
+      root: driver.context.root,
+      configFile: driver.configFile,
+      mode: MCP_APP_MODE,
+      logLevel: (driver.logLevel ?? 'warn') as 'warn',
+    })
+  } finally {
+    restoreEnv(MCP_APP_PAGE_ENV, previous)
+    restoreEnv(MCP_APP_BUNDLER_ENV, previousBundler)
+  }
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name]
+  else process.env[name] = value
 }
 
 interface ResolvedPrototype {
