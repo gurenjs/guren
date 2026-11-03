@@ -111,7 +111,7 @@ const COMMANDS = `## Commands
   .map((name) => `\`${name}\``)
   .join(', ')}. Nothing else passes: not \`make:migration\` or \`add plugin\`, not \`bun run db:migrate\` (the data step runs migrations), not \`codegen\`. Arguments hold letters, digits and \`_-.,:/=@+%\`, with single or double quotes around a value that has spaces. A shell operator, \`$\`, a backslash, an absolute path or a \`..\` segment fails the check.
 
-\`plan:scaffold\` writes what the plan declares, so \`commands\` are for what it does not declare. The commands run before every other step: a generator that writes a model, a model's table, a controller, validator, resource, policy, route or side effect the plan adds (\`make:model\`, \`make:feature\`, \`add session\` beside an added \`sessions\` table) collides with the step that writes it, and one that imports such a model (\`make:factory\`, \`make:resource\`) fails its typecheck. Both fail the check.`
+The commands run before every other step. Keep \`commands\` for what the plan does not declare: a generator for an element the plan adds or renames fails the check where running it first breaks a later step. In an app that is not API-only, \`plan:scaffold\` writes each model the plan adds in the project root, with its table, validators, resources, policies, controllers, routes and side effects, and refuses a target that already exists (\`make:model\`, \`make:feature\`). A blueprint that creates an added model's table writes a migration the data step's own would repeat (\`add session\` beside an added \`sessions\` table). Output that imports what no step has written yet fails the commands step's typecheck (\`make:factory\` or \`make:resource\` for an added model).`
 
 const CHECK = `## Check the plan
 

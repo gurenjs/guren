@@ -230,34 +230,44 @@ function checkCommands(plan: PlanDraft, results: PlanCheckResult[]): void {
 }
 
 /**
- * A command that writes an element the plan adds runs before the step writing it, which then
- * collides (`plan:scaffold` refuses a target that exists); one importing such an element fails
- * the commands step's own typecheck. Matched by name, so the reading is a lower bound.
+ * The commands run before every step that builds what the plan adds or renames. A command breaks the
+ * plan where `plan:scaffold` then refuses a target it left, where it writes a table the data step's
+ * migration is to create, or where its output imports what no step has written yet, which fails the
+ * commands step's own typecheck. Any other write is a stub its step edits, and no finding.
  */
 function checkCommandTargets(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
   let derived: PlanTaskDerivation | undefined
   const derivation = (): PlanTaskDerivation => (derived ??= derivePlanTasks(plan, { apiOnly: app.apiOnly }))
-  const commandsStep = (): string | undefined => derivation().tasks.flatMap((task) => task.steps).find((step) => step.kind === 'commands')?.id
-  for (const { id, quoted, hits } of planCommandTargets(plan, derivation)) {
-    const written = hits.filter((hit) => hit.effect === 'writes')
-    const imported = hits.filter((hit) => hit.effect === 'imports')
-    const clauses = [
-      ...groupByStep(written).map(({ step, hits: group }) =>
-        `it writes ${listHits(group)}, which ${step === undefined ? 'a later step writes' : step.scaffold ? `plan:scaffold writes at step ${step.id}, refusing a target that already exists` : `step ${step.id} writes`}`),
-      ...groupByStep(imported).map(({ step, hits: group }) =>
-        `it imports ${listHits(group)}, which ${step === undefined ? 'a later step writes' : `step ${step.id} writes`}, so the commands step${stepName(commandsStep())} fails its typecheck`),
-    ]
+  for (const { id, quoted, hits } of planCommandTargets(plan, app, derivation)) {
+    const commandsStep = derivation().tasks.flatMap((task) => task.steps).find((step) => step.kind === 'commands')?.id
     results.push(
-      finding('plan:command-target', 'fail', `The command ${quoted} runs before the steps that build what the plan adds: ${clauses.join('; ')}.`, {
+      finding('plan:command-target', 'fail', `The command ${quoted} runs before the steps that build what the plan adds: ${targetClauses(hits, commandsStep).join('; ')}.`, {
         elementId: id,
         section: 'commands',
-        suggestion: 'plan:scaffold writes what the plan declares, so `commands` hold generators only for what it does not. Drop this command, or write what it adds beyond the plan (a factory, a seeder) by hand in a step after the element it imports exists.',
+        suggestion: '`commands` are for what the plan does not declare. Drop this command: the step that owns each element writes it, and a factory or seeder for an element belongs in a step after the element exists.',
       }),
     )
   }
 }
 
-const stepName = (id: string | undefined): string => (id === undefined ? '' : ` (${id})`)
+function targetClauses(hits: readonly PlanCommandTargetHit[], commandsStep: string | undefined): string[] {
+  const later = (step: PlanCommandTargetHit['step']): string => (step === undefined ? 'a later step' : `step ${step.id}`)
+  const typecheck = `so the commands step${commandsStep === undefined ? '' : ` (${commandsStep})`} fails its typecheck`
+  const named = (hit: PlanCommandTargetHit): string => `${hit.label} (${hit.elementId})`
+  return [
+    ...groupByStep(hits.filter((hit) => hit.problem.kind === 'scaffold')).map(({ step, hits: group }) =>
+      `it writes ${listHits(group)}, which plan:scaffold writes at ${later(step)}, refusing a target that already exists`),
+    ...hits.flatMap((hit) => (hit.problem.kind === 'table' ? [`it creates ${named(hit)} with a migration of its own, before ${later(hit.step)} writes the migration for that table`] : [])),
+    ...groupByStep(hits.filter((hit) => hit.problem.kind === 'imports')).map(({ step, hits: group }) =>
+      `it imports ${listHits(group)}, which ${later(step)} writes, ${typecheck}`),
+    ...hits.flatMap((hit) => {
+      const { problem } = hit
+      if (problem.kind === 'schema') return [`it writes ${named(hit)} importing \`${problem.identifier}\` from db/schema, which does not declare it yet, ${typecheck}`]
+      if (problem.kind === 'page') return [`it writes ${named(hit)} rendering the page ${problem.page}, which the application does not have, ${typecheck}`]
+      return []
+    }),
+  ]
+}
 
 function listHits(hits: readonly PlanCommandTargetHit[]): string {
   const names = hits.map((hit) => `${hit.label} (${hit.elementId})`)

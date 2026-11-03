@@ -1297,25 +1297,19 @@ async function warnAboutStalePasswordScaffold(): Promise<void> {
   }
 }
 
-function parseOAuthProviders(raw: string | undefined): string[] {
-  if (!raw) {
-    return []
-  }
-
-  const seen = new Set<string>()
-  for (const token of raw.split(',')) {
+/** The known providers `raw` names, and the unknown names `resolveAuthFeatures()` warns about. */
+function readOAuthProviders(raw: string | undefined): { known: string[]; unknown: string[] } {
+  const known = new Set<string>()
+  const unknown: string[] = []
+  for (const token of (raw ?? '').split(',')) {
     const name = token.trim().toLowerCase()
     if (!name) {
       continue
     }
-    if (!(KNOWN_OAUTH_PROVIDERS as readonly string[]).includes(name)) {
-      consola.warn(`Unknown OAuth provider "${name}" — skipping. Supported: ${KNOWN_OAUTH_PROVIDERS.join(', ')}.`)
-      continue
-    }
-    seen.add(name)
+    if ((KNOWN_OAUTH_PROVIDERS as readonly string[]).includes(name)) known.add(name)
+    else unknown.push(name)
   }
-
-  return Array.from(seen)
+  return { known: Array.from(known), unknown }
 }
 
 export interface MakeAuthOptions extends WriterOptions {
@@ -1337,7 +1331,7 @@ export interface MakeAuthOptions extends WriterOptions {
  * Everything downstream consumes these capabilities rather than the flags, so
  * a new way to switch one off lands in `resolveAuthFeatures()` alone.
  */
-interface AuthFeatures {
+export interface AuthFeatures {
   /** Registration and password reset, plus a mail binding when the app has none. */
   includeExtras: boolean
   /** Email verification. Builds on the registration flow. */
@@ -1356,30 +1350,40 @@ interface AuthFeatures {
 type MailSetup = 'definition' | 'provider'
 
 function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
-  const oauthProviders = parseOAuthProviders(options.oauth)
-  const oauthOnly = Boolean(options.oauthOnly)
+  for (const name of readOAuthProviders(options.oauth).unknown) {
+    consola.warn(`Unknown OAuth provider "${name}" — skipping. Supported: ${KNOWN_OAUTH_PROVIDERS.join(', ')}.`)
+  }
+  const features = authFeaturesFor(options)
 
   // Neither degraded reading is defensible: honouring `--oauth-only` without
   // providers scaffolds an app with no way to sign in, ignoring it scaffolds
   // the password experience the flag exists to opt out of.
-  if (oauthOnly && oauthProviders.length === 0) {
+  if (options.oauthOnly && features.oauthProviders.length === 0) {
     throw new Error(
       `--oauth-only requires --oauth with at least one supported provider (${KNOWN_OAUTH_PROVIDERS.join(', ')}).`,
     )
   }
 
-  // Password login is the substrate registration, reset, and the profile
-  // password field all sit on, so --oauth-only subsumes --minimal.
-  const includeExtras = !options.minimal && !oauthOnly
-  const includeVerify = includeExtras && Boolean(options.verify)
-
-  if (options.verify && !includeExtras) {
+  if (options.verify && !features.includeExtras) {
     consola.warn(
-      oauthOnly
+      options.oauthOnly
         ? '--verify has nothing to verify without password registration — skipping (OAuth accounts arrive with a provider-vouched email).'
         : '--verify requires the default (non-minimal) experience — skipping email verification.',
     )
   }
+
+  return features
+}
+
+/** {@link resolveAuthFeatures} with no warning and no refusal, for the plan check that names what `make:auth` writes. */
+export function authFeaturesFor(options: Pick<MakeAuthOptions, 'minimal' | 'verify' | 'oauth' | 'oauthOnly'>): AuthFeatures {
+  const oauthProviders = readOAuthProviders(options.oauth).known
+  const oauthOnly = Boolean(options.oauthOnly)
+
+  // Password login is the substrate registration, reset, and the profile
+  // password field all sit on, so --oauth-only subsumes --minimal.
+  const includeExtras = !options.minimal && !oauthOnly
+  const includeVerify = includeExtras && Boolean(options.verify)
 
   // Without --verify nothing in the scaffold can re-prove a replacement
   // address, so the profile form must not accept one.

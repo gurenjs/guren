@@ -3,13 +3,14 @@ import { readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { builtinSubCommands } from '../src/commands'
+import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
 import { planApproveFile } from '../src/plan-approve'
 import { planGeneratorNames } from '../src/plan/command-allowlist'
 import { PLAN_GENERATOR_TARGETS, readPlanGeneratorCall, type PlanGeneratorRule } from '../src/plan/command-targets'
 import { PlanDraftSchema } from '../src/plan/schema'
 import { validatePlan } from '../src/plan/validate'
 import { resolveValue } from '../src/run-cli'
-import { createTempRoot, writeWorkspaceFiles } from './helpers'
+import { createTempRoot, createTempWorkspace, writeWorkspaceFiles } from './helpers'
 import { loadCommentsPlan, PLAN_APP_FILES, planAppState } from './plan-fixture'
 
 type ArgDefinition = { type?: string; alias?: string | string[] }
@@ -35,12 +36,16 @@ async function registryArgs(name: string): Promise<{ positional: boolean; valueF
 
 const rule = (name: string): PlanGeneratorRule => PLAN_GENERATOR_TARGETS[name] as PlanGeneratorRule
 
-function commandFindings(command: string, plan: Record<string, unknown> = loadCommentsPlan()) {
+function commandFindings(command: string, plan: Record<string, unknown> = loadCommentsPlan(), app = planAppState()) {
   const parsed = PlanDraftSchema.parse({ ...plan, commands: [{ id: 'command.x', command, reason: 'Set up first.' }] })
-  return validatePlan(parsed, planAppState()).filter((result) => result.key.startsWith('plan:command'))
+  return validatePlan(parsed, app).filter((result) => result.key.startsWith('plan:command'))
 }
 
-const messageOf = (command: string): string | undefined => commandFindings(command).find((result) => result.key === 'plan:command-target')?.message
+const messageOf = (command: string, plan?: Record<string, unknown>, app?: ReturnType<typeof planAppState>): string | undefined =>
+  commandFindings(command, plan, app).find((result) => result.key === 'plan:command-target')?.message
+
+type PlanDocument = Record<string, unknown> & { models: Array<Record<string, unknown>>; controllers: unknown[]; policies: unknown[] }
+const commentsPlan = (): PlanDocument => loadCommentsPlan() as PlanDocument
 
 const SCAFFOLD = 'task/entity/model.comment/scaffold'
 const REFUSES = `which plan:scaffold writes at step ${SCAFFOLD}, refusing a target that already exists`
@@ -150,32 +155,123 @@ describe('the §2 check', () => {
   })
 
   test('should fail a blueprint writing the table of a model the plan adds, whatever root the model sits in', () => {
-    const plan = loadCommentsPlan() as { models: unknown[] }
+    const plan = commentsPlan()
     const session = { id: 'model.session', change: { kind: 'add' }, name: 'Session', table: 'sessions', columns: [], relationships: [], fillable: [] }
-    const target = (command: string, models: unknown[]) =>
-      commandFindings(command, { ...plan, models }).find((result) => result.key === 'plan:command-target')?.message
 
-    const root = [...plan.models, session]
-    expect(target('guren add session', root)).toEndWith('it writes table sessions of model Session (model.session), which plan:scaffold writes at step task/entity/model.session/scaffold, refusing a target that already exists.')
-    expect(target('guren make:auth', root)).toContain('it writes table sessions of model Session (model.session)')
-    expect(target('guren make:auth --no-session', root)).toBeUndefined()
+    const root = { ...plan, models: [...plan.models, session] }
+    expect(messageOf('guren add session', root)).toEndWith('it writes table sessions of model Session (model.session), which plan:scaffold writes at step task/entity/model.session/scaffold, refusing a target that already exists.')
+    expect(messageOf('guren make:auth', root)).toContain('it writes table sessions of model Session (model.session)')
+    expect(messageOf('guren make:auth --no-session', root)).toBeUndefined()
 
-    const inModule = [...plan.models, { ...session, module: 'accounts' }]
-    expect(target('guren add session', inModule)).toEndWith('it writes table sessions of model Session (model.session), which step task/entity/model.session/data writes.')
+    const inModule = { ...plan, models: [...plan.models, { ...session, module: 'accounts' }] }
+    expect(messageOf('guren add session', inModule)).toEndWith(
+      'it creates table sessions of model Session (model.session) with a migration of its own, before step task/entity/model.session/data writes the migration for that table.',
+    )
+  })
+
+  test('should judge a renamed model and a renamed table by the name they take, which is absent when the plan starts', () => {
+    const plan = commentsPlan()
+    const renamed = { ...plan, models: plan.models.map((model) => (model.id === 'model.post' ? { ...model, change: { kind: 'rename', from: 'Post' }, name: 'Article' } : model)) }
+    expect(messageOf('guren make:factory ArticleFactory', renamed)).toEndWith(`it imports model Article (model.post), which step task/entity/model.post/data writes, ${FAILS_TYPECHECK}.`)
+
+    const intoSessions = {
+      ...plan,
+      models: plan.models.map((model) => (model.id === 'model.post' ? { ...model, tableRenamedFrom: 'posts', table: 'sessions', dataMigration: { kind: 'none', reason: 'Renamed in place.' } } : model)),
+    }
+    expect(messageOf('guren add session', intoSessions)).toContain('it creates table sessions of model Post (model.post) with a migration of its own')
+  })
+
+  test('should fail a model no scaffold writes only for the db/schema export it imports before anything declares it', () => {
+    const apiOnly = planAppState({ apiOnly: true })
+    expect(messageOf('guren make:model Comment', undefined, apiOnly)).toEndWith(
+      `it writes model Comment (model.comment) importing \`comments\` from db/schema, which does not declare it yet, ${FAILS_TYPECHECK}.`,
+    )
+    expect(messageOf('guren make:factory CommentFactory', undefined, apiOnly)).toEndWith(`it imports model Comment (model.comment), which step task/entity/model.comment/data writes, ${FAILS_TYPECHECK}.`)
+  })
+
+  test('should fail a controller no scaffold writes only for a page it renders that the application lacks', () => {
+    const plan = commentsPlan()
+    const withReports = { ...plan, controllers: [...plan.controllers, { id: 'controller.reports', change: { kind: 'add' }, className: 'ReportController', actions: [] }] }
+    expect(messageOf('guren make:controller Report', withReports)).toEndWith(
+      `it writes controller ReportController (controller.reports) rendering the page report/Index, which the application does not have, ${FAILS_TYPECHECK}.`,
+    )
+    expect(messageOf('guren make:controller Report', withReports, planAppState({ pages: ['posts/Index', 'report/Index'] }))).toBeUndefined()
+    expect(messageOf('guren make:controller Report', withReports, planAppState({ apiOnly: true }))).toBeUndefined()
+  })
+
+  test('should pass a stub no scaffold writes and nothing imports, which the step that owns it edits', () => {
+    const plan = commentsPlan()
+    const job = { id: 'effect.digest', change: { kind: 'add' }, kind: 'job', name: 'SendDigestJob', trigger: 'nightly', description: 'Sends the digest.' }
+    expect(messageOf('guren make:job SendDigest', { ...plan, sideEffects: [job] })).toBeUndefined()
+
+    const postPolicy = { id: 'policy.post', change: { kind: 'add' }, name: 'PostPolicy', model: 'model.post', abilities: [{ name: 'update', rule: 'the author' }] }
+    expect(messageOf('guren make:policy Post', { ...plan, policies: [...plan.policies, postPolicy] })).toBeUndefined()
+
+    const apiOnly = planAppState({ apiOnly: true })
+    expect(messageOf('guren make:policy Comment', undefined, apiOnly)).toBeUndefined()
+    expect(messageOf('guren make:controller CommentController', undefined, apiOnly)).toBeUndefined()
   })
 
   test('should leave a command the allowlist refuses to plan:command alone', () => {
     expect(commandFindings('bun run db:migrate').map((result) => result.key)).toEqual(['plan:command'])
   })
 
-  test('should match a module element by its module, and name its owning step, since plan:scaffold writes the root only', () => {
-    const plan = loadCommentsPlan() as { models: Array<{ id: string }> }
+  test('should match a module element by its module, and judge a model plan:scaffold leaves to its step by the schema it imports', () => {
+    const plan = commentsPlan()
     const inModule = { ...plan, models: plan.models.map((model) => (model.id === 'model.comment' ? { ...model, module: 'billing' } : model)) }
-    const written = 'it writes model Comment (model.comment), which step task/entity/model.comment/data writes.'
+    const written = `it writes model Comment (model.comment) importing \`comments\` from db/schema, which does not declare it yet, ${FAILS_TYPECHECK}.`
 
-    expect(commandFindings('guren make:model Comment --module billing', inModule).find((result) => result.key === 'plan:command-target')?.message).toEndWith(written)
-    expect(commandFindings('guren make:model Comment -M Billing', inModule).find((result) => result.key === 'plan:command-target')?.message).toEndWith(written)
-    expect(commandFindings('guren make:model Comment', inModule).filter((result) => result.key === 'plan:command-target')).toEqual([])
+    expect(messageOf('guren make:model Comment --module billing', inModule)).toEndWith(written)
+    expect(messageOf('guren make:model Comment -M Billing', inModule)).toEndWith(written)
+    expect(messageOf('guren make:model Comment', inModule)).toBeUndefined()
+  })
+})
+
+describe("make:auth's targets", () => {
+  const AUTH_APP = {
+    'src/app.ts': "import { createApp } from '@guren/core'\nimport registerWebRoutes from '../routes/web.js'\n\nconst app = createApp({ routes: registerWebRoutes, providers: [] })\n\nexport default app\n",
+    'routes/web.ts': "import { Router } from '@guren/core'\n\nexport function registerWebRoutes(router: Router): void {\n  router.get('/', () => 'home')\n}\n",
+    'resources/js/pages/Home.tsx': 'export default function Home() { return <h1>home</h1> }\n',
+    'db/schema.ts': "export const posts = 'posts'\n",
+  }
+
+  function written(created: readonly string[]): Record<string, string[]> {
+    const pick = (pattern: RegExp): string[] => created.flatMap((path) => pattern.exec(path)?.slice(1, 2) ?? []).sort()
+    return {
+      models: pick(/\/app\/Models\/(\w+)\.ts$/),
+      controllers: pick(/\/app\/Http\/Controllers\/(?:\w+\/)*(\w+)\.ts$/),
+      mails: pick(/\/app\/Mail\/(\w+)\.ts$/),
+      validators: pick(/\/app\/Http\/Validators\/(\w+)Validator\.ts$/),
+    }
+  }
+
+  function planned(args: string[]): Record<string, string[]> {
+    const { writes } = rule('make:auth').targets(readPlanGeneratorCall(rule('make:auth'), args)!)
+    const names = (keep: (target: (typeof writes)[number]) => boolean): string[] =>
+      writes.filter(keep).flatMap((target) => ('names' in target ? [...target.names] : 'entity' in target ? [target.entity] : [])).sort()
+    return {
+      models: names((target) => target.section === 'models'),
+      controllers: names((target) => target.section === 'controllers'),
+      mails: names((target) => target.section === 'sideEffects' && target.kind === 'mail'),
+      validators: names((target) => target.section === 'validators'),
+    }
+  }
+
+  test.each([
+    [[], {}],
+    [['--minimal'], { minimal: true }],
+    [['--verify'], { verify: true }],
+    [['--oauth', 'github'], { oauth: 'github' }],
+    [['--oauth', 'github', '--oauth-only'], { oauth: 'github', oauthOnly: true }],
+  ] as Array<[string[], MakeAuthOptions]>)('should name the classes and validator files make:auth %j writes', async (args, options) => {
+    const workspace = await createTempWorkspace('guren-plan-command-targets-auth-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, AUTH_APP)
+      const created = await makeAuth({ ...options, force: true, session: false })
+      expect(planned(args)).toEqual(written(created))
+    } finally {
+      await workspace.cleanup()
+    }
   })
 })
 
