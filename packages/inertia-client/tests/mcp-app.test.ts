@@ -15,7 +15,7 @@ await mock.module('@inertiajs/react', () => ({ ...realInertiaReact, createInerti
 
 const { BridgeCatalogue, createMcpAppHttpClient, MCP_APP_CONTRACT, planVisit } = await import('../src/mcp-app-bridge')
 const { installMemoryHistory } = await import('../src/mcp-app-history')
-const { startMcpApp } = await import('../src/mcp-app')
+const { getMcpAppState, startMcpApp } = await import('../src/mcp-app')
 
 const SANDBOX = 'https://abc123.claudemcpcontent.com'
 const APP = 'https://blog.example.com'
@@ -162,6 +162,23 @@ describe('createMcpAppHttpClient', () => {
       { name: 'posts.update', args: { id: '1', title: 'T' } },
       { name: 'posts.update', args: { id: '2', title: 'T' } },
     ])
+  })
+
+  it('sends nothing more for a visit cancelled while its call was out', async () => {
+    const controller = new AbortController()
+    answers.set('posts.update', (args) => {
+      controller.abort()
+      return executed({ status: 307, location: `${APP}/posts/${Number(args.id) + 1}` })
+    })
+    const visit = send({ method: 'put', url: '/posts/1', data: { title: 'T' }, signal: controller.signal })
+    await expect(visit).rejects.toBeInstanceOf(HttpCancelledError)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('keeps the query of a GET it hands off', async () => {
+    answers.set('posts.show', { _meta: { 'dev.guren/response': { contract: MCP_APP_CONTRACT + 1, outcome: 'executed', status: 200 } } })
+    await expect(send({ url: '/posts/2?tab=comments', params: { page: 3 } })).rejects.toBeInstanceOf(HttpCancelledError)
+    expect(handOffs).toEqual([`${APP}/posts/2?tab=comments&page=3`])
   })
 
   it('hands a redirect off the application to the browser without changing the page', async () => {
@@ -377,6 +394,17 @@ describe('startMcpApp', () => {
     await startMcpApp({ host, resolve: async () => ({ default: () => null }) })
     expect(element.textContent).toContain('inside an MCP Apps host')
     expect(createInertiaAppMock).not.toHaveBeenCalled()
+  })
+
+  it('offers the URL when the host declines to open it', async () => {
+    installDom()
+    const { host } = fakeHost(executed({ status: 200, url: `${APP}/posts/12` }, page('posts/Show', '/posts/12')))
+    host.openLink = async () => ({ isError: true })
+    await startMcpApp({ host, resolve: async () => ({ default: () => null }), setup: () => {} })
+    const http = capturedOptions?.http as { request(config: HttpRequestConfig): Promise<unknown> }
+    await expect(http.request({ method: 'get', url: `${SANDBOX}/admin` } as HttpRequestConfig)).rejects.toBeInstanceOf(HttpCancelledError)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(getMcpAppState().handOff).toBe(`${APP}/admin`)
   })
 
   it('shows that the call was cancelled and mounts nothing', async () => {

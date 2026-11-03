@@ -107,6 +107,11 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
+/** The same state outside React, read once. */
+export function getMcpAppState(): McpAppState {
+  return state
+}
+
 /** The host around this view; `isMcpApp` is false in the ordinary app, where every action rejects. */
 export function useMcpApp(): McpAppState {
   return useSyncExternalStore(subscribe, () => state, () => state)
@@ -185,11 +190,17 @@ export async function startMcpApp(options: StartMcpAppOptions): Promise<unknown>
       }
     },
     handOff: (url) => {
-      if (capabilities?.openLinks) {
-        void host.openLink({ url }).catch(() => update({ handOff: url }))
-      } else {
+      if (!capabilities?.openLinks) {
         update({ handOff: url })
+        return
       }
+      // A host that declines (a blocked domain, the user cancelling) resolves with `isError`.
+      void host.openLink({ url }).then(
+        (opened) => {
+          if ((opened as { isError?: boolean } | undefined)?.isError) update({ handOff: url })
+        },
+        () => update({ handOff: url }),
+      )
     },
     pendingApproval: (visit) => watchApproval(host, visit),
     refused: (refusal) => update({ refusal }),

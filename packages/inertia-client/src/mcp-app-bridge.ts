@@ -102,7 +102,15 @@ export interface VisitOrigins {
 }
 
 export type VisitPlan =
-  | { kind: 'call'; tool: BridgeTool; method: string; path: string; arguments: Record<string, unknown> }
+  | {
+    kind: 'call'
+    tool: BridgeTool
+    method: string
+    path: string
+    /** The path with every query value the visit carried, for a hand-off. */
+    requested: string
+    arguments: Record<string, unknown>
+  }
   | { kind: 'unmatched'; method: string; path: string; reason: string }
   | { kind: 'external'; method: string; url: string }
 
@@ -124,16 +132,17 @@ export function planVisit(
     return { kind: 'external', method: sent, url: target.href }
   }
   const path = target.pathname
+  const requested = requestedPath(target, params)
   const body = readBody(data)
   const spoofed = sent === 'POST' && typeof body.value === 'object' && body.value !== null
     && typeof (body.value as Record<string, unknown>)._method === 'string'
     ? String((body.value as Record<string, unknown>)._method).toUpperCase()
     : sent
-  if (!catalogue) return { kind: 'unmatched', method: spoofed, path: path + target.search, reason: 'read-only' }
+  if (!catalogue) return { kind: 'unmatched', method: spoofed, path: requested, reason: 'read-only' }
   if (body.file) return { kind: 'unmatched', method: spoofed, path, reason: 'A file upload cannot travel through a tool call.' }
 
   const match = catalogue.match(spoofed, path)
-  if (!match) return { kind: 'unmatched', method: spoofed, path: path + target.search, reason: 'No tool answers this visit.' }
+  if (!match) return { kind: 'unmatched', method: spoofed, path: requested, reason: 'No tool answers this visit.' }
   if (!match.tool.bridgeable) {
     return { kind: 'unmatched', method: spoofed, path, reason: `Tool "${match.tool.toolName}" takes one name from two inputs.` }
   }
@@ -152,7 +161,19 @@ export function planVisit(
       if (key !== '_method' && !Object.hasOwn(match.params, key)) args.set(key, value)
     }
   }
-  return { kind: 'call', tool: match.tool, method: spoofed, path, arguments: Object.fromEntries(args) }
+  return { kind: 'call', tool: match.tool, method: spoofed, path, requested, arguments: Object.fromEntries(args) }
+}
+
+/** `params` is where Inertia puts a GET's data; the browser would have sent them in the query. */
+function requestedPath(target: URL, params: Record<string, unknown> | undefined): string {
+  const search = new URLSearchParams(target.search)
+  for (const [key, value] of Object.entries(params ?? {})) {
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (item !== undefined && item !== null) search.append(Array.isArray(value) ? `${key}[]` : key, String(item))
+    }
+  }
+  const query = search.toString()
+  return query ? `${target.pathname}?${query}` : target.pathname
 }
 
 export interface PendingApprovalVisit {
@@ -194,7 +215,7 @@ export function createMcpAppHttpClient(deps: BridgeDeps): HttpClient {
       try {
         throwIfAborted(processed.signal, processed.url)
         const bag = headerValue(processed.headers, 'x-inertia-error-bag')
-        const answer = await visit(deps, processed.method, processed.url, processed.data, processed.params, bag, 0)
+        const answer = await visit(deps, processed.signal, processed.method, processed.url, processed.data, processed.params, bag, 0)
         throwIfAborted(processed.signal, processed.url)
         if (answer.kind === 'settled') throw new HttpCancelledError('Settled by the MCP App bridge', processed.url)
         const response: HttpResponse = {
@@ -213,6 +234,7 @@ export function createMcpAppHttpClient(deps: BridgeDeps): HttpClient {
 
 async function visit(
   deps: BridgeDeps,
+  signal: AbortSignal | undefined,
   method: string,
   url: string,
   data: unknown,
@@ -234,9 +256,11 @@ async function visit(
   // A page this document does not bundle opens in the browser whatever the call
   // returns, so the call is not made (RFC 0038 §7 builds one document per page).
   if (plan.method === 'GET' && plan.tool.page !== undefined && !(await deps.hasComponent(plan.tool.page))) {
-    return handOff(deps, appUrl(plan.path + new URL(url, origins.sandbox).search, origins))
+    return handOff(deps, appUrl(plan.requested, origins))
   }
 
+  // Checked before every call, a redirect's included: a cancelled visit must not send another write.
+  throwIfAborted(signal, url)
   let result: ToolResultLike
   try {
     result = await deps.call(plan.tool.toolName, plan.arguments)
@@ -247,7 +271,7 @@ async function visit(
   const { response, page } = readToolResult(result)
   if (!response || response.contract !== MCP_APP_CONTRACT) {
     return plan.method === 'GET'
-      ? handOff(deps, appUrl(plan.path, origins))
+      ? handOff(deps, appUrl(plan.requested, origins))
       : refuse(deps, bag, 'The application was updated. Open it to continue.')
   }
 
@@ -261,7 +285,7 @@ async function visit(
   }
 
   if (page) {
-    if (!(await deps.hasComponent(page.component))) return handOff(deps, response.url ?? appUrl(plan.path, origins))
+    if (!(await deps.hasComponent(page.component))) return handOff(deps, response.url ?? appUrl(plan.requested, origins))
     const current = deps.currentPage()
     return { kind: 'page', page: { ...page, version: current?.version ?? page.version } }
   }
@@ -271,11 +295,11 @@ async function visit(
     if (location.origin !== origins.app) return handOff(deps, location.href)
     const keep = FOLLOWED_AS_SENT.has(response.status)
     const next = `${location.pathname}${location.search}`
-    return visit(deps, keep ? plan.method : 'GET', next, keep ? data : undefined, undefined, bag, hops + 1)
+    return visit(deps, signal, keep ? plan.method : 'GET', next, keep ? data : undefined, undefined, bag, hops + 1)
   }
   if (response.status === 422 && response.errors) return errorsPage(deps, bag, firstMessages(response.errors))
   return plan.method === 'GET'
-    ? handOff(deps, response.url ?? appUrl(plan.path, origins))
+    ? handOff(deps, response.url ?? appUrl(plan.requested, origins))
     : refuse(deps, bag, `The application answered ${response.status}, which this view cannot show.`)
 }
 
