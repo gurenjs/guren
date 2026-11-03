@@ -104,7 +104,7 @@ async function createDriftedApp(name: string): Promise<string> {
 /** The doc node plan:close writes for the comments plan, closed at `hash`. */
 function closeDoc(hash: string): string {
   const plan = PlanSchema.parse(loadApprovedCommentsPlan())
-  return renderPlanDoc({ plan, hash, slug: 'comments', approval: { hash, approvedAt: APPROVED_AT }, elements: [], waived: new Map() })
+  return renderPlanDoc({ plan, hash, slug: 'comments', approval: { hash, approvedAt: APPROVED_AT }, elements: [], waived: new Map(), accepted: [] })
 }
 
 const planResults = (checks: CheckResult[]): CheckResult[] => checks.filter((result) => result.key.startsWith('plan:'))

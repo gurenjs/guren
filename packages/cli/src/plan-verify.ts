@@ -174,7 +174,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     else deferred = await run(stepId)
   }
 
-  const overlaid = await overlayVerification(root, path, plan, await verifier.status(), derivation, { replacedUnreadable: before.unreadable, waivers: log })
+  const overlaid = await overlayVerification(root, path, plan, await verifier.status(), derivation, { replacedUnreadable: before.unreadable, waivers: log, approval })
   const { freshness } = await judge()
   const contexts = freshness ? judgeStepContext(plan, freshness, derivation, { inProgress: stepInProgress(before.state?.active) }) : new Map<string, PlanStepContext>()
   const staleContext = steps.map((step) => step.stepId).flatMap((id) => {

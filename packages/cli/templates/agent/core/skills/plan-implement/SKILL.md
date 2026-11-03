@@ -249,7 +249,11 @@ bunx guren plan:close docs/plans/<slug>/plan.json --dry-run
 ```
 
 and run it without `--dry-run` only when asked. It refuses while any element is
-neither verified nor waived, and names them. It writes the plan's document under
+neither verified, accepted nor waived, and names them. An element no behaviour
+can reach (a command, a side effect, an altered column) reads `accepted` once
+its step verifies, since approving the plan accepted it that way, so it needs
+no waiver; when `plan:close` sends one to `plan:approve`, the approval predates
+that acceptance, and approving again is the person's call. It writes the plan's document under
 `docs/plans/` and draft blocks between `<!-- guren:plan … -->` markers in
 `docs/entities/<Entity>.md`; edit the text outside the markers freely, since a
 second close replaces only what is inside them.
