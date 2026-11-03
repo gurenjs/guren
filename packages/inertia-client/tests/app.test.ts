@@ -124,6 +124,33 @@ describe('startInertiaClient', () => {
   })
 })
 
+describe('startInertiaClient({ live })', () => {
+  const page = {
+    component: 'Orders/Show',
+    props: { errors: {} },
+    url: '/orders/1',
+    version: null,
+    clearHistory: false,
+    encryptHistory: false,
+    rememberedState: {},
+    rescuedProps: [],
+    flash: {},
+  } as Page
+  const transport = { subscribe: () => () => {} }
+
+  it('hands the live option to Inertia, which declares configureLive', async () => {
+    await startInertiaClient({ page, live: { transport, throttle: 2000 }, resolve: async () => ({ default: () => null }), setup: () => {} })
+
+    expect(capturedOptions?.live).toEqual({ transport, throttle: 2000 })
+  })
+
+  it('passes no live option when none is given', async () => {
+    await startInertiaClient({ page, resolve: async () => ({ default: () => null }), setup: () => {} })
+
+    expect(capturedOptions).not.toHaveProperty('live')
+  })
+})
+
 describe('the default setup', () => {
   const page: Page = {
     component: 'Login',

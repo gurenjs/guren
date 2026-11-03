@@ -75,6 +75,11 @@
       "import": "./dist/prototype.js",
       "default": "./dist/prototype.js"
     },
+    "./live": {
+      "types": "./dist/live.d.ts",
+      "import": "./dist/live.js",
+      "default": "./dist/live.js"
+    },
     "./package.json": {
       "default": "./package.json"
     }

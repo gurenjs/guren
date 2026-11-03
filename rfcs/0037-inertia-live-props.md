@@ -406,8 +406,14 @@ import { liveTransport } from '@guren/inertia-client/live'
 startInertiaClient({ pages, live: liveTransport() })
 ```
 
-`StartInertiaClientOptions.live` is typed `LiveOption` from `@inertiajs/core`,
-so an app may pass any transport Inertia accepts, its own included. The SSR
+`StartInertiaClientOptions.live` is typed ~~`LiveOption` from `@inertiajs/core`~~
+**`LiveOptions | LiveTransport` from `./live`, which restate Inertia 3.11's
+types (amended in implementation: `@guren/inertia-client` still admits
+`@inertiajs/*` ^3.6.1, whose declarations have no `LiveOption`, and raising the
+range nests a second Inertia in an app whose lockfile holds 3.6; a type-only
+fixture holds the restatement assignable to Inertia's own. With an Inertia that
+does not export `configureLive`, `startInertiaClient()` warns and drops the
+option)**, so an app may pass any transport Inertia accepts, its own included. The SSR
 entry (`@guren/inertia-client/server`) takes no `live`, matching
 `@inertiajs/react`'s `live?: never` on the server options, and the prototype
 entry does not forward it, since a static prototype build has no socket to
@@ -418,6 +424,10 @@ What the transport does, as a `LiveTransport` (it routes by event name):
 - **One socket per tab, opened on the first `subscribe()`.** A page with no
   live props opens nothing. The socket is closed a few seconds after the last
   channel is released, so navigating between two live pages keeps it.
+  **Amended in implementation:** the delay is the `idleTimeout` option (5000 ms
+  by default), and closing an idle socket reports no disconnect, since no
+  channel missed an event. A page restored from the back/forward cache reopens
+  its socket.
 - **Channels reference-counted by wire name.** `subscribe(channel, event, handler)`
   maps `{ name, type }` back to the wire name (the table in §1), and sends
   `{ action: 'subscribe', channel }` only for the first listener of that name;
@@ -452,9 +462,22 @@ What the transport does, as a `LiveTransport` (it routes by event name):
   between would be lost. With the Redis driver the answer still precedes the
   Redis subscription itself (`RedisDriver.subscribe()` does not wait for it),
   which Open Question 6 takes up. After five consecutive attempts that end
-  without a `connected` frame (a runtime that answers 501, §5, or a socket
-  closed with 1008), it stops, warns once, and the page keeps working with
-  static props.
+  without a `connected` frame (a runtime that answers 501, §5~~, or a socket
+  closed with 1008~~), it stops, warns once, and the page keeps working with
+  static props. **Amended in implementation:** it gives up only while no
+  connection has ever answered its replay, so a deploy that keeps the server
+  down for longer than the backoff does not stop live props for good; once one
+  has, it retries forever, the delay doubling to 30 s. The backoff starts over
+  only after a connection answers its replay, so a server that closes the
+  socket right after `connected` is retried more slowly each time. Inertia
+  refreshes only on a `true` that follows a `false` *and* an earlier `true`, so
+  when the page's first socket fails before it ever came up, the transport
+  reports `true` then `false` once, so the first successful connection still
+  triggers the catch-up reload. A subscription added while a replay is being
+  answered delays the `true` too, and a new channel during a backoff waits for
+  the pending reconnect rather than opening at once. A frame that
+  carries a `channel` is always an event, so an app event named `connected` or
+  `subscription` is not read as a control frame.
 - **`socketId()`** returns the socket id from the `connected` frame (§4), or
   `null` before it arrives.
 

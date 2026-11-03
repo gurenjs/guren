@@ -1,9 +1,11 @@
 import { createInertiaApp } from '@inertiajs/react'
+import * as inertiaReact from '@inertiajs/react'
 import type { HttpClient, Page } from '@inertiajs/core'
 import React from 'react'
 import { createRoot, hydrateRoot } from 'react-dom/client'
 import { createPagesResolver as createPagesResolverFactory, type ResolveComponent } from './resolve'
 import type { PageManifest } from './contracts'
+import type { AnyLiveTransport, LiveOptions } from './live'
 import type { AnyPrototypeDefinition } from './prototype'
 import { recordTypedValues } from './typed-before-hydration'
 
@@ -36,6 +38,12 @@ export interface StartInertiaClientOptions {
    * `prototype: import.meta.env.GUREN_PROTOTYPE ? { load: () => import('./prototype'), base: import.meta.env.BASE_URL } : undefined`
    */
   prototype?: PrototypeLoader | PrototypeClientOptions
+  /**
+   * Inertia's live props (RFC 0037): `liveTransport()` from
+   * `@guren/inertia-client/live`, or any transport Inertia 3.11 accepts.
+   * Needs `@inertiajs/react` 3.11 or later; a prototype build ignores it.
+   */
+  live?: LiveOptions | AnyLiveTransport
 }
 
 export type PrototypeModule = { default: AnyPrototypeDefinition } | AnyPrototypeDefinition
@@ -96,6 +104,7 @@ function mountInertiaApp(options: StartInertiaClientOptions, page: Page, http?: 
   }
 
   return createInertiaApp({
+    ...liveOption(options.live),
     resolve: resolveForInertia,
     setup({ el, App, props }) {
       (options.setup ?? defaultSetup)({ el: el as HTMLElement, App: App as any, props: props as any })
@@ -135,7 +144,23 @@ async function startPrototypeClient(
   }
 
   const http = createPrototypeHttpClient(definition, { base })
-  return mountInertiaApp(options, options.page ?? (await resolveInitialPage(http, window.location)), http)
+  // A fixture answers every visit, and there is no socket to open.
+  const withoutLive = { ...options, live: undefined }
+  return mountInertiaApp(withoutLive, options.page ?? (await resolveInitialPage(http, window.location)), http)
+}
+
+/**
+ * The `@inertiajs/react` that consumes `live` is what has to be 3.11, and it
+ * pins its own core. `socketId` came with live props; `in` keeps the probe off
+ * the bundler's list of imports that must exist.
+ */
+function liveOption(live: StartInertiaClientOptions['live']): { live?: LiveOptions | AnyLiveTransport } {
+  if (!live) return {}
+  if (!('socketId' in inertiaReact)) {
+    console.warn('Live props need @inertiajs/react 3.11 or later; the installed Inertia ignores the live option.')
+    return {}
+  }
+  return { live }
 }
 
 function getInitialPage(): Page | undefined {
