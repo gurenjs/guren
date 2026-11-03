@@ -42,7 +42,8 @@ end: handlers can only call actions on an authorization layer, and a Lean proof
 shows no request sequence reads beyond a principal's permissions. Guren
 controllers are arbitrary TypeScript, so that proof is out of reach. Two of its
 practices transfer: an explicit list of what the guarantee trusts rather than
-checks (its `ASSUMPTIONS.md`), and confining effects to declared boundaries.
+checks (its `ASSUMPTIONS.md`), and confining effects to declared boundaries,
+which Guren can approach only as conventions on direct imports (§8).
 
 ### Existing implementation to reuse
 
@@ -51,7 +52,7 @@ checks (its `ASSUMPTIONS.md`), and confining effects to declared boundaries.
 | Advisory scan | `audit-deps.ts` (`bun audit --json`, `unavailable` never a pass) | Input to the exposure report |
 | Bare specifier to package name | `arch-check.ts` (`isBareSpecifier`, `packageNameFromSpecifier`, private) | Moves to `import-resolution.ts` as the one rule |
 | Relative and `@/` import resolution | `import-resolution.ts` (`resolveImportPath`) | Follows app-internal imports to their packages |
-| Package import bans | `guren.arch.ts` `disallowPackages` | Effect boundary presets (§8) |
+| Package import bans | `guren.arch.ts` `disallowPackages` | Direct-import conventions (§8) |
 | Application Graph v1 | RFC 0032, `application-graph.ts` | Nodes and routes the exposure joins onto |
 | Column reads | `column-consumers.ts` (controllers, resources, pages) | Data exposure (§7) |
 | Route authorization on the chain | `authorization-audit.ts` (`chainAuthorizes`) | Data exposure verdicts |
@@ -68,8 +69,11 @@ checks (its `ASSUMPTIONS.md`), and confining effects to declared boundaries.
 | M2 | Lockfile dependency tree and `guren deps:why` (§3) |
 | M3 | Import edges, placement and `guren deps:exposure`; advisory findings carry exposure and a fix path (§4, §5) |
 | M4 | Runtime advisory check against `oven-sh/bun`'s repository advisories (§6) |
-| M5 | Data exposure and the effect boundary presets (§7, §8) |
+| M5 | Data exposure and the direct-import conventions (§7, §8) |
 | M6 | Trust boundary section in every report (§9) |
+
+M3 ships the coverage, attribution and snapshot fields with the first exposure
+output; M6 only adds the summary section built from them.
 
 M1 stands alone and can ship before the rest is accepted, since it changes only
 scaffold output and two advisory checks.
@@ -144,6 +148,11 @@ For existing apps:
   choice and passes.
 - `guren upgrade` offers to add the block, as it does for other configuration
   autofixes. `guren doctor --fix` stays limited to generated files.
+- An app's exclusion list is the closure of the first-party packages it
+  installs, which grows past the template's set once it adds a plugin. `guren
+  upgrade` (which moves every installed `@guren/*` dependency), `guren add` and
+  `guren plugin` rewrite the list from the installed manifests, and
+  `supply-chain-cooldown` reports a first-party package missing from it.
 
 The Renovate `minimumReleaseAge` and Dependabot `cooldown` settings govern bot
 PRs only. The bunfig gate also covers `bun add` from a person or an agent, so
@@ -153,31 +162,37 @@ it is the default; the docs recommend setting both.
 
 `packages/cli/src/dependency-tree.ts`, pure: `readBunLock(text)` parses the
 text lockfile (`lockfileVersion: 1`, JSON with trailing commas) and
-`dependencyTree(lock, appWorkspace)` returns:
+`dependencyTree(lock, appWorkspace)` returns one entry per installed package
+instance, since one package can be installed at several versions:
 
 ```ts
 interface DependencyTree {
   coverage: Coverage                 // RFC 0032's shape
   packages: Array<{
+    id: string                       // `${name}@${version}`
     name: string
     version: string
     integrity?: string               // the lockfile's sha512
     direct: boolean
     depth: number                    // 0 for a direct dependency
-    via: string[]                    // direct dependencies it is reachable through
-    path: string[]                   // one shortest path, direct dependency first
-    scopes: Array<'prod' | 'dev' | 'optional' | 'peer'>
+    paths: Record<string, string[]>  // per direct dependency: one shortest path to this instance
+    declaredAs: Array<'prod' | 'dev' | 'optional' | 'peer'>
+    installedInProduction: boolean   // reachable from `dependencies` or `optionalDependencies`
   }>
 }
 ```
 
-A package reachable only through `devDependencies` is `dev`, and the production
-image (`bun install --production`) does not contain it. In a workspace, the
-app's own entry under `workspaces` is the root. A binary `bun.lockb` or a
-missing lockfile is `unavailable` with its reason, never an empty tree.
+`declaredAs` and `installedInProduction` describe the manifest and
+`bun install --production` only. They say nothing about what the build ships:
+a dev-only package a page imports is bundled into `public/` and reaches the
+browser through the production image all the same, which is why §4 judges
+placement from imports and the build output, never from `declaredAs`. In a
+workspace, the app's own entry under `workspaces` is the root. A binary
+`bun.lockb` or a missing lockfile is `unavailable` with its reason, never an
+empty tree.
 
-`guren deps:why <name> [--json]` prints the tree for one package: its
-versions, every `via`, and one path per direct dependency.
+`guren deps:why <name> [--json]` prints every installed instance of the
+package and, for each, its path from every direct dependency.
 
 ### 4. Import edges and placement
 
@@ -187,99 +202,157 @@ rather than new graph kinds:
 ```ts
 interface DependencyExposure {
   schemaVersion: 1
-  graphSnapshot: string              // the RFC 0032 snapshot id it joined
-  coverage: Record<'tree' | 'imports' | 'placement' | 'graph', Coverage>
+  snapshot: { id: string; graph: string; capturedAt: string; consistency: 'stable' | 'changed' }
+  coverage: Record<'tree' | 'imports' | 'placement' | 'graph' | 'runtime', Coverage>
   packages: Array<{
-    name: string
-    version: string
-    via: string[]
-    placement: Array<'server' | 'client' | 'ssr' | 'build' | 'test'>
-    carrier: 'app' | 'framework'
+    id: string                       // the DependencyTree instance
+    placement: Array<{
+      at: 'server' | 'client' | 'ssr' | 'build' | 'test'
+      evidence: 'import' | 'build-manifest'
+    }>
+    attribution: 'routes' | 'framework' | 'none-found' | 'unknown'
+    note?: string
     importedBy: Array<{
       file: string
       line: number
       chain: string[]                // app files from a graph node's file to the import
-      nodes: string[]                // RFC 0032 node ids reaching this file
+      nodes: Array<{ node: string; relation: string }>
     }>
     routes: Array<{ node: string; method: string; path: string; name?: string; authentication?: 'required' | 'guest-only' }>
   }>
+  runtime: Array<{ source: 'process' | 'engines' | 'packageManager' | 'dockerfile'; value: string; exact: boolean }>
 }
 ```
+
+`attribution` is what an empty `routes` means: `framework` for a package only
+the framework pulls in, `none-found` when every reader that could have found an
+import ran to completion and found none, and `unknown` when a reader limit in
+`coverage` could hide one.
 
 The reader:
 
 - Collects runtime bare specifiers from app source by AST: static `import`,
   `export … from`, and `import()` with a literal argument. Type-only imports are
-  skipped. A non-literal `import()` makes `imports` partial with the file named.
-  `node:` and `bun:` specifiers are listed under the runtime (§6), not as
-  packages.
+  skipped. `node:` and `bun:` specifiers are listed under the runtime (§6), not
+  as packages.
+- Marks `imports` partial, naming the file, for each construct it cannot
+  follow: a non-literal `import()`, `require()`, `new Worker()` or
+  `import.meta.glob()`, a relative or `@/` import that does not resolve, and a
+  file that does not parse.
 - Maps a specifier to its package through `packageNameFromSpecifier`, moved out
   of `arch-check.ts` into `import-resolution.ts` so both readers share it.
 - Follows relative and `@/` imports with `resolveImportPath`, so a package a
-  service imports is attributed to every controller, model, page, middleware
-  and policy file that reaches the service. `chain` records the files between.
-- Joins those files to graph nodes by `file`, and nodes to routes through
-  `handles`, `renders` and `usesMiddleware`. `authentication` is copied from the
-  route node.
+  service imports is attributed to every graph node file that reaches the
+  service. `chain` records the files between.
+- Joins those files to graph nodes by `file`, then to routes along every
+  relation the graph has: a controller through `handles`, a page through
+  `renders`, middleware through `usesMiddleware`, a model through `binds` and
+  through the controllers whose files reach it, a policy through `authorizes`
+  to the controller action and on through `handles`, a validator through
+  `validates` (a route's contract directly, a controller's through `handles`).
+  The relation each node was reached by is kept. An `unresolved` graph entry on
+  the way makes the package `unknown` rather than dropping the route.
+  `authentication` is copied from the route node.
 
 Placement comes from where the importing file sits: `server` for anything the
 server entry reaches (controllers, models, middleware, policies, validators,
 routes, config, providers), `client` for `resources/js/`, `ssr` for a client
 file in the SSR entry's reach, `build` for `vite.config.ts`, `drizzle.config.ts`
 and `scripts/`, `test` for `tests/` and `*.test.ts`. When a client build
-exists, the Vite build manifest confirms `client`, recorded as its own evidence
-source (`build-manifest`) rather than RFC 0032's `registered`, which means an
-introspected registration.
+exists, the Vite build manifest confirms `client` with `evidence:
+'build-manifest'`, its own source rather than RFC 0032's `registered`, which
+means an introspected registration.
 
-A package that only `@guren/*` (or another framework package) pulls in is
-`carrier: 'framework'`. hono and drizzle-orm reach every route, so these are
-reported once with `routes` empty and a note, never spread over each route.
+A package that only `@guren/*` (or another framework package) pulls in has
+`attribution: 'framework'`. hono and drizzle-orm reach every route, so these
+are reported once with a note, never spread over each route.
+
+The tree, the import scan and the graph are read as one snapshot, as RFC 0032
+requires of the graph alone: the lockfile, every `package.json` read, and each
+scanned source file are fingerprinted before and after collection, together
+with the graph's own fingerprints. A change between the two readings makes
+`consistency: 'changed'`. Exit codes follow `guren graph`: 0 for a complete,
+stable snapshot, 1 with the partial document for incomplete coverage or a
+changed snapshot, and 1 with a versioned error object when nothing could be
+collected.
 
 The names say what was read. `importedBy` means an import exists on a path
-from that file; it does not mean the vulnerable function runs. A route that is
-not listed may still reach the package through a reader limit, which
-`coverage` names. Following RFC 0032, nothing here becomes a pass or fail.
+from that file; it does not mean the vulnerable function runs. Following RFC
+0032, nothing here becomes a pass or fail.
 
 ### 5. Advisory findings with exposure and a fix path
 
-Each `deps:*` finding in `guren audit --json` gains:
+`audit-deps.ts` keeps the structured advisories it parses today and drops after
+deduplication: `bun audit` lists one entry per affected range, and the finding
+keeps only the first. The ranges of one GHSA are unioned before anything below
+uses them. The audit report gains, at report level:
 
 ```ts
-exposure?: DependencyExposure['packages'][number]
+dependencyExposure?: {
+  snapshot: DependencyExposure['snapshot']
+  coverage: DependencyExposure['coverage']
+}
+```
+
+and each `deps:*` finding gains:
+
+```ts
+advisory: { ghsa: string; ranges: string[] }           // every affected range
+exposures: Array<DependencyExposure['packages'][number]> // every installed instance in any range
 fix?: {
-  status: 'available' | 'unavailable'
+  status: 'verified' | 'candidate' | 'unavailable'
   reason?: string
   steps: Array<
-    | { kind: 'update'; package: string; to: string }          // a direct dependency
+    | { kind: 'update'; package: string; to: string }
     | { kind: 'override'; package: string; to: string; note: string }
     | { kind: 'cooldown-exclude'; entry: string; publishedAt: string }
   >
 }
 ```
 
-The severity stays what `bun audit` reported. The fix path is computed from the
-npm registry packument (`versions`, `time`, each version's dependency ranges)
+The severity stays what `bun audit` reported. A fix is proposed from the npm
+registry packument (`versions`, `time`, each version's dependency ranges),
 under the scan's timeout:
 
-1. If the package is direct, `update` to the newest version outside
-   `vulnerable_versions`.
-2. If it is transitive, find for each `via` the newest version of that direct
-   dependency whose range admits a fixed version, and `update` it.
-3. If no direct dependency release admits one, `override`, with a note that
-   Bun's `overrides` replace the range and do not move a peer the lockfile has
-   already resolved (measured in #1154).
-4. If the fixed version is younger than the app's `minimumReleaseAge`, add a
-   `cooldown-exclude` step with `name@version`, exempting that version only.
+1. For a direct instance, `update` to the newest version outside the union of
+   ranges.
+2. For a transitive instance, `update` along each of its `paths` the nearest
+   dependency whose newer release no longer admits an affected version on that
+   path.
+3. Where no release does, `override`, with a note that Bun's `overrides`
+   replace the range and do not move a peer the lockfile has already resolved
+   (#1154 hit this).
 
-A registry that does not answer makes the fix `unavailable` with its reason,
-never a guessed version. The text report prints the routes and the steps under
-each advisory.
+A proposal is only a `candidate` until it is checked. The check copies the
+app's manifest, lockfile and `bunfig.toml` to a temporary directory, applies
+the steps, and runs `bun install --lockfile-only` there. The fix is `verified`
+when the resulting lockfile has no instance of the package inside the union of
+ranges. The copied `bunfig.toml` keeps the app's `minimumReleaseAge`, so a
+step that needs a version younger than the gate, whether the patched package,
+a parent being updated or a new intermediate package, fails the resolution;
+each blocked version becomes a `cooldown-exclude` step with its exact
+`name@version`, and the resolution runs again. Bun's own stability filter
+(which can push resolution past a version the age alone would allow) is
+covered the same way, because the check resolves with Bun rather than
+predicting Bun. A registry that does not answer, a missing publish time, or a
+resolution that fails for another reason leaves the fix `candidate` or
+`unavailable` with the reason, never a guessed version.
+
+The text report prints the routes, the attribution and the steps under each
+advisory, and the report's coverage beside them.
 
 The development MCP server gains `guren_get_dependency_exposure`, read-only,
-with the same bounded output rule as `guren_get_application_graph`. The docs
-add a scheduled workflow running `guren audit --json` and failing on a new
-advisory, so a disclosure is noticed the day it is published rather than at the
-next deploy.
+with the same bounded output rule as `guren_get_application_graph`.
+
+`guren audit` fails today only on a `fail` finding, and `bun audit` low and
+moderate advisories are warnings, so a scheduled run of the plain command does
+not fail on every advisory. The scheduled check gets its own flag:
+`guren audit --deps-baseline <file>` exits 1 when a `deps:*` finding key is
+absent from the baseline file (a previous run's JSON, or one the app commits),
+and exits 1 with its own message when the dependency scan is `unavailable`, so
+a registry outage is never read as "nothing new". The docs add a scheduled
+workflow around it, so a disclosure is noticed the day it is published rather
+than at the next deploy.
 
 ### 6. Runtime version
 
@@ -311,58 +384,89 @@ The advisories above are relevant to Guren's own support range: 1.3.x is
 best-effort, every 1.3.x release falls inside two of the three ranges, and
 1.3.14 and later inside all three.
 
-The Dockerfile `guren deploy` renders moves from
-`oven/bun:1` to the minor of the Bun running the command, so a rebuild cannot
-change the runtime silently. The templates set no `engines.bun` today, so the
-report usually shows only the process version and the image tag.
+The Dockerfile `guren deploy` renders has two stages, `oven/bun:1` for the
+builder and `oven/bun:1-slim` for production. Both move to the exact version of
+the Bun running the command (`oven/bun:1.4.4` and `oven/bun:1.4.4-slim`), so the
+runtime check can match them and a rebuild does not pick up another release.
+A tag is still mutable on the registry; pinning a digest as well is Open
+Question 7. The templates set no `engines.bun` today, so the report usually
+shows only the process version and the image tags.
 
 ### 7. Data exposure
 
-`guren audit` gains a column section built from `column-consumers.ts`. That
-reader finds property reads today; this RFC extends it to a whole record passed
-as a value, which it does not detect yet.
+`guren audit` gains a column section. It starts from response sinks, not from
+models: every props value passed to `this.inertia()`, every argument to
+`this.json()`, and each Resource's `toArray()`. For each value the reader
+records which model's columns it carries, using `column-consumers.ts` where
+that reader identifies a record, and records the value as `unknown`, with its
+expression and line, where it does not (`this.json(await service.loadUser())`).
+`column-consumers.ts` finds property reads today; this RFC extends it to a
+whole record passed as a value.
 
-- For each model column, the Resources whose `toArray()` reads it, the
-  controller actions that pass a record of the model to `this.inertia()` or
-  `this.json()` without a Resource or `Model.serialize()`, and the pages that
-  read it.
-- A column is sensitive when the model lists it in `static hidden`, or its
-  name matches `password`, `token`, `secret`, `hash`, `apiKey` or `otp`
+- A whole record passed to a sink carries every column.
+- A value passed through `Model.serialize()` or `serializeMany()` carries the
+  model's effective output columns: the `visible` list when it is non-empty
+  (it takes precedence over `hidden`, `packages/orm/src/serialization.ts`),
+  otherwise every column minus `hidden`, plus `appends`.
+- A value from `auth.user()` carries the record minus the credential and
+  `hidden` columns only when the introspected `auth` section reports the bound
+  provider as the model provider (`ModelUserProvider.sanitize()` strips them).
+  A custom provider may not implement `sanitize()`, and a provider bound only
+  in `boot()` is past what introspection runs, so in both cases the user is
+  `unknown`.
+  The provenance is followed through aliases and destructuring, never inferred
+  from a TypeScript type.
+- A column is sensitive when the model lists it in `hidden`, or its name
+  matches `password`, `token`, `secret`, `hash`, `apiKey` or `otp`
   (case-insensitive, as whole camelCase or snake_case segments).
-- A sensitive column reaching a response is `exposure-sensitive-column`, an
-  advisory warn. A whole record passed raw counts as reading every column. The
-  finding names the action, the route and whether the chain authorizes
-  (`chainAuthorizes`).
+- A sensitive column reaching a sink is `exposure-sensitive-column`, an
+  advisory warn naming the action, the route and whether the chain authorizes
+  (`chainAuthorizes`). An `unknown` value is listed as unread, never as safe.
 
 This is an audit rule over its own static reader, not a verdict drawn from
-graph edges. Records the reader cannot follow (across a call or a file, the
-limit `column-consumers.ts` states) are listed as unread, never as safe.
+graph edges. Against `examples/blog`, `DashboardController` passes
+`auth.user()` straight to Inertia; the blog binds the model provider with
+`auth.useModel()` in its `AuthProvider.register()`, so the rule reports nothing
+there.
 
-### 8. Effect boundaries
+### 8. Direct-import conventions
 
 No template ships a `guren.arch.ts` today. The templates gain one with two
 rules using `disallowPackages`:
 
 ```ts
-{ from: 'resources/js/**', disallowPackages: ['drizzle-orm', 'postgres', 'mysql2', '@guren/orm'], message: 'Pages run in the browser; load data in the controller.' },
-{ from: 'app/Http/Controllers/**', disallowPackages: ['drizzle-orm'], severity: 'warn', message: 'Go through a Model so scopes, hidden columns and policies apply.' },
+{ from: 'resources/js/**', disallowPackages: ['drizzle-orm', 'postgres', 'mysql2', '@guren/orm', '@guren/core', '@guren/server'], message: 'Pages run in the browser; load data in the controller and pass it as props.' },
+{ from: 'app/Http/Controllers/**', disallowPackages: ['drizzle-orm'], severity: 'warn', message: 'Query through a Model, or move the raw query out of the controller.' },
 ```
 
-These are the nearest Guren gets to Nyxis's handlers that can only call
-declared actions. `guren check`, and so `guren gate`, checks them. No template
-controller and no `make:*` generator imports `drizzle-orm` today, so neither
-rule fires on scaffold output; the second is a warn because a raw query is
-sometimes the right call.
+These are conventions on direct imports, not an effect boundary. The arch check
+reads a file's own runtime imports: it follows no app-local wrapper and no
+dynamic `import()` (`packages/cli/src/arch/index.ts`), so a page can still reach
+database code through a local module. Going through a Model does not by itself
+hide columns or authorize a request either; §7 and `authorization-audit.ts` are
+what report those. What the rules buy is that the common direct paths show up
+in `guren check`, and so in `guren gate`. Nyxis gets the stronger guarantee
+because its handlers cannot perform IO at all; an equivalent here would need
+transitive checking through local modules and the `@guren/core` facade, which
+this RFC does not propose.
+
+No template controller and no `make:*` generator imports `drizzle-orm`, and no
+template or blog page imports `@guren/core` or `@guren/server` at runtime, so
+neither rule fires on scaffold output. The second rule is a warn because a raw
+query is sometimes the right call.
 
 ### 9. Trust boundary
 
 Every `deps:exposure` and audit report ends with a section listing what its
 results rest on without checking:
 
-- the runtime version (§6);
+- the runtime advisories, read from `oven-sh/bun`'s repository only (§6), and
+  an image tag that names no exact version;
 - packages carried by the framework, attributed to no route;
-- each reader's limits that applied in this run (non-literal imports, records
-  followed no further than one file);
+- each reader's limits that applied in this run (the constructs §4 marks
+  partial, the response values §7 leaves `unknown`, graph entries left
+  `unresolved`);
+- fixes left as a `candidate` because the resolution check could not run;
 - the lockfile's integrity hashes, which Bun checks at install, not Guren.
 
 The list is generated from the run's `coverage` entries, so it cannot claim a
@@ -414,3 +518,9 @@ existing `deps:*` finding keys are unchanged; the new fields are optional.
    annotation be required?
 6. Which Bun release introduced `minimumReleaseAge`, and does an older Bun
    ignore the key or fail on it? Only 1.4.4 was measured.
+7. Should the rendered Dockerfile pin image digests as well as exact tags?
+   A digest survives a re-pushed tag, at the cost of a manual bump per Bun
+   release.
+8. Does `bun install --lockfile-only` apply `minimumReleaseAge` and the
+   stability filter exactly as a full install does? §5's fix check relies on
+   it; it has not been measured.
