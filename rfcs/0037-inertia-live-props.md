@@ -469,7 +469,13 @@ What the transport does, as a `LiveTransport` (it routes by event name):
   down for longer than the backoff does not stop live props for good; once one
   has, it retries forever, the delay doubling to 30 s. The backoff starts over
   only after a connection answers its replay, so a server that closes the
-  socket right after `connected` is retried more slowly each time. A frame that
+  socket right after `connected` is retried more slowly each time. Inertia
+  refreshes only on a `true` that follows a `false` *and* an earlier `true`, so
+  when the page's first socket fails before it ever came up, the transport
+  reports `true` then `false` once, so the first successful connection still
+  triggers the catch-up reload. A subscription added while a replay is being
+  answered delays the `true` too, and a new channel during a backoff waits for
+  the pending reconnect rather than opening at once. A frame that
   carries a `channel` is always an event, so an app event named `connected` or
   `subscription` is not read as a control frame.
 - **`socketId()`** returns the socket id from the `connected` frame (§4), or

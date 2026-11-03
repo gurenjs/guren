@@ -282,6 +282,55 @@ describe('liveTransport()', () => {
     expect(transport.socketId?.()).toBe(`s_${'d'.repeat(32)}`)
   })
 
+  it('waits for a subscription added during the replay before reporting connected', () => {
+    const transport = create()
+    const statuses: boolean[] = []
+    transport.onStatusChange?.((connected) => statuses.push(connected))
+    transport.subscribe(order, 'OrderUpdated', () => {})
+    const [socket] = sockets
+    socket!.connected()
+    transport.subscribe({ name: 'news', type: 'public' }, 'Posted', () => {})
+
+    socket!.answer('private-orders.1')
+    expect(statuses).toEqual([])
+    socket!.answer('news')
+    expect(statuses).toEqual([true])
+  })
+
+  it('arms one catch-up reload when the first socket never came up, and only one', async () => {
+    const transport = create()
+    const statuses: boolean[] = []
+    transport.onStatusChange?.((connected) => statuses.push(connected))
+    transport.subscribe(order, 'OrderUpdated', () => {})
+
+    sockets[0]!.close()
+    expect(statuses).toEqual([true, false])
+    await tick(1100)
+    sockets[1]!.close()
+    expect(statuses).toEqual([true, false])
+
+    await tick(2100)
+    sockets[2]!.connected()
+    sockets[2]!.answer('private-orders.1')
+    expect(statuses).toEqual([true, false, true])
+  })
+
+  it('leaves opening to the pending reconnect when a new channel arrives during the backoff', async () => {
+    const transport = create()
+    transport.subscribe(order, 'OrderUpdated', () => {})
+    sockets[0]!.connected()
+    sockets[0]!.answer('private-orders.1')
+    sockets[0]!.close()
+
+    transport.subscribe({ name: 'news', type: 'public' }, 'Posted', () => {})
+    expect(sockets).toHaveLength(1)
+
+    await tick(1100)
+    expect(sockets).toHaveLength(2)
+    sockets[1]!.connected()
+    expect(sockets[1]!.sent.map((message) => message.channel)).toEqual(['private-orders.1', 'news'])
+  })
+
   it('subscribes nothing for a channel type Guren does not have', () => {
     const transport = create()
     const off = transport.subscribe({ name: 'x', type: 'encrypted-private' }, 'E', () => {})
