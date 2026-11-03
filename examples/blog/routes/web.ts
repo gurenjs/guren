@@ -1,7 +1,8 @@
 import { Router, registerAttachmentRoutes, requireAuthenticated } from '@guren/core'
 import PostController from '../app/Http/Controllers/PostController.js'
 import { Post } from '../app/Models/Post.js'
-import { PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
+import { PageQuerySchema, PostIdParamSchema, PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
+import { pages } from '@/.guren/pages.gen'
 import { registerAuthenticatedAreaRoutes } from './authenticated.js'
 
 export function registerWebRoutes(baseRouter: Router): void {
@@ -19,9 +20,14 @@ export function registerWebRoutes(baseRouter: Router): void {
   registerAuthenticatedAreaRoutes(router)
 
   router.group('/posts', (posts) => {
-    posts.get('/', [PostController, 'index']).name('posts.index')
+    // The two reads an MCP Apps host renders with the blog's own pages (RFC 0038).
+    posts.get('/', { query: PageQuerySchema }, [PostController, 'index'])
+      .name('posts.index')
+      .agent({ toolName: 'posts_index', description: 'List the latest blog posts, newest first.', ui: pages.posts.Index })
     posts.middleware('auth').get('/new', [PostController, 'create']).name('posts.create')
-    posts.get('/:id', [PostController, 'show']).name('posts.show')
+    posts.get('/:id', { params: PostIdParamSchema }, [PostController, 'show'])
+      .name('posts.show')
+      .agent({ toolName: 'posts_show', description: 'Show one blog post with its author.', ui: pages.posts.Show })
     posts.middleware('auth').group((authed) => {
       authed.get('/:id/edit', { bind: { id: Post }, name: 'posts.edit' }, [PostController, 'edit'])
       authed.post('/', { name: 'posts.store', body: PostPayloadSchema }, [PostController, 'store'])

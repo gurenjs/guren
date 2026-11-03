@@ -50,11 +50,24 @@ export const sessions = pgTable('sessions', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 }, (t) => [index('sessions_expires_at_idx').on(t.expiresAt)])
 
+// The App MCP endpoint's bearer tokens (`DatabaseApiTokenStore`); property names are the ApiToken fields.
+export const apiTokens = pgTable('api_tokens', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  hashedToken: text('hashed_token').notNull().unique(),
+  userId: text('user_id').notNull(),
+  abilities: jsonb('abilities').$type<string[]>().notNull(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const schema = {
   attachments,
   posts,
   users,
   sessions,
+  apiTokens,
 }
 
 export type BlogSchema = typeof schema

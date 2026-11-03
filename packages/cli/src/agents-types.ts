@@ -7,9 +7,11 @@
  * hence running after the data generator. An app with no derivable tools gets no
  * file, and a stale one is removed.
  */
-import { readFile, rm } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { existsSync } from 'node:fs'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import { deriveAgentTools, type DerivedAgentTool, type RouteDefinition } from '@guren/server'
+import { MCP_APP_MODULE, renderPagesModule } from '@guren/server/vite'
 import type { ResourceDefinition } from './data-types'
 import {
   describeDeclarations,
@@ -160,8 +162,22 @@ export async function generateAgentTypes(
     pluginAi: (await appDependsOn(appRoot, PLUGIN_AI_PACKAGE)) === true ? { definitions } : undefined,
   })
   const outputPath = await writeGeneratedFileIn(appRoot, outputFile, content, { force: options.force })
+  if (tools.some((tool) => tool.ui?.page !== undefined)) await ensureMcpAppPagesModule(appRoot)
 
   return { outputPath, tools, warnings }
+}
+
+/**
+ * An empty `.guren/mcp-app/index.gen.ts` until `vite build --mode mcp-app` writes
+ * the real one, so `mcpPlugin({ ui: { pages: () => import(...) } })` typechecks and
+ * boots on a fresh clone (the plugin then lists each page with no build behind it).
+ * A module already there is the build's and is never replaced.
+ */
+async function ensureMcpAppPagesModule(appRoot: string): Promise<void> {
+  const file = resolve(appRoot, MCP_APP_MODULE)
+  if (existsSync(file)) return
+  await mkdir(dirname(file), { recursive: true })
+  await writeFile(file, renderPagesModule({}))
 }
 
 export interface BuildAgentToolsOptions {

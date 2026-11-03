@@ -15,6 +15,16 @@ This is a minimal, diff-able view. For interactive exploration of the Drizzle sc
 
 ```mermaid
 erDiagram
+  apiTokens {
+    text id PK
+    text name
+    text hashedToken
+    text userId
+    jsonb abilities
+    timestamp lastUsedAt
+    timestamp expiresAt
+    timestamp createdAt
+  }
   attachments {
     text id PK
     text attachableType
@@ -57,6 +67,19 @@ erDiagram
   posts }o--|| users : authorId
   users ||--o{ posts : posts
 ```
+
+## apiTokens (table: api_tokens)
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | text | primary key |
+| name | text | not null |
+| hashedToken | text | not null |
+| userId | text | not null |
+| abilities | jsonb | not null |
+| lastUsedAt | timestamp |  |
+| expiresAt | timestamp |  |
+| createdAt | timestamp | not null |
 
 ## attachments
 
