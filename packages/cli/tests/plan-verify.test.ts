@@ -718,6 +718,67 @@ describe('PlanVerifier', () => {
     })
   })
 
+  describe('behaviours marked alreadyHolds', () => {
+    /** The fixture with `ids` marked: their tests guard what the application does before the plan's work. */
+    const marked = (ids: readonly string[]): PlanDraft => {
+      const target = structuredClone(plan)
+      for (const behaviour of target.tasks.flatMap((task) => task.acceptance)) if (ids.includes(behaviour.id)) behaviour.alreadyHolds = true
+      return target
+    }
+    /** Every behaviour's case failing but those of `passing`. */
+    const runWith = (passing: readonly string[]): string => junit(IDS.map((id) => ({ name: `[${id}] x`, ...(passing.includes(id) ? {} : { inner: '<failure/>' }) })))
+
+    test('should not ask a marked behaviour to fail, and record no red run for it that the run did not see', async () => {
+      const step = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, runWith(['AC-comments-3'])), {}, marked(['AC-comments-3'])).verify(TESTS)
+
+      expect(step.record.outcome).toBe('verified')
+      expect(commandOf(step, 'tests:fail')).toMatchObject({ status: 'pass', reason: '[AC-comments-3] holds already, so not asked to fail' })
+      expect(step.record.acceptance.find((behaviour) => behaviour.id === 'AC-comments-3')).toEqual({ id: 'AC-comments-3', status: 'passing' })
+      expect(step.record.acceptance.filter((behaviour) => behaviour.red).map((behaviour) => behaviour.id)).toEqual(['AC-comments-1', 'AC-comments-2', 'AC-comments-4'])
+    })
+
+    test('should record the red run of a marked behaviour every case of which it saw fail', async () => {
+      const step = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, FAILING), {}, marked(['AC-comments-3'])).verify(TESTS)
+
+      expect(step.record.outcome).toBe('verified')
+      expect(step.record.acceptance.filter((behaviour) => behaviour.red).map((behaviour) => behaviour.id)).toEqual(IDS)
+    })
+
+    test('should still ask for a marked behaviour’s test', async () => {
+      const report = junit(IDS.filter((id) => id !== 'AC-comments-3').map((id) => ({ name: `[${id}] x`, inner: '<failure/>' })))
+
+      const step = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, report), {}, marked(['AC-comments-3'])).verify(TESTS)
+
+      expect(commandOf(step, 'tests:fail')).toMatchObject({ status: 'fail', reason: 'a behaviour is not failing', findings: ['[AC-comments-3] has no test'] })
+    })
+
+    test('should run no bun test when every behaviour is marked, recording no red run', async () => {
+      const fake = fakeExec({}, PASSING)
+
+      const step = await verifier(statusOf(), fake, {}, marked(IDS)).verify(TESTS)
+
+      expect(step.record.outcome).toBe('verified')
+      expect(commandOf(step, 'tests:fail')).toMatchObject({
+        status: 'pass',
+        label: 'not run: no behaviour is left to see fail before its implementation exists',
+        reason: '[AC-comments-1], [AC-comments-2], [AC-comments-3], [AC-comments-4] hold already, so not asked to fail',
+      })
+      expect(fake.calls.some((command) => command[1] === 'test')).toBe(false)
+      expect(step.record.acceptance.some((behaviour) => behaviour.red !== undefined)).toBe(false)
+    })
+
+    test('should still need a marked behaviour to pass where the step’s behaviours are judged', async () => {
+      const step = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, runWith(IDS.filter((id) => id !== 'AC-comments-3'))), {}, marked(['AC-comments-3'])).verify(HTTP)
+
+      expect(commandOf(step, 'tests')).toMatchObject({ status: 'fail', reason: 'a behaviour is not passing' })
+      expect(step.record.outcome).toBe('failed')
+    })
+
+    test('should keep a behaviour’s shape when it is marked, so a red run seen before the mark is still carried', () => {
+      expect(behaviourShape(marked(['AC-comments-1']), 'AC-comments-1')).toBe(behaviourShape(plan, 'AC-comments-1'))
+    })
+  })
+
   test('should fail an http step on a compiler error while its behaviours pass', async () => {
     const error = "app/Http/Controllers/CommentController.ts(12,28): error TS2345: Argument of type 'number' is not assignable to parameter of type 'WhereClause'."
     const fake = fakeExec({ 'run typecheck': { exitCode: 2, stdout: `${error}\nFound 1 error.\n` } })

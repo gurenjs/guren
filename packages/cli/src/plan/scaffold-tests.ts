@@ -7,15 +7,16 @@
  * and none is skipped. Requests are spelled so `test-requests.ts` reads each one back to its route.
  */
 
+import { MODELS_DIR } from '../discovery'
 import { collectionSlug } from '../inflect'
 import { quoteString } from '../schema-columns'
 import { escapeTemplateLiteral, isBindingName, PATH_PARAM_PATTERN, quoteObjectKey } from '../utils'
-import { bracketedTokens, isAcceptanceId, SKELETON_BOOT_FAILED } from './acceptance-status'
+import { alreadyHoldingIds, bracketedTokens, isAcceptanceId, SKELETON_BOOT_FAILED } from './acceptance-status'
 import { importSpecifier } from './scaffold-controller'
 import type { PlanScaffoldFile } from './scaffold'
 import type { PlanScaffoldUnwritten } from './scaffold-http'
 import type { PlanAcceptance, PlanColumn, PlanDraft, PlanModel, PlanRoute } from './schema'
-import type { PlanDerivedStep, PlanDerivedTask } from './tasks'
+import type { PlanDerivedStep, PlanDerivedTask, PlanTaskDerivation } from './tasks'
 
 export interface PlanTestsApp {
   /** The app-relative entry whose default export is the application: `src/app.ts` or `app.ts`. */
@@ -28,10 +29,41 @@ export interface PlanTestsOutput {
   file: PlanScaffoldFile
   /** Expectations written as an `unwritten()` call, which the agent writes by hand. */
   unwritten: PlanScaffoldUnwritten[]
-  /** Behaviours on a route the application has, with no `given()` or `unwritten()` call, whose test may already pass, which `tests:fail` refuses. */
+  /** The step's behaviours {@link planMayPassNow} lists: their tests may pass before the implementation, which `tests:fail` refuses. */
   mayPassNow: string[]
   /** Why nothing may be written. Non-empty means the output is not to be used. */
   refusals: string[]
+}
+
+/** Why a behaviour's route answers before its task's implementation exists. */
+export type PlanRouteAnswersBefore =
+  | { kind: 'exists'; route: string; change: 'existing' | 'alter' | 'rename' }
+  | { kind: 'wired'; route: string; task: string }
+
+/** A behaviour whose test may pass before its task's implementation exists, so `tests:fail` refuses its step. */
+export interface PlanMayPassNow {
+  id: string
+  /** The `tests` step that runs it. */
+  step: string
+  because: PlanRouteAnswersBefore
+}
+
+/**
+ * Whether `route` answers once `task`'s `tests` step runs: the plan does not add it (a rename usually
+ * keeps its path), or a task ahead of `task` mounts it. That task owns the route, or owns the action
+ * and none of its routes, which completes only by mounting another task's route (RFC 0030 §5).
+ */
+export function routeAnswersBefore(plan: PlanDraft, derivation: PlanTaskDerivation, task: PlanDerivedTask, route: PlanRoute): PlanRouteAnswersBefore | undefined {
+  const { kind } = route.change
+  if (kind === 'existing' || kind === 'alter' || kind === 'rename') return { kind: 'exists', route: route.id, change: kind }
+  if (kind !== 'add') return undefined
+  const owns = (candidate: PlanDerivedTask, id: string): boolean => candidate.steps.some((step) => step.elementIds.includes(id))
+  const ahead = derivation.tasks.slice(0, Math.max(0, derivation.tasks.findIndex((candidate) => candidate.id === task.id)))
+  const mounting = ahead.find(
+    (candidate) =>
+      owns(candidate, route.id) || (owns(candidate, route.action) && !plan.routes.some((other) => other.action === route.action && owns(candidate, other.id))),
+  )
+  return mounting ? { kind: 'wired', route: route.id, task: mounting.id } : undefined
 }
 
 // Must match the message `withCsrf()` throws in packages/testing/src/test-app.ts for the default path.
@@ -165,10 +197,11 @@ function comparesWith(column: PlanColumn, value: unknown): boolean {
 
 class TestsEmitter {
   readonly unwritten: PlanScaffoldUnwritten[] = []
-  readonly mayPassNow: string[] = []
+  readonly mayPassNow: Array<{ id: string; because: PlanRouteAnswersBefore }> = []
   readonly refusals: string[] = []
   readonly models = new Map<string, string>()
   private readonly taken: ReadonlySet<string>
+  private readonly holding: ReadonlySet<string>
   private usesGiven = false
   private usesUnwritten = false
   private usesExpect = false
@@ -179,8 +212,11 @@ class TestsEmitter {
     private readonly plan: PlanDraft,
     private readonly path: string,
     private readonly app: PlanTestsApp,
+    /** `undefined` for every route of a step that runs no `tests:fail`, where passing at once is what is asked. */
+    private readonly answersBefore: (route: PlanRoute) => PlanRouteAnswersBefore | undefined,
   ) {
     this.taken = new Set([...FILE_NAMES, ...plan.models.map((model) => model.name)])
+    this.holding = alreadyHoldingIds(plan)
   }
 
   private leave(behaviour: PlanAcceptance, detail: string, reason: string, lines: string[]): void {
@@ -313,8 +349,9 @@ class TestsEmitter {
     } else if (!failsUnrouted) {
       this.leave(behaviour, 'expect', 'nothing written here fails against a route that does not exist yet, so assert what the behaviour changes', lines)
     }
-    // A route the application already has (renamed ones usually keep their path) may answer as the plan expects today.
-    if (route.change.kind !== 'add' && route.change.kind !== 'drop' && !this.placeholder) this.mayPassNow.push(behaviour.id)
+    // A `given()` or `unwritten()` call is where the test is made to fail first; a marked behaviour is asked to pass.
+    const before = this.placeholder || this.holding.has(behaviour.id) ? undefined : this.answersBefore(route)
+    if (before) this.mayPassNow.push({ id: behaviour.id, because: before })
     return `  test(${title}, async () => {\n${lines.join('\n')}\n  })`
   }
 
@@ -390,13 +427,55 @@ function describeTask(plan: PlanDraft, task: PlanDerivedTask): string {
   }
 }
 
-/** What `plan:scaffold` writes for a `tests` step. Pure: the caller reads the application and writes the result. */
-export function emitPlanTests(plan: PlanDraft, task: PlanDerivedTask, step: PlanDerivedStep, context: { slug: string; planFile: string }, app: PlanTestsApp): PlanTestsOutput {
-  const path = planTestsFilePath(context.slug, task)
-  const emitter = new TestsEmitter(plan, path, app)
+/** The step's tests, one per behaviour, through one emitter: what `emitPlanTests()` and `planMayPassNow()` share. */
+function writeTests(plan: PlanDraft, derivation: PlanTaskDerivation, task: PlanDerivedTask, step: PlanDerivedStep, path: string, app: PlanTestsApp) {
+  const failsFirst = step.verify.includes('tests:fail')
+  const emitter = new TestsEmitter(plan, path, app, (route) => (failsFirst ? routeAnswersBefore(plan, derivation, task, route) : undefined))
   const wanted = new Set(step.acceptanceIds)
   const behaviours = plan.tasks.flatMap((intent) => intent.acceptance).filter((behaviour) => wanted.has(behaviour.id))
-  const tests = behaviours.map((behaviour) => emitter.test(behaviour))
+  return { emitter, wanted, behaviours, tests: behaviours.map((behaviour) => emitter.test(behaviour)) }
+}
+
+/**
+ * Every behaviour whose test, as `plan:scaffold` writes it, may pass before its implementation exists:
+ * a route that answers already ({@link routeAnswersBefore}), no `given()` or `unwritten()` call, no
+ * `alreadyHolds` mark. The scaffold reports it, the §2 checks warn on it before approval. `rootModels`
+ * are the root's model classes now; a tests step finds them as the tasks ahead left them (each root
+ * model they own added, renamed or dropped) plus those its own task's scaffold step wrote.
+ */
+export function planMayPassNow(plan: PlanDraft, derivation: PlanTaskDerivation, rootModels: Iterable<string>): PlanMayPassNow[] {
+  const present = new Set(rootModels)
+  const models = plan.models.filter((model) => !model.module)
+  const found: PlanMayPassNow[] = []
+  for (const task of derivation.tasks) {
+    const step = task.steps.find((candidate) => candidate.kind === 'tests')
+    if (step) {
+      const scaffolded = task.steps.filter((candidate) => candidate.kind === 'scaffold').flatMap((candidate) => candidate.generates)
+      const names = [...present, ...models.filter((model) => scaffolded.includes(model.id)).map((model) => model.name)]
+      const modelFiles = Object.fromEntries(names.map((name) => [name, `${MODELS_DIR}/${name}.ts`]))
+      const { emitter } = writeTests(plan, derivation, task, step, planTestsFilePath('plan', task), { entry: 'src/app.ts', modelFiles })
+      found.push(...emitter.mayPassNow.map(({ id, because }) => ({ id, step: step.id, because })))
+    }
+    for (const model of models.filter((candidate) => task.steps.some((owner) => owner.elementIds.includes(candidate.id)))) {
+      if (model.change.kind === 'drop') present.delete(model.name)
+      else if (model.change.kind === 'rename') present.delete(model.change.from)
+      if (model.change.kind === 'add' || model.change.kind === 'rename') present.add(model.name)
+    }
+  }
+  return found
+}
+
+/** What `plan:scaffold` writes for a `tests` step. Pure: the caller reads the application and writes the result. */
+export function emitPlanTests(
+  plan: PlanDraft,
+  derivation: PlanTaskDerivation,
+  task: PlanDerivedTask,
+  step: PlanDerivedStep,
+  context: { slug: string; planFile: string },
+  app: PlanTestsApp,
+): PlanTestsOutput {
+  const path = planTestsFilePath(context.slug, task)
+  const { emitter, wanted, behaviours, tests } = writeTests(plan, derivation, task, step, path, app)
   const contents = emitter.source(context.planFile, step.id, describeTask(plan, task), tests)
   // A body, a database value, an error key or a page name is written as the plan spells it, and plan:verify would select the file by an id in it.
   const foreign = [...new Set(bracketedTokens(contents).filter((token) => isAcceptanceId(token) && !wanted.has(token)))]
@@ -404,7 +483,7 @@ export function emitPlanTests(plan: PlanDraft, task: PlanDerivedTask, step: Plan
   return {
     file: { elements: behaviours.map((behaviour) => behaviour.id), path, contents },
     unwritten: emitter.unwritten,
-    mayPassNow: emitter.mayPassNow,
+    mayPassNow: emitter.mayPassNow.map(({ id }) => id),
     refusals: emitter.refusals,
   }
 }

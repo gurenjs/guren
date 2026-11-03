@@ -97,6 +97,7 @@ function everyBranch(): Loose[] {
   // the plan rather than reading it, and every other path it "read" means nothing.
   plan[UNDECLARED] = { nested: true }
   plan.models[0][UNDECLARED] = 'unread'
+  plan.tasks[0].acceptance[0].alreadyHolds = true
   plan.flows = [
     {
       id: 'flow.comment',

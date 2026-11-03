@@ -71,6 +71,11 @@ export type AcceptanceReport =
   | { state: 'invalid'; errors: AcceptanceError[]; observed: AcceptanceBehaviourStatus[] }
   | { state: 'judged'; behaviours: AcceptanceBehaviourStatus[] }
 
+/** The behaviours marked `alreadyHolds` (RFC 0030 §1): the one reading of the mark `tests:fail`, the Stop hook and the scaffold share. */
+export function alreadyHoldingIds(plan: Pick<Plan, 'tasks'>): Set<string> {
+  return new Set(plan.tasks.flatMap((task) => task.acceptance.filter((behaviour) => behaviour.alreadyHolds === true).map((behaviour) => behaviour.id)))
+}
+
 /** Distinct, in the order the tasks declare them: an id under two tasks is `validate`'s to report, not a second behaviour. */
 export function planAcceptanceIds(plan: Pick<Plan, 'tasks'>): string[] {
   return [...new Set(plan.tasks.flatMap((task) => task.acceptance.map((behaviour) => behaviour.id)))]

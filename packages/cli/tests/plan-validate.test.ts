@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { CheckStatus } from '../src/check-result'
-import { loadPlanAppState } from '../src/plan/app-state'
+import { loadPlanAppState, type PlanAppState } from '../src/plan/app-state'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { validatePlan, type PlanCheckResult } from '../src/plan/validate'
 import { writeWorkspaceFiles } from './helpers'
@@ -836,5 +836,101 @@ describe('flows', () => {
 
     expect(find(failures(results), 'plan:reference', 'flow.one')).toBeUndefined()
     expect(expectResult(results, 'plan:reference', 'flow.two', 'fail').message).toContain('"form"')
+  })
+})
+
+describe('behaviours whose test may pass before the implementation exists', () => {
+  type Behaviour = PlanDraft['tasks'][number]['acceptance'][number]
+
+  /** The fixture and a guest's GET of a route with no parameter and nothing to set up, the route's change as given. */
+  function guestIndex(change: PlanDraft['routes'][number]['change'], behaviour: Partial<Behaviour> = {}): PlanDraft {
+    const draft = plan()
+    draft.controllers[0]!.actions.push({ id: 'action.comments.index', change: { kind: 'add' }, name: 'index', authorization: { middleware: ['auth'] }, response: { kind: 'json', description: 'The comments.' }, rules: [] })
+    draft.routes.push({ id: 'route.comments.index', change, method: 'GET', path: '/comments', name: 'comments.index', action: 'action.comments.index', middleware: ['auth'], bind: [] })
+    draft.tasks[0]!.covers.push('route.comments.index')
+    draft.tasks[0]!.acceptance.push({ id: 'AC-comments-5', description: 'A guest is sent to sign in before reading comments.', kind: 'unauthenticated', actor: 'guest', route: 'route.comments.index', given: [], expect: { redirect: '/login' }, ...behaviour })
+    return draft
+  }
+
+  test('should warn about a behaviour on a route that exists already, with nothing to set up, naming the step tests:fail would refuse', () => {
+    for (const change of [{ kind: 'existing' }, { kind: 'alter' }, { kind: 'rename', from: 'comments.list' }] as const) {
+      const result = expectResult(validatePlan(guestIndex(change), appState()), 'plan:may-pass-now', 'AC-comments-5', 'warn')
+
+      expect(result.message).toBe(
+        `Behaviour "AC-comments-5" may pass before its implementation exists: "comments.index" exists already (${change.kind}), and its test has nothing to set up, so tests:fail would refuse task/entity/model.comment/tests.`,
+      )
+      expect(result.section).toBe('acceptance')
+      expect(result.suggestion).toContain('"alreadyHolds": true')
+    }
+  })
+
+  test('should not warn about a marked behaviour, one on a route the plan adds, or one with a setup to write', () => {
+    const quiet = [guestIndex({ kind: 'existing' }, { alreadyHolds: true }), guestIndex({ kind: 'add' }), guestIndex({ kind: 'existing' }, { given: ['a comment exists'] })]
+
+    for (const draft of quiet) expect(find(validatePlan(draft, appState()), 'plan:may-pass-now')).toBeUndefined()
+  })
+
+  /** The guest's behaviour moved to a story task behind the comments slice, which adds its route. */
+  function storyOnAddedRoute(behaviour: Partial<Behaviour> = {}): PlanDraft {
+    const draft = guestIndex({ kind: 'add' })
+    const moved = draft.tasks[0]!.acceptance.pop()!
+    draft.sideEffects.push({ id: 'effect.comments.audit', change: { kind: 'add' }, kind: 'job', name: 'AuditCommentReads', trigger: 'A comment list is read.', description: 'Records who read the comments.' })
+    draft.tasks.push({ id: 'task.audit', entity: 'Audit trail', summary: 'Record who reads the comments.', covers: ['effect.comments.audit'], acceptance: [{ ...moved, id: 'AC-audit-1', ...behaviour }] })
+    return draft
+  }
+
+  /** The application registering `comments.index` with `middleware`, as `loadPlanAppState()` reads it for `plan:render`. */
+  function registered(middleware: string[], extra: { hasInlineMiddleware?: boolean; authenticationRequired?: boolean } = {}): PlanAppState {
+    return appState({ routes: [{ name: 'comments.index', method: 'GET', path: '/comments', middleware, hasInlineMiddleware: false, authenticationRequired: false, ...extra }] })
+  }
+
+  test('should warn about a behaviour on a route an earlier task mounts, and send it to that task rather than to the mark', () => {
+    const result = expectResult(validatePlan(storyOnAddedRoute(), appState()), 'plan:may-pass-now', 'AC-audit-1', 'warn')
+
+    expect(result.message).toContain('task/entity/model.comment mounts "comments.index" before this behaviour\'s tests step')
+    expect(result.message).toEndWith('so tests:fail would refuse task/story/task.audit/tests.')
+    expect(result.suggestion).toBe('Move it to task/entity/model.comment, which adds the route: its tests step sees the test fail before that work exists.')
+  })
+
+  test('should warn about a mark on a behaviour whose route nothing answers before its tests step', () => {
+    const result = expectResult(validatePlan(guestIndex({ kind: 'add' }, { alreadyHolds: true }), appState()), 'plan:already-holds', 'AC-comments-5', 'warn')
+
+    expect(result.message).toBe('Behaviour "AC-comments-5" is marked "alreadyHolds", but nothing answers its route "comments.index" before its tests step, so it cannot hold yet.')
+    expect(find(validatePlan(guestIndex({ kind: 'existing' }, { alreadyHolds: true }), appState()), 'plan:already-holds')).toBeUndefined()
+  })
+
+  test('should warn about a mark on a behaviour whose route an earlier task of the plan adds, since only this plan makes it hold', () => {
+    const results = validatePlan(storyOnAddedRoute({ alreadyHolds: true }), appState())
+
+    expect(expectResult(results, 'plan:already-holds', 'AC-audit-1', 'warn').message).toBe(
+      'Behaviour "AC-audit-1" is marked "alreadyHolds", but its route "comments.index" is added by task/entity/model.comment, so it holds only through this plan\'s work.',
+    )
+    expect(find(results, 'plan:may-pass-now', 'AC-audit-1')).toBeUndefined()
+  })
+
+  test('should warn about a mark on an unauthenticated behaviour where the plan puts authentication on a route that lacks it now', () => {
+    const marked = guestIndex({ kind: 'alter' }, { alreadyHolds: true })
+
+    const result = expectResult(validatePlan(marked, registered([])), 'plan:already-holds', 'AC-comments-5', 'warn')
+
+    expect(result.message).toBe('Behaviour "AC-comments-5" is marked "alreadyHolds", but the plan puts authentication on "comments.index", which the application\'s route does not apply now, so its test fails today.')
+    // Behind authentication already, by name or by a group's declared capability, or not read as one route, the mark stands.
+    expect(find(validatePlan(marked, registered(['auth'])), 'plan:already-holds')).toBeUndefined()
+    expect(find(validatePlan(marked, registered([], { authenticationRequired: true })), 'plan:already-holds')).toBeUndefined()
+    expect(find(validatePlan(marked, registered([], { hasInlineMiddleware: true })), 'plan:already-holds')).toBeUndefined()
+    expect(find(validatePlan(marked, appState()), 'plan:already-holds')).toBeUndefined()
+    // The action's own middleware is part of the guard the plan puts on the route.
+    const throughAction = guestIndex({ kind: 'alter' }, { alreadyHolds: true })
+    throughAction.routes.find((route) => route.id === 'route.comments.index')!.middleware = []
+    expect(find(validatePlan(throughAction, registered([])), 'plan:already-holds', 'AC-comments-5')).toBeDefined()
+  })
+
+  test('should warn about the same mark on an existing route whose altered action adds the authentication, and not where the plan restates it', () => {
+    const marked = guestIndex({ kind: 'existing' }, { alreadyHolds: true })
+    marked.routes.find((route) => route.id === 'route.comments.index')!.middleware = []
+    marked.controllers[0]!.actions.find((action) => action.id === 'action.comments.index')!.change = { kind: 'alter' }
+
+    expect(expectResult(validatePlan(marked, registered([])), 'plan:already-holds', 'AC-comments-5', 'warn').message).toContain('the plan puts authentication on "comments.index"')
+    expect(find(validatePlan(guestIndex({ kind: 'existing' }, { alreadyHolds: true }), registered(['auth'])), 'plan:already-holds')).toBeUndefined()
   })
 })
