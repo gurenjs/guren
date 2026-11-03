@@ -114,6 +114,8 @@ throw new HttpException(429, 'Rate limit exceeded')
 
 The `ExceptionHandler` supports any error with a numeric `statusCode` property, not just `HttpException` subclasses. This means `ModelNotFoundException` (exported from `@guren/core`, with `statusCode: 404`) is automatically rendered as a 404 response without any extra configuration. For errors with `statusCode >= 500`, the message is hidden in production (replaced with "Internal Server Error").
 
+Outside debug, a 404 message the framework composed from the record reads `Not Found` instead: the one `findOrFail()` and route model binding throw (`Post not found for id=42`), the ones `NotFoundHttpException.forModel()` and the other `for*()` constructors write, and a 404 thrown with no message. `denyAsNotFound()` and `abort(404)` default to that same `Not Found`, so with the framework's defaults a record a policy hides reads exactly like one that does not exist, and the response cannot tell a stranger which ids exist. A message you write yourself, as in `abort(404, 'That invitation has expired')`, `denyAsNotFound('…')` or `new NotFoundHttpException('…', 'Invitation', id)`, is shown as written, so keep record details out of it. Only the framework's own construction counts: a `resourceType` or `modelName` field on your exception does not make its message replaceable. Only the message changes: a body your exception's `toResponse()` builds keeps its shape, and the original message stays on the exception for reporters and logs.
+
 ## HTTP Exceptions
 
 Throw `HTTPException` to return specific HTTP status codes:
@@ -182,9 +184,9 @@ While `NODE_ENV` is not `production`, the exception handler shows what went wron
 
 - A browser request that ends in a 5xx gets the debug page: the exception's name and message, the stack trace, the request's method, URL and headers, and the `NODE_ENV`, Bun version and platform. A browser request is one that accepts `text/html` and is not an Inertia visit or an XHR.
 - An Inertia visit, an XHR or a JSON caller gets the JSON body with the exception's name and stack added.
-- A browser request that ends in a 4xx gets the plain error page with its message, as in production. A 4xx is the caller's mistake, and a stack trace would not help with it.
+- A browser request that ends in a 4xx gets the plain error page with its message. A 4xx is the caller's mistake, and a stack trace would not help with it.
 
-In production the details are dropped, the message of a 5xx that is not an `HttpException` becomes `Internal Server Error`, and a browser gets the generic error page. An `HttpException` keeps its own message in production, so do not put internal details in one.
+In production the details are dropped, the message of a 5xx that is not an `HttpException` becomes `Internal Server Error`, and a browser gets the generic error page. A 404 message the framework composed from a record reads `Not Found`, so with the defaults a missing record and one a policy hides cannot be told apart. Any other `HttpException` keeps its own message in production, a 404 you wrote a message for included, so do not put internal details in one.
 
 To turn details on and off by another rule, bind your own handler under `exception.handler` in a provider's `register()`. The framework adds its own renderers in `boot()`, so they attach to yours:
 
@@ -290,11 +292,12 @@ export class ErrorPageServiceProvider extends ServiceProvider {
 
     for (const errorClass of [NotFoundHttpException, ModelNotFoundException]) {
       handler.render<Error>(errorClass, (error, ctx) => {
+        const message = handler.shouldShowDetails() ? error.message : 'Not Found'
         const wantsPage = ctx.req.header('X-Inertia') === 'true'
           || (ctx.req.header('accept') ?? '').includes('text/html')
-        if (!wantsPage) return ctx.json({ message: error.message }, 404)
+        if (!wantsPage) return ctx.json({ message }, 404)
 
-        return inertia('Error', { status: 404, message: error.message }, {
+        return inertia('Error', { status: 404, message }, {
           status: 404,
           request: ctx.req.raw,
           container: this.container,
@@ -304,6 +307,8 @@ export class ErrorPageServiceProvider extends ServiceProvider {
   }
 }
 ```
+
+The renderer passes `error.message` on only while debug details are on. `findOrFail()`'s message names the model and the id, and a policy that hides a record with `denyAsNotFound()` raises a `NotFoundHttpException` too, so a body built from the message would tell a hidden record from a missing one.
 
 Keep these renderers to specific classes. `ValidationException`, `AuthenticationException` and `AuthorizationException` all extend `HttpException`, so a renderer for `HttpException` would also replace how validation, authentication and authorization failures are answered, the validation redirect included.
 
@@ -385,6 +390,7 @@ The exception handler already answers differently by environment, so most apps n
 | | Development (`debug` on) | Production |
 |---|---|---|
 | Message of a 5xx | The exception's own | `Internal Server Error`, except an `HttpException`, which keeps its own |
+| Message of a 404 | The exception's own (`Post not found for id=42`) | `Not Found` when the framework composed it from the record; a message you wrote is kept |
 | Exception name and stack | Included in the JSON body | Omitted |
 | A browser's 5xx | The debug page | A generic error page |
 

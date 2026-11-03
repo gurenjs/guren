@@ -10,7 +10,8 @@ import type {
   RendererRegistration,
   ErrorResponse,
 } from './types'
-import { HttpException } from './HttpException'
+import { HttpException, NOT_FOUND_MESSAGE } from './HttpException'
+import { hasComposedMessage } from './exceptions/NotFoundHttpException'
 import { renderErrorPage } from './error-page'
 import { renderDebugPage } from './debug-page'
 import { redactQueryParams } from './redact-query-params'
@@ -126,12 +127,15 @@ export class ExceptionHandler {
     // Resolved before the branch so this renders with the same number
     // `reportException` judged it by; `toResponse()` supplies only the body.
     const statusCode = resolveExceptionStatus(error)
+    // `findOrFail()` names the model and key, and a record a policy hides with
+    // `denyAsNotFound()` must not read differently from that miss.
+    const replacement = !debug && statusCode === 404 && hasComposedNotFoundMessage(error) ? NOT_FOUND_MESSAGE : undefined
 
     let body: ErrorResponse
     if (HttpException.isHttpException(error)) {
-      body = error.toResponse(debug).body
+      body = replacement === undefined ? error.toResponse(debug).body : bodyWithMessage(error, replacement, debug)
     } else {
-      body = { message: statusCode < 500 || debug ? error.message : 'Internal Server Error' }
+      body = { message: replacement ?? (statusCode < 500 || debug ? error.message : 'Internal Server Error') }
       if (debug) {
         body.exception = error.name
         body.stack = error.stack
@@ -141,9 +145,10 @@ export class ExceptionHandler {
     if (this.wantsHtmlResponse(ctx)) {
       // A 4xx is the caller's mistake, so a browser gets the plain page even in
       // debug: a stack trace for every mistyped id would bury the real faults.
+      // The generic 404 message adds nothing to the page's own description.
       const html = debug && statusCode >= 500
         ? renderDebugPage(error, ctx.req.raw)
-        : renderErrorPage(statusCode, body.message)
+        : renderErrorPage(statusCode, statusCode === 404 && body.message === NOT_FOUND_MESSAGE ? undefined : body.message)
       return ctx.html(html, statusCode as ContentfulStatusCode)
     }
 
@@ -176,6 +181,40 @@ export class ExceptionHandler {
         return response
       }
     }
+  }
+}
+
+/**
+ * A 404 message the framework wrote from the record rather than one a developer
+ * chose: the ORM's `findOrFail()` (by name and `modelName`, since it crosses a
+ * package boundary), a `NotFoundHttpException.for*()`, or none at all.
+ */
+function hasComposedNotFoundMessage(error: Error): boolean {
+  return hasComposedMessage(error)
+    || (error.name === 'ModelNotFoundException' && typeof (error as { modelName?: unknown }).modelName === 'string')
+    || error.message === ''
+}
+
+/**
+ * `toResponse()`'s body with `message` in place of the error's own, set on the error
+ * and put back after: a subclass's `toResponse()` may read private fields a copy
+ * lacks. A message that cannot be written (a frozen error, a getter with no setter)
+ * is replaced in the body instead.
+ */
+function bodyWithMessage(error: HttpException, message: string, debug: boolean): ErrorResponse {
+  const own = Object.getOwnPropertyDescriptor(error, 'message')
+  try {
+    error.message = message
+  } catch {
+    return { ...error.toResponse(debug).body, message }
+  }
+
+  try {
+    // A setter may accept the write and keep another value.
+    return error.message === message ? error.toResponse(debug).body : { ...error.toResponse(debug).body, message }
+  } finally {
+    if (own) Object.defineProperty(error, 'message', own)
+    else delete (error as { message?: string }).message
   }
 }
 
@@ -230,7 +269,7 @@ export function abort(
   message?: string,
   errors?: Record<string, string[]>
 ): never {
-  throw new HttpException(statusCode, message ?? 'Error', errors)
+  throw new HttpException(statusCode, message ?? (statusCode === 404 ? NOT_FOUND_MESSAGE : 'Error'), errors)
 }
 
 export function abortIf(

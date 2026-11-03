@@ -10,7 +10,8 @@ import type {
   AuthorizationResponse,
   ResponseBuilder,
 } from './types'
-import { AuthorizationException, HttpException } from '../errors'
+import { AuthorizationException, HttpException, NotFoundHttpException } from '../errors'
+import { NOT_FOUND_MESSAGE } from '../errors/HttpException'
 import { getAuthContext } from '../auth/context'
 import { ambientBinding, bindAmbient } from '../http/default-application'
 import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
@@ -30,7 +31,7 @@ export const Response: ResponseBuilder = {
   },
 
   denyAsNotFound(message?: string): AuthorizationResponse & { status: 404 } {
-    return { allowed: false, message: message ?? 'Not found.', status: 404 }
+    return { allowed: false, message: message ?? NOT_FOUND_MESSAGE, status: 404 }
   },
 }
 
@@ -72,10 +73,17 @@ function isPolicyTuple(value: unknown[]): boolean {
     && (typeof value[0] === 'function' || typeof value[0] === 'string')
 }
 
-/** Honours `denyWithStatus()` / `denyAsNotFound()` so a policy can hide a record as a 404. */
+/**
+ * Honours `denyWithStatus()` / `denyAsNotFound()` so a policy can hide a record as a 404.
+ * A 404 is a `NotFoundHttpException`, so a renderer registered for missing records renders it too.
+ */
 export function denialToException(response: AuthorizationResponse): Error {
   const message = response.message ?? 'This action is unauthorized.'
   const status = (response as AuthorizationResponse & { status?: number }).status
+
+  if (status === 404) {
+    return new NotFoundHttpException(message)
+  }
 
   if (typeof status === 'number' && status !== 403) {
     return new HttpException(status, message)

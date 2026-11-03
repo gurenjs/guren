@@ -1,5 +1,12 @@
 import type { ErrorResponse } from './types'
 
+/**
+ * The one 404 message the framework writes itself: `HttpException.notFound()`,
+ * `NotFoundHttpException`, `denyAsNotFound()`, `abort(404)`, and what the exception
+ * handler puts in place of a message naming a record outside debug.
+ */
+export const NOT_FOUND_MESSAGE = 'Not Found'
+
 /** Base HTTP exception class. */
 export class HttpException extends Error {
   readonly statusCode: number
@@ -67,7 +74,7 @@ export class HttpException extends Error {
     return new HttpException(403, message)
   }
 
-  static notFound(message: string = 'Not Found'): HttpException {
+  static notFound(message: string = NOT_FOUND_MESSAGE): HttpException {
     return new HttpException(404, message)
   }
 

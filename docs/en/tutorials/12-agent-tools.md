@@ -964,7 +964,7 @@ expect(result.status).toBe(404)
 console.log(result.text)
 ```
 
-The agent receives an error result: `isError` is true, the status is 404, and the text is the JSON body of the error response, whose `message` is `Post not found for id=999`. Under `bun test` the handler shows details, so the body also carries `exception` and `stack`. A browser that asks for HTML under `bun run preview` gets the plain HTML 404 page with the same message; outside production the handler answers it with the same JSON instead.
+The agent receives an error result: `isError` is true, the status is 404, and the text is the JSON body of the error response, whose `message` is `Post not found for id=999`. Under `bun test` the handler shows details, so the body also carries `exception` and `stack`. A browser that asks for HTML gets the plain HTML 404 page instead, with the same message outside production. Under `bun run preview` the page carries no message and the JSON says only `Not Found`: in production the handler replaces a 404 message the framework composed from the record, so a missing post reads like one a policy hides with `denyAsNotFound()`.
 
 The framework's part: the 404 (`findWithOrFail` throws an exception that carries it), the choice of JSON or HTML from the request's `Accept` header, the details outside production, and the mapping of any 4xx or 5xx response to an MCP error result. Yours: using `findWithOrFail` in `show` at all, rather than `find` and an answer of your own, and whether a missing post gets a page of its own.
 
