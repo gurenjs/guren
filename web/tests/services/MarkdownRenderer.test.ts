@@ -245,3 +245,39 @@ describe('feature lists', () => {
     }
   })
 })
+
+describe('file trees', () => {
+  const fence = '`'.repeat(3)
+  const tree = (body: string) => `${fence}tree\n${body}\n${fence}`
+
+  it('nests box-drawn entries under the folder above them, with badges and notes', async () => {
+    const html = await renderMarkdownToHtml(
+      tree('routes/\n├── api/\n│   └── hello.ts   # GET `/api/hello`\n└── web.ts'),
+    )
+
+    expect(html).toMatch(/^<pre class="doc-tree">/u)
+    expect(html).toMatch(
+      /<details open><summary[^>]*>[\s\S]*routes\/[\s\S]*<details open><summary[^>]*>[\s\S]*api\/[\s\S]*hello\.ts/u,
+    )
+    expect(html).toContain('doc-tree-badge--ts')
+    expect(html).toContain('<span class="doc-tree-note">GET <code>/api/hello</code></span>')
+  })
+
+  it('reads two-space indentation the same way', async () => {
+    const boxed = await renderMarkdownToHtml(tree('lang/\n├── en/\n│   └── messages.json\n└── ja/'))
+    const indented = await renderMarkdownToHtml(tree('lang/\n  en/\n    messages.json\n  ja/'))
+
+    expect(indented).toBe(boxed)
+  })
+
+  it('escapes names and notes', async () => {
+    const html = await renderMarkdownToHtml(tree('dist/\n└── index.html   # <meta name="robots">'))
+
+    expect(html).toContain('&lt;meta name=&quot;robots&quot;&gt;')
+    expect(html).not.toContain('<meta')
+  })
+
+  it('refuses a line nested more than one level below the line above it', async () => {
+    await expect(renderMarkdownToHtml(tree('app/\n│   ├── Models/'))).rejects.toThrow('nested more than one level')
+  })
+})

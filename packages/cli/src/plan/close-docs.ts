@@ -41,6 +41,8 @@ const WORDS: Record<PlanLocale, Record<string, string>> = {
     assumptions: 'Assumptions',
     decisions: 'Decisions',
     noWaivers: 'No element was waived; every one was verified.',
+    noWaiversAccepted: 'No element was waived.',
+    accepted: "Accepted at approval as complete on their step's verified run, since no behaviour can reach them",
     elements: 'Elements',
     element: 'Element',
     change: 'Change',
@@ -60,6 +62,8 @@ const WORDS: Record<PlanLocale, Record<string, string>> = {
     assumptions: '前提',
     decisions: '決定事項',
     noWaivers: '免除した要素はありません。すべて検証済みです。',
+    noWaiversAccepted: '免除した要素はありません。',
+    accepted: '振る舞いでは確かめられないので、ステップの検証で完了とすることを承認時に了承した要素',
     elements: '要素',
     element: '要素',
     change: '変更',
@@ -79,10 +83,12 @@ export interface PlanCloseContext {
   /** Names the blocks; a revision closes under its parent's. */
   slug: string
   approval: PlanApproval
-  /** The overlaid status elements, every one of which is `verified` or `waived` unless `existing`. */
+  /** The overlaid status elements, every one of which is `verified`, `accepted` or `waived` unless `existing`. */
   elements: ReadonlyArray<PlanElementStatus<PlanElementState>>
   /** The waivers that lifted an element to `waived`, by element id, in element order. */
   waived: ReadonlyMap<string, PlanWaiver>
+  /** The elements that closed `accepted`, in element order: the approval accepted them without a behaviour. */
+  accepted: readonly string[]
   /** App-relative, POSIX: the plan file, or `undefined` when it sits outside the application. */
   planFile?: string
 }
@@ -109,6 +115,10 @@ function relativeLink(from: string, to: string): string {
 
 function waiverLine(locale: PlanLocale, waiver: PlanWaiver): string {
   return `- ${WORDS[locale].waived} \`${waiver.elementId}\`: ${waiver.reason} (${waiver.at}${waiver.by ? `, ${waiver.by}` : ''})`
+}
+
+function acceptedLine(locale: PlanLocale, ids: readonly string[]): string {
+  return `- ${WORDS[locale].accepted}: ${ids.map((id) => `\`${id}\``).join(', ')}`
 }
 
 function cite(text: string, ids: readonly string[]): string {
@@ -174,7 +184,9 @@ export function renderPlanDoc(context: PlanCloseContext): string {
   if (plan.assumptions.length > 0) lines.push(`## ${words.assumptions}`, '', ...bullets(plan.assumptions), '')
 
   const waiverLines = [...context.waived.values()].map((waiver) => waiverLine(locale, waiver))
-  lines.push(`## ${words.decisions}`, '', ...(waiverLines.length > 0 ? waiverLines : [words.noWaivers]), '')
+  const accepted = context.accepted.length > 0 ? [acceptedLine(locale, context.accepted)] : []
+  const decisions = waiverLines.length > 0 ? [...waiverLines, ...accepted] : accepted.length > 0 ? [words.noWaiversAccepted, '', ...accepted] : [words.noWaivers]
+  lines.push(`## ${words.decisions}`, '', ...decisions, '')
 
   lines.push(`## ${words.elements}`, '', `| ${words.element} | ${words.change} | ${words.state} |`, '| --- | --- | --- |')
   for (const element of context.elements) {
@@ -204,7 +216,9 @@ function entityDocBlocks(context: PlanCloseContext, model: PlanModel): Partial<R
   for (const controller of plan.controllers) if (owned.has(controller.id)) for (const action of controller.actions) owned.add(action.id)
   for (const section of [plan.policies, plan.resources]) for (const entry of section) if (entry.model === model.id) owned.add(entry.id)
   const waivers = [...context.waived.values()].filter((waiver) => owned.has(waiver.elementId))
-  if (waivers.length > 0) blocks.decisions = waivers.map((waiver) => waiverLine(locale, waiver))
+  const accepted = context.accepted.filter((id) => owned.has(id))
+  const decisions = [...waivers.map((waiver) => waiverLine(locale, waiver)), ...(accepted.length > 0 ? [acceptedLine(locale, accepted)] : [])]
+  if (decisions.length > 0) blocks.decisions = decisions
 
   if (tasks.length > 0 && plan.scope.nonGoals.length > 0) blocks.nonGoals = bullets(plan.scope.nonGoals)
 

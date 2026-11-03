@@ -220,13 +220,27 @@ taxes every install for a dev-only screen. Instead:
 - the scaffold adds `mermaid` to ~~new apps'~~ `devDependencies` —
   **Amended in implementation:** to the `default` blueprint only. The
   `api` blueprint has no frontend, so it relies on the degradation path
-  below instead of carrying a browser diagram library;
+  below instead of carrying a browser diagram library. **Amended after
+  acceptance (2026-11-03):** no blueprint adds it (see below);
 - `/_guren/docs/assets/mermaid.js` serves the file resolved from the
-  *app's* `node_modules` (via `import.meta.resolve`, no path input);
+  *app's* `node_modules` (~~via `import.meta.resolve`~~ read from
+  `node_modules/mermaid/dist/mermaid.min.js` in the app root or its
+  nearest ancestor, no path input);
 - when mermaid is not installed, diagram fences degrade to plain code
   blocks with a one-line hint (`bun add -d mermaid`).
 
 No CDN is involved: the viewer works offline and sends nothing anywhere.
+
+**Amended after acceptance (2026-11-03), mermaid leaves the scaffold.**
+mermaid depends on katex, so the `default` blueprint's `mermaid`
+devDependency made `guren audit` (A06) report a katex advisory on every
+fresh app, for a library only this screen uses. Every blueprint now
+relies on the degradation path, and an app opts in with
+`bun add -d mermaid`. For that hint to work as written, the endpoint
+reads the file off the disk on each miss instead of asking the module
+resolver: Bun remembers a failed resolution for the life of the
+process, so an install did not show until the dev server restarted.
+Apps scaffolded earlier keep their `mermaid` until they remove it.
 
 ### Freshness
 
@@ -249,7 +263,8 @@ channel (SSE) is deferred — see Open Questions.
 ### Scaffold and docs changes
 
 - `create-app` templates: `GUREN_DOCS=1` joins `GUREN_MCP=1` in the
-  `dev` script; `mermaid` joins `devDependencies`.
+  `dev` script; ~~`mermaid` joins `devDependencies`~~ (amended
+  2026-11-03: no template ships `mermaid`).
 - Agent harness (`docs-and-spec.md` rule) and the spec-anchored guide
   mention the viewer as the human-facing half of the loop.
 

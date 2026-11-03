@@ -36,9 +36,10 @@ flowchart LR
 | 読み取り | `alter` の計画した性質が、承認時にどう読めたか（[`alter` の読み取り](./implementation-plan-verification.md#alter-の読み取り)） |
 | タスク、ステップ | Guren が計画から組み立てる作業。おもにエンティティごとにタスクがあり、共有する作業にもタスクができる。タスクは 6 種類のステップに分かれる（[実装](#実装-plannext-と-planverify)） |
 | 記録 | ステップの検証結果。`.guren/plans/` に置かれる |
-| 状態 | 要素の進み具合。`planned`、`present`、`wired`、`verified`、`drifted`、`unjudged`、`blocked`、`waived` のどれか（[進捗を読む](#進捗を読む-planstatus)） |
+| 状態 | 要素の進み具合。`planned`、`present`、`wired`、`verified`、`accepted`、`drifted`、`unjudged`、`blocked`、`waived` のどれか（[進捗を読む](#進捗を読む-planstatus)） |
 | 到達 | 通った振る舞いが、ルートと期待するページから計画の参照をたどって、その要素まで達しているか（[規則](./implementation-plan-verification.md#要素が完了と数えられる条件)） |
 | 鮮度 | 要素が依存するものが、基準点のときのままか（[鮮度](./implementation-plan-verification.md#鮮度)）。依存先が古くなったステップは、`plan:next` が保留する |
+| 承認時の了承 | どの振る舞いも届かない要素 (コマンド、副作用、変更するカラム) を、ステップの検証が通った時点で完了とすることを、計画の承認で認めること（[承認](#承認-planapprove)） |
 | 免除(waive) | 人が理由を付けて、要素を未完成のまま受け入れること（[要素を waive する](#要素を-waive-する-planwaive)） |
 
 ## 置き場所
@@ -48,7 +49,7 @@ flowchart LR
 | ファイル | 中身 | コミット |
 |---|---|---|
 | `docs/plans/comments/plan.json` | 計画そのもの | する |
-| `docs/plans/comments/approvals.json` | `plan:approve` が記録したハッシュと、`alter` ごとの読み取り | する |
+| `docs/plans/comments/approvals.json` | `plan:approve` が記録したハッシュと、`alter` ごとの読み取り、振る舞いなしで了承した要素 | する |
 | `docs/plans/comments/decisions.json` | `plan:waive` が書く免除 (waiver) の記録 | する |
 | `docs/plans/comments/revisions/0001.json` | `plan:revise` が書くリビジョン | する |
 | `docs/plans/comments/plan.html` | `plan:render` が書くページ | しない |
@@ -79,7 +80,7 @@ bunx guren plan "comments on posts, authors can delete their own" --print-prompt
 
 依頼を省いた場合、プロンプトは依頼内容を尋ねるようエージェントに指示します。`--json` を付けると、プロンプトとスキーマが 1 つのオブジェクトで出力されます。`--print-prompt` を付けずに `guren plan` を実行するとエラーで終わり、モデルに単独で計画を書かせる使い方はまだ用意していません (このページの最後を参照)。
 
-エージェントハーネスを入れたアプリ (`bunx guren agent:init` で導入し、`agent:sync` で更新) では、この流れを `plan-write` スキルが進めます。エージェントに機能の計画を頼むと、書き始める前に設計を左右する点を質問してきます。答えを受け取るとプロンプトに沿って計画を書き、失敗する検査がなくなるまで `plan:render --json` を実行して、最後にページの場所と未決の点を伝えます。レビュー後の変更は `plan:revise` で記録し、承認まではしません。承認した計画は `plan-implement` スキルが実装します。
+エージェントハーネスを入れたアプリ (`bunx guren agent:init` で導入し、`agent:sync` で更新) では、この流れを `plan-write` スキルが進めます。エージェントに機能の計画を頼むと、書き始める前に設計を左右する点を質問してきます。答えを受け取るとプロンプトに沿って計画を書き、失敗する検査がなくなるまで `plan:render --json` を実行して、最後にページの場所と未決の点を伝えます。レビュー後の変更は `plan:revise` で記録し、承認まではしません。承認した計画は `plan-implement` スキルが実装します。計画は、変更を作る前に人が承認するときにだけ意味があります。そのため、承認する人がいないセッション (`claude -p` によるヘッドレス実行、定期実行のジョブ、誰もレビューしないと書かれた依頼) では、依頼された変更を計画なしでそのまま作ります。計画そのものを頼まれた場合は後でレビューできるように書き、承認されていない計画を実装することはありません。
 
 `plan:render` はファイルを計画のスキーマで検証し、誤りのあるフィールドを指摘します。
 
@@ -107,6 +108,8 @@ bunx guren plan:render docs/plans/comments/plan.json
 「エージェントへの依頼文をコピー」を押すと、計画のパス、`plan-write` スキルでレビューを反映してほしいという依頼、フィードバックをまとめた依頼文が、ページの表示言語でコピーされます。これをエージェントに送れば、レビューがリビジョンとして計画に取り込まれます。`plan:revise` は `feedback.json` から承認と回答を読みます (後述)。コメントの内容は、読者かエージェントが計画のコピーに反映します。フッターには、計画を直したあとに実行する `plan:render` と `plan:approve` の 2 つのコマンドが表示されます。
 
 開発サーバーを `GUREN_MCP=1` で動かしていれば、同じページを [Dev Center](./application-diagnostics.md) の計画のページから開けます (**Review this plan**、`/_guren/plans/<slug>/review`)。この場合は判定、コメント、回答を付けるたびに `.guren/plans/<slug>.feedback.json` へ保存され、次に開いたときもその状態から始まります。保存したファイルには、レビューした計画の版が記録されます。計画が変わったあとは、`plan:render` でページを作り直すまでレビューを受け付けません。エージェントにはレビューしたことを伝えるだけでよく、JSON を貼り付ける必要はありません。
+
+計画にコマンド、追加または変更する副作用、変更するカラムがあると、「確認が必要な項目」に **Completes without a behaviour** も表示されます。直すものを指す警告ではありません。これらの要素にはどの振る舞いも届かないので、計画を承認すると、ステップの検証が通った時点で完了とすることを了承したことになります（[承認](#承認-planapprove)）。この警告で、承認する前にその一覧を確かめられます。
 
 検査は、今のアプリケーションに対して実行されます。報告される内容には、たとえば次のようなものがあります。
 
@@ -148,6 +151,15 @@ Comments on posts (plan.json)
 Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 14 element(s) hashed.
 Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recorded in docs/plans/comments/approvals.json.
 ```
+
+どの振る舞いも届かない要素がある計画では、出力にもう 1 つのまとまりが加わります。ルートへのリクエストを見ても、そのルートがディスパッチするジョブや、計画が実行するコマンド、読み取りがすでに一致していたカラムの変更はわからないので、振る舞いではこれらを検証できません。そこで計画を承認すると、それぞれをステップの検証が通った時点で完了とすることを了承したことになり、その一覧が表示されます。例のコピーの計画に、`CommentController.store` から発行する `CommentPosted` イベントを足した場合は次のとおりです。
+
+```text
+Accepted as complete on their step's verified run, since no behaviour can reach them (plan:status reports each one accepted once that run holds, and plan:close needs no waiver for it):
+  side effects: event.commentPosted
+```
+
+この一覧は、描画したページが **Completes without a behaviour** として固定表示するものと同じで、`--dry-run` でも表示されるため、決める前に確かめられます。一覧は承認の一部として `approvals.json` に記録され、そのハッシュの承認にだけ効きます。改訂版は自分の承認のときに改めて了承し、前の承認からは何も引き継ぎません。この記録がない古い承認の計画も、もう一度 `plan:approve` を実行すれば記録されます。了承で省けるのは振る舞いだけなので、イベントを実際に発行し、そのステップの検証が通るまでは完了になりません。
 
 最初に承認したときに、計画に `baseline` が書き込まれます。`rev` は計画を書いた時点のコミットで、`contextHash` は参照している要素ごとに、アプリケーションでの今の形をハッシュにしたものです。コミットのないリポジトリや、未コミットの変更がある作業ツリー (計画自身のファイルは除く) で承認が拒否されるのはこのためです。承認の記録は計画の中には入らず、隣の `approvals.json` に書かれます。両方をコミットしてください。`--dry-run` を付けると、拒否の確認だけを行い、記録する内容を表示して何も書き込みません。
 
@@ -388,7 +400,7 @@ Policies
   verified  add       CommentPolicy              policy.comment
 
 Elements the plan changes: 16
-  planned 0, present 0, wired 0, verified 16, drifted 0, unjudged 0, blocked 0, waived 0
+  planned 0, present 0, wired 0, verified 16, accepted 0, drifted 0, unjudged 0, blocked 0, waived 0
 ```
 
 | 状態 | 意味 |
@@ -397,6 +409,7 @@ Elements the plan changes: 16
 | `present` | コードにあり、スキャナーが読める計画上の性質がすべて一致している (`drop` なら存在しない) |
 | `wired` | 到達できる。`createApp()` がマウントし、先に登録されたルートに横取りされないルート、そのルートが呼ぶアクション、そのアクションが返すページ、そのルートやアクションが検証に使う validator、アプリケーションがディスパッチ、発行 (emit)、登録、送信する副作用が該当する |
 | `verified` | 検証済み。所属するステップの検証が通り、指紋を取ったファイルが変わっていない |
+| `accepted` | 承認時に了承済み。どの振る舞いも届かない要素で、`verified` と同じ条件でステップの検証が通っている。振る舞いなしで完了とすることを、承認のときに了承している |
 | `drifted` | 検証後に変更された、または一部はあるが性質が食い違っている |
 | `unjudged` | 計画が書いた性質をどれも読み取れず (`alter` なら、食い違う性質がなく、読み取りに照らして数えられる一致もなく)、変更が起きたかどうかを判断できる材料がほかにない |
 | `blocked` | ここでは判定できない。理由が添えられる |
@@ -426,23 +439,23 @@ Not approved at this hash: plan:next, plan:scaffold, plan:verify, plan:waive, pl
 
 ## 要素を waive する: `plan:waive`
 
-この計画では仕上げない要素や、計画のどこからも判定できない要素は、人が理由を付けて未完成のまま受け入れられます。よくあるのは副作用です。たとえば例のコピーの計画に、`CommentController.store` から発行する `CommentPosted` イベントを足したとします。イベントは `wired` になり、`plan:close` は残った要素の 1 つとして次のように示します。
+この計画では仕上げない要素は、人が理由を付けて未完成のまま受け入れられます。[承認](#承認-planapprove)の節の `CommentPosted` イベントを例に、リスナーの計画が出るまではコントローラーから発行しないことにしたとします。承認時の了承は振る舞いがないことに対するもので、未完成のままでよいという意味ではありません。クラスはあっても発行するコードがないので、`plan:close` は残った要素の 1 つとして次のように示します。
 
 ```text
-  event.commentPosted: wired
-    No planned property of it matched beyond its existence and no behaviour can reach it, so no plan:verify run lifts it: waive it with bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "<why>"
+  event.commentPosted: present (Not confirmed as wired: nothing in the application's source emits it)
+    Change the code until plan:status reports it wired, then run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http; or waive it: bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "<why>"
 ```
 
-副作用にはどの振る舞いも届かないので ([要素が完了と数えられる条件](./implementation-plan-verification.md#要素が完了と数えられる条件)を参照してください)、示される選択肢は免除だけです。
+発行しないままにするのは人の判断なので、免除として記録します。
 
 ```bash
-bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "no behaviour can observe an emitted event; the listener's own plan tests the notification"
+bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "emitted once the listener's plan ships"
 ```
 
 ```text
 Comments on posts (plan.json)
 
-Waived event.commentPosted: no behaviour can observe an emitted event; the listener's own plan tests the notification
+Waived event.commentPosted: emitted once the listener's plan ships
 
 Recorded in docs/plans/comments/decisions.json
 The decision log is committed with the plan. A waiver names this plan hash, so a revision does not inherit it.
@@ -461,10 +474,10 @@ The decision log is committed with the plan. A waiver names this plan hash, so a
 
 ## 閉じる: `plan:close`
 
-現在のハッシュの承認があり、計画で変更する要素がすべて `verified` か `waived` になったら、計画を閉じられます。そうなるまでは拒否され、残っている要素ごとに、何が完了を妨げているかと、それを進めるコマンドが次の行に示されます。次の出力は、上の `drifted` の例で `http` を確かめ直す前のものです (示された 8 つの要素のうち 2 つを抜き出しています)。
+現在のハッシュの承認があり、計画で変更する要素がすべて `verified`、`accepted`、`waived` のいずれかになったら、計画を閉じられます。そうなるまでは拒否され、残っている要素ごとに、何が完了を妨げているかと、それを進めるコマンドが次の行に示されます。次の出力は、上の `drifted` の例で `http` を確かめ直す前のものです (示された 8 つの要素のうち 2 つを抜き出しています)。
 
 ```text
- ERROR  docs/plans/comments/plan.json is not closed: every element must be verified or waived with a reason (guren plan:waive), and these are not, each with what holds it and what moves it:
+ ERROR  docs/plans/comments/plan.json is not closed: every element must be verified, accepted at approval, or waived with a reason (guren plan:waive), and these are not, each with what holds it and what moves it:
   validator.comment: drifted (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http; changed since: app/Http/Resources/CommentResource.ts)
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http again, since that run no longer holds; or waive it: bunx guren plan:waive docs/plans/comments/plan.json validator.comment --reason "<why>"
   controller.comments: present (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http, but no planned property of it matched beyond its existence and no verified run of a step whose behaviours reach it (task/entity/model.comment/http) holds now, so that result is not counted: run plan:verify on that step, or waive it)
@@ -473,9 +486,9 @@ The decision log is committed with the plan. A waiver names this plan hash, so a
 
 `controller.comments` は `http` の振る舞いを通してしか `verified` にならないので、そのステップを確かめ直せば一緒に `verified` になります。完了の状態に届いていない要素や `blocked` の要素は、`plan:verify` を実行する前にコードや環境を直す必要があります。
 
-どの `plan:verify` の実行でも `verified` にならない要素には、`plan:waive` が示されます。足りないのが要素に届く振る舞いだけの場合は、振る舞いを足して計画を承認し直すという選択肢も示されます。ただし、カラム、コマンド、副作用に示されるのは免除だけです (「要素を waive する」の節を参照してください)。`plan:verify` が指紋を取れない要素も、どの実行でも `verified` にならないので、免除だけが示されます。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、ループの最後にいるエージェントにも、計画を閉じられない理由がわかります。
+どの `plan:verify` の実行でも `verified` にならない要素には、`plan:waive` が示されます。足りないのが要素に届く振る舞いだけの場合は、振る舞いを足して計画を承認し直すという選択肢も示されます。ただし、カラム、コマンド、副作用には、振る舞いを足しても届きません。承認時に了承した要素には、そのステップの `plan:verify` が示されます。了承の記録がない古い承認の要素には、免除より先に、了承を記録する `plan:approve` が示されます。`plan:verify` が指紋を取れない要素も、どの実行でも `verified` にならないので、免除だけが示されます。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、ループの最後にいるエージェントにも、計画を閉じられない理由がわかります。
 
-すべての要素が `verified` か `waived` になったら、`--dry-run` で書き込まれる内容を確かめられます。問題がなければ計画を閉じます。
+すべての要素が `verified`、`accepted`、`waived` のいずれかになったら、`--dry-run` で書き込まれる内容を確かめられます。問題がなければ計画を閉じます。
 
 ```bash
 bunx guren plan:close docs/plans/comments/plan.json
@@ -508,7 +521,7 @@ Closed 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0. The pla
 
 マーカーの外の文章は自由に編集できます。同じエンティティについて後から別の計画を閉じても、置き換わるのはその計画自身のマーカーの中だけです。見出しは計画の `locale` に従い、`ja` の計画なら日本語で書かれます。
 
-ルールには、それを確かめる振る舞いの id が引用されます。どのテストにも書かれていない id を引用している場合は、`bunx guren check --docs` が警告します。免除を残したまま閉じた計画では、免除ごとに `make:adr` のコマンドも表示されるので、決定として残しておく価値のあるものに使ってください。
+ルールには、それを確かめる振る舞いの id が引用されます。どのテストにも書かれていない id を引用している場合は、`bunx guren check --docs` が警告します。免除を残したまま閉じた計画では、免除ごとに `make:adr` のコマンドも表示されるので、決定として残しておく価値のあるものに使ってください。承認時に了承した要素も決定事項の節に並びますが、計画からの逸脱ではないので `make:adr` は表示されません。。
 
 閉じた計画は `check --plan` の対象から外れます。閉じるときに `docs/plans/<slug>.md` へ `closed: true` と計画のハッシュが書かれるためで、閉じたあとに承認した改訂版は、ふたたび開いた計画として扱われます。
 

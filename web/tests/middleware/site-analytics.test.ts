@@ -113,11 +113,11 @@ describe('classifyContent', () => {
 })
 
 describe('referrerHost', () => {
-  it('should keep only the host and drop same-site referrers', () => {
+  it('should keep only the host and mark same-site referrers', () => {
     expect(referrerHost('https://news.ycombinator.com/item?id=1', 'guren.dev')).toBe(
       'news.ycombinator.com',
     )
-    expect(referrerHost('https://guren.dev/docs', 'guren.dev')).toBe('')
+    expect(referrerHost('https://guren.dev/docs', 'guren.dev')).toBe('self')
     expect(referrerHost('not a url', 'guren.dev')).toBe('')
     expect(referrerHost(undefined, 'guren.dev')).toBe('')
   })

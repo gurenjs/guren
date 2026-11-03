@@ -15,6 +15,7 @@ import {
 } from './helpers'
 import { fileExists } from '../src/discovery'
 import { makeAiAgent } from '../src/make-ai-agent'
+import { loadScaffoldTemplate } from '../src/scaffold-templates'
 
 const cliRoot = resolve(import.meta.dir, '..')
 const repoRoot = resolve(cliRoot, '../..')
@@ -206,6 +207,8 @@ describe('guren make:ai-agent', () => {
         resolve('resources/js/pages/support-bot/Chat.tsx'),
         resolve('resources/js/components/ai/AgentChat.tsx'),
       ])
+      expect(await readFile(resolve('resources/js/components/ai/AgentChat.tsx'), 'utf8'))
+        .toBe(loadScaffoldTemplate('ai-chat/resources/js/components/ai/AgentChat.tsx'))
       expect(await fileExists(process.cwd(), 'resources/js/components/ui/Textarea.tsx')).toBe(true)
       const routes = await readFile(resolve('routes/web.ts'), 'utf8')
       expect(routes).toContain("import { registerSupportBotChatRoutes } from './support-bot-chat.js'")

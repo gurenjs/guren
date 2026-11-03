@@ -5,12 +5,13 @@
  * Markup stays in the app: the copied `Field` component renders what `useField` returns.
  */
 import type { ChangeEvent } from 'react'
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef } from 'react'
 import type { FormDataErrors, FormDataKeys, FormDataType, Method } from '@inertiajs/core'
 import { useForm, usePage } from '@inertiajs/react'
 import type { InertiaFormProps, InertiaPrecognitiveFormProps } from '@inertiajs/react'
 import { substituteRouteParams, type RoutePathParams } from './components'
 import { findTranslation, type I18nPageProps } from './i18n'
+import { adoptTypedValue, takeTypedValue } from './typed-before-hydration'
 
 export type { FormDataType } from '@inertiajs/core'
 
@@ -362,7 +363,7 @@ export function useField<TBody extends FormDataType<TBody>, K extends keyof TBod
   const contract = routeForm?.contract?.fields[name]
   const initialValue = routeForm ? (routeForm.initialData as Record<string, unknown>)[name] : undefined
   const i18n = usePage().props._i18n as I18nPageProps | undefined
-  return describeField({
+  const field = describeField<TBody[K]>({
     id,
     name,
     value: form.data[name],
@@ -374,6 +375,18 @@ export function useField<TBody extends FormDataType<TBody>, K extends keyof TBod
     ...(routeForm?.contract ? { route: routeForm.contract.route } : {}),
     setValue: (value) => form.setData(name as FormDataKeys<TBody>, value as never),
   })
+  const fieldRef = useRef(field)
+  fieldRef.current = field
+
+  useLayoutEffect(() => {
+    // Once, on mount: what was typed before hydration, which the form's initial value would
+    // overwrite on its next render. Only a hydrated control carries one.
+    const element = document.getElementById(id)
+    const typed = element ? takeTypedValue(element) : undefined
+    if (typed) adoptTypedValue(fieldRef.current, typed)
+  }, [])
+
+  return field
 }
 
 export interface DescribeFieldInput<TValue> {

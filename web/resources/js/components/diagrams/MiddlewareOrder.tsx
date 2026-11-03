@@ -62,8 +62,8 @@ export function MiddlewareOrder({ locale }: InteractiveDiagramProps) {
     <div className="doc-diagram middleware-order">
       <div className="doc-diagram-head">
         <p className="doc-diagram-intro">{labels.intro}</p>
-        <div className="middleware-order-controls">
-          <div className="middleware-order-switch" role="group" aria-label={labels.orderGroup}>
+        <div className="doc-diagram-controls">
+          <div className="doc-diagram-switch" role="group" aria-label={labels.orderGroup}>
             {(['written', 'run'] as const).map((value) => (
               <button key={value} type="button" aria-pressed={order === value} onClick={() => switchOrder(value)}>
                 {labels.order[value]}
@@ -74,14 +74,14 @@ export function MiddlewareOrder({ locale }: InteractiveDiagramProps) {
         </div>
       </div>
 
-      <ol ref={list} className="doc-diagram-list middleware-order-list">
+      <ol ref={list} className="doc-diagram-list doc-diagram-rows middleware-order-list">
         {ORDERS[order].map((id, index) => {
           const entry = MIDDLEWARE_STEPS[id]
           const runIndex = ORDERS.run.indexOf(id)
           const muted = order === 'written' && entry.kind === 'router'
           const state = runIndex === position ? 'current' : order === 'run' && runIndex < position ? 'done' : undefined
           return (
-            <li key={id} data-id={id} className="middleware-order-row" data-state={state} data-muted={muted}>
+            <li key={id} data-id={id} className="doc-diagram-row" data-state={state} data-muted={muted}>
               <button
                 type="button"
                 className="doc-diagram-node"
@@ -91,7 +91,7 @@ export function MiddlewareOrder({ locale }: InteractiveDiagramProps) {
                 <span className="doc-diagram-index" aria-hidden="true">{index + 1}</span>
                 <span className="doc-diagram-chip" data-tone={KIND_TONE[entry.kind]}>{labels.kind[entry.kind]}</span>
                 <code>{entry.code}</code>
-                <span className="middleware-order-where">{muted ? labels.added : entry.where[locale]}</span>
+                <span className="doc-diagram-note">{muted ? labels.added : entry.where[locale]}</span>
               </button>
             </li>
           )
@@ -102,7 +102,7 @@ export function MiddlewareOrder({ locale }: InteractiveDiagramProps) {
         <p className="doc-diagram-detail-title">
           <span className="doc-diagram-chip" data-tone={KIND_TONE[step.kind]}>{labels.kind[step.kind]}</span>
           <code>{step.code}</code>
-          <span className="middleware-order-where">{step.where[locale]}</span>
+          <span className="doc-diagram-note">{step.where[locale]}</span>
         </p>
         <p>{step.text[locale]}</p>
       </div>

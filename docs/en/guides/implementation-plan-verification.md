@@ -70,7 +70,7 @@ A property with no reading from approval is not counted, even when it matches. B
 Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in docs/plans/comments/approvals.json: model.post, view.posts.show.
 ```
 
-After the work, a reading would find the property already held, so approving again cannot help. An `alter` whose matches all lack a reading reads `unjudged`, and its note says to verify the change through a behaviour that reaches it; once its step has verified, a second note adds the waiver. For an element no behaviour can reach, such as a column, the note names only the waiver.
+After the work, a reading would find the property already held, so approving again cannot help. An `alter` whose matches all lack a reading reads `unjudged`, and its note says to verify the change through a behaviour that reaches it; once its step has verified, a second note adds the waiver. An altered column is an element no behaviour can reach, so approving the plan accepts it as complete on its step's verified run, and the note says that (see [When an element counts as complete](#when-an-element-counts-as-complete)).
 
 An `alter` whose readable planned properties all held at approval cannot complete on them. `plan:approve` still approves it, and warns, naming the element and the properties; `--json` lists them under `heldAlters`. The warning is judged on the readings of the approval entry, so approving the same hash again repeats it, and a re-approval after the work, under the same baseline, does not raise it for a property the work changed. For a plan whose `view.posts.show` only restates the `post` prop the page already declares:
 
@@ -151,7 +151,7 @@ A property no scanner reads is never counted as a match, and an element whose pl
 
 A route is mounted but not reached when a route registered before it, with the same method or `ALL`, answers every request its path matches: a planned `GET /comments/new` after `GET /comments/:id` never receives a request. Such a route stays `present`, and so do the action, validator and page only it reaches; so does a route that may be shadowed, where the order or the paths cannot be compared. The note names the earlier route and the routes file or module that registered it; register the planned route first, or change its path.
 
-A side effect is mounted when the application's source, outside tests and the class's own file, uses the class through the framework's API: a job dispatched or scheduled, an event emitted, a listener registered, a mail sent or queued, a notification sent. Its step is `incomplete` until that use exists. Once it does, the step can verify, but the element stays `wired`. Which action uses it is not checked against the plan's `trigger`.
+A side effect is mounted when the application's source, outside tests and the class's own file, uses the class through the framework's API: a job dispatched or scheduled, an event emitted, a listener registered, a mail sent or queued, a notification sent. Its step is `incomplete` until that use exists. Once it does, the step can verify, and the element becomes `accepted` rather than `verified` (below). Which action uses it is not checked against the plan's `trigger`.
 
 A verified step does not by itself complete an element none of whose planned properties matched beyond its existence. (A key a validator or resource declares, and an ability a policy declares, count as such a match: they show only that the name exists.) Such an element becomes `verified` only while a passing behaviour *reaches* it, following the plan's own references:
 
@@ -163,7 +163,17 @@ A verified step does not by itself complete an element none of whose planned pro
 
 A form's validator, the route a form submits to and the routes a page's buttons call do not carry reach, since a request to a route shows nothing of the page that links to it. Only behaviours of steps that must see them pass count; the `tests` step, which verifies by seeing them fail, never carries reach.
 
-So these elements need a behaviour that reaches them, or a waiver, before the plan can close: a validator, resource or policy whose keys or abilities are all that matched, a page none of whose planned props matched, a controller (it plans no property), and an `alter` none of whose matches counts. No behaviour can reach a column, command, job, event, listener, mail or notification, so one of these that does not complete on its own properties closes only with a waiver. `--json` records why an element was not completed under `hold`.
+So these elements need a behaviour that reaches them, or a waiver, before the plan can close: a validator, resource or policy whose keys or abilities are all that matched, a page none of whose planned props matched, a controller (it plans no property), and an `alter` none of whose matches counts. `--json` records why an element was not completed under `hold`.
+
+No behaviour can reach a column, command, job, event, listener, mail or notification. An added or renamed column normally completes on its own properties, but a command, a side effect the plan adds or alters, and a column it alters have nothing a behaviour or a reader could show. These are the elements `plan:render` lists as **Completes without a behaviour**, and approving the plan accepts them. Where only a behaviour could otherwise lift one, because none of its planned properties matched beyond its existence, it is lifted once its step has a verified run that still holds and it is at its completion state (a side effect `wired`, a command or a held `alter` `unjudged`): `plan:status` reports it `accepted`, and `plan:close` counts it as complete. An altered column whose change its properties do show still reads `verified`. The list is read from the plan alone, so one column case is left to a waiver: an added column whose every property reads `unknown`, such as one built by a helper the schema reader cannot follow, or a renamed one with nothing readable, is `unjudged`, and no behaviour reaches it.
+
+```text
+Side effects
+  accepted  add       CommentPosted              event.commentPosted
+      Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http. No behaviour can reach it, and the approval accepted it as complete on that run.
+```
+
+`accepted` is not `verified`: no behaviour exercised the element, and the state says so. Everything else holds as for `verified`. A side effect nothing uses stays `present`, a changed file makes the element `drifted` until its step is verified again, and a waiver is not needed. The acceptance is recorded on the approval of the plan's current hash. A plan approved before Guren recorded it has none, and `plan:status` and `plan:close` then name `plan:approve`, which adds it to that approval, before the waiver.
 
 A planned `body`, `params` or `query` validator counts as matched when the action validates with it or a route holds it as a contract schema. An action that validates with something else, a schema built in place (`this.validateBody(PostSchema.partial())`) included, or through a helper, keeps the action at `present` with a note instead of drifting it.
 

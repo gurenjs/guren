@@ -1,12 +1,15 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it, vi } from 'vitest'
 
 import { htmlToText } from '../../app/Services/search-sections.js'
 import { INTERACTIVE_DIAGRAMS } from '../../config/interactive-diagrams.js'
+import { COURSE_LOOP } from '../../resources/js/components/diagrams/course-loop.js'
+import { CSRF_EXCHANGE } from '../../resources/js/components/diagrams/csrf-exchange.js'
 import { MIDDLEWARE_STEPS, ORDERS } from '../../resources/js/components/diagrams/middleware-order-steps.js'
 import { PLAN_LIFECYCLE_STAGES } from '../../resources/js/components/diagrams/plan-lifecycle-stages.js'
+import { QUEUE_LIFECYCLE } from '../../resources/js/components/diagrams/queue-lifecycle.js'
 import { INTERACTIVE_DIAGRAM_LOADERS } from '../../resources/js/components/diagrams/registry.js'
 
 vi.mock('shiki', () => ({ codeToHtml: vi.fn(async () => '<pre>code</pre>') }))
@@ -91,5 +94,29 @@ describe('interactive diagrams', () => {
     expect(written.map((node) => labels.get(node))).toEqual(
       ORDERS.written.filter((id) => MIDDLEWARE_STEPS[id].kind !== 'router').map((id) => expect.stringContaining(token(id))),
     )
+  })
+})
+
+const docsFile = (locale: string, category: string, slug: string) =>
+  fileURLToPath(new URL(`../../../docs/${locale}/${category}/${slug}.md`, import.meta.url))
+
+describe.each([
+  ['csrf-exchange', CSRF_EXCHANGE, 'guides', 'csrf'],
+  ['queue-lifecycle', QUEUE_LIFECYCLE, 'guides', 'queue'],
+  ['course-loop', COURSE_LOOP, 'agent-course', '00-overview'],
+] as const)('the %s sequence', (name, diagram, category, slug) => {
+  it.each(['en', 'ja'] as const)('sits once on the %s page, over a fallback naming every step, with links that resolve', async (locale) => {
+    const html = await renderMarkdownToHtml(readFileSync(docsFile(locale, category, slug), 'utf8'), { locale, category })
+    expect(html.match(new RegExp(`data-interactive="${name}"`, 'gu'))).toHaveLength(1)
+    const block = new RegExp(`<div class="doc-interactive" data-interactive="${name}"><pre class="mermaid">([\\s\\S]*?)</pre>`, 'u').exec(html)
+    const fallback = block![1].replace(/&gt;/gu, '>').replace(/&#39;/gu, "'").replace(/&quot;/gu, '"')
+    for (const step of diagram.scenarios.flatMap((scenario) => scenario.steps)) {
+      expect(fallback).toContain(step.fallback)
+      if (step.link && 'anchor' in step.link) expect(html).toContain(`id="${step.link.anchor[locale]}"`)
+      if (step.link && 'href' in step.link) {
+        const [, linkCategory, linkSlug] = /\/([^/]+)\/([^/]+)$/u.exec(step.link.href[locale])!
+        expect(existsSync(docsFile(locale, linkCategory, linkSlug))).toBe(true)
+      }
+    }
   })
 })

@@ -27,6 +27,12 @@ describe('the docs viewer shell', () => {
     expect(bundle).not.toContain(import.meta.dir.split('/').slice(0, 3).join('/'))
   })
 
+  // A scaffolded app has no mermaid until it adds one; the hint is how its reader learns that.
+  test('should load mermaid from the app, and name the install command beside a diagram it cannot render', () => {
+    expect(shell).toContain('<script src="/_guren/docs/assets/mermaid.js"')
+    expect(bundle).toContain('bun add -d mermaid')
+  })
+
   test('should be written by the build where the server reads it', () => {
     expect(docsViewerAssetPath().endsWith('assets/docs-viewer/index.html')).toBe(true)
   })

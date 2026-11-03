@@ -4,11 +4,6 @@ import guren from '@guren/core/vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// Parallel worktree sessions each start a managed Vite on 5173; on macOS the
-// IPv4/IPv6 split lets two of them "succeed" on the same port while the
-// browser's `localhost` reaches only one. An explicit port opts a session out.
-const devPort = Number.parseInt(process.env.GUREN_VITE_PORT ?? '', 10)
-
 export default defineConfig(({ command }) => ({
   publicDir: false,
   // Read only when vitest is pointed at this file explicitly: the `test`
@@ -31,7 +26,6 @@ export default defineConfig(({ command }) => ({
       input: ['resources/js/app.tsx', 'resources/css/app.css'],
     },
   },
-  ...(Number.isInteger(devPort) ? { server: { port: devPort, strictPort: true } } : {}),
   plugins: [
     // Dev-server only: the plugin re-running the codegen script during
     // `vite build` would overwrite the real prerender output with stubs (the

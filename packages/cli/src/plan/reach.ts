@@ -90,3 +90,40 @@ export function behaviourCanReach(plan: PlanDraft | Plan): Set<string> {
   const behaviours = plan.tasks.flatMap((task) => task.acceptance.map((behaviour) => behaviour.id))
   return new Set([...targets, ...behaviourReach(plan, [...targets, ...behaviours])])
 }
+
+export interface PlanElementWithoutBehaviour {
+  id: string
+  section: 'columns' | 'sideEffects' | 'commands'
+}
+
+/**
+ * The elements an approval accepts as complete on their step's verified run alone (RFC 0030 §4):
+ * outside {@link behaviourCanReach}, and of a kind no planned property lifts. A command, an added or
+ * altered side effect, and an altered column; an added or renamed column is read by its properties.
+ * Pure over the plan, so an added column none of whose properties reads stays a case for a waiver.
+ */
+export function planElementsWithoutBehaviour(plan: PlanDraft | Plan): PlanElementWithoutBehaviour[] {
+  const reachable = behaviourCanReach(plan)
+  return listPlanElementEntries(plan).flatMap(({ id, section, element }): PlanElementWithoutBehaviour[] => {
+    if (reachable.has(id)) return []
+    const change = (element.change as { kind?: string } | undefined)?.kind
+    if (section === 'commands') return [{ id, section }]
+    if (section === 'sideEffects' && (change === 'add' || change === 'alter')) return [{ id, section }]
+    if (section === 'columns' && change === 'alter') return [{ id, section }]
+    return []
+  })
+}
+
+const WITHOUT_BEHAVIOUR_NOUNS: Record<PlanElementWithoutBehaviour['section'], string> = {
+  commands: 'commands',
+  sideEffects: 'side effects',
+  columns: 'altered columns',
+}
+
+/** `<kind>: <ids>` per section with any, so a long list still reads at a glance; `plan:approve` and `plan:render` print it. */
+export function groupElementsWithoutBehaviour(elements: readonly PlanElementWithoutBehaviour[]): string[] {
+  return (Object.keys(WITHOUT_BEHAVIOUR_NOUNS) as Array<PlanElementWithoutBehaviour['section']>).flatMap((section) => {
+    const ids = elements.filter((element) => element.section === section).map((element) => element.id)
+    return ids.length > 0 ? [`${WITHOUT_BEHAVIOUR_NOUNS[section]}: ${ids.join(', ')}`] : []
+  })
+}

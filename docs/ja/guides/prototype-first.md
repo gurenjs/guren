@@ -144,7 +144,7 @@ bun run build:prototype
 
 このスクリプトはマニフェストを再生成し、`guren check --prototype` を実行してから、`dist/prototype/` をビルドします。
 
-```text
+```tree
 dist/prototype/
 ├── index.html        # the shell, <meta name="robots" content="noindex, nofollow">
 ├── 404.html          # a copy of index.html, for hosts that serve it on unknown paths

@@ -26,6 +26,11 @@
 - Diagrams are ```mermaid fences. They render natively on GitHub, and the site
   renders them client-side — anything shiki would try to highlight instead
   becomes a grey code block, so keep the fence language exactly `mermaid`
+- Directory listings are ```tree fences: `├──` / `└──` / `│` drawing (or
+  two-space indents), a trailing `/` on a directory, and ` # ` before a note,
+  which may hold `code`. GitHub shows the drawing as written; the site renders
+  folding folders, file badges and right-aligned notes. A line nested more
+  than one level below the line above it fails the build
 - Prefer `flowchart LR` and `direction LR` (ER diagrams) for anything wider
   than three nodes: the docs column is much wider than it is tall, and a
   top-to-bottom chain of boxes turns into a narrow 900px-tall strip

@@ -27,7 +27,8 @@ import type { RuntimeErrorBuffer } from '../mcp/runtime-errors'
 import { isDocsViewerEnabled } from '../docs-viewer/endpoint'
 import type { DevBannerOptions } from './dev-banner'
 import { formatHostPort, isWildcardHost } from './host-port'
-import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
+import { readViteDevServerPort, startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
+import { DEFAULT_DEV_SERVER_URL } from './vite-manifest'
 import { runInRequestScope } from '../support/request-deferrer'
 import { isHotReloadRuntime } from '../hot-reload/hot-disposables'
 import { adoptDefaultApplication } from './default-application'
@@ -864,7 +865,7 @@ export class Application {
           root: viteOptions?.root ?? process.cwd(),
           config: viteOptions?.config,
           host: viteOptions?.host,
-          port: viteOptions?.port,
+          port: viteOptions?.port ?? readViteDevServerPort(),
         })
         adoptViteDevServer(this, server, localUrl)
         resolvedAssetsUrl = localUrl
@@ -953,7 +954,7 @@ export class Application {
       this.logDevServerBanner({
         hostname: boundHostname,
         port: boundPort,
-        assetsUrl: resolvedAssetsUrl ?? 'http://localhost:5173',
+        assetsUrl: resolvedAssetsUrl ?? DEFAULT_DEV_SERVER_URL,
         assetServer: startedViteHere || reusableVite ? 'managed' : 'external',
       })
     } else if (typeof process !== 'undefined' && process.env.NODE_ENV === 'production') {

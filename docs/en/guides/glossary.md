@@ -52,6 +52,7 @@ Short definitions for common terms in the Guren docs.
 ## Plan states
 `plan:status`, `plan:verify` and `plan:next` print these values for steps and elements. See [Implementation Plans](./implementation-plans.md) for the details.
 - **`verified`**: every verify command passed, and the record still holds.
+- **`accepted`**: an element no behaviour can reach (a command, a side effect, an altered column) whose step verified it. Approving the plan accepted it as complete that way, so it needs no waiver.
 - **`failed`**: a verify command failed; there is something to fix.
 - **`blocked`**: the environment kept a command from running (a missing script, an unreachable database, a timeout). Not a failed implementation.
 - **`drifted`**: a file the record fingerprinted changed after it verified. Re-check it with `plan:verify --step`.

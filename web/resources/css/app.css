@@ -925,13 +925,13 @@ body.docs-theme {
   }
 }
 
-.middleware-order-controls {
+.doc-diagram-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
 }
 
-.middleware-order-switch {
+.doc-diagram-switch {
   display: inline-flex;
   padding: 2px;
   border: 1px solid var(--docs-border-strong);
@@ -939,70 +939,217 @@ body.docs-theme {
   background: var(--docs-surface-panel);
 }
 
-.middleware-order-switch button {
+.doc-diagram-switch button {
   padding: 0.35rem 0.75rem;
   border-radius: calc(var(--g-r-ctl) - 2px);
   font-size: 0.875rem;
   color: var(--docs-text-secondary);
 }
 
-.middleware-order-switch button[aria-pressed='true'] {
+.doc-diagram-switch button[aria-pressed='true'] {
   background: var(--docs-accent-tint);
   color: var(--docs-accent-strong);
   font-weight: 600;
 }
 
-/* The positioned parent makes each row's offsetTop list-relative (MiddlewareOrder.tsx). */
-.docs-content .middleware-order-list {
-  position: relative;
+.docs-content .doc-diagram-rows {
+  --chip-col: 9rem;
   display: grid;
   gap: 0.5rem;
 }
 
-.middleware-order-row > .doc-diagram-node {
+/* The positioned parent makes each row's offsetTop list-relative (MiddlewareOrder.tsx). */
+.docs-content .middleware-order-list {
+  --chip-col: 5.5rem;
+  position: relative;
+}
+
+.doc-diagram-row > .doc-diagram-node {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas: 'kind where' 'code code';
+  grid-template-areas: 'chip note' 'code code';
   align-items: center;
   gap: 0.25rem 0.5rem;
 }
 
-.middleware-order-row[data-muted='true'] > .doc-diagram-node {
+.doc-diagram-row[data-muted='true'] > .doc-diagram-node {
   border-style: dashed;
 }
 
-.middleware-order-row .doc-diagram-index {
+.doc-diagram-row .doc-diagram-index {
   display: none;
   grid-area: index;
 }
 
-.middleware-order-row .doc-diagram-chip {
-  grid-area: kind;
+.doc-diagram-row .doc-diagram-chip {
+  grid-area: chip;
   justify-self: start;
 }
 
-.docs-content .middleware-order-row code {
+.docs-content .doc-diagram-row code,
+.doc-diagram-row .doc-diagram-label {
   grid-area: code;
 }
 
-.middleware-order-row .middleware-order-where {
-  grid-area: where;
+.doc-diagram-label {
+  color: var(--docs-heading);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.doc-diagram-row .doc-diagram-note {
+  grid-area: note;
   justify-self: end;
 }
 
-.middleware-order-where {
+.doc-diagram-note {
   font-size: 0.75rem;
   color: var(--docs-text-secondary);
 }
 
 @media (min-width: 640px) {
-  .middleware-order-row > .doc-diagram-node {
-    grid-template-columns: 1.5rem 5.5rem minmax(0, 1fr) auto;
-    grid-template-areas: 'index kind code where';
+  .doc-diagram-row > .doc-diagram-node {
+    grid-template-columns: 1.5rem var(--chip-col) minmax(0, 1fr) auto;
+    grid-template-areas: 'index chip code note';
   }
 
-  .middleware-order-row .doc-diagram-index {
+  .doc-diagram-row .doc-diagram-index {
     display: block;
+  }
+}
+
+/* ─── File trees: ```tree fences, drawn by app/Services/doc-tree.ts ─── */
+.docs-content pre.doc-tree {
+  white-space: normal;
+  word-break: normal;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--docs-border-soft);
+  border-radius: var(--g-r-card);
+  background: var(--docs-surface-raised);
+  color: var(--docs-text-primary);
+  font-family: var(--font-family-display);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.docs-content .doc-tree ul {
+  display: block;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.docs-content .doc-tree ul ul {
+  margin-left: 1.05rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--docs-border-soft);
+}
+
+.docs-content .doc-tree li {
+  padding: 0;
+  line-height: inherit;
+}
+
+.doc-tree-row {
+  display: flex;
+  align-items: center;
+  column-gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--g-r-ctl);
+}
+
+summary.doc-tree-row {
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.doc-tree-row::-webkit-details-marker {
+  display: none;
+}
+
+summary.doc-tree-row:hover {
+  background: color-mix(in srgb, var(--docs-text-primary) 6%, transparent);
+}
+
+summary.doc-tree-row:focus-visible {
+  outline: 2px solid var(--docs-accent-strong);
+  outline-offset: -2px;
+}
+
+/* a leaf has no chevron, so it starts where a folder's icon does */
+.doc-tree-row--leaf {
+  padding-left: 2rem;
+}
+
+.doc-tree-chevron,
+.doc-tree-icon,
+.doc-tree-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.doc-tree-chevron {
+  width: 1rem;
+  color: var(--docs-text-muted);
+  transition: transform 150ms ease;
+}
+
+details[open] > summary .doc-tree-chevron {
+  transform: rotate(90deg);
+}
+
+.doc-tree svg {
+  width: 100%;
+  height: 100%;
+}
+
+.doc-tree-icon {
+  color: var(--docs-text-secondary);
+}
+
+.doc-tree-badge {
+  font-family: var(--g-font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--docs-text-secondary);
+}
+
+.doc-tree-badge--ts { color: #2f6db5; }
+.doc-tree-badge--js { color: #a16207; }
+:root.dark .doc-tree-badge--ts { color: #7aaef0; }
+:root.dark .doc-tree-badge--js { color: #f6c177; }
+
+.doc-tree-name {
+  flex-shrink: 0;
+  color: var(--docs-heading);
+}
+
+/* a long note wraps inside its own right-aligned column */
+.doc-tree-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: 1.5rem;
+  color: var(--docs-text-secondary);
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+/* narrow screens: the note drops under the name instead of squeezing it */
+@media (max-width: 640px) {
+  .doc-tree-row {
+    flex-wrap: wrap;
+  }
+
+  .doc-tree-note {
+    flex-basis: 100%;
+    margin-left: 1.6rem;
+    padding-left: 0;
+    text-align: left;
   }
 }
 
@@ -1368,14 +1515,25 @@ pre:hover .docs-copy-btn,
 }
 
 /* ─── Doc card hover ─── */
-.docs-card {
-  transition: all 0.2s ease;
+/* ─── Docs index: the three ways in, and the directory of pages ─── */
+.docs-entry,
+.docs-index-link {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: background-color 150ms ease, outline-color 150ms ease;
 }
 
-.docs-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--docs-shadow-floating);
-  border-color: var(--docs-accent-strong) !important;
+.docs-entry:hover {
+  background-color: var(--docs-surface-raised);
+}
+
+.docs-index-link:hover {
+  background-color: var(--docs-accent-tint);
+}
+
+.docs-entry:focus-visible,
+.docs-index-link:focus-visible {
+  outline-color: var(--docs-accent-strong);
 }
 
 /* Color-mode toggle icons on server-rendered content pages (app/View/Header):

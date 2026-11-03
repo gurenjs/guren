@@ -1,6 +1,6 @@
 ---
 name: plan-write
-description: Write and revise an implementation plan (`docs/plans/<slug>/plan.json`, RFC 0030) before any code, for a change across several models, routes or pages ("plan this feature").
+description: "Write and revise an implementation plan (`docs/plans/<slug>/plan.json`, RFC 0030) before any code, for a change across several models, routes or pages (\"plan this feature\"). Its step 0 comes first, headless and scheduled runs included: it decides whether a plan is written when nobody in the session can approve one."
 ---
 
 # Plan Writing Skill
@@ -8,6 +8,26 @@ description: Write and revise an implementation plan (`docs/plans/<slug>/plan.js
 You write the plan in this session, the person reviews and approves it, and
 `plan-implement` builds it. Never run `plan:approve`: approving is the
 person's decision, made after reading the page.
+
+## 0. Check that someone will approve it
+
+A plan is built only after a person approves it, so decide this before you
+run anything below. Nobody will approve one in this session when:
+
+- the request says nobody will review or approve it, or that the work runs
+  unattended (overnight, on a schedule, "don't wait for me"), or
+- the session cannot reach the person: a non-interactive run such as
+  `claude -p`, a CI job or a scheduled task, where no reply can come.
+
+Then, when the request asks for the plan itself, for a person to review
+later, write it, stop after step 2, and implement nothing. When the request is
+for the working change and no plan for it exists, write no plan and no
+`docs/plans/` file: build it directly with the ordinary workflow (the
+`feature` or `scaffold` skill, `bunx guren check` after each edit, and
+`bunx guren gate` until it exits 0). An unapproved plan never reaches
+`plan:next`, so writing one spends the tokens and builds nothing. When the
+request names a plan that is not approved, the `plan-implement` skill
+reports it and stops. When you cannot tell and can ask the person, ask once.
 
 ## 1. Get the prompt and follow it
 
