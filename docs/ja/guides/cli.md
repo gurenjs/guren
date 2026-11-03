@@ -92,7 +92,7 @@ bunx guren add admin --public
 
 このコマンドを使うには `config/env.ts` が必要です。`db/schema.ts` があるアプリでは、`ai_conversations` と `ai_messages` の 2 つのテーブルを追加してマイグレーションを生成し、会話をそこに保存するよう `config/ai.ts` を設定します。`--no-conversations` を付けると、この処理を省きます。テーブルには、ツールの結果も含めてモデルが見た会話がそのまま残るので、機密データとして扱ってください。
 
-エージェントクラスは、そのあと `make:ai-agent <Name>` で `app/Ai/Agents` に書き出します。`--tools` に指定したエージェントツールは、ルートから導出できることを確かめたうえでエージェントに渡されます。`--output` を付けると構造化出力のスキーマの雛形が加わり、`--test` を付けると `app.fakeAi()` でモデルの応答を台本にしたテストが書き出されます。スコープ、会話、ストリーミング、キューについては [AI エージェント](./ai-agents.md) で説明しています。
+エージェントクラスは、そのあと `make:ai-agent <Name>` で `app/Ai/Agents` に書き出します。`--tools` に指定したエージェントツールは、ルートから導出できることを確かめたうえでエージェントに渡されます。`--output` を付けると構造化出力のスキーマの雛形が加わり、`--test` を付けると `app.fakeAi()` でモデルの応答を台本にしたテストが書き出されます。`--chat` を付けると、ストリーミングするチャットのページとそのコントローラ、ルートも書き出されます。スコープ、会話、ストリーミング、キューについては [AI エージェント](./ai-agents.md) で説明しています。
 
 ### `add lint`
 
@@ -155,7 +155,7 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 
 `--force` を付けると、一覧のファイルは手書きのものも含めてすべて上書きされます。`--test`・`--factory`・`--policy` を付けたときだけ追加されるファイルには、一覧にそのフラグが添えてあり、フラグを外せば衝突を避けられます。プロトタイプからの昇格では、プロトタイプのときに書いたページとバリデーターをそのまま残すので、これらは既存のファイルとして数えません。
 
-複数のファイルを書き出すほかのコマンドも、最初に書き込む前に同じ確認をして中断します。対象は `make:auth`、`make:module`、`make:ai-agent`(`--test` がフラグにあたります)、`deploy`、そして `add` の各ブループリントで、サンプルのイベント・ジョブ・Mailable も含みます。ファイルを 1 つだけ書く `make:*` コマンドも、同じメッセージで中断します。例外は、途中まで入ったものを再実行で補うためのブループリント(`add session`、`add cache`、`add schedule`、`add ai`、`add prototype`)で、既存のファイルは残し、足りないものだけを書き出します。
+複数のファイルを書き出すほかのコマンドも、最初に書き込む前に同じ確認をして中断します。対象は `make:auth`、`make:module`、`make:ai-agent`(`--test` か `--chat` がフラグにあたります)、`deploy`、そして `add` の各ブループリントで、サンプルのイベント・ジョブ・Mailable も含みます。ファイルを 1 つだけ書く `make:*` コマンドも、同じメッセージで中断します。例外は、途中まで入ったものを再実行で補うためのブループリント(`add session`、`add cache`、`add schedule`、`add ai`、`add prototype`)で、既存のファイルは残し、足りないものだけを書き出します。
 
 ## 主要コマンド
 
@@ -176,7 +176,7 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 | `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
 | `make:command <Name>` | `app/Console/Commands` にコンソールコマンドを生成。`--command <name>` で呼び出し名を指定。`src/console.ts` への登録が必要([コンソールコマンドガイド](./console.md)参照) | `bunx guren make:command SendDigest --command reports:digest` |
 | `make:policy <Name>` | 認可ポリシーを `app/Policies` に生成。一覧・閲覧・作成はログイン中のユーザーに、更新と削除は `userId` が一致する所有者だけに許可する | `bunx guren make:policy Post` |
-| `make:ai-agent <Name>` | インプロセスの AI エージェント(`@guren/plugin-ai`)を `app/Ai/Agents` に生成する。`--tools` はルート由来のエージェントツールを付与し、`--output` は Zod の出力スキーマを加え、`--test` は `fakeAi()` のテストを書く | `bunx guren make:ai-agent SupportTriager --tools tickets_show --test` |
+| `make:ai-agent <Name>` | インプロセスの AI エージェント(`@guren/plugin-ai`)を `app/Ai/Agents` に生成する。`--tools` はルート由来のエージェントツールを付与し、`--output` は Zod の出力スキーマを加え、`--test` は `fakeAi()` のテストを書き、`--chat` はストリーミングするチャットのページ、コントローラ、ルートを書く | `bunx guren make:ai-agent SupportTriager --tools tickets_show --test` |
 | `make:agent <Name>` | 永続エージェントを `app/Agents` に生成し、`config/agents.ts` に登録し、モデルや ORM から遠ざける `guren.arch.ts` のルールを追加し、クラスが必要とする `config/bindings.ts` と tsconfig の `types` エントリも書き出す([永続エージェント](./durable-agents.md)参照) | `bunx guren make:agent Triager` |
 | `make:validator <Name>` | Zodバリデーションスキーマ(ルートパラメータ・一覧クエリ・ペイロード)を `app/Http/Validators` に生成。`--fields` は `make:feature` と同じ構文 | `bunx guren make:validator Post --fields "title:string,body:text"` |
 | `make:adr "<Title>"` | アーキテクチャ意思決定を採番付きファイルとして `docs/adr/` に記録(リンク可能なfrontmatter付き)。`--entity <Model>` で `entities:`/`related:` を自動補完、`--issue <ref>`(カンマ区切りで複数可)でGitHubのIssue/PRへの `issues:` リンクを記入 | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412` |

@@ -342,6 +342,10 @@ export const makeAiAgentCommand = defineCommand({
       type: 'boolean',
       description: 'Also write a test that scripts the agent with app.fakeAi().',
     },
+    chat: {
+      type: 'boolean',
+      description: 'Also write a streaming chat page, its controller and routes, with the history restored on reload.',
+    },
     force: FORCE_ARG,
     module: MODULE_ARG,
   },
@@ -351,6 +355,7 @@ export const makeAiAgentCommand = defineCommand({
       tools: args.tools,
       output: Boolean(args.output),
       test: Boolean(args.test),
+      chat: Boolean(args.chat),
     })
     for (const file of files) consola.success(`Created ${file}`)
     for (const note of notes) consola.warn(note)

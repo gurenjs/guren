@@ -94,6 +94,7 @@
   "devDependencies": {
     "@ai-sdk/anthropic": "^4.0.78",
     "@ai-sdk/openai": "^4.0.67",
+    "@ai-sdk/react": "4.0.110",
     "@axe-core/playwright": "~4.14.0",
     "@babel/types": "^7.29.0",
     "@guren/core": "^1.26.0",

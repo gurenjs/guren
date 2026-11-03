@@ -263,6 +263,11 @@ describe('generated sources parse', () => {
     await expectAllOutputsParse('guren-parse-controller-api-', () => makeController('Widget'), seedApiOnlyApp)
   })
 
+  // The chat page, its controller and routes, and the copied AgentChat with the UI components it imports.
+  it('make:ai-agent --chat', async () => {
+    await expectAllOutputsParse('guren-parse-ai-chat-', () => makeAiAgent('SupportBot', { chat: true }), seedInertiaApp)
+  })
+
   for (const [label, run] of singleFileCases) {
     it(label, async () => {
       await expectAllOutputsParse(`guren-parse-${label.replace(/[^a-z]+/g, '-')}-`, run)
@@ -285,6 +290,7 @@ describe('generated sources parse', () => {
     const prefixes = {
       'make:auth': 'guren-parse-auth-',
       'make:feature': 'guren-parse-feature-',
+      'make:ai-agent --chat': 'guren-parse-ai-chat-',
       'make:view': 'guren-parse-make-view-',
       'add admin': 'guren-parse-add-admin-',
       'add ui': 'guren-parse-add-ui-',

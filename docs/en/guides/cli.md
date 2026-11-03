@@ -113,7 +113,8 @@ that. The tables hold each transcript as the model saw it, tool results included
 treat them as sensitive data. `make:ai-agent <Name>` then writes an agent class to
 `app/Ai/Agents`. `--tools` hands it the named agent tools after checking that a route
 derives each one, `--output` adds a structured-output schema stub, and `--test` writes
-a test that scripts the model with `app.fakeAi()`. [AI Agents](./ai-agents.md) covers
+a test that scripts the model with `app.fakeAi()`. `--chat` also writes a streaming chat page with its
+controller and routes. [AI Agents](./ai-agents.md) covers
 the rest: scopes, conversations, streaming and queueing.
 
 ### `add lint`
@@ -178,7 +179,7 @@ with its flag, and dropping the flag gets past it. Promoting a prototype keeps t
 pages and validator the prototype run wrote, so those never count.
 
 Every other command that writes several files refuses the same way before its first
-write: `make:auth`, `make:module`, `make:ai-agent` (where `--test` is the flag),
+write: `make:auth`, `make:module`, `make:ai-agent` (where `--test` or `--chat` is the flag),
 `deploy`, and the `add` blueprints, their sample event, job or mailable included. A
 single-file `make:*` command refuses in the same words. The blueprints meant to be
 re-run to repair a partial install (`add session`, `add cache`, `add schedule`,
@@ -205,7 +206,7 @@ re-run to repair a partial install (`add session`, `add cache`, `add schedule`,
 | `make:notification <Name>` | Generates a notification class, its `type` pinned to the class name | `bunx guren make:notification InvoicePaid` |
 | `make:mail <Name>` | Generates a mailable class | `bunx guren make:mail WelcomeEmail` |
 | `make:command <Name>` | Generates a console command in `app/Console/Commands`; `--command <name>` sets the invocation name. Register it in `src/console.ts` — see the [console commands guide](./console.md) | `bunx guren make:command SendDigest --command reports:digest` |
-| `make:ai-agent <Name>` | Scaffolds an in-process AI agent in `app/Ai/Agents` (`@guren/plugin-ai`). `--tools` grants route-derived agent tools, `--output` adds a Zod output schema, `--test` writes a `fakeAi()` test | `bunx guren make:ai-agent SupportTriager --tools tickets_show --test` |
+| `make:ai-agent <Name>` | Scaffolds an in-process AI agent in `app/Ai/Agents` (`@guren/plugin-ai`). `--tools` grants route-derived agent tools, `--output` adds a Zod output schema, `--test` writes a `fakeAi()` test, `--chat` writes a streaming chat page, controller and routes | `bunx guren make:ai-agent SupportTriager --tools tickets_show --test` |
 | `make:agent <Name>` | Scaffolds a durable agent in `app/Agents`, registers it in `config/agents.ts`, adds the `guren.arch.ts` rule that keeps it off your models and ORM, and writes the `config/bindings.ts` and tsconfig `types` entry its class needs — see [Durable Agents](./durable-agents.md) | `bunx guren make:agent Triager` |
 
 > **Note:** `make:*` commands avoid overwriting existing files. Use `--force` if you need to replace them.
