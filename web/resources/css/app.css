@@ -308,8 +308,8 @@ html {
 
 body {
   font-family: var(--font-family-display);
-  background-color: var(--color-crimson-950);
-  color: var(--color-crimson-50);
+  background-color: var(--home-ground);
+  color: var(--home-text);
 }
 
 body.docs-theme {
@@ -1465,6 +1465,10 @@ pre:hover .docs-copy-btn,
   text-align: left;
   padding: 0.75rem 1rem;
   color: var(--docs-text-secondary);
+  /* .docs-content breaks words anywhere; a header word stays whole and the
+     table scrolls instead */
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .docs-content table td {
