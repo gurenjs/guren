@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test'
 import type { Page } from '@inertiajs/core'
 import * as realInertiaReact from '@inertiajs/react'
+import * as realReactDomClient from 'react-dom/client'
 
 let capturedOptions: Record<string, unknown> | undefined
 const createInertiaAppMock = mock(async (options: Record<string, unknown>) => {
@@ -14,6 +15,18 @@ const createInertiaAppMock = mock(async (options: Record<string, unknown>) => {
 await mock.module('@inertiajs/react', () => ({
   ...realInertiaReact,
   createInertiaApp: createInertiaAppMock,
+}))
+
+const mounts: string[] = []
+await mock.module('react-dom/client', () => ({
+  ...realReactDomClient,
+  createRoot: () => {
+    mounts.push('createRoot')
+    return { render: () => {} }
+  },
+  hydrateRoot: () => {
+    mounts.push('hydrateRoot')
+  },
 }))
 
 const { startInertiaClient } = await import('../src/app')
@@ -30,6 +43,7 @@ const originalDocument = globalRef.document
 
 afterEach(() => {
   capturedOptions = undefined
+  mounts.length = 0
   createInertiaAppMock.mockClear()
   if (originalWindow === undefined) {
     delete globalRef.window
@@ -103,5 +117,35 @@ describe('startInertiaClient', () => {
     })
 
     expect(capturedOptions?.page).toEqual(page)
+  })
+})
+
+describe('the default setup', () => {
+  const page: Page = {
+    component: 'Login',
+    props: { errors: {} },
+    url: '/login',
+    version: null,
+    clearHistory: false,
+    encryptHistory: false,
+    rememberedState: {},
+    rescuedProps: [],
+    flash: {},
+  }
+
+  async function mountInto(serverRendered: boolean): Promise<string[]> {
+    await startInertiaClient({ page, resolve: async () => ({ default: () => null }) })
+    const setup = capturedOptions?.setup as (args: { el: unknown; App: unknown; props: unknown }) => void
+    setup({ el: { hasAttribute: (name: string) => serverRendered && name === 'data-server-rendered' }, App: () => null, props: {} })
+    return [...mounts]
+  }
+
+  // A fresh root would replace the server's markup, and what was typed into it before hydration.
+  it('hydrates markup the server rendered', async () => {
+    expect(await mountInto(true)).toEqual(['hydrateRoot'])
+  })
+
+  it('renders a fresh root into an empty container', async () => {
+    expect(await mountInto(false)).toEqual(['createRoot'])
   })
 })

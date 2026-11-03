@@ -5,7 +5,7 @@
  * Markup stays in the app: the copied `Field` component renders what `useField` returns.
  */
 import type { ChangeEvent } from 'react'
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef } from 'react'
 import type { FormDataErrors, FormDataKeys, FormDataType, Method } from '@inertiajs/core'
 import { useForm, usePage } from '@inertiajs/react'
 import type { InertiaFormProps, InertiaPrecognitiveFormProps } from '@inertiajs/react'
@@ -362,7 +362,7 @@ export function useField<TBody extends FormDataType<TBody>, K extends keyof TBod
   const contract = routeForm?.contract?.fields[name]
   const initialValue = routeForm ? (routeForm.initialData as Record<string, unknown>)[name] : undefined
   const i18n = usePage().props._i18n as I18nPageProps | undefined
-  return describeField({
+  const field = describeField<TBody[K]>({
     id,
     name,
     value: form.data[name],
@@ -374,6 +374,31 @@ export function useField<TBody extends FormDataType<TBody>, K extends keyof TBod
     ...(routeForm?.contract ? { route: routeForm.contract.route } : {}),
     setValue: (value) => form.setData(name as FormDataKeys<TBody>, value as never),
   })
+  const fieldRef = useRef(field)
+  fieldRef.current = field
+
+  useLayoutEffect(() => {
+    // Once, on mount: a hydrated control keeps what was typed before hydration, which the
+    // form's initial value would overwrite on its next render.
+    const element = document.getElementById(id)
+    if (element) adoptControlValue(fieldRef.current, element)
+  }, [])
+
+  return field
+}
+
+/**
+ * Sends a value the control holds and the field state does not through the control's own
+ * `onChange`, so it is read back as any change would be. A file input counts once it holds a file.
+ */
+export function adoptControlValue<TValue>(field: FieldState<TValue>, element: object): void {
+  if (field.input === 'hidden') return
+  const target = element as HTMLInputElement & HTMLSelectElement & HTMLTextAreaElement
+  const differs =
+    field.input === 'checkbox' ? target.checked !== field.control.checked
+      : field.input === 'file' ? (target.files?.length ?? 0) > 0
+        : target.value !== field.control.value
+  if (differs) field.control.onChange({ target, currentTarget: target } as never)
 }
 
 export interface DescribeFieldInput<TValue> {
