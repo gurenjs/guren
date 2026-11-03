@@ -42,6 +42,27 @@ bun run build
 
 Code generation should leave no diffs after committing. The GitHub Actions workflow (`.github/workflows/ci.yml`) enforces the same steps on pushes and pull requests.
 
+### Interactive Diagrams in the Docs
+
+A mermaid diagram in `docs/en` or `docs/ja` can be upgraded to a React component on guren.dev. Put a marker on its own line directly above the fence:
+
+````md
+<!-- interactive: plan-lifecycle -->
+
+```mermaid
+flowchart LR
+  ...
+```
+````
+
+GitHub hides the comment and keeps rendering the mermaid, which is also what the search index, `llms-full.txt` and a reader without JavaScript get. On the site, `app/Services/doc-interactive.ts` wraps the fence in a placeholder and `pages/Docs/Show.tsx` mounts the component into it, loading it only on pages that have one. To add a diagram:
+
+1. Add its name to `config/interactive-diagrams.ts`. A marker naming anything else fails the render.
+2. Write the component under `resources/js/components/diagrams/` and register its loader in `registry.ts`. The type requires one for every name.
+3. Keep the mermaid fence showing the same flow, so the fallback stays true.
+
+A diagram earns interactivity when the reader needs to follow a sequence or a loop, or to look at one part at a time (who acts at each stage, what each step writes). A diagram that reads in one glance stays plain mermaid. Components take `locale`, use the `--g-*` / `--docs-*` tokens so dark mode follows, work at 375px, keep motion behind `prefers-reduced-motion: no-preference`, and link to the guide's sections rather than repeating them. `plan-lifecycle` (the implementation plans guide) is the reference.
+
 ### Production Builds
 
 Run `bun run build` before deploying. This script internally executes `bunx vite build` and `bunx vite build --ssr` so the Bun server can stream pre-rendered HTML during the first request. After building, `bun run preview` starts the same Bun server in production mode against the generated manifests instead of using Vite's static preview server.

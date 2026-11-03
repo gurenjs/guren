@@ -5,17 +5,20 @@ import { pascalCase, safePathSegments, writeRoot, writeScaffoldFile } from './ut
 const VIEW_ROOT = 'resources/js/pages'
 
 function viewTemplate(componentName: string): string {
-  return `import { Head } from '@inertiajs/react'
-import type { FC } from 'react'
+  // A page named after an import (`make:view Head`) would redeclare it, so that import takes an alias.
+  const head = componentName === 'Head' ? 'InertiaHead' : 'Head'
+  const fc = componentName === 'FC' ? 'ReactFC' : 'FC'
+  return `import { ${head === 'Head' ? 'Head' : `Head as ${head}`} } from '@inertiajs/react'
+import type { ${fc === 'FC' ? 'FC' : `FC as ${fc}`} } from 'react'
 
 interface ${componentName}Props {
   message?: string
 }
 
-const ${componentName}: FC<${componentName}Props> = ({ message }) => {
+const ${componentName}: ${fc}<${componentName}Props> = ({ message }) => {
   return (
     <div className="space-y-4">
-      <Head title="${componentName}" />
+      <${head} title="${componentName}" />
       <h1 className="text-2xl font-bold">${componentName}</h1>
       {message ? <p>{message}</p> : null}
     </div>

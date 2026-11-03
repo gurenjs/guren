@@ -1,5 +1,12 @@
 # create-guren-app
 
+## 1.20.3
+
+### Patch Changes
+
+- fe4ecdc: Every scaffolded page now sets its document title with Inertia's `<Head>`. The dashboard `make:auth` writes and the blog blueprint ships, the admin blueprint's dashboard, the Index, Show, New and Edit pages `make:feature` writes, and the page `make:view` writes rendered none, so after an Inertia visit to one of them the document had no title of its own and axe reported `document-title`. The `make:feature` pages are titled after the resource (`Posts`, `Post`, `New Post`, `Edit Post`), a `make:view` page after its component, and the dashboards `Dashboard` and `Admin dashboard`. Pages already in an app are not rewritten.
+- fe4ecdc: A link inside a sentence is underlined. The harness rule `ui.md` now lists two text link styles: a link on its own (a nav item, "Back", "Edit") keeps `text-g-accent-text transition hover:underline`, and a link inside a sentence uses `text-g-accent-text underline underline-offset-2 transition hover:no-underline`, the string `make:auth` already writes, because color alone does not tell it apart from the words around it (axe's `link-in-text-block`). Run `bunx guren agent:sync` to pick up the rule. The blog blueprint's sign-in and sign-up pages, whose "Sign up" and "Sign in" links sat inside a sentence in color alone, now use the underlined style.
+
 ## 1.20.2
 
 ### Patch Changes

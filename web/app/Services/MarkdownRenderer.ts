@@ -16,6 +16,7 @@ import {
   type DocLocale,
 } from './docs-config.js'
 import { expandFeatureLists } from './doc-features.js'
+import { renderInteractiveDiagrams } from './doc-interactive.js'
 
 const DEFAULT_LANGUAGE = 'text'
 
@@ -176,5 +177,5 @@ export async function renderMarkdownToHtml(
     rewriteImage: linkContext ? (src) => rewriteDocImage(src, linkContext) : undefined,
     highlight: highlightDocsCode,
   })
-  return renderer.render(expandFeatureLists(markdown))
+  return renderInteractiveDiagrams(await renderer.render(expandFeatureLists(markdown)))
 }
