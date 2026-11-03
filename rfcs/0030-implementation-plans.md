@@ -994,8 +994,13 @@ would be needed. The decision is now taken once, at approval
 - The elements are the ones `behaviourCanReach()` leaves out, of a kind no
   planned property can lift: every command, a side effect the plan adds or
   alters, and a column it alters. An added or renamed column is left out,
-  since its type, nullability, uniqueness and index match once it is built;
-  so are a dropped element (lifted on its step alone) and an `existing` one.
+  since its type, nullability, uniqueness and index normally match once it is
+  built; so are a dropped element (lifted on its step alone) and an `existing`
+  one. The list is read from the plan alone, so it cannot see the exception:
+  an added column whose every property reads `unknown` (built by a helper the
+  static reader cannot follow), or a renamed one whose properties and previous
+  name have no reader, is `unjudged`, no behaviour reaches it, and it is the
+  one column case that still ends in `plan:waive`.
 - `plan:render` pins them to the page as one advisory warning,
   `plan:without-behaviour`, grouped by kind, so the person reads the list
   before approving; the Dev Center's review serves that page, and its approve
@@ -2150,8 +2155,9 @@ each rule was read.
   summary would show every command and side effect as a deviation, and the
   status line naming the decision log would point at a log that holds none of
   them. Its readers are few: `closesPlan()` (`plan:close`, `plan:next`), the
-  summary counts, and the close documents; the `Stop` hook, the docs viewer and
-  the Dev Center read step records, never element states. The record and the step
+  summary counts, and the close documents. The docs viewer and the Dev Center
+  read step records, never element states, and the `Stop` hook reads element
+  states only for `blocked`, which acceptance never sets. The record and the step
   outcome are untouched: `plan:verify` judges an accepted element like any
   other (it is never in the step's `waived`), so the `Stop` hook and
   `recordStillHolds()` read as before. A waiver on an accepted element is not
