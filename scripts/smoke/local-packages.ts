@@ -352,7 +352,22 @@ export async function rewriteAppDependencies(
   }
 
   await writeManifest(appDir, manifest)
+  await liftReleaseAgeGate(appDir)
   await assertLocalGurenDependencies(appDir, context)
+}
+
+/**
+ * A vendored smoke tests the scaffold against this checkout, not the date: with
+ * the gate the template ships, a third-party range only days-old versions satisfy
+ * fails the install until they age. `sync-template-deps.ts --release` judges that
+ * case, and `smoke:starter:npm`, which rewrites nothing, keeps the gate.
+ */
+export async function liftReleaseAgeGate(appDir: string): Promise<void> {
+  const path = join(appDir, 'bunfig.toml')
+  const bunfig = await readFile(path, 'utf8').catch(() => undefined)
+  if (bunfig === undefined) return
+  const lifted = bunfig.replace(/^minimumReleaseAge = \d+$/mu, 'minimumReleaseAge = 0')
+  if (lifted !== bunfig) await writeFile(path, lifted, 'utf8')
 }
 
 /**

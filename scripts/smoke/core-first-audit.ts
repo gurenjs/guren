@@ -26,6 +26,8 @@ const ignoredFileNames = new Set([
   'pnpm-lock.yaml',
   'yarn.lock',
   'tsconfig.json',
+  // Its release-age exclusions name every installed @guren package, server included.
+  'bunfig.toml',
 ])
 
 const ignoredDirNames = new Set([
