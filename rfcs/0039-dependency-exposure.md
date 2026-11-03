@@ -191,6 +191,17 @@ text lockfile (`lockfileVersion: 1`, JSON with trailing commas) and
 `dependencyTree(lock, appWorkspace)` returns one entry per installed package
 instance, since one package can be installed at several versions:
 
+**Amended in implementation:** Bun 1.4.4 writes `lockfileVersion: 2` for a new
+install, with the same tables, so versions 1 and 2 are read. A workspace app's
+own nested copies are keyed under its package name (`@scope/plugin/vitest`), and
+its direct dependencies resolve there first. An entry is one installed
+`name@version` (nested copies of one version merge) and carries `installedAs`,
+the names it sits under in `node_modules`, which differ from `name` for an npm
+alias. A peer, optional ones included, is followed once the lockfile resolves it:
+a production install of a probe app installed a resolved optional peer. A path
+through one may therefore name a dependency that is not why the package is
+there, which the fix path of §5 has to account for.
+
 ```ts
 interface DependencyTree {
   coverage: Coverage                 // RFC 0032's shape
