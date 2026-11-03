@@ -24,7 +24,7 @@ One command installs it:
 bunx guren add attachments
 ```
 
-Read what it did, because you will be maintaining it. It installed the storage layer first (`config/storage.ts`, listed in `config: [...]`, and `app/Services/FileStorage.ts`, two disks: `local` rooted at `./storage/app` and `public` rooted at `./public/storage`). Then it added an `attachments` table to `db/schema.ts`, wrote `config/attachments.ts` and `app/Providers/AttachmentsProvider.ts`, registered the provider in `src/app.ts`, mounted the delivery route by calling `registerAttachmentRoutes` at the top of your route registrar, and registered an `attachments:prune` console command. The table needs its migration:
+Read what it did, because you will be maintaining it. It installed the storage layer first (`config/storage.ts`, listed in `config: [...]`, and `app/Services/FileStorage.ts`, two disks: `local` rooted at `./storage/app` and `public` rooted at `./public/storage`, both added to `.gitignore` since they hold files nothing should commit). Then it added an `attachments` table to `db/schema.ts`, wrote `config/attachments.ts` and `app/Providers/AttachmentsProvider.ts`, registered the provider in `src/app.ts`, mounted the delivery route by calling `registerAttachmentRoutes` at the top of your route registrar, and registered an `attachments:prune` console command. The table needs its migration:
 
 ```bash run
 bun run db:make create_attachments
@@ -34,13 +34,7 @@ bun run db:make create_attachments
 bun run db:migrate
 ```
 
-Two hand edits. The disks hold files nothing should commit, so make sure these two lines are in `.gitignore` (a recent CLI adds them itself, and the command below adds only what is missing):
-
-```bash run
-for line in 'storage/app/' 'public/storage'; do grep -qxF "$line" .gitignore || echo "$line" >> .gitignore; done
-```
-
-And the config needs a model map the generator cannot write for you, because it does not know which of your models will carry attachments. The prune command needs the map to check that an attachment's owner still exists. The block below adds `Model.morphMap` at the end and the `Model` and `Post` imports it needs, and trims the generator's longer comments down to the three decisions this section explains:
+One hand edit. The config needs a model map the generator cannot write for you, because it does not know which of your models will carry attachments. The prune command needs the map to check that an attachment's owner still exists. The block below adds `Model.morphMap` at the end and the `Model` and `Post` imports it needs, and trims the generator's longer comments down to the three decisions this section explains:
 
 ```ts file=config/attachments.ts
 import { Model, configureAttachments } from '@guren/core'
