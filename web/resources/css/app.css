@@ -711,12 +711,16 @@ body.docs-theme {
   height: 1.25rem;
 }
 
-.doc-feature-title {
+.docs-content .doc-feature > p {
+  margin: 0;
+}
+
+.docs-content .doc-feature > p:first-of-type {
   color: var(--docs-heading);
   line-height: 1.5;
 }
 
-.docs-content .doc-feature-text {
+.docs-content .doc-feature > p + p {
   margin: 0;
   font-size: 0.95rem;
   line-height: 1.7;
@@ -730,11 +734,11 @@ body.docs-theme {
     grid-row: 1;
   }
 
-  .doc-feature-title {
+  .docs-content .doc-feature > p:first-of-type {
     align-self: center;
   }
 
-  .docs-content .doc-feature-text {
+  .docs-content .doc-feature > p + p {
     grid-column: 1 / -1;
     margin-top: 0.5rem;
   }
