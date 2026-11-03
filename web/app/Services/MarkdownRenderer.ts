@@ -15,6 +15,7 @@ import {
   type DocCategory,
   type DocLocale,
 } from './docs-config.js'
+import { renderFeatureLists } from './doc-features.js'
 
 const DEFAULT_LANGUAGE = 'text'
 
@@ -175,5 +176,5 @@ export async function renderMarkdownToHtml(
     rewriteImage: linkContext ? (src) => rewriteDocImage(src, linkContext) : undefined,
     highlight: highlightDocsCode,
   })
-  return renderer.render(markdown)
+  return renderFeatureLists(await renderer.render(markdown))
 }

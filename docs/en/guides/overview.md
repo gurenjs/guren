@@ -90,19 +90,30 @@ await app.actingAs(user).get('/dashboard').assertOk()
 
 ## What Makes Guren Different
 
+<!-- features -->
+
+<!-- feature-icon: bolt -->
 **Bun-native from day one.** Guren runs on Bun's runtime with Hono as the HTTP layer. There is no Node.js compatibility shim, so you get Bun's fast startup, native TypeScript execution, and built-in test runner out of the box.
 
+<!-- feature-icon: code -->
 **Laravel's developer experience, in TypeScript.** If you have used Laravel, the patterns are instantly familiar: resource routing, `Controller` base classes with `this.inertia()`, and `Model.where().orderBy().get()`. If you have not, you will find them intuitive anyway: the API reads like what it does.
 
+<!-- feature-icon: shield -->
 **End-to-end type safety.** Your Drizzle schema types flow into your Model, through your Controller, and into your React page props. Change a column name and TypeScript catches every place that needs updating, from database to browser.
 
+<!-- feature-icon: graph -->
 **Project knowledge that stays connected to code.** Guren links architecture decisions and generated spec views to the entities and paths they govern, validates those relations, and renders the whole corpus as an interactive Docs Graph during development. See [Spec-Anchored Development](./spec-anchored.md) for the complete workflow.
 
+<!-- feature-icon: battery -->
 **Batteries included, not forced.** Authentication, validation, caching, queues, mail, events, broadcasting, and scheduling are all there when you need them. Each subsystem is opt-in through ServiceProviders, so you only load what you use.
 
+<!-- feature-icon: folder -->
 **Convention over configuration.** Generate a full feature with `bunx guren add auth` or `bunx guren add resource posts`. The CLI scaffolds the files in the right place with the right structure so you spend time building features, not debating folder layout.
 
+<!-- feature-icon: route -->
 **Router registrars over global state.** Generated apps export route registrars and pass them into `createApp({ routes })`, which keeps routing scoped to each application instance.
+
+<!-- /features -->
 
 For a deeper, honest comparison with Hono, Next.js, and Laravel, and for how Guren is designed for AI coding agents, see [Why Guren](./why-guren.md).
 
