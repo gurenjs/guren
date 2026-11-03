@@ -580,7 +580,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
                         <span>{section.title}</span>
                         <ChevronRightIcon aria-hidden className="docs-nav-chevron size-3.5 shrink-0" />
                       </summary>
-                      <nav className="mb-3 mt-1 flex flex-col gap-0.5 border-l border-docs-border pl-2 ml-2">
+                      <nav aria-label={section.title} className="mb-3 mt-1 flex flex-col gap-0.5 border-l border-docs-border pl-2 ml-2">
                         {section.docs.map((entry) => {
                           const isActive = active?.category === group.category && active?.slug === entry.slug
                           return (
@@ -638,7 +638,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
                       href={nav.prev.href}
                       className="docs-pagination-link flex flex-col gap-1.5 rounded-xl border border-docs-border bg-docs-page p-5 no-underline"
                     >
-                      <span className="text-sm font-semibold text-docs-text-muted">← Previous</span>
+                      <span className="text-sm font-semibold text-docs-text-secondary">← Previous</span>
                       <span className="text-lg font-semibold text-docs-heading">{nav.prev.title}</span>
                     </Link>
                   ) : <div />}
@@ -647,7 +647,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
                       href={nav.next.href}
                       className="docs-pagination-link flex flex-col gap-1.5 rounded-xl border border-docs-border bg-docs-page p-5 text-right no-underline"
                     >
-                      <span className="text-sm font-semibold text-docs-text-muted">Next →</span>
+                      <span className="text-sm font-semibold text-docs-text-secondary">Next →</span>
                       <span className="text-lg font-semibold text-docs-heading">{nav.next.title}</span>
                     </Link>
                   )}

@@ -11,23 +11,25 @@ import { GithubIcon, MenuIcon, MoonIcon, SunIcon } from './icons.js'
  * is a `<details>` disclosure instead of React state.
  */
 
-export const Header: FC = () => (
+/** `section` is named beside the logo, as in the React header. */
+export const Header: FC<{ section?: 'Docs' | 'Blog' }> = ({ section = 'Docs' }) => (
   <header class="sticky top-0 z-50 border-b border-docs-border bg-docs-page">
     <div class="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-4 px-6 py-3">
       <a href="/" class="flex items-center gap-3 text-docs-heading no-underline">
-        <img src="/logo.svg" alt="Guren Docs" class="size-8 rounded-lg p-0.5" />
-        <span class="text-[1.1rem] font-bold tracking-tight">Guren Docs</span>
+        <img src="/logo.svg" alt="" class="size-8 rounded-lg p-0.5" />
+        <span class="text-[1.1rem] font-bold tracking-tight">Guren {section}</span>
       </a>
       <div class="flex flex-wrap items-center gap-5">
-        <nav class="hidden items-center gap-6 text-[0.95rem] font-medium md:flex">
+        <nav aria-label="Main" class="hidden items-center gap-6 text-[0.95rem] font-medium md:flex">
           <a href="/docs" class="text-docs-text no-underline transition hover:text-docs-accent">Guides</a>
           <a href="/docs/tutorials/00-overview" class="text-docs-text no-underline transition hover:text-docs-accent">Tutorials</a>
           <a href="/docs/agent-course/00-overview" class="text-docs-text no-underline transition hover:text-docs-accent">Agent Course</a>
+          <a href="/blog" class="text-docs-text no-underline transition hover:text-docs-accent">Blog</a>
           <a
             href={GITHUB_URL}
             target="_blank"
             rel={OWN_REPO_LINK_REL}
-            class="flex items-center gap-1.5 text-docs-text-muted no-underline transition hover:text-docs-accent"
+            class="flex items-center gap-1.5 text-docs-text-secondary no-underline transition hover:text-docs-accent"
           >
             <GithubIcon class="size-4" />
             GitHub
@@ -36,7 +38,7 @@ export const Header: FC = () => (
         <button
           type="button"
           id="color-mode-toggle"
-          class="text-docs-text-muted transition hover:text-docs-accent"
+          class="text-docs-text-secondary transition hover:text-docs-accent"
           aria-label="Switch color mode"
         >
           <SunIcon class="cm-sun size-5" />
@@ -44,7 +46,7 @@ export const Header: FC = () => (
         </button>
         <details class="relative md:hidden">
           <summary
-            class="flex cursor-pointer list-none items-center text-docs-text-muted transition hover:text-docs-accent [&::-webkit-details-marker]:hidden"
+            class="flex cursor-pointer list-none items-center text-docs-text-secondary transition hover:text-docs-accent [&::-webkit-details-marker]:hidden"
             aria-label="Menu"
           >
             <MenuIcon class="size-6" />
@@ -54,11 +56,12 @@ export const Header: FC = () => (
             <a href="/docs" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Guides</a>
             <a href="/docs/tutorials/00-overview" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Tutorials</a>
             <a href="/docs/agent-course/00-overview" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Agent Course</a>
+            <a href="/blog" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Blog</a>
             <a
               href={GITHUB_URL}
               target="_blank"
               rel={OWN_REPO_LINK_REL}
-              class="rounded-md px-3 py-2 text-docs-text-muted no-underline transition hover:text-docs-accent"
+              class="rounded-md px-3 py-2 text-docs-text-secondary no-underline transition hover:text-docs-accent"
             >
               GitHub
             </a>
