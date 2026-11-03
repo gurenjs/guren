@@ -15,7 +15,7 @@ const PAGE_PREFIXES = ['/docs', '/blog', '/start']
  */
 export function canonicalPath(pathname: string): string | undefined {
   let path = pathname
-  if (path.length > 1 && path.endsWith('/') && PAGE_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+  if (path.length > 1 && path.endsWith('/') && PAGE_PREFIXES.some((prefix) => path.startsWith(`${prefix}/`))) {
     path = path.replace(/\/+$/u, '') || '/'
   }
 
