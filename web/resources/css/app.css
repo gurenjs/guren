@@ -311,6 +311,43 @@ body.docs-theme {
   background: var(--g-tick);
 }
 
+.docs-nav-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--g-r-ctl);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--docs-heading);
+  cursor: pointer;
+  list-style: none;
+  transition: background-color 150ms ease;
+}
+
+.docs-nav-summary::-webkit-details-marker {
+  display: none;
+}
+
+.docs-nav-summary:hover {
+  background-color: var(--docs-accent-tint);
+}
+
+.docs-nav-summary:focus-visible {
+  outline: 2px solid var(--docs-accent-strong);
+  outline-offset: 2px;
+}
+
+.docs-nav-chevron {
+  color: var(--docs-text-muted);
+  transition: transform 150ms ease;
+}
+
+.docs-nav-section[open] > .docs-nav-summary .docs-nav-chevron {
+  transform: rotate(90deg);
+}
+
 /* the same 3px logo-gradient fragment, standalone — for a page title when no
    nav current place is on screen */
 .docs-tick {
@@ -492,6 +529,17 @@ body.docs-theme {
   max-width: 100%;
 }
 
+/* Tailwind's preflight zeroes paragraph margins; without these, consecutive
+   paragraphs run together into one block. :where() keeps these at one class
+   of specificity, so a component's own paragraph (a callout label) wins. */
+.docs-content :where(p) {
+  margin: 1.1rem 0;
+}
+
+.docs-content :where(li > p) {
+  margin: 0.4rem 0;
+}
+
 .docs-content h1,
 .docs-content h2,
 .docs-content h3,
@@ -508,20 +556,23 @@ body.docs-theme {
   letter-spacing: -0.02em;
 }
 
+/* The rule sits above the heading, so a section's start stays visible while
+   scrolling into it. */
 .docs-content h2 {
-  font-size: 1.75rem;
-  border-bottom: 1px solid var(--docs-border-soft);
-  padding-bottom: 0.5rem;
-  margin-top: 3rem;
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+  border-top: 1px solid var(--docs-border-soft);
+  padding-top: 1.75rem;
+  margin-top: 3.5rem;
 }
 
 .docs-content h3 {
-  font-size: 1.4rem;
-  margin-top: 2rem;
+  font-size: 1.2rem;
+  margin-top: 2.25rem;
 }
 
 .docs-content h4 {
-  font-size: 1.15rem;
+  font-size: 1.05rem;
 }
 
 /* Hide the first document title; the page header already renders it. */
@@ -582,8 +633,8 @@ body.docs-theme {
   display: none;
 }
 
-.plan-lifecycle {
-  --plan-gap: 0.75rem;
+/* Shared by every interactive diagram (components/diagrams/); each adds only its layout. */
+.doc-diagram {
   margin: 1.5rem 0;
   padding: 1.25rem;
   border: 1px solid var(--docs-border-soft);
@@ -591,7 +642,7 @@ body.docs-theme {
   background: var(--docs-surface-raised);
 }
 
-.plan-lifecycle-head {
+.doc-diagram-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -600,13 +651,13 @@ body.docs-theme {
   margin-bottom: 1rem;
 }
 
-.docs-content .plan-lifecycle-intro {
+.docs-content .doc-diagram-intro {
   margin: 0;
   font-size: 0.875rem;
   color: var(--docs-text-secondary);
 }
 
-.plan-lifecycle-play {
+.doc-diagram-play {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -618,26 +669,114 @@ body.docs-theme {
   font-weight: 600;
 }
 
-.plan-lifecycle-play:hover {
+.doc-diagram-play:hover {
   background: var(--g-accent-down);
+}
+
+.doc-diagram button:focus-visible {
+  outline: 2px solid var(--docs-accent);
+  outline-offset: 2px;
+}
+
+.docs-content .doc-diagram-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.docs-content .doc-diagram-list > li {
+  margin: 0;
+  padding: 0;
+}
+
+.doc-diagram-node {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--docs-border-strong);
+  border-radius: var(--g-r-ctl);
+  background: var(--docs-surface-panel);
+  color: var(--docs-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+[data-state='done'] > .doc-diagram-node {
+  border-color: var(--docs-accent);
+}
+
+[data-state='current'] > .doc-diagram-node {
+  border-color: var(--docs-accent);
+  background: var(--docs-accent-tint);
+  box-shadow: 0 0 0 3px var(--docs-accent-tint);
+}
+
+.docs-content .doc-diagram-node code,
+.docs-content .doc-diagram-detail-title code {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--docs-heading);
+  font-weight: 600;
+  font-size: 0.875rem;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.doc-diagram-index {
+  font-size: 0.75rem;
+  color: var(--docs-text-muted);
+}
+
+.doc-diagram-chip {
+  padding: 0.05rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--docs-text-secondary);
+  border-radius: 999px;
+  background: var(--docs-surface-panel);
+  border: 1px solid var(--docs-border-soft);
+}
+
+.doc-diagram-chip[data-tone='accent'] {
+  border-color: var(--docs-accent);
+  color: var(--docs-accent-strong);
+}
+
+.doc-diagram-chip[data-tone='ok'] {
+  border-color: var(--g-ok-chip);
+  color: var(--g-ok);
+}
+
+.doc-diagram-detail {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--docs-border-soft);
+}
+
+.docs-content .doc-diagram-detail p {
+  margin: 0 0 0.5rem;
+}
+
+.doc-diagram-detail-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .doc-diagram-node {
+    transition: background-color 0.3s, border-color 0.3s, box-shadow 0.3s, color 0.3s;
+  }
+}
+
+.plan-lifecycle {
+  --plan-gap: 0.75rem;
 }
 
 .docs-content .plan-lifecycle-track {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--plan-gap);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.docs-content .plan-lifecycle-track > li {
-  margin: 0;
-  padding: 0;
-}
-
-.docs-content .plan-lifecycle-track > li::marker {
-  content: none;
 }
 
 .plan-lifecycle-stage {
@@ -656,56 +795,15 @@ body.docs-theme {
 
 .plan-lifecycle-node {
   display: flex;
-  width: 100%;
   height: 100%;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.25rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--docs-border-strong);
-  border-radius: var(--g-r-ctl);
-  background: var(--docs-surface-panel);
-  color: var(--docs-text-primary);
-  text-align: left;
-  cursor: pointer;
-}
-
-.docs-content .plan-lifecycle-node code,
-.docs-content .plan-lifecycle-detail-title code {
-  padding: 0;
-  background: none;
-  border: 0;
-  color: var(--docs-heading);
-  font-weight: 600;
-  font-size: 0.875rem;
-  overflow-wrap: normal;
-  word-break: normal;
-}
-
-.plan-lifecycle-index {
-  font-size: 0.75rem;
-  color: var(--docs-text-muted);
 }
 
 .plan-lifecycle-actor {
   font-size: 0.75rem;
   color: var(--docs-text-secondary);
-}
-
-.plan-lifecycle-stage[data-state='done'] .plan-lifecycle-node {
-  border-color: var(--docs-accent);
-}
-
-.plan-lifecycle-stage[data-state='current'] .plan-lifecycle-node {
-  border-color: var(--docs-accent);
-  background: var(--docs-accent-tint);
-  box-shadow: 0 0 0 3px var(--docs-accent-tint);
-}
-
-.plan-lifecycle-node:focus-visible,
-.plan-lifecycle-play:focus-visible {
-  outline: 2px solid var(--docs-accent);
-  outline-offset: 2px;
 }
 
 .plan-lifecycle-loop {
@@ -722,43 +820,6 @@ body.docs-theme {
 .plan-lifecycle-loop[data-active='true'] {
   border-color: var(--docs-accent);
   color: var(--docs-accent-strong);
-}
-
-.plan-lifecycle-detail {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--docs-border-soft);
-}
-
-.docs-content .plan-lifecycle-detail p {
-  margin: 0 0 0.5rem;
-}
-
-.plan-lifecycle-detail-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-
-.plan-lifecycle-detail-title .plan-lifecycle-actor,
-.plan-lifecycle-step {
-  padding: 0.05rem 0.5rem;
-  font-size: 0.75rem;
-  color: var(--docs-text-secondary);
-  border-radius: 999px;
-  background: var(--docs-surface-panel);
-  border: 1px solid var(--docs-border-soft);
-}
-
-.plan-lifecycle-detail-title .plan-lifecycle-actor[data-actor='person'] {
-  border-color: var(--docs-accent);
-  color: var(--docs-accent-strong);
-}
-
-.plan-lifecycle-detail-title .plan-lifecycle-actor[data-actor='agent'] {
-  border-color: var(--g-ok-chip);
-  color: var(--g-ok);
 }
 
 .docs-content .plan-lifecycle-writes {
@@ -798,10 +859,9 @@ body.docs-theme {
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .plan-lifecycle-node,
   .plan-lifecycle-stage::after,
   .plan-lifecycle-loop {
-    transition: background-color 0.3s, border-color 0.3s, box-shadow 0.3s, color 0.3s;
+    transition: background-color 0.3s, border-color 0.3s, color 0.3s;
   }
 
   .plan-lifecycle-stage[data-state='current'] .plan-lifecycle-node {
@@ -816,16 +876,99 @@ body.docs-theme {
   }
 }
 
+.middleware-order-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.middleware-order-switch {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--docs-border-strong);
+  border-radius: var(--g-r-ctl);
+  background: var(--docs-surface-panel);
+}
+
+.middleware-order-switch button {
+  padding: 0.35rem 0.75rem;
+  border-radius: calc(var(--g-r-ctl) - 2px);
+  font-size: 0.875rem;
+  color: var(--docs-text-secondary);
+}
+
+.middleware-order-switch button[aria-pressed='true'] {
+  background: var(--docs-accent-tint);
+  color: var(--docs-accent-strong);
+  font-weight: 600;
+}
+
+/* The positioned parent makes each row's offsetTop list-relative (MiddlewareOrder.tsx). */
+.docs-content .middleware-order-list {
+  position: relative;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.middleware-order-row > .doc-diagram-node {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: 'kind where' 'code code';
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+
+.middleware-order-row[data-muted='true'] > .doc-diagram-node {
+  border-style: dashed;
+}
+
+.middleware-order-row .doc-diagram-index {
+  display: none;
+  grid-area: index;
+}
+
+.middleware-order-row .doc-diagram-chip {
+  grid-area: kind;
+  justify-self: start;
+}
+
+.docs-content .middleware-order-row code {
+  grid-area: code;
+}
+
+.middleware-order-row .middleware-order-where {
+  grid-area: where;
+  justify-self: end;
+}
+
+.middleware-order-where {
+  font-size: 0.75rem;
+  color: var(--docs-text-secondary);
+}
+
+@media (min-width: 640px) {
+  .middleware-order-row > .doc-diagram-node {
+    grid-template-columns: 1.5rem 5.5rem minmax(0, 1fr) auto;
+    grid-template-areas: 'index kind code where';
+  }
+
+  .middleware-order-row .doc-diagram-index {
+    display: block;
+  }
+}
+
 .docs-content a {
   color: var(--docs-accent-strong);
-  text-decoration: none;
-  font-weight: 600;
-  border-bottom: 1px solid transparent;
-  transition: border-color 0.2s;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--docs-accent-strong) 40%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.2s;
 }
 
 .docs-content a:hover {
-  border-bottom-color: var(--docs-accent-strong);
+  text-decoration-color: var(--docs-accent-strong);
 }
 
 /* The code surface has no theme: ink in light and dark alike (--g-ink, which
@@ -856,14 +999,53 @@ body.docs-theme {
   color: var(--shiki-dark) !important;
 }
 
+/* Lines a `highlight=` fence attribute names (MarkdownRenderer.ts). The band
+   spans the block's padding (1.25rem, .shiki above). The surface is ink in both
+   themes, so one tint serves light and dark. */
+.docs-content .shiki .line.highlighted {
+  display: inline-block;
+  box-sizing: border-box;
+  width: calc(100% + 2.5rem);
+  margin: 0 -1.25rem;
+  padding: 0 1.25rem;
+  /* An empty line has no inline content to give it height. */
+  min-height: 1lh;
+  background: rgba(235, 111, 146, 0.14);
+  box-shadow: inset 3px 0 0 var(--g-accent);
+}
+
+/* The rest dims only where a pointer can hover it back to full strength; on
+   touch nothing could undo it, so the band alone marks the lines there. */
+@media (hover: hover) {
+  .docs-content .shiki.has-highlighted .line:not(.highlighted) {
+    opacity: 0.55;
+  }
+
+  .docs-content .shiki.has-highlighted:hover .line,
+  .docs-content .shiki.has-highlighted:focus-within .line {
+    opacity: 1;
+  }
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .docs-content .shiki.has-highlighted .line {
+    transition: opacity 0.2s;
+  }
+}
+
+/* Neutral, so a code span never reads as a link: links own the accent. */
 .docs-content :not(pre) > code {
-  background: var(--docs-accent-tint);
+  background: color-mix(in srgb, var(--docs-text-primary) 7%, transparent);
   border-radius: 0.375rem;
   padding: 0.125rem 0.375rem;
-  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, "SFMono", monospace;
+  font-family: var(--g-font-mono);
   font-size: 0.875em;
-  color: var(--docs-accent-strong);
+  color: var(--docs-heading);
   font-weight: 500;
+}
+
+.docs-content a > code {
+  color: inherit;
 }
 
 /* ─── Callouts — the diagnostic row, not a box. Same anatomy as guren check
@@ -910,6 +1092,79 @@ body.docs-theme {
 .guren-markdown-alert--warning .guren-markdown-alert__label { color: var(--g-warn); }
 
 .guren-markdown-alert--caution .guren-markdown-alert__label { color: var(--g-danger); }
+
+/* ─── Feature lists (`<!-- features -->` in the source, see
+   app/Services/doc-features.ts): one card per bold-led paragraph, the icon
+   in a tinted tile beside the title. ─── */
+.docs-content ul.doc-features {
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+  gap: 12px;
+}
+
+.docs-content li.doc-feature {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  column-gap: 14px;
+  row-gap: 0.25rem;
+  padding: 16px 18px;
+  border: 1px solid var(--docs-border-soft);
+  border-radius: var(--g-r-card);
+  background: var(--docs-surface-raised);
+}
+
+.doc-feature-icon {
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--g-r-ctl);
+  background: var(--docs-accent-tint);
+  color: var(--docs-accent-strong);
+}
+
+.doc-feature-icon svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.docs-content .doc-feature > p {
+  margin: 0;
+}
+
+.docs-content .doc-feature > p:first-of-type {
+  color: var(--docs-heading);
+  line-height: 1.5;
+}
+
+.docs-content .doc-feature > p + p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--docs-text-secondary);
+}
+
+/* On a phone the gutter would cost the body a fifth of its width, so the
+   icon moves onto the title's line. */
+@media (max-width: 639px) {
+  .doc-feature-icon {
+    grid-row: 1;
+  }
+
+  .docs-content .doc-feature > p:first-of-type {
+    align-self: center;
+  }
+
+  .docs-content .doc-feature > p + p {
+    grid-column: 1 / -1;
+    margin-top: 0.5rem;
+  }
+}
 
 /* ─── Tutorial listings: a fence that names the file it writes carries the
    path as a sticky header, and a long one scrolls inside itself rather than

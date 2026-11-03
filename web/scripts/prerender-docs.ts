@@ -139,7 +139,10 @@ async function prerender(): Promise<void> {
           const [raw, doc] = await Promise.all([
             store.getRaw(category, slug, locale),
             store.getRendered(category, slug, locale),
-          ])
+          ]).catch((error: unknown) => {
+            const reason = error instanceof Error ? error.message : String(error)
+            throw new Error(`Failed to prerender ${locale}/${category}/${slug}: ${reason}`, { cause: error })
+          })
           if (raw === null || doc === null) {
             throw new Error(`Failed to prerender ${locale}/${category}/${slug}`)
           }
