@@ -33,6 +33,22 @@ describe('makeView', () => {
     }
   })
 
+  it('aliases an import a page shares its name with', async () => {
+    const workspace = await createTempWorkspace('guren-cli-view-collision-')
+    try {
+      const head = await readFile(await makeView('anatomy/Head'), 'utf8')
+      expect(head).toMatch(/^import \{ Head as InertiaHead \} from '@inertiajs\/react'$/m)
+      expect(head).toContain('const Head: FC<HeadProps>')
+      expect(head).toContain('<InertiaHead title="Head" />')
+
+      const fc = await readFile(await makeView('types/FC'), 'utf8')
+      expect(fc).toMatch(/^import type \{ FC as ReactFC \} from 'react'$/m)
+      expect(fc).toContain('const FC: ReactFC<FCProps>')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('keeps accepting a name with a space, the way pascalCase always has', async () => {
     const workspace = await createTempWorkspace('guren-cli-view-space-')
     try {
