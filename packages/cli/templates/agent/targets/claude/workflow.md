@@ -3,8 +3,12 @@ a `SessionStart` hook injects the `guren context` project map, and a
 `PostToolUse` hook (`.claude/hooks/check-after-edit.ts`) re-runs `guren check`
 after edits to routes, controllers, models, schema, or pages, and runs oxlint on
 the edited file when the app has an `.oxlintrc.json` (`bunx guren add lint`
-writes one; warnings are reported too), feeding findings back immediately. A
-`Stop` hook (`.claude/hooks/gate-on-stop.ts`) runs `guren gate` when you finish a
+writes one; warnings are reported too). Its findings arrive as context next to
+the edit's result and never block the edit: midway through a change that spans
+several files, a routes file not wired yet or an import whose use comes in the
+next edit is expected. Fix a finding the edit itself introduced right away, and
+make sure the rest are gone once the change is complete. Files git ignores are
+not checked. A `Stop` hook (`.claude/hooks/gate-on-stop.ts`) runs `guren gate` when you finish a
 turn with uncommitted changes: codegen, typecheck, lint, `check`, `audit`, and
 the test suite, the same stages CI runs. If any stage fails, or `audit` warns
 on a file you changed (a mutating action with no authorization, request data in

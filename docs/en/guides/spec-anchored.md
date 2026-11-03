@@ -236,7 +236,8 @@ declared per document: a doc that sets OKF's `stale_after: <date>`
 gets a warning once that day passes.) The agent harness in every new app teaches
 this loop (pull the entity context before touching a model, keep
 frontmatter in sync when moving files, regenerate spec views with
-structural changes), and the edit hook enforces it mechanically.
+structural changes). The edit hook reports a lapse right after the edit that
+caused it, and `guren gate` checks the finished change.
 
 ## Next Steps
 

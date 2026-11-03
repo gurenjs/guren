@@ -25,7 +25,7 @@
 エージェントごとに、次のものが動きます。
 
 - Claude Code、Codex、Cursor では、コミットしていない変更を残したままターンが終わると、ゲートの hook が [`guren gate`](./cli.md#検査監査コマンド) を実行します。失敗したステージは CI まで持ち越さず、同じターンの中で直せます。`guren plan:next` で印を付けた計画のステップがまだ[検証済み](./glossary.md#計画の状態)になっていなければ（[実装計画](./implementation-plans.md)を参照）、そのステップの指摘も最大 3 回まで差し戻します。
-- Claude Code ではさらに、セッションの開始時に `guren context` のプロジェクトマップを読み込みます。ルート、`app/Http/`、モデル、スキーマ、ページを編集すると `guren check` を再実行し、アプリに `.oxlintrc.json` があれば、編集したソースファイルに oxlint をかけます。
+- Claude Code ではさらに、セッションの開始時に `guren context` のプロジェクトマップを読み込みます。ルート、`app/Http/`、モデル、スキーマ、ページを編集すると `guren check` を再実行し、アプリに `.oxlintrc.json` があれば、編集したソースファイルに oxlint をかけます。この編集時の hook は、指摘を編集の結果と一緒にエージェントへ返しますが、編集は止めません。複数のファイルにまたがる変更では、まだつないでいないルートファイルや次の編集で使う import も途中で指摘されるので、ターンの終了を止めるかどうかはゲートの hook が判断します。git が無視するファイルは検査しません。
 - `AGENTS.md` を読むエージェント（Codex、Cursor、GitHub Copilot、OpenCode）には、`AGENTS.md` で、セッション開始時に `guren context`、編集後に `guren check`、作業を終える前に `guren gate` を実行するよう指示しています。Codex と Cursor では最後の `guren gate` をゲートの hook でも確かめますが、GitHub Copilot と OpenCode には hooks がありません。
 
 hook が効く範囲には、次の注意点があります。
