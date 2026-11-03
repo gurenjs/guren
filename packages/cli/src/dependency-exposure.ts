@@ -57,11 +57,12 @@ export interface ExposureJoin {
 const SSR_ENTRIES = ['resources/js/ssr.tsx', 'resources/js/ssr.ts', 'resources/js/ssr.jsx', 'resources/js/ssr.js']
 const PAGE_ENTRY = /^resources\/js\/(?:app|ssr)\.[cm]?[jt]sx?$/u
 const BUILD_FILE = /^(?:vite|drizzle|playwright[\w.-]*|vitest)\.config\.[cm]?[jt]sx?$/u
-const TEST_FILE = /(?:^|\/)tests?\/|\.(?:test|spec|browser)\.[cm]?[jt]sx?$/u
+const TEST_DIRECTORY = /(?:^|\/)tests?\//u
+const TEST_SUFFIX = /\.(?:test|spec|browser)\.[cm]?[jt]sx?$/u
 
 /** Where a file runs, by where it sits; `ssrReach` is every file the SSR entry imports. */
 export function placementOf(file: string, ssrReach: ReadonlySet<string>): Placement[] {
-  if (TEST_FILE.test(file)) return ['test']
+  if (TEST_DIRECTORY.test(file) || TEST_SUFFIX.test(file)) return ['test']
   if (BUILD_FILE.test(file) || file.startsWith('scripts/')) return ['build']
   if (file.startsWith('resources/js/')) return ssrReach.has(file) ? ['client', 'ssr'] : ['client']
   return ['server']
