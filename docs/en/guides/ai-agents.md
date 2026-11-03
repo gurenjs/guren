@@ -360,9 +360,24 @@ The tables keep the transcript as the model saw it: the user's text, tool argume
 // app/Http/Controllers/SupportChatController.ts
 import { Controller } from '@guren/core'
 import { ChatTurnSchema } from '@guren/plugin-ai'
+import { z } from 'zod'
+import { pages } from '@/.guren/pages.gen'
 import { SupportTriager } from '../../Ai/Agents/SupportTriager'
 
+const ChatPageQuerySchema = z.object({ conversation: z.string().min(1).optional() })
+
 export default class SupportChatController extends Controller {
+  async show() {
+    const { conversation } = this.validateQuery(ChatPageQuerySchema)
+    const user = await this.auth.userOrFail<{ id: number }>()
+    const messages = conversation ? await this.make('ai').agent(SupportTriager).as(user).history(conversation) : null
+
+    return this.inertia(pages.support.Chat, {
+      conversationId: messages ? conversation! : null,
+      messages: messages ?? [],
+    })
+  }
+
   async chat(): Promise<Response> {
     const { conversation, message } = await this.validateBody(ChatTurnSchema)
     const user = await this.auth.userOrFail<{ id: number }>()
@@ -375,20 +390,34 @@ export default class SupportChatController extends Controller {
 }
 ```
 
+`show()` renders the chat page. `history(id)` returns the stored conversation as `useChat` messages, under the same two checks as `continue()`. A conversation id another user started, or another agent's, returns `null` like an unknown one, so the page opens an empty chat instead of failing. Tool calls come back as `tool-<name>` parts with their results, the shape the live stream renders, and a failed tool shows the same masked error. A tool that defines `toModelOutput` comes back with the output the model saw. `toUIMessages()` from `@guren/plugin-ai` is the same conversion for history read some other way.
+
 In the page, `createChatTransport()` from `@guren/plugin-ai/client` posts one turn, `{ conversation, message }`, never the transcript. The history lives on the server, because a transcript sent by the browser would let it invent what the model or a tool "already said". The first turn sends `conversation: null`, the controller starts one, and the response names it in the `X-Guren-Conversation` header, which the transport keeps for later turns. The transport also sends the `XSRF-TOKEN` cookie back as the `X-XSRF-TOKEN` header, so the route stays behind CSRF protection.
 
+A reload lands on `show()` with the id in the query, so the page starts from the stored history. `useChat({ id, messages })` displays it, and the next turn still sends only `{ conversation, message }`. The `key` remounts the chat when an Inertia visit opens another conversation, since the transport is created once per mount.
+
 ```tsx
+// resources/js/pages/support/Chat.tsx
 import { useChat } from '@ai-sdk/react'
-import { createChatTransport } from '@guren/plugin-ai/client'
+import { createChatTransport, type UIMessage } from '@guren/plugin-ai/client'
 import { useState } from 'react'
 
-export default function SupportChat({ conversationId }: { conversationId: string | null }) {
+interface Props {
+  conversationId: string | null
+  messages: UIMessage[]
+}
+
+export default function Chat(props: Props) {
+  return <Conversation key={props.conversationId ?? 'new'} {...props} />
+}
+
+function Conversation({ conversationId, messages: initialMessages }: Props) {
   const [transport] = useState(() =>
     createChatTransport('/support/chat', {
       conversation: conversationId,
       onConversation: (id) => window.history.replaceState(null, '', `?conversation=${id}`),
     }))
-  const { messages, sendMessage } = useChat({ transport })
+  const { messages, sendMessage } = useChat({ id: conversationId ?? undefined, messages: initialMessages, transport })
   const [draft, setDraft] = useState('')
 
   return (
@@ -404,12 +433,11 @@ export default function SupportChat({ conversationId }: { conversationId: string
 }
 ```
 
-Install `@ai-sdk/react` 4.x, the line that pairs with `ai` 7, in the app for `useChat`. Four limits follow from keeping history on the server:
+Install `@ai-sdk/react` 4.x, the line that pairs with `ai` 7, in the app for `useChat`. Three limits follow from keeping history on the server:
 
 - A chat needs a conversation store. No stateless form exists.
 - An agent that declares `output` cannot stream, since its JSON would reach the chat as plain text. Use `prompt()` for it.
 - The transport refuses to regenerate a message, and refuses a user message with a file attached.
-- The plugin does not convert stored history back into `useChat` messages. A page reloaded mid-conversation starts with an empty message list and continues the same conversation on the server.
 
 A request aborted through `signal` stores nothing. A storage failure after the answer has started streaming is logged, since the status code has already been sent.
 

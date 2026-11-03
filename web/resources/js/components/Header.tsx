@@ -42,7 +42,7 @@ function ColorModeButton({ variant }: { variant: 'home' | 'docs' }) {
     <button
       type="button"
       onClick={toggle}
-      className="text-docs-text-muted transition hover:text-docs-accent"
+      className="text-docs-text-secondary transition hover:text-docs-accent"
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
     >
       {isDark ? <SunIcon className="size-5" /> : <MoonIcon className="size-5" />}
@@ -105,11 +105,11 @@ export function Header({ variant, basePath = '/docs', locales = [], framed = fal
       <header className="sticky top-0 z-50 border-b border-docs-border bg-docs-page">
         <div className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-4 px-6 py-3">
           <Link href="/" className="flex items-center gap-3 text-docs-heading no-underline">
-            <img src="/logo.svg" alt="Guren Docs" className="size-8 rounded-lg p-0.5" />
+            <img src="/logo.svg" alt="" className="size-8 rounded-lg p-0.5" />
             <span className="text-[1.1rem] font-bold tracking-tight">Guren Docs</span>
           </Link>
           <div className="flex flex-wrap items-center gap-5">
-            <nav className="hidden items-center gap-6 text-[0.95rem] font-medium md:flex">
+            <nav aria-label="Main" className="hidden items-center gap-6 text-[0.95rem] font-medium md:flex">
               <Link href={basePath} className="text-docs-text no-underline transition hover:text-docs-accent">Guides</Link>
               <Link href={`${basePath}/tutorials/00-overview`} className="text-docs-text no-underline transition hover:text-docs-accent">Tutorials</Link>
               <Link href={`${basePath}/agent-course/00-overview`} className="text-docs-text no-underline transition hover:text-docs-accent">Agent Course</Link>
@@ -117,7 +117,7 @@ export function Header({ variant, basePath = '/docs', locales = [], framed = fal
                 href="https://github.com/gurenjs/guren"
                 target="_blank"
                 rel={OWN_REPO_LINK_REL}
-                className="flex items-center gap-1.5 text-docs-text-muted no-underline transition hover:text-docs-accent"
+                className="flex items-center gap-1.5 text-docs-text-secondary no-underline transition hover:text-docs-accent"
               >
                 <GithubIcon className="size-4" />
                 GitHub
@@ -132,7 +132,7 @@ export function Header({ variant, basePath = '/docs', locales = [], framed = fal
                     className={`rounded-md px-2.5 py-1 text-[0.85rem] font-semibold no-underline transition ${
                       locale.active
                         ? 'bg-docs-accent-tint text-docs-accent'
-                        : 'text-docs-text-muted hover:text-docs-accent'
+                        : 'text-docs-text-secondary hover:text-docs-accent'
                     }`}
                   >
                     {locale.label}
@@ -143,7 +143,7 @@ export function Header({ variant, basePath = '/docs', locales = [], framed = fal
             <ColorModeButton variant="docs" />
             <button
               type="button"
-              className="text-docs-text-muted transition hover:text-docs-accent md:hidden"
+              className="text-docs-text-secondary transition hover:text-docs-accent md:hidden"
               onClick={() => setMobileOpen(true)}
               aria-label="Open menu"
             >

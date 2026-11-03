@@ -12,9 +12,9 @@ export function Footer({ variant }: FooterProps) {
   if (variant === 'docs') {
     return (
       <footer className="border-t border-docs-border bg-docs-page">
-        <div className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-4 px-6 py-6 text-sm text-docs-text-muted">
+        <div className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-4 px-6 py-6 text-sm text-docs-text-secondary">
           <div className="flex items-center gap-3">
-            <img src="/logo.svg" alt="Guren" className="size-6 rounded-md" />
+            <img src="/logo.svg" alt="" className="size-6 rounded-md" />
             <span>&copy; {year} Guren Framework</span>
           </div>
           <div className="flex items-center gap-4">
