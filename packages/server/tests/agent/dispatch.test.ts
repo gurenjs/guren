@@ -409,3 +409,58 @@ describe('auth refusals on a tool call', () => {
     expect(outcome.content[0]!.text).toBe('HTTP 303 (Location: /posts/1)')
   })
 })
+
+describe('mapToolResponse facts for MCP Apps (RFC 0038)', () => {
+  function plainTool(): DerivedAgentTool {
+    return toolFor((router) => {
+      router.get('/posts', handler).name('posts.index').agent({})
+    }, 'posts.index')
+  }
+
+  test('carries a redirect location as a field', async () => {
+    const response = new Response(null, { status: 303, headers: { Location: '/posts/12' } })
+    const outcome = await mapToolResponse(plainTool(), response)
+    expect(outcome.location).toBe('/posts/12')
+  })
+
+  test('resolves a relative location against the dispatched request', async () => {
+    const response = new Response(null, { status: 303, headers: { Location: '../13' } })
+    const outcome = await mapToolResponse(plainTool(), response, 'http://app.test/posts/12/edit')
+    expect(outcome.location).toBe('http://app.test/posts/13')
+  })
+
+  test('keeps the location on a tool whose output schema a redirect cannot satisfy', async () => {
+    const outputTool = toolFor((router) => {
+      router.post('/posts', { output: z.object({ ok: z.boolean() }) }, () => ({ ok: true })).name('posts.store').agent({})
+    }, 'posts.store')
+    const response = new Response(null, { status: 303, headers: { Location: '/posts/12' } })
+    const outcome = await mapToolResponse(outputTool, response)
+    expect(outcome.isError).toBe(true)
+    expect(outcome.location).toBe('/posts/12')
+  })
+
+  test('carries the errors object of a 422', async () => {
+    const response = new Response(JSON.stringify({ message: 'Invalid', errors: { title: ['Required'] } }), {
+      status: 422,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const outcome = await mapToolResponse(plainTool(), response)
+    expect(outcome.errors).toEqual({ title: ['Required'] })
+  })
+
+  test('keeps the whole Inertia page beside the unwrapped props for a ui page tool only', async () => {
+    const page = { component: 'posts/Index', props: { posts: [1] }, url: '/posts', version: 'v' }
+    const inertiaResponse = () => new Response(JSON.stringify(page), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'X-Inertia': 'true' },
+    })
+    const uiTool = toolFor((router) => {
+      router.get('/posts', handler).name('posts.index').agent({ ui: 'posts/Index' })
+    }, 'posts.index')
+
+    const outcome = await mapToolResponse(uiTool, inertiaResponse())
+    expect(outcome.inertiaPage).toEqual(page)
+    expect(JSON.parse(outcome.content[0]!.text)).toEqual({ posts: [1] })
+    expect((await mapToolResponse(plainTool(), inertiaResponse())).inertiaPage).toBeUndefined()
+  })
+})

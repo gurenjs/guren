@@ -81,9 +81,20 @@ export function createRateLimitInterposition(
     const write = !preflight && !tool.annotations.readOnlyHint
     if (limiter.take(rateKey, { write })) return undefined
 
-    return {
-      reason: 'rate-limit',
-      message: `Rate limit exceeded for this token${write ? ' (write budget)' : ''}. Retry later.`,
-    }
+    return { reason: 'rate-limit', message: rateLimitMessage(write) }
   }
+}
+
+function rateLimitMessage(write: boolean): string {
+  return `Rate limit exceeded for this token${write ? ' (write budget)' : ''}. Retry later.`
+}
+
+/**
+ * Take one read from the token's budget for a read that never enters the
+ * pipeline (`guren_approval_status`, the MCP Apps resources): the refusal
+ * message, or undefined when the read may go ahead.
+ */
+export function takeReadBudget(limiter: AgentRateLimiter | undefined, rateKey: string): string | undefined {
+  if (!limiter || limiter.take(rateKey, { write: false })) return undefined
+  return rateLimitMessage(false)
 }

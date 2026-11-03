@@ -207,6 +207,19 @@ export interface AgentRouteMetadata {
   approval?: 'required'
   /** Argument fields masked in agent audit logs. */
   redact?: string[]
+  /** Render this tool's result in an MCP Apps host with an Inertia page (RFC 0038). */
+  ui?: AgentUiPage | AgentRouteUi
+}
+
+/** A page by id: a generated `PageContract` (anything with a string `id`), or the id itself. */
+export type AgentUiPage = { readonly id: string } | string
+
+/** The object form of `AgentRouteMetadata.ui` (RFC 0038 §1). */
+export interface AgentRouteUi {
+  /** Absent for a tool a view calls but that renders no view of its own. */
+  page?: AgentUiPage
+  /** MCP Apps `_meta.ui.visibility`. Default `['model', 'app']`. */
+  visibility?: ReadonlyArray<'model' | 'app'>
 }
 
 /**
@@ -215,7 +228,31 @@ export interface AgentRouteMetadata {
  * `schemas` and the spread OpenAPI metadata still alias the registry.
  */
 function cloneAgentMetadata(metadata: AgentRouteMetadata): AgentRouteMetadata {
-  return structuredClone(metadata)
+  if (metadata.ui === undefined) return structuredClone(metadata)
+  const { ui, ...rest } = metadata
+  return { ...structuredClone(rest), ui: structuredClone(pageIdsOf(ui)) }
+}
+
+/**
+ * A generated `PageContract` reduced to its id, since its `props()` method is
+ * what `structuredClone` throws on. Everything else is kept as written for
+ * `deriveAgentToolUi()` to judge, so a malformed declaration is reported as written.
+ */
+function pageIdsOf(ui: unknown): AgentRouteMetadata['ui'] {
+  // A contract spread with options keeps them, so the derivation can refuse the mixed shape.
+  if (isPageLike(ui) && ('visibility' in ui || 'page' in ui)) {
+    const { visibility, page } = ui as { visibility?: unknown; page?: unknown }
+    return { id: ui.id, visibility, page } as unknown as AgentRouteMetadata['ui']
+  }
+  if (isPageLike(ui)) return ui.id
+  if (typeof ui === 'object' && ui !== null && isPageLike((ui as { page?: unknown }).page)) {
+    return { ...(ui as AgentRouteUi), page: (ui as { page: { id: string } }).page.id }
+  }
+  return ui as AgentRouteMetadata['ui']
+}
+
+function isPageLike(value: unknown): value is { id: string } {
+  return typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'string'
 }
 
 interface RegisteredRoute {

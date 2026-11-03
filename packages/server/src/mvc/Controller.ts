@@ -15,6 +15,7 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 import { getApiTokenOrFail } from '../auth/api-token'
 import { resolveGate, type Gate } from '../authorization/Gate'
 import { resolveOptional } from '../container/resolve-optional'
+import { readAgentSharedProps } from '../internal/agent-principal'
 import { withDefaultHeaders } from '../support/default-headers'
 import type { AuthUser } from '../authorization/types'
 import {
@@ -282,7 +283,7 @@ export class Controller {
         : componentOrPage.component ?? componentOrPage.id
 
     // Shared props go through the same partial-reload filter as the page's own.
-    const sharedProps = await resolveSharedInertiaProps(ctx, this._container)
+    const sharedProps = await resolveSharedProps(ctx, this._container)
 
     // The engine derives the page url (path + query string) from the request
     // when options.url is absent.
@@ -546,4 +547,18 @@ export class Controller {
   private async getBody(): Promise<Record<string, unknown>> {
     return asRecord(await this.getRawBody())
   }
+}
+
+/**
+ * Shared props, narrowed to what the agent pipeline allowed this exact request (RFC 0038 §6).
+ * An empty allowlist runs no resolver; a non-empty one runs them all, since one resolver returns several keys.
+ */
+async function resolveSharedProps(ctx: Context, container: ContainerLike | undefined): Promise<ResolvedSharedInertiaProps> {
+  const allowed = readAgentSharedProps(ctx.req.raw)
+  if (allowed?.size === 0) return {} as ResolvedSharedInertiaProps
+  const shared = await resolveSharedInertiaProps(ctx, container)
+  if (!allowed) return shared
+  return Object.fromEntries(
+    Object.entries(shared as Record<string, unknown>).filter(([key]) => allowed.has(key)),
+  ) as ResolvedSharedInertiaProps
 }

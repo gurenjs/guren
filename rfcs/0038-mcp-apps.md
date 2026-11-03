@@ -206,8 +206,9 @@ whose `ui` is malformed is left out of the derived set, with a warning naming
 the route, and `guren check` fails on it.
 
 `.guren/agents.gen.ts` carries `ui` like every other derived field, so
-`guren tool:list` and `guren tool:inspect` show it and the WebMCP client
-ignores it. Codegen also writes the set of UI pages the MCP App build needs (§4)
+~~`guren tool:list` and `guren tool:inspect` show it and~~ the WebMCP client
+ignores it. **Amended in implementation (Phase 1):** `tool:list` and
+`tool:inspect` print `ui` in Phase 3, with the rest of the developer surface. Codegen also writes the set of UI pages the MCP App build needs (§4)
 into the same file, as `agentUiPages`, so the build reads one generated input
 and never loads the routes file. The manifest itself is never bundled into a
 view (§5).
@@ -328,8 +329,11 @@ Any other URI, including a page URI with a stale `v`, answers the SDK's
 in its data on every protocol revision (it maps a handler's `-32002` to
 `-32602` at the era seam). Resource reads go through the same authentication
 the endpoint already applies before any MCP framing, through the rate limiter,
-and into the audit trail as their own event (`AgentResourceRead`), since a
-template read is not a tool invocation.
+~~and into the audit trail as their own event (`AgentResourceRead`), since a
+template read is not a tool invocation.~~ **Amended in implementation (Phase 1):**
+the audit event is not written yet. It needs a record kind beside the two the
+trail stores today (`AgentToolInvoked`, `AgentToolDenied`) and a reader for it,
+which is its own change; a resource read is authenticated and metered meanwhile.
 
 **`tools/call`.** Unchanged for the pipeline. Only the result metadata differs
 (§6).
@@ -438,10 +442,13 @@ method, path and input sources of the tools the caller may call. It does not
 bundle `agents.gen.ts`: that manifest names every tool, its description,
 schemas, policy ability and approval and redaction settings, and a template is
 handed to every token that can see one page. Instead the view reads
-`ui://<server>/bridge?v=<hash>` with `readServerResource()` after connecting.
-The server answers it per caller, from the same filter as `tools/list`, with
+~~`ui://<server>/bridge?v=<hash>`~~ `ui://<server>/bridge` with
+`readServerResource()` after connecting. **Amended in implementation (Phase 1):**
+no build hash, since the catalogue is computed per request and never cached as
+a template. The server answers it per caller, from the same filter as `tools/list`, with
 `{ toolName, method, path, inputSources }` per tool in route registration
-order. What this discloses beyond `tools/list` is the method and path of tools
+order (**amended:** plus `inputBodyNested` and `bridgeable`, false for a tool
+whose derivation reported an input-name collision, `DerivedAgentTool.inputCollisions`). What this discloses beyond `tools/list` is the method and path of tools
 the caller can already call, which the guide states.
 
 1. **Initial page.** The bridge connects `App` from
@@ -560,14 +567,19 @@ type GurenToolResponse =
 `ToolCallOutcome` gains the HTTP facts `mapToolResponse()` already reads
 (`location`, the 422 `errors` object) as fields, so the adapter never parses
 its own text. `url` and `location` are made absolute in the adapter, from the
-app's configured URL; `mapToolResponse()` cannot, since it also runs in the
+~~app's configured URL~~ origin the MCP request reached the endpoint on
+(**amended in implementation:** the same origin the re-entrant request is
+already dispatched with, so a host-authorization middleware and the hand-off
+agree on the app's address); `mapToolResponse()` cannot, since it also runs in the
 browser for the WebMCP client (through `@guren/core/agent`) and has no
 application URL. The text stays as it is, so a reworded message never breaks a
 view, the same reason `DerivedAgentTool.warnings` exists beside the prefixed
 lines.
 
 **`dev.guren/inertia-page`** is present when the response carries
-`X-Inertia: true`, with the app-relative `url` of §5.
+`X-Inertia: true`, with the app-relative `url` of §5. **Amended in
+implementation (Phase 1):** only for a tool whose `ui` names a page. A page no
+view renders is not handed to a third-party frame.
 
 **What props leave the application.** The page object goes to the host and into
 a third-party iframe, and today the same props already reach the model as text.
@@ -576,16 +588,24 @@ page) are the part an author does not see at the call site: `auth.user`, flash
 messages, the `_i18n` catalogue. One policy governs both destinations, decided
 here rather than left to `share()`:
 
-- On a request the agent dispatch makes (the agent surface header, which App MCP
-  sets on its own in-process request), `Controller.inertia()` resolves **only
+- On a request the agent dispatch makes ~~(the agent surface header, which App MCP
+  sets on its own in-process request)~~, `Controller.inertia()` resolves **only
   the shared props named in `mcpPlugin({ ui: { sharedProps: [...] } })`**,
-  default none. Unlisted lazy shared props are never evaluated.
+  default none. ~~Unlisted lazy shared props are never evaluated.~~
+  **Amended in implementation (Phase 1):** the allowlist is installed by the
+  agent pipeline (`AgentInvocationOptions.sharedProps`) on the exact `Request`
+  it dispatches, the seam the principal handoff uses (RFC 0017 §2), not read
+  from the surface header: `buildToolRequest()` defaults that header to `mcp`,
+  so `TestApp.agent()` and `guren tool:call` would have been narrowed too, and
+  nothing on the wire can now set or widen it. An empty allowlist runs no
+  `share()` resolver; a non-empty one runs them all, since one resolver returns
+  several keys, and drops the unlisted keys afterwards.
 - The action's own props are sent; the controller chose them for that page.
 - The text `content` is the same projected `page.props`, so the model reads no
   more than the view receives.
 
-The header can be sent by a browser on a WebMCP call, but sending it only
-withholds shared props from the response, so a forged one discloses nothing.
+~~The header can be sent by a browser on a WebMCP call, but sending it only
+withholds shared props from the response, so a forged one discloses nothing.~~
 A shorter model-facing summary for `ui` tools (a Resource or a function of the
 props) is an additive option for later; the default is the projected props.
 
@@ -626,7 +646,9 @@ the build is per page (§4) so one admission publishes one page.
 external origin. Under that default `connect-src` is `'none'` and no external
 script, style, image or font loads, so the view reaches nothing except through
 the host's tool calls. Every origin an app adds widens that, and `guren audit`
-warns on each:
+warns on each (**amended in implementation:** the audit warnings land in Phase 3
+with the rest of the developer surface; Phase 1 passes the declared origins
+through):
 
 ```ts
 mcpPlugin({

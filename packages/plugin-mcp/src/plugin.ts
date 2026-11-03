@@ -27,6 +27,7 @@ import type { Context } from 'hono'
 
 import { readExternalMcpAuth, type ExternalMcpAuth } from './external-auth'
 import { AgentRateLimiter, createRateLimitInterposition, type RateLimitConfig } from './rate-limit'
+import { uiAuthority, unbuiltPages, type AppMcpUi, type McpUiConfig } from './mcp-apps'
 import { APP_MCP_REQUEST, createAppMcpServer, type AppMcpServerOptions } from './server'
 
 export interface McpPluginConfig {
@@ -77,6 +78,12 @@ export interface McpPluginConfig {
     /** @default 1 hour (`DEFAULT_AGENT_APPROVAL_TTL_MS`) */
     ttlMs?: number
   }
+  /**
+   * MCP Apps (RFC 0038): the built pages a `.agent({ ui })` route's view loads,
+   * their presentation and CSP, and the shared Inertia props a tool call carries.
+   * @default undefined — no pages; every shared prop is withheld from tool calls
+   */
+  ui?: McpUiConfig
 }
 
 /**
@@ -128,6 +135,16 @@ const factory = definePlugin<McpPluginConfig>({
     const serverInfo = {
       name: config.serverInfo?.name ?? 'guren-app',
       version: config.serverInfo?.version ?? '1.0.0',
+    }
+    const ui = await loadUi(config.ui, serverInfo.name)
+    const unbuilt = unbuiltPages(exposed, ui)
+    if (unbuilt.length > 0) {
+      // Listed without a view, never without their visibility (RFC 0038 §3).
+      console.warn(
+        `[@guren/plugin-mcp] No built MCP App page for ${unbuilt.map((page) => `"${page}"`).join(', ')}, so the `
+        + 'tools naming them are listed without a view. Build the pages with `bunx vite build --mode mcp-app` '
+        + "and pass ui: { pages: () => import('@/.guren/mcp-app/index.gen') } to mcpPlugin().",
+      )
     }
     // Per-token, in this process. An app's own rate-limit middleware keys on
     // `server.requestIP()`, which is null for the synthesized re-entrant request
@@ -209,6 +226,7 @@ const factory = definePlugin<McpPluginConfig>({
       // status tool that reports on them — so the two cannot disagree about whether
       // a queue exists; the server reads only three of its keys. `defer` rides along.
       const approvals = createAgentApprovalContext(config.approvals, principal, defer)
+      const origin = new URL(c.req.url).origin
 
       const pipeline = createAgentInvocationPipeline({
         app,
@@ -234,8 +252,10 @@ const factory = definePlugin<McpPluginConfig>({
         // the real Host the MCP client reached `/mcp` on. Defaulting to
         // localhost (dispatch's fallback) makes host-authorization middleware
         // — which RFC 0016's "in production" apps are encouraged to enable —
-        // reject every tool call with 403.
-        origin: new URL(c.req.url).origin,
+        // reject every tool call with 403. A view's hand-off is made absolute against it too.
+        origin,
+        // An App MCP tool call carries no shared prop the app did not name (RFC 0038 §6).
+        sharedProps: config.ui?.sharedProps ?? [],
         // A forwarded credential or the principal seam, never both. See
         // `ResolvedCaller.credential`.
         ...credential,
@@ -254,6 +274,8 @@ const factory = definePlugin<McpPluginConfig>({
         pipeline,
         limiter,
         rateKey,
+        ui,
+        appOrigin: origin,
         onInvoked: (tool, args, status, durationMs) => {
           record(
             new AgentToolInvoked(
@@ -399,6 +421,28 @@ function executionContext(c: Context): ExecutionContext | undefined {
 }
 
 type ExecutionContext = Parameters<Application['fetch']>[2]
+
+/** The pages module, loaded once at boot. A module that fails or has another shape leaves every tool without a view. */
+async function loadUi(config: McpUiConfig | undefined, serverName: string): Promise<AppMcpUi | undefined> {
+  if (!config) return undefined
+  let pages: AppMcpUi['pages']
+  if (config.pages) {
+    try {
+      const loaded: unknown = (await config.pages()).mcpAppPages
+      if (typeof loaded === 'object' && loaded !== null) {
+        pages = loaded as AppMcpUi['pages']
+      } else {
+        console.error(
+          '[@guren/plugin-mcp] The MCP App pages module exports no `mcpAppPages` object, '
+          + 'the shape `vite build --mode mcp-app` writes to .guren/mcp-app/index.gen.ts.',
+        )
+      }
+    } catch (error) {
+      console.error('[@guren/plugin-mcp] The MCP App pages module failed to load:', error)
+    }
+  }
+  return { authority: uiAuthority(serverName), pages, config }
+}
 
 function unauthorized(c: Context, message: string): Response {
   c.header('WWW-Authenticate', 'Bearer')

@@ -71,6 +71,8 @@ export type {
 export type {
   BindableModel,
   AgentRouteMetadata,
+  AgentRouteUi,
+  AgentUiPage,
   RouteBuilder,
   RouteContractOptions,
   RouteDefinition,
@@ -85,7 +87,7 @@ export type {
 // Agent Contract (RFC 0016): protocol-independent derivation of agent tools
 // from the contracts routes already carry. Consumed by the CLI's
 // `.guren/agents.gen.ts` and by protocol adapters, which must not derive twice.
-export { deriveAgentTools } from './agent/derive'
+export { deriveAgentToolUi, deriveAgentTools } from './agent/derive'
 export type {
   AgentToolInputSource,
   AgentToolSchema,
@@ -93,6 +95,7 @@ export type {
   DerivedAgentTool,
   DerivedAgentToolAnnotations,
   DerivedAgentToolExposure,
+  DerivedAgentToolUi,
 } from './agent/derive'
 // The dispatch contract (RFC 0016 §3): a tool call re-enters the application as
 // a real HTTP request. Here rather than in a protocol adapter because every

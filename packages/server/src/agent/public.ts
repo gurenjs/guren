@@ -27,5 +27,6 @@ export type {
   DerivedAgentTool,
   DerivedAgentToolAnnotations,
   DerivedAgentToolExposure,
+  DerivedAgentToolUi,
 } from './derive'
 export type { AgentSurface } from './events'
