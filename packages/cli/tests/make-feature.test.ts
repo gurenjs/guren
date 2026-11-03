@@ -326,6 +326,24 @@ describe('makeFeature', () => {
     }
   })
 
+  // An Inertia visit to a page with no <Head> leaves the document without a title of its own (axe's document-title).
+  it('gives every page it writes a document title', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-head-')
+
+    try {
+      await makeFeature('Post', { fields: 'title:string,meta:json' })
+
+      const titles: Record<string, string> = { Index: 'Posts', Show: 'Post', New: 'New Post', Edit: 'Edit Post' }
+      for (const [page, title] of Object.entries(titles)) {
+        const source = await readFile(join(workspace.dir, `resources/js/pages/posts/${page}.tsx`), 'utf8')
+        expect(source).toMatch(/^import \{ Head(?:, Link)? \} from '@inertiajs\/react'$/m)
+        expect(source).toContain(`<Head title="${title}" />`)
+      }
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('generates a delete button on the Show page', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-show-delete-')
 

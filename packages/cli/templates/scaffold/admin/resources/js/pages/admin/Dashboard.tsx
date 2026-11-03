@@ -1,3 +1,5 @@
+import { Head } from '@inertiajs/react'
+
 type Props = {
   stats: {
     users: number
@@ -9,6 +11,7 @@ type Props = {
 export default function AdminDashboard({ stats }: Props) {
   return (
     <main className="mx-auto max-w-5xl space-y-8 px-6 py-12">
+      <Head title="Admin dashboard" />
       <header className="space-y-2">
         <p className="text-xs uppercase tracking-wide text-g-text-2">Admin</p>
         <h1 className="text-3xl font-semibold">Dashboard</h1>
