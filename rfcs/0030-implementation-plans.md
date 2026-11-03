@@ -2957,10 +2957,11 @@ runs `guren plan "<request>" --print-prompt` and follows it, adding what the
 prompt cannot say: ask in the client's own way and wait before writing the
 JSON, report the page, open questions and warnings left after
 `plan:render --json`, record review changes with `plan:revise`, and hand an
-approved plan to `plan-implement`. It writes no plan in a session nobody
-approves from (a non-interactive run, a request that says nobody will
-review): the agent builds the change directly, since an unapproved plan never
-reaches `plan:next`.
+approved plan to `plan-implement`. In a session nobody approves from (a
+non-interactive run, a request that says nobody will review) it writes no
+plan for a requested change and the agent builds the change directly, since
+an unapproved plan never reaches `plan:next`; a request for the plan itself
+still gets one, and `plan-implement` reports an unapproved plan and stops.
 The plan's conventions stay in `buildPlanPrompt()` alone.
 
 **Two producers, for two situations.** The headless one cannot ask anything:

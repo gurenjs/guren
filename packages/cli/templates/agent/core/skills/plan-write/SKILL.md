@@ -1,6 +1,6 @@
 ---
 name: plan-write
-description: "Write and revise an implementation plan (`docs/plans/<slug>/plan.json`, RFC 0030) before any code, for a change across several models, routes or pages (\"plan this feature\"). Only when a person will approve it before it is built: in a session nobody approves from (a headless `claude -p` run, a scheduled job), build the change directly."
+description: "Write and revise an implementation plan (`docs/plans/<slug>/plan.json`, RFC 0030) before any code, for a change across several models, routes or pages (\"plan this feature\"). Its step 0 comes first, headless and scheduled runs included: it decides whether a plan is written when nobody in the session can approve one."
 ---
 
 # Plan Writing Skill
@@ -19,14 +19,15 @@ run anything below. Nobody will approve one in this session when:
 - the session cannot reach the person: a non-interactive run such as
   `claude -p`, a CI job or a scheduled task, where no reply can come.
 
-Then, when the request is for the working change, write no plan and no
+Then, when the request asks for the plan itself, for a person to review
+later, write it, stop after step 2, and implement nothing. When the request is
+for the working change and no plan for it exists, write no plan and no
 `docs/plans/` file: build it directly with the ordinary workflow (the
 `feature` or `scaffold` skill, `bunx guren check` after each edit, and
 `bunx guren gate` until it exits 0). An unapproved plan never reaches
 `plan:next`, so writing one spends the tokens and builds nothing. When the
-request asks for the plan itself, for a person to review later, write it,
-stop after step 2, and implement nothing. When you cannot tell and can ask
-the person, ask once.
+request names a plan that is not approved, the `plan-implement` skill
+reports it and stops. When you cannot tell and can ask the person, ask once.
 
 ## 1. Get the prompt and follow it
 
