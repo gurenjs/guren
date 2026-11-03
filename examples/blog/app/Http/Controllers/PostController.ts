@@ -1,8 +1,10 @@
 import {
+  type BroadcastManager,
   type InertiaResponse,
   type ResolvedSharedInertiaProps,
   Controller,
   HttpException,
+  live,
   paginate,
   type PaginatedPageProps,
 } from '@guren/core'
@@ -10,6 +12,8 @@ import { Post } from '../../Models/Post.js'
 import type { UserRecord } from '../../Models/User.js'
 import { PostFormSchema, PageQuerySchema, PostIdParamSchema } from '../Validators/PostValidator.js'
 import { PostCreated } from '../../Events/PostCreated.js'
+import { PostsChanged } from '../../Events/PostsChanged.js'
+import { PostUpdated } from '../../Events/PostUpdated.js'
 import { PostCacheService, POSTS_PAGE_SIZE } from '../../Services/PostCacheService.js'
 import { pages } from '@/.guren/pages.gen'
 import { PostResource, type PostResourceData } from '../Resources/PostResource.js'
@@ -29,6 +33,11 @@ export default class PostController extends Controller {
     return new PostCacheService(this.make('cache'))
   }
 
+  // Every send passes `except: this.ctx`: the author's own tab is already up to date from the redirect.
+  #broadcast(): BroadcastManager {
+    return this.make<BroadcastManager>('broadcast')
+  }
+
   async #requireAuthor(post: BoundPost, message: string): Promise<void> {
     const authUser = await this.auth.userOrFail<UserRecord>()
     if (post.authorId !== authUser.id) {
@@ -46,7 +55,14 @@ export default class PostController extends Controller {
     const withCovers = await Post.withAttachments(result.data, ['cover'])
     const data = withCovers.map((post) => new PostResource(post).toJSON())
     const pagination = { meta: paginator.meta(), links: paginator.links() }
-    return this.inertia(pages.posts.Index, { data, pagination }, { title: 'Posts | Guren Blog' })
+    return this.inertia(
+      pages.posts.Index,
+      {
+        data: live(data, { on: new PostsChanged() }),
+        pagination: live(pagination, { on: new PostsChanged() }),
+      },
+      { title: 'Posts | Guren Blog' },
+    )
   }
 
   async show(): Promise<InertiaResponse<'posts/Show', PostShowInertiaProps> | Response> {
@@ -55,7 +71,11 @@ export default class PostController extends Controller {
     // withAttachments maps records 1:1, so the destructured entry always exists.
     const [withCover] = await Post.withAttachments([post], ['cover'])
     const resource = new PostResource(withCover!).toJSON()
-    return this.inertia(pages.posts.Show, { post: resource }, { title: `${post.title} | Guren Blog` })
+    return this.inertia(
+      pages.posts.Show,
+      { post: live(resource, { on: new PostUpdated(post.id) }) },
+      { title: `${post.title} | Guren Blog` },
+    )
   }
 
   async create(): Promise<Response> {
@@ -75,11 +95,15 @@ export default class PostController extends Controller {
       await cacheService.invalidatePost(post.id)
       await this.make('events').emit(new PostCreated(post, authUser))
 
-      const cover = await this.file('cover')
-      if (cover) {
-        // Validation (image: 'require') and thumbnail generation happen here;
-        // a non-image answers 422 with the error keyed on 'cover'.
-        await Post.attach(post.id, 'cover', cover)
+      try {
+        const cover = await this.file('cover')
+        if (cover) {
+          // Validation (image: 'require') and thumbnail generation happen here;
+          // a non-image answers 422 with the error keyed on 'cover'.
+          await Post.attach(post.id, 'cover', cover)
+        }
+      } finally {
+        await this.#broadcast().broadcastEvent(new PostsChanged(), { except: this.ctx })
       }
     }
 
@@ -113,11 +137,16 @@ export default class PostController extends Controller {
     const cacheService = this.#cacheService()
     await cacheService.invalidatePost(post.id)
 
-    const cover = await this.file('cover')
-    if (cover) {
-      // hasOne replaces: the previous cover row and its stored objects are
-      // purged before the new one is written.
-      await Post.attach(post.id, 'cover', cover)
+    try {
+      const cover = await this.file('cover')
+      if (cover) {
+        // hasOne replaces: the previous cover row and its stored objects are
+        // purged before the new one is written.
+        await Post.attach(post.id, 'cover', cover)
+      }
+    } finally {
+      await this.#broadcast().broadcastEvent(new PostsChanged(), { except: this.ctx })
+      await this.#broadcast().broadcastEvent(new PostUpdated(post.id), { except: this.ctx })
     }
 
     return this.redirect(`/posts/${post.id}`)
@@ -135,6 +164,7 @@ export default class PostController extends Controller {
 
     const cacheService = this.#cacheService()
     await cacheService.invalidatePost(post.id)
+    await this.#broadcast().broadcastEvent(new PostsChanged(), { except: this.ctx })
 
     return this.redirect('/posts')
   }

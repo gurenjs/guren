@@ -18,6 +18,7 @@ export default class BroadcastProvider extends ServiceProvider {
   boot(): void {
     const broadcast = this.container.make<BroadcastManager>('broadcast')
     broadcast.channel('announcements', () => true)
+    broadcast.channel('posts', () => true)
     broadcast.privateChannel('posts.{id}', () => true)
   }
 }

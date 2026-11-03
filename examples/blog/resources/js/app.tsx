@@ -13,10 +13,12 @@ try {
   pages = undefined
 }
 
-void import('@guren/inertia-client').then(({ startInertiaClient }) =>
+void Promise.all([import('@guren/inertia-client'), import('@guren/inertia-client/live')]).then(([{ startInertiaClient }, { liveTransport }]) =>
   startInertiaClient({
     pages,
     pageManifest,
+    // Connects to /broadcasting/socket (routes/broadcasting.ts) for the live props on the posts pages.
+    live: liveTransport(),
     // `vite --mode prototype` defines GUREN_PROTOTYPE as `true`; in every
     // other build it is the literal `false`, so this branch and its import are
     // dropped from the bundle (RFC 0021).
