@@ -14,6 +14,7 @@ import { HttpException, NOT_FOUND_MESSAGE } from './HttpException'
 import { hasComposedMessage } from './exceptions/NotFoundHttpException'
 import { renderErrorPage } from './error-page'
 import { renderDebugPage } from './debug-page'
+import { wantsHtmlResponse } from './wants-html'
 import { redactQueryParams } from './redact-query-params'
 import { ambientBinding, bindAmbient } from '../http/default-application'
 import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
@@ -155,16 +156,13 @@ export class ExceptionHandler {
     return ctx.json(body, statusCode as ContentfulStatusCode)
   }
 
-  /** False for Inertia, XHR and JSON callers, which need a JSON payload. */
+  /**
+   * False for Inertia, XHR and JSON callers, which need a JSON payload. The CSRF
+   * middleware picks its page by `wants-html.ts` directly, so an override here
+   * does not change what a rejected form post answers.
+   */
   protected wantsHtmlResponse(ctx: Context): boolean {
-    if (!ctx?.req?.header) return false
-    const accept = ctx.req.header('accept') ?? ''
-    const isJsonRequest =
-      accept.includes('application/json') ||
-      ctx.req.header('x-requested-with') === 'XMLHttpRequest' ||
-      ctx.req.header('x-inertia') === 'true'
-
-    return !isJsonRequest && accept.includes('text/html')
+    return wantsHtmlResponse(ctx)
   }
 
   middleware(): Middleware {

@@ -21,7 +21,7 @@ sequenceDiagram
     M->>C: run
     C-->>B: 200
   else missing or mismatched
-    M-->>B: 403
+    M-->>B: 403 JSON (a 419 page for a browser navigation)
   end
 ```
 
@@ -48,7 +48,7 @@ The middleware automatically:
 ## Including the Token in Forms
 
 A native `<form method="post">` must carry the token as a `_token` field, or Guren
-rejects it with a 403. In an Inertia app, `useForm()` and `<Link method="post">`
+rejects it, and the browser shows a 419 "Page Expired" page. In an Inertia app, `useForm()` and `<Link method="post">`
 send it for you (see [Inertia.js Integration](#inertiajs-integration)).
 
 Use the `csrfField()` helper to generate a hidden input field:
@@ -136,6 +136,8 @@ createCsrfMiddleware({
 })
 ```
 
+Without `onError`, a rejected request gets one of two answers. A browser navigation (a request that accepts `text/html` and is not an Inertia visit, an XHR or a JSON caller) gets a 419 "Page Expired" page asking the user to go back, reload the page and submit the form again. Every other caller gets a 403 with the JSON body `{ "message": "CSRF token mismatch" }`. An `onError` you pass answers both.
+
 The remaining options rarely need changing:
 
 | Option | Default | Purpose |
@@ -216,8 +218,8 @@ Inertia automatically reads the `XSRF-TOKEN` cookie and includes it in requests.
 
 That only covers requests Inertia sends through Axios. A native
 `<form method="post">` submits as a full browser navigation, which carries no
-`X-XSRF-TOKEN` header — so Guren rejects it with a 403 unless the form itself
-carries a `_token` hidden field.
+`X-XSRF-TOKEN` header — so Guren rejects it with the 419 "Page Expired" page
+unless the form itself carries a `_token` hidden field.
 
 In an Inertia page, prefer `useForm()`:
 

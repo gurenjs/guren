@@ -129,6 +129,17 @@ The `--force` flag bypasses the cache and regenerates all manifests from scratch
 
 ---
 
+### A "419 Page Expired" page after submitting a form
+
+**Cause:** The browser posted the form itself, without a CSRF token. This is the same rejection as "CSRF token mismatch", answered as a page because the request came from a browser navigation. A form submitted before the page's scripts finished loading posts this way, and so does a native `<form method="post">` with no `_token` field.
+
+**Fix:**
+
+1. Go back, reload the page and submit the form again once it has loaded.
+2. If it happens every time, the form is not going through Inertia. Submit it with `useForm()`, or give the native form a `_token` hidden field (see [Including the Token in Forms](./csrf.md#including-the-token-in-forms)).
+
+---
+
 ### "Validation failed" with no useful error message
 
 **Cause:** The validation schema does not match the shape of the incoming request body.

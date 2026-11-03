@@ -872,7 +872,7 @@ The rubric:
 
 - The controller uses `this.auth.userOrFail()`, not `this.auth.user()` with a manual null check. `guren audit` recognises the former as an authentication check; it does not recognise the latter.
 - The page receives a `UserResource`, and the resource has no `passwordHash`. Two layers already hide it; the rubric is that the agent did not reach past them.
-- "Log out" is a `POST`, sent through an Inertia `Link` so the CSRF token travels with it. A plain `<form method="post">` would be refused with a 403.
+- "Log out" is a `POST`, sent through an Inertia `Link` so the CSRF token travels with it. A plain `<form method="post">` would be refused, and the browser would show a 419 "Page Expired" page.
 - Both tests are green, and every earlier test still is.
 
 **Checkpoint:** while signed in, open [http://localhost:3333/profile](http://localhost:3333/profile), then log out. Reload `/profile`: a 401.
