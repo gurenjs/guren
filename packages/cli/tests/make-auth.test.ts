@@ -1929,7 +1929,7 @@ export default createApp({ routes: registerAuthRoutes })
     )
 
     expect(response.status).toBe(303)
-    expect(response.headers.get('location')).toBe('http://localhost/login')
+    expect(response.headers.get('location')).toBe('/login')
     expect(flashedErrors(response)).toEqual({ email: 'The email address is badly formatted.' })
   })
 

@@ -69,7 +69,7 @@ describe('InertiaServiceProvider validation handling', () => {
     })
 
     expect(res.status).toBe(303)
-    expect(res.headers.get('Location')).toBe('http://localhost/form')
+    expect(res.headers.get('Location')).toBe('/form')
   })
 
   it('flashes flattened errors to session (first message per field)', async () => {
@@ -120,6 +120,63 @@ describe('InertiaServiceProvider validation handling', () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({}),
+    })
+
+    expect(res.status).toBe(303)
+    expect(res.headers.get('Location')).toBe('/')
+  })
+
+  // Behind a TLS-terminating proxy the request reads http: while the browser's Referer reads https:.
+  it('redirects back to an https Referer on the same host, by its path', async () => {
+    const res = await app.request('/submit', {
+      method: 'POST',
+      headers: { 'X-Inertia': 'true', Referer: 'https://localhost/posts/1/edit?tab=body' },
+    })
+
+    expect(res.status).toBe(303)
+    expect(res.headers.get('Location')).toBe('/posts/1/edit?tab=body')
+  })
+
+  // A proxy that does not forward Host hands the app its upstream address.
+  it('redirects back to a Referer on the APP_URL host from the validated env', async () => {
+    container.instance('env', { APP_URL: 'https://app.example.com' })
+
+    const res = await app.request('http://10.0.0.5:3000/submit', {
+      method: 'POST',
+      headers: { 'X-Inertia': 'true', Referer: 'https://app.example.com/posts/1/edit' },
+    })
+
+    expect(res.headers.get('Location')).toBe('/posts/1/edit')
+  })
+
+  it('reads APP_URL from process.env when the app declares no env schema', async () => {
+    const previous = process.env.APP_URL
+    process.env.APP_URL = 'https://app.example.com'
+    try {
+      const res = await app.request('http://10.0.0.5:3000/submit', {
+        method: 'POST',
+        headers: { 'X-Inertia': 'true', Referer: 'https://app.example.com/posts/1/edit' },
+      })
+
+      expect(res.headers.get('Location')).toBe('/posts/1/edit')
+    } finally {
+      if (previous === undefined) delete process.env.APP_URL
+      else process.env.APP_URL = previous
+    }
+  })
+
+  it.each([
+    'https://evil.example/x',
+    'http://localhost:4000/form',
+    '//evil.example/x',
+    '/\\evil.example/x',
+    '/\t/evil.example/x',
+    'http://localhost//evil.example/x',
+    'javascript://localhost/%0aalert(1)',
+  ])('redirects to / for a Referer that leaves the app: %p', async (referer) => {
+    const res = await app.request('/submit', {
+      method: 'POST',
+      headers: { 'X-Inertia': 'true', Referer: referer },
     })
 
     expect(res.status).toBe(303)

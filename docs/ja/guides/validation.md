@@ -277,7 +277,7 @@ function Login({ errors }: { errors?: Record<string, string> }) {
 細かい点は次のとおりです。
 
 - アプリにセッションがあればエラーをセッションに保持し（`createApp({ auth })` でマウントされます）、なければ有効期限の短い Cookie に保持します。そのため、作ったばかりのアプリでもエラーが表示されます。
-- リダイレクト先は `Referer` ヘッダーで、ヘッダーがなければ `/` です。
+- リダイレクト先は、`Referer` ヘッダーがリクエストのホストか `APP_URL` のホストを指していればそのパスです。ヘッダーがないときや別のホストを指しているときは `/` に戻ります。パスとクエリだけを使うので、偽の `Referer` を送られてもサイトの外へは移動しません。`Host` ヘッダーを転送しないプロキシの後ろでは、リクエストのホストがプロキシの転送先のアドレスになるので、`APP_URL` に公開 URL を設定してください。`X-Forwarded-Host` は読みません。
 - この処理を差し替えるには、サービスプロバイダーの `boot()` で独自のレンダラーを登録します。`this.container.make<ExceptionHandler>('exception.handler').render(ValidationException, (error, ctx) => …)` のように書くと、組み込みのものより先に呼ばれます。
 
 ### Inertia での表示

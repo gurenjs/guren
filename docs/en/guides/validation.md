@@ -277,7 +277,7 @@ This covers failures from `validateBody`, `validateQuery`, `validateParams` and 
 A few details:
 
 - The errors are stored in the session when the app has one (`createApp({ auth })` mounts it), and otherwise in a short-lived cookie, so a fresh scaffold shows them too.
-- The redirect goes to the `Referer` header, or to `/` when there is none.
+- The redirect goes to the path of the `Referer` header when it names the request's host or the host of `APP_URL`, and to `/` when there is no `Referer` or it names another host. Only the path and query are kept, so a forged `Referer` cannot send the browser off the site. Behind a proxy that does not forward the `Host` header, the request names the proxy's upstream address, so set `APP_URL` to the public URL; `X-Forwarded-Host` is not read.
 - To replace this behavior, register your own renderer from a service provider's `boot()`: `this.container.make<ExceptionHandler>('exception.handler').render(ValidationException, (error, ctx) => …)`. It runs before the built-in one.
 
 ### Displaying in Inertia

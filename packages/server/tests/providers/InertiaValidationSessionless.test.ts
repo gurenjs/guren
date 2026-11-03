@@ -74,7 +74,7 @@ describe('InertiaServiceProvider validation handling without a session', () => {
     })
 
     expect(res.status).toBe(303)
-    expect(res.headers.get('Location')).toBe('http://localhost/form')
+    expect(res.headers.get('Location')).toBe('/form')
 
     const header = res.headers
       .getSetCookie()

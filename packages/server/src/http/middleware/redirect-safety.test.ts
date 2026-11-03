@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { Hono } from 'hono'
-import { createRedirectSafetyMiddleware, isSafeRedirectUrl } from './redirect-safety'
+import { createRedirectSafetyMiddleware, isSafeRedirectUrl, sameHostRefererPath } from './redirect-safety'
 
 describe('isSafeRedirectUrl', () => {
   const requestUrl = 'http://example.com/current'
@@ -111,5 +111,59 @@ describe('createRedirectSafetyMiddleware', () => {
     const res = await app.request('http://example.com/redirect')
 
     expect(res.headers.get('Location')).toBe('https://accounts.google.com/auth')
+  })
+})
+
+describe('sameHostRefererPath', () => {
+  const requestUrl = 'http://example.com/posts'
+  const hosts = ['example.com']
+  const back = (referer: string | undefined, fallback?: string) => sameHostRefererPath(referer, requestUrl, hosts, fallback)
+
+  test('keeps the path and query of a Referer on an accepted host, whatever its scheme', () => {
+    expect(back('http://example.com/posts/1/edit')).toBe('/posts/1/edit')
+    expect(back('https://example.com/posts/1/edit?tab=body')).toBe('/posts/1/edit?tab=body')
+    expect(back('/posts/create')).toBe('/posts/create')
+  })
+
+  // A proxy that does not forward Host hands the app its upstream address.
+  test('accepts the configured app host when the request names the upstream one', () => {
+    const upstream = 'http://10.0.0.5:3000/posts'
+
+    expect(sameHostRefererPath('https://app.example.com/posts/1/edit', upstream, ['10.0.0.5:3000', 'app.example.com'])).toBe('/posts/1/edit')
+    expect(sameHostRefererPath('https://app.example.com/posts/1/edit', upstream, ['10.0.0.5:3000'])).toBe('/')
+  })
+
+  test('keeps a backslash in the query', () => {
+    expect(back('http://example.com/search?q=a\\b')).toBe('/search?q=a\\b')
+  })
+
+  test('drops the userinfo of an accepted Referer', () => {
+    expect(back('http://user:secret@example.com/form')).toBe('/form')
+  })
+
+  test('falls back for a missing Referer or one on a host or port not accepted', () => {
+    expect(back(undefined)).toBe('/')
+    expect(back('')).toBe('/')
+    expect(back('https://evil.example/x')).toBe('/')
+    expect(back('http://example.com:8080/x')).toBe('/')
+    expect(sameHostRefererPath('http://example.com:8080/x', requestUrl, ['example.com', 'example.com:8080'])).toBe('/x')
+    expect(back('https://evil.example/x', '/home')).toBe('/home')
+  })
+
+  test('falls back for a Referer whose path a browser reads as another host', () => {
+    expect(back('//evil.example/x')).toBe('/')
+    expect(back('/\\evil.example/x')).toBe('/')
+    expect(back('/\t/evil.example/x')).toBe('/')
+    expect(back(' //evil.example/x')).toBe('/')
+    expect(back('\u0001//evil.example/x')).toBe('/')
+    expect(back('http://example.com//evil.example/x')).toBe('/')
+    expect(back('http://example.com/\\evil.example/x')).toBe('/')
+    expect(back('http://example.com/..//evil.example/x')).toBe('/')
+    expect(back('http://evil.example\\@example.com/x')).toBe('/')
+  })
+
+  test('falls back for a scheme other than http and https', () => {
+    expect(back('javascript://example.com/%0aalert(1)')).toBe('/')
+    expect(back('data:text/html,hi')).toBe('/')
   })
 })
