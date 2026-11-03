@@ -25,7 +25,9 @@ Three related gaps sit next to this one:
   more often than a person does. No template sets Bun's release-age gate.
 - **The runtime is invisible.** `bun audit` reports npm packages. A Bun
   advisory appears in neither the lockfile nor the audit, though the
-  Dockerfile `guren deploy` renders pins only `oven/bun:1`.
+  Dockerfile `guren deploy` renders pins only `oven/bun:1`. The three Bun
+  advisories published in October 2026 are not in the global advisory
+  database either (§6).
 - **Data exposure has no report.** `hidden` columns are dropped by
   `Model.serialize()` and by `auth.user()` (the session guard sanitizes the
   user), and the blog example renders posts through Resources. A record from
@@ -65,7 +67,7 @@ checks (its `ASSUMPTIONS.md`), and confining effects to declared boundaries.
 | M1 | Cooldown defaults in scaffolds; `guren doctor` and `guren upgrade` for existing apps (§2) |
 | M2 | Lockfile dependency tree and `guren deps:why` (§3) |
 | M3 | Import edges, placement and `guren deps:exposure`; advisory findings carry exposure and a fix path (§4, §5) |
-| M4 | Runtime version report (§6) |
+| M4 | Runtime advisory check against `oven-sh/bun`'s repository advisories (§6) |
 | M5 | Data exposure and the effect boundary presets (§7, §8) |
 | M6 | Trust boundary section in every report (§9) |
 
@@ -281,12 +283,35 @@ next deploy.
 
 ### 6. Runtime version
 
-`guren deps:exposure` and `guren audit` report the runtime they can see: the
+`guren deps:exposure` and `guren audit` check the runtime they can see: the
 `Bun.version` of the process, `engines.bun` and `packageManager` from
-`package.json`, and the base image tags in the app's `Dockerfile`. The report
-says plainly that these are not checked against advisories, and the
-`coverage.runtime` entry stays `unavailable` until an advisory source is chosen
-(Open Question 3). The Dockerfile `guren deploy` renders moves from
+`package.json`, and the base image tags in the app's `Dockerfile`.
+
+Each version is checked against the repository advisories of `oven-sh/bun`
+(`GET /repos/oven-sh/bun/security-advisories`), the only source that was
+current when queried on 2026-11-03:
+
+| Source | What it returned |
+| --- | --- |
+| `oven-sh/bun` repository advisories | 3 high advisories published 2026-10-23 and 24, each with `npm/bun` `vulnerable_version_range` (for example `>= 1.0.21, < 1.4.4`) and `patched_versions` `1.4.4` |
+| GitHub global advisory database (`ecosystem=npm&affects=bun`) | 2 older advisories, one withdrawn; the 3 above return 404 |
+| OSV.dev (`npm/bun`) | the same 2 as the global database |
+| NVD keyword search | none |
+
+`bun audit` and OSV read the global database, which had not picked up the
+repository's advisories, so the runtime check reads the repository directly.
+A version matches when `Bun.semver.satisfies(version, vulnerable_version_range)`
+holds, and the finding (`deps:runtime:<ghsa>`) names `patched_versions` as the
+fix. An image tag that names no exact version (`oven/bun:1`) is reported as
+unpinned rather than matched. The endpoint answers without a token at 60
+requests an hour; CI passes `GITHUB_TOKEN`. A request that fails makes
+`coverage.runtime` `unavailable` with the reason, never a clean result.
+
+The advisories above are relevant to Guren's own support range: 1.3.x is
+best-effort, every 1.3.x release falls inside two of the three ranges, and
+1.3.14 and later inside all three.
+
+The Dockerfile `guren deploy` renders moves from
 `oven/bun:1` to the minor of the Bun running the command, so a rebuild cannot
 change the runtime silently. The templates set no `engines.bun` today, so the
 report usually shows only the process version and the image tag.
@@ -380,9 +405,9 @@ existing `deps:*` finding keys are unchanged; the new fields are optional.
 1. Should `@guren/*` stay excluded from the cooldown (§2), or should the release
    train publish and wait three days before the templates reference it?
 2. Three days or seven for the default age?
-3. Where do Bun advisories come from? Candidates are the GitHub advisory
-   database for `oven-sh/bun` and the Bun release notes; neither has been
-   checked for completeness.
+3. Should the runtime check also read the global database once it catches up,
+   in case Bun files an advisory there and not in the repository? The two
+   have disagreed only in the repository's favour so far.
 4. Should the trust boundary section also be written to `docs/spec/`? It would
    be drift-gated there, and every dependency bump would touch it.
 5. Is a name list the right default for sensitive columns, or should a schema
