@@ -14,7 +14,8 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
 - Statics: \`find(id)\` → record | null · \`findOrFail(id)\` (throws, renders 404) · \`first(where?)\` ·
   \`all()\` · \`create(data)\` · \`update(where, data)\` · \`delete(where)\` · \`paginate(options?)\` ·
   \`create(data, { set: { authorId } })\` / \`update(where, data, { set })\` (server-chosen columns kept out of fillable) ·
-  \`transaction(async (trx) => ...)\` · \`forceCreate/forceUpdate\` (bypass fillable — never pass request input)
+  \`transaction(async (trx, txModel) => ...)\` (\`txModel\` = \`Model.inTransaction(trx)\`; any other model joins via
+  \`Other.inTransaction(trx)\`) · \`forceCreate/forceUpdate\` (bypass fillable — never pass request input)
 - Where: \`where({ a: 1, ids: [1, 2] })\` (object = AND, array value = IN) or \`where(field, op, value)\` —
   operators (exact set): \`=\` \`!=\` \`>\` \`<\` \`>=\` \`<=\` \`like\` \`in\` \`not in\` \`is null\` \`is not null\`.
   NULL: \`whereNull(field)\` / \`whereNotNull(field)\`, or the operator form \`where(field, 'is null', null)\` / \`orWhere(field, 'is null', null)\`;
@@ -51,7 +52,8 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
   never on \`this.ctx.get()\`
 - \`await this.authorize('update', [Post, post])\` (throws → 403); an ability with no record takes the bare class,
   \`await this.authorize('create', Post)\`. Register the policy in a provider's
-  \`boot()\`: \`this.container.make('gate').policy(Post, PostPolicy)\`, or every check is denied
+  \`boot()\`: \`this.container.make('gate').policy(Post, PostPolicy)\`, or every check is denied. A new provider
+  still declares \`register(): void {}\` (abstract on \`ServiceProvider\`) and is listed in \`createApp({ providers })\`
 
 ### Routes (@guren/core)
 - Agent tools: \`.agent({ description })\` (or \`agent:\` in the route options) exposes a route as an MCP tool —

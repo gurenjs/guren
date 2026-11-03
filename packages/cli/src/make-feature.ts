@@ -265,7 +265,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   consola.info(`  4. Run: bunx guren codegen`)
   if (withPolicy) {
     const modelsBase = moduleName ? `../modules/${moduleName}` : '../app'
-    consola.info(`  5. Register the policy from a service provider's boot():`)
+    consola.info(`  5. Register the policy in a service provider's boot() (a new provider, from \`bunx guren make:provider\`, also declares register(): void {} and is listed in createApp({ providers })):`)
     consola.info(`     import { ${singular} } from '${modelsBase}/Models/${singular}.js'`)
     consola.info(`     import { ${singular}Policy } from '${modelsBase}/Policies/${singular}Policy.js'`)
     consola.info(`     this.container.make('gate').policy(${singular}, ${singular}Policy)`)
