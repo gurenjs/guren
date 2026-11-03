@@ -156,6 +156,34 @@ function buildPrevNext(
   }
 }
 
+function sectionKey(category: string, title: string): string {
+  return `${category}/${title}`
+}
+
+function activeSectionKey(categories: DocCategoryGroup[], active: ActiveDoc | undefined): string | undefined {
+  if (!active) return undefined
+  const group = categories.find((candidate) => candidate.category === active.category)
+  const section = group?.sections.find((candidate) => candidate.docs.some((doc) => doc.slug === active.slug))
+  return group && section ? sectionKey(group.category, section.title) : undefined
+}
+
+// Inertia remounts the page on every visit, so the sections a reader opened or
+// closed by hand live here. Written only from a click, never on the server; the
+// section holding the current page opens on its own and is not remembered.
+let rememberedSections: ReadonlySet<string> = new Set()
+
+function rememberToggle(key: string, open: boolean): void {
+  rememberedSections = withSection(rememberedSections, key, open)
+}
+
+function withSection(sections: ReadonlySet<string>, key: string, open: boolean): ReadonlySet<string> {
+  if (sections.has(key) === open) return sections
+  const next = new Set(sections)
+  if (open) next.add(key)
+  else next.delete(key)
+  return next
+}
+
 function useTableOfContents(doc: DocPage | null) {
   const [items, setItems] = useState<TocItem[]>([])
   const [activeId, setActiveId] = useState<string>('')
@@ -221,10 +249,19 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
   // nodes the effects below add.
   const docHtml = useMemo(() => ({ __html: doc?.html ?? '' }), [doc?.html])
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const currentSection = activeSectionKey(categories, active)
+  const [openSections, setOpenSections] = useState<ReadonlySet<string>>(() =>
+    currentSection ? withSection(rememberedSections, currentSection, true) : rememberedSections,
+  )
+
+  const syncSection = (key: string, open: boolean) => {
+    setOpenSections((previous) => withSection(previous, key, open))
+  }
 
   useEffect(() => {
     setSidebarOpen(false)
-  }, [active?.category, active?.slug])
+    if (currentSection) setOpenSections((previous) => withSection(previous, currentSection, true))
+  }, [active?.category, active?.slug, currentSection])
 
   // A browser scrolls to the fragment on a full load; Inertia does not after a
   // client-side visit. Keyed on the router event, not the doc: two results in one
@@ -511,27 +548,40 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
                 <h2 className="docs-kicker mb-4 pl-2 text-xs text-docs-heading">
                   {group.title}
                 </h2>
-                {group.sections.map((section) => (
-                  <div key={`${group.category}-${section.title}`} className="mb-5">
-                    <h3 className="docs-kicker mb-2 pl-2 text-[0.7rem] text-docs-text-secondary">
-                      {section.title}
-                    </h3>
-                    <nav className="flex flex-col gap-0.5">
-                      {section.docs.map((entry) => {
-                        const isActive = active?.category === group.category && active?.slug === entry.slug
-                        return (
-                          <Link
-                            key={`${group.category}-${entry.slug}`}
-                            href={`${basePath}/${group.category}/${entry.slug}`}
-                            className={`docs-nav-link ${isActive ? 'docs-nav-link--active' : ''}`}
-                          >
-                            {entry.title}
-                          </Link>
-                        )
-                      })}
-                    </nav>
-                  </div>
-                ))}
+                {group.sections.map((section) => {
+                  const key = sectionKey(group.category, section.title)
+                  return (
+                    <details
+                      key={key}
+                      open={openSections.has(key)}
+                      onToggle={(event) => syncSection(key, event.currentTarget.open)}
+                      className="docs-nav-section mb-1"
+                    >
+                      <summary
+                        className="docs-nav-summary"
+                        onClick={(event) => rememberToggle(key, !event.currentTarget.parentElement?.hasAttribute('open'))}
+                      >
+                        <span>{section.title}</span>
+                        <ChevronRightIcon aria-hidden className="docs-nav-chevron size-3.5 shrink-0" />
+                      </summary>
+                      <nav className="mb-3 mt-1 flex flex-col gap-0.5 border-l border-docs-border pl-2 ml-2">
+                        {section.docs.map((entry) => {
+                          const isActive = active?.category === group.category && active?.slug === entry.slug
+                          return (
+                            <Link
+                              key={`${group.category}-${entry.slug}`}
+                              href={`${basePath}/${group.category}/${entry.slug}`}
+                              aria-current={isActive ? 'page' : undefined}
+                              className={`docs-nav-link ${isActive ? 'docs-nav-link--active' : ''}`}
+                            >
+                              {entry.title}
+                            </Link>
+                          )
+                        })}
+                      </nav>
+                    </details>
+                  )
+                })}
               </section>
             ))}
           </div>
@@ -617,7 +667,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
                   } ${
                     toc.activeId === item.id
                       ? 'font-semibold text-docs-accent'
-                      : 'text-docs-text-muted hover:text-docs-text'
+                      : 'text-docs-text-secondary hover:text-docs-heading'
                   }`}
                 >
                   {item.text}
