@@ -1364,6 +1364,15 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     )
   })
 
+  // With no fillable at all, create(data, { set }) refuses every set, so "the server sets every column" would fail at the first write.
+  test('should write a planned empty fillable as fillable: [], which create(data, { set }) accepts', () => {
+    const document = widgetsPlan()
+    document.models[3]!.fillable = []
+    const model = emitWidgets(document, 'pg').files.find((file) => file.path === 'app/Models/Widget.ts')!.contents
+
+    expect(model).toContain('export class Widget extends defineModel(widgets, {\n  fillable: [],\n}) {')
+  })
+
   test('should write a stubbed field whose name holds a line break or a line separator as a valid literal', () => {
     const document = widgetsPlan()
     document.resources[0]!.fields.push({ name: 'odd\nname here', type: 'string' })

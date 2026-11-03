@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, readFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { makeModel, modelFile } from '../src/make-model'
+import { buildModelSource, makeModel, modelFile } from '../src/make-model'
 
 describe('makeModel', () => {
   let tempDir: string
@@ -66,6 +66,24 @@ describe('makeModel', () => {
       }
       "
     `)
+  })
+
+  // `create(data, { set })` refuses a model with no fillable at all, so an empty list is not the same as none.
+  it('should write an empty fillable as fillable: [], and none when it is not given', () => {
+    expect(buildModelSource({ className: 'Post', schemaIdentifier: 'posts', fillable: [] })).toMatchInlineSnapshot(`
+      "import { defineModel } from '@guren/core'
+      import { posts } from '../../db/schema.js'
+
+      export type PostRecord = typeof posts.$inferSelect
+      export type NewPostRecord = typeof posts.$inferInsert
+
+      export class Post extends defineModel(posts, {
+        fillable: [],
+      }) {
+      }
+      "
+    `)
+    expect(buildModelSource({ className: 'Post', schemaIdentifier: 'posts' })).toContain('export class Post extends defineModel(posts) {')
   })
 
   it('writes the attachable model byte for byte', () => {

@@ -29,8 +29,11 @@ export interface ModelSourceOptions {
   className: string
   schemaIdentifier: string
   attachments?: AttachmentDefinition[]
-  /** Written as `defineModel()`'s `fillable` option when non-empty. */
-  fillable?: string[]
+  /**
+   * Written as `defineModel()`'s `fillable` option whenever given: `[]` is the plan's "the server
+   * sets every column", which `create(data, { set })` needs, while an absent option refuses `set`.
+   */
+  fillable?: readonly string[]
   relationships?: ModelRelationshipSource[]
   /** Further `db/schema` exports the file reads: related tables, a pivot. */
   schemaImports?: string[]
@@ -54,7 +57,7 @@ export function buildModelSource(options: ModelSourceOptions): string {
   const { className, schemaIdentifier } = options
   const attachments = options.attachments ?? []
   const relationships = options.relationships ?? []
-  const fillable = options.fillable ?? []
+  const { fillable } = options
 
   // `image: 'require'` (full-decode validation, 422 on non-image) is this
   // scaffold's own default, not the framework's; the author drops it per
@@ -64,7 +67,7 @@ export function buildModelSource(options: ModelSourceOptions): string {
   const types = [...new Set(relationships.map((relationship) => RELATION_RECORD[relationship.type].type))].sort().map((type) => `type ${type}`)
   const schemaImports = [schemaIdentifier, ...[...new Set(options.schemaImports ?? [])].filter((name) => name !== schemaIdentifier).sort()]
 
-  const defined = fillable.length === 0
+  const defined = fillable === undefined
     ? `defineModel(${schemaIdentifier})`
     : `defineModel(${schemaIdentifier}, {\n  fillable: [${fillable.map((name) => `'${name}'`).join(', ')}],\n})`
   const declaration = attachments
