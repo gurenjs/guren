@@ -95,7 +95,7 @@ A task intent names an entity, the elements it covers, and the behaviours that p
 }
 ```
 
-`kind` is one of `success`, `validation`, `unauthenticated`, `forbidden`, `not-found` and `state`. The checks count them: a route with a validator and no `validation` behaviour, or with authentication and no `unauthenticated` one, is reported. `expect` takes `status`, `redirect`, `inertia`, `errors` and `database`; request `input` and database values are written as `{ "name": "body", "json": "\"Nice post\"" }`, the value as JSON text.
+`kind` is one of `success`, `validation`, `unauthenticated`, `forbidden`, `not-found` and `state`. The checks count them on the routes the plan adds or alters: a route with a validator and no `validation` behaviour, or with authentication and no `unauthenticated` one, is reported. `expect` takes `status`, `redirect`, `inertia`, `errors` and `database`; request `input` and database values are written as `{ "name": "body", "json": "\"Nice post\"" }`, the value as JSON text.
 
 Each behaviour becomes a test whose title carries its id in brackets. Start acceptance ids with `AC-`: `plan:verify` reports a bracketed `AC-` token that the plan does not declare, which is how a mistyped id gets caught.
 
@@ -107,6 +107,25 @@ test("[AC-comments-4] a user cannot delete someone else's comment", async () => 
 ```
 
 Guren redirects a non-GET request with 303, so a behaviour that expects the redirect after a form post says `"status": 303`.
+
+A behaviour that holds before the plan's work carries `"alreadyHolds": true`. The usual one is an `unauthenticated` behaviour on a route the plan alters and that is behind authentication today: a guest is sent to sign in already, and the plan must keep it that way.
+
+```json
+{
+  "id": "AC-comments-6",
+  "description": "A guest is sent to sign in before editing a post.",
+  "kind": "unauthenticated",
+  "actor": "guest",
+  "route": "route.posts.edit",
+  "given": [],
+  "alreadyHolds": true,
+  "expect": { "redirect": "/login" }
+}
+```
+
+The `tests` step asks every behaviour's test to fail before the implementation exists, which a test of what already holds cannot do. A marked behaviour is asked for its test only, and the step that runs the tests still needs it to pass. Leave the mark off when the plan adds the guard itself: that test fails until the work is done. An `existing` route needs no `unauthenticated` behaviour at all.
+
+`plan:render` warns about a behaviour whose test may pass before its implementation exists: one with nothing to set up, on a route that exists already or that an earlier task mounts. Mark it if it guards what already holds, move it to the task that adds its route, or give it a setup or an expectation that only the planned work meets. A mark on a behaviour whose route nothing answers yet is a warning too.
 
 ## Questions
 
