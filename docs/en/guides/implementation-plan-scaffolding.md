@@ -44,7 +44,7 @@ export const CommentPayloadSchema = z.object({
 })
 ```
 
-A required `string` or `text` field that plans no `min` and no format also gets `.min(1)`, because a blank form field arrives as `""` and `z.string()` alone accepts it. Plan `min 0` to keep the empty string. Query and params validators get the same bound, since a GET form sends a blank field as `""` too.
+A required `string` or `text` field that plans no `min` and no format also gets `.min(1)`, because an empty form field arrives as `""` and `z.string()` alone accepts it. The bound refuses the empty string only: a value of spaces or line breaks still passes. When the field must hold visible text, state that rule in the plan, which lists it for the `http` step to implement; plan `min 0` to keep the empty string. Query and params validators get the same bound, since a GET form sends an empty field as `""` too.
 
 A validator an action takes its `query` or `params` from gets `z.coerce.number()` and `z.stringbool()` for numbers and booleans, since those values arrive as text. A rule written in prose, or one that does not fit the field's type (a bound on a boolean), is not written, and the report lists it.
 
