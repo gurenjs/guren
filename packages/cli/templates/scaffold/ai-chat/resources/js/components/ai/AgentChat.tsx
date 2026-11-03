@@ -113,7 +113,7 @@ function Conversation({ api, conversationId, messages: initialMessages, placehol
         method="post"
         action={api}
         onSubmit={send}
-        className="flex items-end gap-2 rounded-g-card border border-g-line-strong bg-g-panel py-2 pr-2 pl-4 shadow-g-card transition focus-within:border-g-accent"
+        className="flex items-end gap-2 rounded-g-card border border-g-line-strong bg-g-panel py-2 pr-2 pl-4 shadow-g-card focus-within:outline-solid focus-within:outline-2 focus-within:-outline-offset-1 focus-within:outline-g-accent"
       >
         <textarea
           aria-label="Message"
@@ -122,9 +122,9 @@ function Conversation({ api, conversationId, messages: initialMessages, placehol
           placeholder={placeholder}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
-          className="max-h-48 min-h-9 flex-1 resize-none bg-transparent py-1.5 text-g-text outline-none [field-sizing:content] placeholder:text-g-muted"
+          className="max-h-48 min-h-9 flex-1 resize-none bg-transparent py-1.5 text-g-text outline-hidden [field-sizing:content] placeholder:text-g-muted"
         />
-        {/* One element for both, so focus stays on it when sending turns it into Stop. */}
+        {/* The box draws the focus ring for its textarea. One element for both, so focus stays when Send turns into Stop. */}
         <button
           type={busy ? 'button' : 'submit'}
           aria-label={busy ? 'Stop' : 'Send'}
