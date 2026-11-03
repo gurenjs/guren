@@ -156,7 +156,7 @@ Inertia のリクエストにはすべてソケット ID が付いて送られ�
 | `live-props:socket-route` | どのファイルも `broadcast.webSocketMiddleware()` をマウントしておらず、transport の接続先がない |
 | `live-props:event-name:…` | live prop が待つイベントに `broadcastAs()` も `static eventName` もない |
 | `live-props:outermost:…` | `live()` が `always()` か deferred のコールバックの中にある |
-| `live-props:unverifiable:…` | 待つイベントが読み取れない。オプションが `on` をそのまま書いたオブジェクトリテラルでない、イベントが `app/` にあるクラスの `new SomeEvent(…)` でない（同じ名前を 2 つのファイルが宣言しているときは、コントローラーの import で判断します）、または基底クラスを読み取れない |
+| `live-props:unverifiable:…` | 待つイベントが読み取れない。オプションが `on` をそのまま書きスプレッドを含まないオブジェクトリテラルでない、イベントがコントローラーの import の指す `app/` のクラスの `new SomeEvent(…)` でない（パッケージから import したイベントは読みません）、または基底クラスを読み取れない |
 
 既存の [deferred props の警告](./frontend.md#deferred-props)も、`live()` の中の `defer()` を見るようになっています。また `bunx guren codegen` は、アプリが `broadcastEvent()` で送るイベントをイベントクラスから読み取り、`.guren/channels.gen.ts` に載せます。
 

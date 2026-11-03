@@ -35,7 +35,7 @@ export async function generateChannelTypes(
   const sourceDir = resolve(appRoot, options.sourceDir ?? DEFAULT_SOURCE_DIR)
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
 
-  const definitions = await collectChannelDefinitions(sourceDir)
+  const definitions = await collectChannelDefinitions(appRoot, sourceDir)
   const channels = Array.from(definitions.keys()).sort((a, b) => a.localeCompare(b))
   const module = buildChannelModuleContent(definitions, {
     source: relative(appRoot, sourceDir) || DEFAULT_SOURCE_DIR,
@@ -103,7 +103,7 @@ ${channelEventManifestEntries || '  // No channel events found'}
 `
 }
 
-async function collectChannelDefinitions(directory: string): Promise<ChannelDefinitionMap> {
+async function collectChannelDefinitions(appRoot: string, directory: string): Promise<ChannelDefinitionMap> {
   const definitions: ChannelDefinitionMap = new Map()
   const files = await listSourceFiles(directory)
   // Parsed through parseSourceFile() with the file path: plugins come from the
@@ -111,13 +111,22 @@ async function collectChannelDefinitions(directory: string): Promise<ChannelDefi
   // unterminated JSX element and the file silently contributes no channels.
   const parsed = await Promise.all(files.map(async (filePath) => ({ filePath, ast: parseSourceFile(await readFile(filePath, 'utf8'), filePath) })))
 
-  // Read first: `broadcastEvent(new X())` may sit in a file before the one declaring X.
-  const eventClasses = new BroadcastEventIndex()
+  const eventClasses = new BroadcastEventIndex(appRoot)
+  const sent: Array<{ local: string; filePath: string }> = []
   for (const { filePath, ast } of parsed) {
-    if (ast) eventClasses.add(ast.program.body, filePath)
+    if (!ast) continue
+    eventClasses.add(ast.program.body, filePath)
+    extractDefinitionsFromAst(ast, definitions, (local) => sent.push({ local, filePath }))
   }
-  for (const { ast } of parsed) {
-    if (ast) extractDefinitionsFromAst(ast, definitions, eventClasses)
+  // After every file is read: `broadcastEvent(new X())` may sit in a file before the one declaring X.
+  for (const { local, filePath } of sent) {
+    const found = await eventClasses.constructed(local, filePath)
+    const eventClass = found.kind === 'class' ? found.reading : undefined
+    if (!eventClass?.channels || eventClass.eventName === undefined) continue
+    const payloadType = renderPayloadType(eventClass.payload)
+    for (const channel of eventClass.channels) {
+      addEventPayload(ensureChannel(definitions, channel), eventClass.eventName, payloadType)
+    }
   }
 
   return definitions
@@ -149,7 +158,7 @@ async function listSourceFiles(directory: string): Promise<string[]> {
 function extractDefinitionsFromAst(
   ast: NonNullable<ReturnType<typeof parseSourceFile>>,
   definitions: ChannelDefinitionMap,
-  eventClasses: BroadcastEventIndex,
+  onEventSent: (local: string) => void,
 ): void {
   walk(ast.program, (node) => {
     if (node.type !== 'CallExpression') return
@@ -178,14 +187,8 @@ function extractDefinitionsFromAst(
     if (methodName === 'broadcastEvent') {
       const [eventArg] = (node.arguments as unknown[]) ?? []
       const created = eventArg ? unwrapTypeAssertion(eventArg as BabelNode) : undefined
-      const callee = created?.type === 'NewExpression' ? (created.callee as BabelNode) : undefined
-      // A name two files declare is left out: which class the call means is the import's to say.
-      const eventClass = callee?.type === 'Identifier' ? eventClasses.unique(callee.name as string) : undefined
-      if (!eventClass?.channels || eventClass.eventName === undefined) return
-      const payloadType = renderPayloadType(eventClass.payload)
-      for (const channel of eventClass.channels) {
-        addEventPayload(ensureChannel(definitions, channel), eventClass.eventName, payloadType)
-      }
+      const constructed = created?.type === 'NewExpression' ? (created.callee as BabelNode) : undefined
+      if (constructed?.type === 'Identifier') onEventSent(constructed.name as string)
       return
     }
 

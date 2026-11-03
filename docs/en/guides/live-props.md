@@ -156,7 +156,7 @@ Once a controller imports `live`, `guren check` adds these advisory warnings (`-
 | `live-props:socket-route` | No file mounts `broadcast.webSocketMiddleware()`, so the transport has nothing to connect to |
 | `live-props:event-name:…` | An event a live prop listens for has no `broadcastAs()` and no `static eventName` |
 | `live-props:outermost:…` | `live()` sits inside `always()` or a deferred callback |
-| `live-props:unverifiable:…` | The events cannot be read: the options are not an object literal with a literal `on`, or an event is not `new SomeEvent(…)` of a class the check finds under `app/` (through the controller's import when two files declare the name), or its base class is not one the check can read |
+| `live-props:unverifiable:…` | The events cannot be read: the options are not an object literal with a literal `on` and no spread, an event is not `new SomeEvent(…)` of a class under `app/` that the controller's import leads to (an event imported from a package is not read), or a base class is not one the check can read |
 
 The existing [deferred props warning](./frontend.md#deferred-props) also sees a `defer()` inside `live()`. `bunx guren codegen` lists the events an app sends through `broadcastEvent()` in `.guren/channels.gen.ts`, read from the event classes.
 
