@@ -136,7 +136,11 @@ describe('the default setup', () => {
   async function mountInto(serverRendered: boolean): Promise<string[]> {
     await startInertiaClient({ page, resolve: async () => ({ default: () => null }) })
     const setup = capturedOptions?.setup as (args: { el: unknown; App: unknown; props: unknown }) => void
-    setup({ el: { hasAttribute: (name: string) => serverRendered && name === 'data-server-rendered' }, App: () => null, props: {} })
+    setup({
+      el: { hasAttribute: (name: string) => serverRendered && name === 'data-server-rendered', querySelectorAll: () => [] },
+      App: () => null,
+      props: {},
+    })
     return [...mounts]
   }
 

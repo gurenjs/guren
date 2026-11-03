@@ -5,6 +5,7 @@ import { createRoot, hydrateRoot } from 'react-dom/client'
 import { createPagesResolver as createPagesResolverFactory, type ResolveComponent } from './resolve'
 import type { PageManifest } from './contracts'
 import type { AnyPrototypeDefinition } from './prototype'
+import { recordTypedValues } from './typed-before-hydration'
 
 type SetupArgs = {
   el: HTMLElement
@@ -52,8 +53,12 @@ export const PROTOTYPE_RESET_FLAG = 'prototype.reset'
 // Inertia's own default: a fresh root would replace the server's markup and lose what was typed into it.
 const defaultSetup = ({ el, App, props }: SetupArgs) => {
   const app = React.createElement(App, props as any)
-  if (el.hasAttribute('data-server-rendered')) hydrateRoot(el, app)
-  else createRoot(el).render(app)
+  if (el.hasAttribute('data-server-rendered')) {
+    recordTypedValues(el)
+    hydrateRoot(el, app)
+  } else {
+    createRoot(el).render(app)
+  }
 }
 
 /** Start the Inertia client application. */

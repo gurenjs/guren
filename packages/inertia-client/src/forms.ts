@@ -11,6 +11,7 @@ import { useForm, usePage } from '@inertiajs/react'
 import type { InertiaFormProps, InertiaPrecognitiveFormProps } from '@inertiajs/react'
 import { substituteRouteParams, type RoutePathParams } from './components'
 import { findTranslation, type I18nPageProps } from './i18n'
+import { adoptTypedValue, takeTypedValue } from './typed-before-hydration'
 
 export type { FormDataType } from '@inertiajs/core'
 
@@ -378,27 +379,14 @@ export function useField<TBody extends FormDataType<TBody>, K extends keyof TBod
   fieldRef.current = field
 
   useLayoutEffect(() => {
-    // Once, on mount: a hydrated control keeps what was typed before hydration, which the
-    // form's initial value would overwrite on its next render.
+    // Once, on mount: what was typed before hydration, which the form's initial value would
+    // overwrite on its next render. Only a hydrated control carries one.
     const element = document.getElementById(id)
-    if (element) adoptControlValue(fieldRef.current, element)
+    const typed = element ? takeTypedValue(element) : undefined
+    if (typed) adoptTypedValue(fieldRef.current, typed)
   }, [])
 
   return field
-}
-
-/**
- * Sends a value the control holds and the field state does not through the control's own
- * `onChange`, so it is read back as any change would be. A file input counts once it holds a file.
- */
-export function adoptControlValue<TValue>(field: FieldState<TValue>, element: object): void {
-  if (field.input === 'hidden') return
-  const target = element as HTMLInputElement & HTMLSelectElement & HTMLTextAreaElement
-  const differs =
-    field.input === 'checkbox' ? target.checked !== field.control.checked
-      : field.input === 'file' ? (target.files?.length ?? 0) > 0
-        : target.value !== field.control.value
-  if (differs) field.control.onChange({ target, currentTarget: target } as never)
 }
 
 export interface DescribeFieldInput<TValue> {

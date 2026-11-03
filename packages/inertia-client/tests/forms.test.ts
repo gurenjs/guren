@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  adoptControlValue,
   deriveFieldInput,
   describeField,
   fromDateTimeLocal,
@@ -160,43 +159,6 @@ describe('date-time controls', () => {
   it('writes nothing until the control changes, so an untouched value goes back as received', () => {
     const { writes } = field(text({ format: 'date-time' }), '2026-11-01T03:22:55.123Z')
     expect(writes).toEqual([])
-  })
-})
-
-describe('adoptControlValue', () => {
-  it('feeds text typed before hydration through the control', () => {
-    const { state, writes } = field(text(), '')
-    adoptControlValue(state, { value: 'typed' })
-    expect(writes).toEqual(['typed'])
-  })
-
-  it('reads a number, a checkbox and a file the way their onChange does', () => {
-    const file = { name: 'cover.png' }
-    const number = field({ type: 'number', required: true }, '')
-    const checkbox = field({ type: 'boolean', required: false }, false)
-    const upload = field({ type: 'unknown', required: true }, null, { overrides: { as: 'file' } })
-
-    adoptControlValue(number.state, { value: '7', valueAsNumber: 7 })
-    adoptControlValue(checkbox.state, { checked: true })
-    adoptControlValue(upload.state, { files: [file] })
-
-    expect(number.writes).toEqual([7])
-    expect(checkbox.writes).toEqual([true])
-    expect(upload.writes).toEqual([file])
-  })
-
-  it('leaves a control that shows the field value, and a hidden one, alone', () => {
-    const shown = field(text(), 'kept')
-    const unchecked = field({ type: 'boolean', required: false }, false)
-    const empty = field({ type: 'unknown', required: true }, null, { overrides: { as: 'file' } })
-    const hidden = field(text(), 'x', { overrides: { as: 'hidden' } })
-
-    adoptControlValue(shown.state, { value: 'kept' })
-    adoptControlValue(unchecked.state, { checked: false })
-    adoptControlValue(empty.state, { files: [] })
-    adoptControlValue(hidden.state, { value: 'other' })
-
-    expect([...shown.writes, ...unchecked.writes, ...empty.writes, ...hidden.writes]).toEqual([])
   })
 })
 
