@@ -903,6 +903,8 @@ export type {
   WebSocketMiddlewareOptions,
   AuthMiddlewareOptions,
   BroadcastableEvent,
+  BroadcastEventOptions,
+  BroadcastSender,
   BroadcastTarget,
   MemoryDriverOptions as BroadcastMemoryDriverOptions,
   RedisClient as BroadcastRedisClient,

@@ -21,47 +21,28 @@ export interface AgentChatProps {
 
 /**
  * Keyed by the conversation, since the transport keeps the id it was created with. A conversation this
- * mount started keeps the mount when the page props catch up, and `restart` remounts a first turn that
- * stored nothing, keeping what it showed, so the next message starts afresh.
+ * mount started keeps the mount when the page props catch up.
  */
 export function AgentChat(props: AgentChatProps) {
   const adopted = useRef<string | null>(null)
-  const [restart, setRestart] = useState({ count: 0, messages: [] as UIMessage[], failed: false })
   const fresh = props.conversationId === null || props.conversationId === adopted.current
   return (
     <Conversation
-      key={`${fresh ? 'new' : props.conversationId}:${restart.count}`}
+      key={fresh ? 'new' : props.conversationId}
       {...props}
-      messages={restart.count > 0 && props.conversationId === null ? restart.messages : props.messages}
-      failed={restart.failed && props.conversationId === null}
       onAdopted={(id) => {
         adopted.current = id
-      }}
-      onRestart={(messages, failed) => {
-        adopted.current = null
-        setRestart(({ count }) => ({ count: count + 1, messages, failed }))
       }}
     />
   )
 }
 
 interface ConversationProps extends AgentChatProps {
-  failed: boolean
   onAdopted: (id: string) => void
-  onRestart: (messages: UIMessage[], failed: boolean) => void
 }
 
-function Conversation({
-  api,
-  conversationId,
-  messages: initialMessages,
-  placeholder = 'Ask a question',
-  failed: failedBefore,
-  onAdopted,
-  onRestart,
-}: ConversationProps) {
+function Conversation({ api, conversationId, messages: initialMessages, placeholder = 'Ask a question', onAdopted }: ConversationProps) {
   const started = useRef<string | null>(null)
-  const stored = useRef(conversationId !== null)
   const [chatId] = useState(() => conversationId ?? undefined)
   const [transport] = useState(() =>
     createChatTransport(api, {
@@ -75,14 +56,9 @@ function Conversation({
     messages: initialMessages,
     transport,
     onFinish: ({ messages: shown, isAbort, isError }) => {
+      // A first turn stopped or failed stores nothing, and the transport adopts no id for it.
       const id = conversationId ?? started.current
-      if (isAbort || isError) {
-        // The transport took the id from the response headers, and a first turn stores nothing until it answers.
-        if (!stored.current && started.current !== null) onRestart(shown, !isAbort)
-        return
-      }
-      if (id === null) return
-      stored.current = true
+      if (isAbort || isError || id === null) return
       // Only a mount that started the conversation; one that opened it is already keyed by its id.
       if (chatId === undefined) onAdopted(id)
       // Without a request: the history entry Back restores then carries the id and every turn shown.
@@ -97,7 +73,6 @@ function Conversation({
     },
   })
   const [draft, setDraft] = useState('')
-  const [failed, setFailed] = useState(failedBefore)
   const end = useRef<HTMLDivElement>(null)
   const busy = status === 'submitted' || status === 'streaming'
 
@@ -110,7 +85,6 @@ function Conversation({
     const text = draft.trim()
     if (!text || busy) return
     clearError()
-    setFailed(false)
     void sendMessage({ text })
     setDraft('')
   }
@@ -132,7 +106,7 @@ function Conversation({
         <div ref={end} />
       </div>
       <p role="status" className="sr-only">{busy ? 'The agent is answering.' : ''}</p>
-      {error || failed ? <Alert tone="danger">The agent could not answer. Try again.</Alert> : null}
+      {error ? <Alert tone="danger">The agent could not answer. Try again.</Alert> : null}
       {/* method and action: a submit before hydration posts to the chat route, never a GET with the text in the URL. */}
       <form method="post" action={api} onSubmit={send} className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <Textarea
