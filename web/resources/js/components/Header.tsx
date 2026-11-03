@@ -18,6 +18,8 @@ interface HeaderProps {
   locales?: LocaleLink[]
   /** Home only: the side rules of the page frame, for a page laid out in it. */
   framed?: boolean
+  /** Docs only: the section named beside the logo. */
+  section?: 'Docs' | 'Blog'
 }
 
 function ColorModeButton({ variant }: { variant: 'home' | 'docs' }) {
@@ -50,7 +52,7 @@ function ColorModeButton({ variant }: { variant: 'home' | 'docs' }) {
   )
 }
 
-export function Header({ variant, basePath = '/docs', locales = [], framed = false }: HeaderProps) {
+export function Header({ variant, basePath = '/docs', locales = [], framed = false, section = 'Docs' }: HeaderProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   if (variant === 'home') {
@@ -68,6 +70,7 @@ export function Header({ variant, basePath = '/docs', locales = [], framed = fal
                 <Link href="/docs" className="transition hover:text-home-text">Docs</Link>
                 <Link href="/docs/tutorials/00-overview" className="transition hover:text-home-text">Tutorials</Link>
                 <Link href="/docs/agent-course/00-overview" className="transition hover:text-home-text">Agent Course</Link>
+                <Link href="/blog" className="transition hover:text-home-text">Blog</Link>
                 <a
                   href="https://github.com/gurenjs/guren"
                   target="_blank"
@@ -106,13 +109,14 @@ export function Header({ variant, basePath = '/docs', locales = [], framed = fal
         <div className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-4 px-6 py-3">
           <Link href="/" className="flex items-center gap-3 text-docs-heading no-underline">
             <img src="/logo.svg" alt="" className="size-8 rounded-lg p-0.5" />
-            <span className="text-[1.1rem] font-bold tracking-tight">Guren Docs</span>
+            <span className="text-[1.1rem] font-bold tracking-tight">Guren {section}</span>
           </Link>
           <div className="flex flex-wrap items-center gap-5">
             <nav aria-label="Main" className="hidden items-center gap-6 text-[0.95rem] font-medium md:flex">
               <Link href={basePath} className="text-docs-text no-underline transition hover:text-docs-accent">Guides</Link>
               <Link href={`${basePath}/tutorials/00-overview`} className="text-docs-text no-underline transition hover:text-docs-accent">Tutorials</Link>
               <Link href={`${basePath}/agent-course/00-overview`} className="text-docs-text no-underline transition hover:text-docs-accent">Agent Course</Link>
+              <Link href="/blog" className="text-docs-text no-underline transition hover:text-docs-accent">Blog</Link>
               <a
                 href="https://github.com/gurenjs/guren"
                 target="_blank"

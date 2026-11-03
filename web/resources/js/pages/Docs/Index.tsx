@@ -151,7 +151,7 @@ export default function DocsIndex({ categories, locale, locales = [], basePath }
             </p>
             <h1 className="mb-5 text-[2.5rem] font-extrabold leading-[1.1] tracking-tight text-docs-heading sm:text-[3rem]">
               {copy.titleTop} <br />
-              <span className="bg-gradient-to-br from-[#db1b1b] to-[#7f1d1d] bg-clip-text text-transparent">
+              <span className="docs-index-accent bg-clip-text text-transparent">
                 {copy.titleAccent}
               </span>
             </h1>

@@ -8,9 +8,9 @@ import { Layout } from './Layout.js'
  * The standard chrome for content pages. Pages wrap their `<main>` in this and
  * pass metadata through the `head` slot (see `Layout` for why the slot wins).
  */
-export const ContentShell: FC<PropsWithChildren<{ head?: unknown }>> = ({ head, children }) => (
+export const ContentShell: FC<PropsWithChildren<{ head?: unknown; section?: 'Docs' | 'Blog' }>> = ({ head, section, children }) => (
   <Layout head={head as never}>
-    <Header />
+    <Header section={section} />
     {children as never}
     <Footer />
   </Layout>
