@@ -4,6 +4,8 @@ CSRF（Cross-Site Request Forgery）は、悪意のあるサイトが認証済�
 
 トークンは 2 つのリクエストにまたがって使われます。フォームを表示する GET のときに発行し、フォームを送信する POST のときに照合します。
 
+<!-- interactive: csrf-exchange -->
+
 ```mermaid
 sequenceDiagram
   participant B as ブラウザー

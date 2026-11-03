@@ -13,6 +13,8 @@ The standard path is: import queue APIs from `@guren/core`, configure the driver
 
 Dispatching and working are separate processes, joined asynchronously through the queue. The request returns as soon as the job is enqueued; it runs later, on the worker's schedule.
 
+<!-- interactive: queue-lifecycle -->
+
 ```mermaid
 flowchart LR
   C["Controller<br/>dispatches the job"]
