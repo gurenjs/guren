@@ -63,10 +63,13 @@ it('every link inside a sentence on a shipped page uses the underlined class str
 
   const paragraphs = sources.flatMap((text) => [...text.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/g)].map((match) => match[1]!))
   const sentencesWithLinks = paragraphs.filter((body) => {
+    // split/join, not replace, for the last step: CodeQL reads a tag-stripping replace as HTML
+    // sanitization (js/incomplete-multi-character-sanitization); this only counts leftover letters.
     const words = body
       .replace(/<(Link|a)\b[\s\S]*?<\/\1>/g, '')
       .replace(/\{[^}]*\}/g, '')
-      .replace(/<[^>]*>/g, '')
+      .split(/<[^>]*>/)
+      .join('')
     return /<(?:Link|a)\b/.test(body) && /[A-Za-z]/.test(words)
   })
   expect(sentencesWithLinks.length).toBeGreaterThan(2)
