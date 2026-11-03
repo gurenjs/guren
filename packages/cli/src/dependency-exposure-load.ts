@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import type { GurenApplicationGraph } from './application-graph'
 import { loadApplicationGraph } from './application-graph-load'
 import { joinExposure, type ExposureJoin } from './dependency-exposure'
@@ -9,6 +9,8 @@ import { collectProjectFiles, IMPORTABLE_EXTENSIONS } from './discovery'
 import { cachedFileProbe } from './import-resolution'
 import { scanImports } from './import-scan'
 import { ParseCache } from './parse-cache'
+
+const JSON_EXTENSION = new Set(['.json'])
 
 export interface DependencyExposure extends ExposureJoin {
   schemaVersion: 1
@@ -37,7 +39,10 @@ export async function loadDependencyExposure(options: { cwd: string; introspect?
   const cwd = resolve(options.cwd)
   const tree = await loadDependencyTree(cwd)
   const files = await collectProjectFiles(cwd, IMPORTABLE_EXTENSIONS)
-  const watched = [...(tree.lockfile ? [resolve(cwd, tree.lockfile)] : []), join(cwd, 'package.json'), ...files]
+  // A directory's package.json picks the file an import of it lands on.
+  const manifests = async () => (await collectProjectFiles(cwd, JSON_EXTENSION)).filter((file) => basename(file) === 'package.json')
+  const directoryManifests = await manifests()
+  const watched = [...(tree.lockfile ? [resolve(cwd, tree.lockfile)] : []), join(cwd, 'package.json'), ...directoryManifests, ...files]
   const before = await fingerprint(watched)
 
   const imports = await scanImports(cwd, new ParseCache(), files, cachedFileProbe())
@@ -52,7 +57,11 @@ export async function loadDependencyExposure(options: { cwd: string; introspect?
   const treeAfter = await loadDependencyTree(cwd)
   const filesAfter = await collectProjectFiles(cwd, IMPORTABLE_EXTENSIONS)
   const treeKey = (loaded: typeof tree) => JSON.stringify([loaded.lockfile, loaded.coverage.status, loaded.packages.map((instance) => [instance.id, instance.integrity ?? null])])
-  const unchanged = before === after && treeKey(tree) === treeKey(treeAfter) && filesAfter.join('\n') === files.join('\n')
+  const manifestsAfter = await manifests()
+  const unchanged = before === after
+    && treeKey(tree) === treeKey(treeAfter)
+    && filesAfter.join('\n') === files.join('\n')
+    && manifestsAfter.join('\n') === directoryManifests.join('\n')
   const joined = joinExposure({ tree, imports, graph })
   const content = JSON.stringify({
     graph: graph?.snapshot.id ?? null,

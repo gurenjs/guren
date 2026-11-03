@@ -33,6 +33,8 @@ export interface ImportScan {
 }
 
 const RUNTIME_PREFIXES = ['node:', 'bun:']
+/** What an import can land on that runs code: the scanned extensions plus CommonJS ones the scan does not read. */
+const CODE_EXTENSIONS = new Set([...IMPORTABLE_EXTENSIONS, '.cjs', '.cts'])
 
 function isRuntimeBuiltin(specifier: string): boolean {
   return specifier === 'bun' || RUNTIME_PREFIXES.some((prefix) => specifier.startsWith(prefix))
@@ -88,6 +90,9 @@ function runtimeSpecifiers(body: Statement[], file: string, reasons: GraphCovera
       if (specifier !== null) found.push({ specifier, line: line ?? 0 })
       else if (glob !== null) globs.push(glob)
       else unfollowed('has an import() whose specifier is not a literal', line)
+    } else if (node.type === 'TSImportEqualsDeclaration' && node.moduleReference.type === 'TSExternalModuleReference') {
+      // `import x = require('x')` compiles to a require() call unless the whole declaration is type-only.
+      if (node.importKind !== 'type') found.push({ specifier: node.moduleReference.expression.value, line: line ?? 0 })
     } else if (node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === 'require') {
       unfollowed('calls require()', line)
     } else if (node.type === 'CallExpression' && isImportMetaGlob(node.callee)) {
@@ -151,7 +156,7 @@ export async function scanImports(cwd: string, cache: ParseCache, files: readonl
       }
       const relative = toPosixRelative(cwd, target)
       // `.guren/` holds generated maps of the app's own files, which are scanned already; a stylesheet or asset imports no package.
-      if (!scannedFiles.has(relative) && !relative.startsWith('.guren/') && IMPORTABLE_EXTENSIONS.has(posix.extname(relative))) {
+      if (!scannedFiles.has(relative) && !relative.startsWith('.guren/') && CODE_EXTENSIONS.has(posix.extname(relative))) {
         reasons.push({ code: 'outside-scan', message: `${file}:${line} imports ${relative}, which this reader does not scan, so its imports are unknown.`, file })
       }
       if (!imports.files.includes(relative)) imports.files.push(relative)

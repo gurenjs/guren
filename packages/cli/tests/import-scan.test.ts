@@ -84,9 +84,21 @@ describe('scanImports', () => {
     expect(reasons.map((reason) => reason.message)).toEqual(['resources/js/app.tsx globs ./nothing/*.tsx, which matches no file this reader scans.'])
   })
 
-  it('reports an import of a code file outside the scan, but not of a stylesheet', async () => {
+  it('reads a TypeScript import-equals require as a runtime import, unless it is type-only', async () => {
     const files = await write({
-      'app/main.ts': "import './build/generated'\nimport '../resources/css/app.css'",
+      'app/legacy.ts': "import leaf = require('leaf')\nimport type shape = require('shape')\nexport const x = leaf",
+    })
+
+    const { files: scanned, reasons } = await scan(files)
+
+    expect(reasons).toEqual([])
+    expect(scanned.get('app/legacy.ts')?.packages).toEqual([{ name: 'leaf', specifier: 'leaf', line: 1 }])
+  })
+
+  it('reports an import of a code file outside the scan, CommonJS included, but not of a stylesheet', async () => {
+    const files = await write({
+      'app/main.ts': "import './build/generated'\nimport '../resources/css/app.css'\nimport './legacy.cjs'",
+      'app/legacy.cjs': "module.exports = require('leaf')",
       'resources/css/app.css': 'body {}',
     })
     await mkdir(join(root, 'app/build'), { recursive: true })
@@ -94,7 +106,7 @@ describe('scanImports', () => {
 
     const { reasons } = await scan(files.filter((file) => file.endsWith('.ts')))
 
-    expect(reasons.map((reason) => reason.code)).toEqual(['outside-scan'])
+    expect(reasons.map((reason) => reason.code)).toEqual(['outside-scan', 'outside-scan'])
   })
 
   it('reports every construct it cannot follow instead of reading the file as importing nothing', async () => {

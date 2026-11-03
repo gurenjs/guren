@@ -119,6 +119,68 @@ describe('joinExposure', () => {
     expect(entry(exposure, 'entities@4.5.0')).toMatchObject({ attribution: 'routes', placement: [{ at: 'server', evidence: 'import' }] })
   })
 
+  it('reaches a package through any package depending on it that the app imports, not only through the direct dependency', () => {
+    const reading = readBunLock(`{
+      "lockfileVersion": 1,
+      "workspaces": { "": { "name": "app", "dependencies": { "top": "^1.0.0" } } },
+      "packages": {
+        "top": ["top@1.0.0", "", { "dependencies": { "middle": "^1.0.0", "leaf": "^1.0.0" } }, "sha512-a=="],
+        "middle": ["middle@1.0.0", "", { "dependencies": { "leaf": "^1.0.0" } }, "sha512-b=="],
+        "leaf": ["leaf@1.0.0", "", {}, "sha512-c=="],
+      },
+    }`)
+    if (reading.kind !== 'read') throw new Error(reading.reason)
+
+    const exposure = joinExposure({
+      tree: dependencyTree(reading.lock),
+      imports: scan({ 'app/Http/Controllers/PostController.ts': { packages: [{ name: 'middle', specifier: 'middle', line: 1 }] } }),
+      graph: graph(),
+    })
+
+    expect(entry(exposure, 'leaf@1.0.0')).toMatchObject({ attribution: 'routes', importedBy: [{ imports: 'middle' }] })
+  })
+
+  it('reads a served file only a test reaches as unknown, never as unreached', () => {
+    const base = graph()
+    const withTest = { ...base, nodes: [...base.nodes, node('test', 'tests/boot.test.ts')] } as GurenApplicationGraph
+
+    const exposure = joinExposure({
+      tree: tree(),
+      imports: scan({
+        'tests/boot.test.ts': { files: ['src/app.ts'] },
+        'src/app.ts': { packages: [{ name: 'marked', specifier: 'marked', line: 3 }] },
+      }),
+      graph: withTest,
+    })
+
+    expect(entry(exposure, 'marked@16.4.2').attribution).toBe('unknown')
+    expect(exposure.coverage.graph.reasons.map((reason) => reason.code)).toEqual(['unowned-file'])
+  })
+
+  it('does not spread a page the client entry globs to the routes of every other page', () => {
+    const base = graph()
+    const withLogin = {
+      ...base,
+      nodes: [...base.nodes, route('login', 'GET', '/login', 'create'), node('controller', 'app/Http/Controllers/AuthController.ts'), node('page', 'resources/js/pages/auth/Login.tsx')],
+      edges: [
+        ...base.edges,
+        { from: 'login', to: 'controller:app/Http/Controllers/AuthController.ts', relation: 'handles', evidence: [] },
+        { from: 'controller:app/Http/Controllers/AuthController.ts', to: 'page:resources/js/pages/auth/Login.tsx', relation: 'renders', evidence: [{ kind: 'static', source: 'controller:create' }] },
+      ],
+    } as GurenApplicationGraph
+
+    const exposure = joinExposure({
+      tree: tree(),
+      imports: scan({
+        'resources/js/app.tsx': { files: ['resources/js/pages/posts/Show.tsx', 'resources/js/pages/auth/Login.tsx'] },
+        'resources/js/pages/posts/Show.tsx': { packages: [{ name: 'marked', specifier: 'marked', line: 1 }] },
+      }),
+      graph: withLogin,
+    })
+
+    expect(entry(exposure, 'marked@16.4.2')).toMatchObject({ routes: [{ path: '/posts/:id' }], importedBy: [{ entries: [] }] })
+  })
+
   it('reaches only the routes to the action that renders a page', () => {
     const exposure = joinExposure({
       tree: tree(),

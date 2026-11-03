@@ -73,14 +73,14 @@ export function placementOf(file: string, ssrReach: ReadonlySet<string>): Placem
   return ['server']
 }
 
-/** BFS over app-file imports from `start`: each reached file with the chain that reaches it. */
-function reach(imports: ImportScan, start: string): Map<string, string[]> {
+/** BFS over app-file imports from `start`: each reached file with the chain that reaches it, never entering `stop`. */
+function reach(imports: ImportScan, start: string, stop: ReadonlySet<string> = new Set()): Map<string, string[]> {
   const chains = new Map<string, string[]>([[start, [start]]])
   const queue = [start]
   while (queue.length > 0) {
     const file = queue.shift()!
     for (const next of imports.files.get(file)?.files ?? []) {
-      if (chains.has(next)) continue
+      if (chains.has(next) || stop.has(next)) continue
       chains.set(next, [...chains.get(file)!, next])
       queue.push(next)
     }
@@ -152,6 +152,23 @@ function headsOf(instance: DependencyInstance): string[] {
   return Object.keys(instance.paths)
 }
 
+/** Every instance that depends on `instance`, directly or not. */
+function ancestorsOf(instance: DependencyInstance, byId: ReadonlyMap<string, DependencyInstance>): DependencyInstance[] {
+  const seen = new Set<string>([instance.id])
+  const queue = [...instance.dependents]
+  const out: DependencyInstance[] = []
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    if (seen.has(id)) continue
+    seen.add(id)
+    const parent = byId.get(id)
+    if (!parent) continue
+    out.push(parent)
+    queue.push(...parent.dependents)
+  }
+  return out
+}
+
 export function joinExposure(input: ExposureInput): ExposureJoin {
   const { tree, imports, graph } = input
   const ssrEntry = SSR_ENTRIES.find((file) => imports.files.has(file))
@@ -169,7 +186,9 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
   const routes = graph ? routesByNode(graph) : new Map<string, ExposedRoute[]>()
   const nodeKind = new Map((graph?.nodes ?? []).map((node) => [node.id, node.kind]))
   const entries = [...imports.files.keys()].filter((file) => PAGE_ENTRY.test(file))
-  const reachByEntry = new Map(entries.map((entry) => [entry, reach(imports, entry)]))
+  // The entry loads a page only on the routes rendering it, which the page's own node attributes.
+  const pageFiles = new Set((graph?.nodes ?? []).flatMap((node) => node.kind === 'page' && node.file !== undefined ? [node.file] : []))
+  const reachByEntry = new Map(entries.map((entry) => [entry, reach(imports, entry, pageFiles)]))
   const pageRoutes = new Map((graph?.nodes ?? [])
     .filter((node) => node.kind === 'page')
     .flatMap((node) => (routes.get(node.id) ?? []).map((route) => [route.node, route] as const)))
@@ -190,9 +209,14 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
   const importsComplete = tree.coverage.status === 'complete' && importReasons.length === 0
   const graphComplete = graph !== null && Object.values(graph.coverage).every((coverage) => coverage.status === 'complete')
 
+  const byId = new Map(tree.packages.map((instance) => [instance.id, instance]))
   const packages = tree.packages.map((instance): ExposedPackage => {
-    // An import of a @guren package is how the app reaches the framework, not this package.
-    const names = [...new Set([...instance.installedAs, ...headsOf(instance).filter((head) => !isFramework(head))])]
+    // Importing any package that depends on this one may run it; importing a @guren package is how the app reaches the framework.
+    const ancestors = ancestorsOf(instance, byId)
+    const names = [...new Set([
+      ...instance.installedAs,
+      ...[...headsOf(instance), ...ancestors.flatMap((ancestor) => ancestor.installedAs)].filter((name) => !isFramework(name)),
+    ])]
     const importedBy = names.flatMap((name) => (importers.get(name) ?? []).map((site) => ({
       file: site.file,
       line: site.line,
@@ -216,12 +240,13 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
     const servedImport = importedBy.some((site) => served(site.file))
     let unattributed = false
     for (const site of importedBy) {
-      if (!served(site.file) || site.nodes.length > 0 || site.entries.length > 0) continue
+      // A test node reaches a file without serving it, so it owns nothing.
+      if (!served(site.file) || site.nodes.some((owner) => owner.kind !== 'test') || site.entries.length > 0) continue
       unattributed = true
       unowned.set(site.file, { code: 'unowned-file', message: `${site.file} is served but no graph node or entry reaches it, so the routes running it are unknown.`, file: site.file })
     }
     const placement = [...placements].sort().map((at) => ({ at, evidence: 'import' as const }))
-    const viaFramework = headsOf(instance).some(isFramework)
+    const viaFramework = [...headsOf(instance), ...ancestors.map((ancestor) => ancestor.name)].some(isFramework)
     const attribution: Attribution = reached.size > 0 ? 'routes'
       : viaFramework ? 'framework'
       : importsComplete && !unattributed && (!servedImport || graphComplete) ? 'none-found'
