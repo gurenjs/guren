@@ -79,11 +79,14 @@ export const setup: StartMcpAppOptions['setup'] = ({ el, App, props }) => {
 /** Writes the setup file on the first build; an existing one is the app's and is never touched. */
 export function ensureSetupFile(context: McpAppBuildContext): string {
   const file = path.resolve(context.root, context.setupFile)
-  if (existsSync(file)) return file
   const css = path.resolve(context.root, context.resourcesDir, '../css/app.css')
   const stylesheet = existsSync(css) ? toImportPath(path.dirname(file), css) : undefined
   mkdirSync(path.dirname(file), { recursive: true })
-  writeFileSync(file, renderSetupTemplate(stylesheet))
+  try {
+    writeFileSync(file, renderSetupTemplate(stylesheet), { flag: 'wx' })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  }
   return file
 }
 
