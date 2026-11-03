@@ -24,7 +24,7 @@ bun run dev
 bunx guren add attachments
 ```
 
-ここで入ったコードは今後アプリの一部として保守していくので、何が変わったかを確認しておきます。まずストレージレイヤーが入りました。`config: [...]` に登録された `config/storage.ts` と `app/Services/FileStorage.ts` で、ディスクは `./storage/app` を保存先とする `local` と、`./public/storage` を保存先とする `public` の 2 つです。
+ここで入ったコードは今後アプリの一部として保守していくので、何が変わったかを確認しておきます。まずストレージレイヤーが入りました。`config: [...]` に登録された `config/storage.ts` と `app/Services/FileStorage.ts` で、ディスクは `./storage/app` を保存先とする `local` と、`./public/storage` を保存先とする `public` の 2 つです。どちらの保存先にもコミットしてはいけないファイルが入るので、2 つとも `.gitignore` に追加されています。
 
 続いて `db/schema.ts` に `attachments` テーブルを追加し、`config/attachments.ts` と `app/Providers/AttachmentsProvider.ts` を作成して、プロバイダーを `src/app.ts` に登録しました。さらに、ルート registrar の先頭に `registerAttachmentRoutes` の呼び出しを入れて配信ルートをマウントし、`attachments:prune` コンソールコマンドも登録しています。
 
@@ -38,13 +38,7 @@ bun run db:make create_attachments
 bun run db:migrate
 ```
 
-手で加える変更が 2 つあります。1 つ目は `.gitignore` です。ディスクにはコミットしてはいけないファイルが入るので、次の 2 行が `.gitignore` に入っていることを確かめます（新しい CLI は自分で追加します。下のコマンドは足りない行だけを追加します）。
-
-```bash run
-for line in 'storage/app/' 'public/storage'; do grep -qxF "$line" .gitignore || echo "$line" >> .gitignore; done
-```
-
-2 つ目は、config にモデルのマップを足すことです。どのモデルが attachments を持つかはジェネレーターには分からないので、この部分は自動では書かれません。prune コマンドはこのマップを使って、attachment の持ち主がまだ存在するかを確かめます。
+手で加える変更は、config にモデルのマップを足すことだけです。どのモデルが attachments を持つかはジェネレーターには分からないので、この部分は自動では書かれません。prune コマンドはこのマップを使って、attachment の持ち主がまだ存在するかを確かめます。
 
 下のブロックでは、末尾に `Model.morphMap` を足し、そのために必要な `Model` と `Post` の import を加えています。ジェネレーターが書いた長めのコメントは、この節で説明する 3 つの判断に絞りました。
 
