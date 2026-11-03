@@ -2,7 +2,8 @@
 
 **Author:** Guren contributors
 **Date:** 2026-11-03
-**Status:** Draft
+**Status:** Accepted (2026-11-03; the deciding maintainer explicitly approved the
+proposal and shortened the standard discussion period before implementation.)
 
 ## Problem
 
@@ -493,6 +494,13 @@ results rest on without checking:
 The list is generated from the run's `coverage` entries, so it cannot claim a
 check the run did not make. Whether apps also commit it as a document is Open
 Question 4.
+
+## Decision
+
+The maintainer accepted the proposal on 2026-11-03 and explicitly shortened
+the standard discussion period. Implementation proceeds in the milestones of
+section 1, M1 first. The Dockerfile pinning in section 6 (exact tags and index
+digests) shipped ahead of the rest in #1325.
 
 ## Alternatives Considered
 
