@@ -311,6 +311,43 @@ body.docs-theme {
   background: var(--g-tick);
 }
 
+.docs-nav-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--g-r-ctl);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--docs-heading);
+  cursor: pointer;
+  list-style: none;
+  transition: background-color 150ms ease;
+}
+
+.docs-nav-summary::-webkit-details-marker {
+  display: none;
+}
+
+.docs-nav-summary:hover {
+  background-color: var(--docs-accent-tint);
+}
+
+.docs-nav-summary:focus-visible {
+  outline: 2px solid var(--docs-accent-strong);
+  outline-offset: 2px;
+}
+
+.docs-nav-chevron {
+  color: var(--docs-text-muted);
+  transition: transform 150ms ease;
+}
+
+.docs-nav-section[open] > .docs-nav-summary .docs-nav-chevron {
+  transform: rotate(90deg);
+}
+
 /* the same 3px logo-gradient fragment, standalone — for a page title when no
    nav current place is on screen */
 .docs-tick {
@@ -492,6 +529,17 @@ body.docs-theme {
   max-width: 100%;
 }
 
+/* Tailwind's preflight zeroes paragraph margins; without these, consecutive
+   paragraphs run together into one block. :where() keeps these at one class
+   of specificity, so a component's own paragraph (a callout label) wins. */
+.docs-content :where(p) {
+  margin: 1.1rem 0;
+}
+
+.docs-content :where(li > p) {
+  margin: 0.4rem 0;
+}
+
 .docs-content h1,
 .docs-content h2,
 .docs-content h3,
@@ -508,20 +556,23 @@ body.docs-theme {
   letter-spacing: -0.02em;
 }
 
+/* The rule sits above the heading, so a section's start stays visible while
+   scrolling into it. */
 .docs-content h2 {
-  font-size: 1.75rem;
-  border-bottom: 1px solid var(--docs-border-soft);
-  padding-bottom: 0.5rem;
-  margin-top: 3rem;
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+  border-top: 1px solid var(--docs-border-soft);
+  padding-top: 1.75rem;
+  margin-top: 3.5rem;
 }
 
 .docs-content h3 {
-  font-size: 1.4rem;
-  margin-top: 2rem;
+  font-size: 1.2rem;
+  margin-top: 2.25rem;
 }
 
 .docs-content h4 {
-  font-size: 1.15rem;
+  font-size: 1.05rem;
 }
 
 /* Hide the first document title; the page header already renders it. */
@@ -818,14 +869,16 @@ body.docs-theme {
 
 .docs-content a {
   color: var(--docs-accent-strong);
-  text-decoration: none;
-  font-weight: 600;
-  border-bottom: 1px solid transparent;
-  transition: border-color 0.2s;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--docs-accent-strong) 40%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.2s;
 }
 
 .docs-content a:hover {
-  border-bottom-color: var(--docs-accent-strong);
+  text-decoration-color: var(--docs-accent-strong);
 }
 
 /* The code surface has no theme: ink in light and dark alike (--g-ink, which
@@ -856,14 +909,19 @@ body.docs-theme {
   color: var(--shiki-dark) !important;
 }
 
+/* Neutral, so a code span never reads as a link: links own the accent. */
 .docs-content :not(pre) > code {
-  background: var(--docs-accent-tint);
+  background: color-mix(in srgb, var(--docs-text-primary) 7%, transparent);
   border-radius: 0.375rem;
   padding: 0.125rem 0.375rem;
-  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, "SFMono", monospace;
+  font-family: var(--g-font-mono);
   font-size: 0.875em;
-  color: var(--docs-accent-strong);
+  color: var(--docs-heading);
   font-weight: 500;
+}
+
+.docs-content a > code {
+  color: inherit;
 }
 
 /* ─── Callouts — the diagnostic row, not a box. Same anatomy as guren check
