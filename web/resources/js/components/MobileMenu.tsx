@@ -44,7 +44,7 @@ export function MobileMenu({ open, onClose, basePath, locales = [] }: MobileMenu
           <button
             type="button"
             onClick={onClose}
-            className="text-docs-text-muted transition hover:text-docs-heading"
+            className="text-docs-text-secondary transition hover:text-docs-heading"
             aria-label="Close menu"
           >
             <XIcon className="size-6" />
@@ -86,6 +86,13 @@ export function MobileMenu({ open, onClose, basePath, locales = [] }: MobileMenu
           >
             Agent Course
           </Link>
+          <Link
+            href="/blog"
+            className="rounded-lg px-3 py-2.5 text-[0.95rem] font-medium text-docs-text no-underline transition hover:bg-docs-accent-tint hover:text-docs-accent"
+            onClick={onClose}
+          >
+            Blog
+          </Link>
           <a
             href="https://github.com/gurenjs/guren"
             target="_blank"
@@ -98,7 +105,7 @@ export function MobileMenu({ open, onClose, basePath, locales = [] }: MobileMenu
         </nav>
         {locales.length > 1 && (
           <div className="border-t border-docs-border px-5 py-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-docs-text-muted">Language</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-docs-text-secondary">Language</p>
             <div className="flex flex-wrap gap-1.5">
               {locales.map((locale) => (
                 <Link
@@ -107,7 +114,7 @@ export function MobileMenu({ open, onClose, basePath, locales = [] }: MobileMenu
                   className={`rounded-md px-3 py-1.5 text-sm font-semibold no-underline transition ${
                     locale.active
                       ? 'bg-docs-accent-tint text-docs-accent'
-                      : 'text-docs-text-muted hover:bg-docs-accent-tint hover:text-docs-accent'
+                      : 'text-docs-text-secondary hover:bg-docs-accent-tint hover:text-docs-accent'
                   }`}
                   onClick={onClose}
                 >

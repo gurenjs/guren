@@ -294,14 +294,15 @@ export function recordDrift(record: PlanStepRecord, digest: string, hashes: Read
 }
 
 /**
- * A behaviour as its test is written from: every field but its description, with the route and the
- * expected page read through to what a test spells (method and path, page and module). A red run
- * seen for one shape says nothing of another. `undefined` for an id the plan does not declare.
+ * A behaviour as its test is written from: every field but its description and `alreadyHolds`, with
+ * the route and the expected page read through to what a test spells (method and path, page and
+ * module). A red run seen for one shape says nothing of another; marking a behaviour changes no test,
+ * so a red run outlives the mark. `undefined` for an id the plan does not declare.
  */
 export function behaviourShape(plan: PlanDraft | Plan, id: string): string | undefined {
   const behaviour = plan.tasks.flatMap((task) => task.acceptance).find((candidate) => candidate.id === id)
   if (!behaviour) return undefined
-  const { description: _description, route: routeId, expect, ...rest } = behaviour
+  const { description: _description, alreadyHolds: _alreadyHolds, route: routeId, expect, ...rest } = behaviour
   const route = plan.routes.find((candidate) => candidate.id === routeId)
   const view = expect.inertia === undefined ? undefined : plan.views.find((candidate) => candidate.id === expect.inertia)
   const page = view ? { page: view.page, ...(view.module === undefined ? {} : { module: view.module }) } : expect.inertia
@@ -318,7 +319,8 @@ export function behaviourShape(plan: PlanDraft | Plan, id: string): string | und
  * The behaviours of `ids` whose red run one of `records` carries to `plan`: seen failing in a
  * verified `tests:fail` run at the shape the plan states now, whatever plan hash or step that run
  * named (a revision may move a behaviour to another task). Once the implementation exists the run
- * cannot be repeated, so a revision leaving a behaviour's test as it was keeps the observation.
+ * cannot be repeated, so a revision leaving a behaviour's test as it was keeps the observation. A
+ * behaviour marked `alreadyHolds` keeps one too: a revision that drops the mark asks for it again.
  */
 export function carriedRedRuns(records: Iterable<PlanStepRecord>, plan: PlanDraft | Plan, ids: readonly string[]): Map<string, PlanRedRun> {
   const recorded = recordedRedRuns(records)

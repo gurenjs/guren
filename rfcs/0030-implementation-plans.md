@@ -293,6 +293,21 @@ structured-output producer needs `additionalProperties: false` on every
 object, which an open record cannot satisfy, and a closed union of primitives
 could not carry a nested request body.
 
+**Amended in implementation (`alreadyHolds`):** a behaviour may carry
+`alreadyHolds: true`, the field being `true` or absent, so a plan without it
+hashes as it did before the field existed. It says the behaviour holds before
+the plan's work, as a guest is already sent to sign in on a route that is
+behind authentication today, so its test guards what exists. Only a route the
+plan does not add can carry such a behaviour: one an earlier task of the plan
+adds holds only through the plan's work, whose own tests step is where it is
+seen to fail. `tests:fail` asks
+no failing run of it, and the step that runs `tests` still needs it to pass
+(§5, §6). The name states the fact rather than the mechanism, in the schema's
+adjective style (`readOnly`, `nullable`): what the verifier does with a marked
+behaviour follows from the fact, and a mechanism name (`skipRedRun`) would
+read as permission to skip. `behaviourShape()` leaves the mark out, as it
+leaves out the description, since marking a behaviour changes no test.
+
 Every section is optional. **Amended in implementation:** as sections that
 default to `[]` on parse. The JSON Schema handed to a producer is the input
 form, so a producer may omit a section; the hash (§4) is taken of the parsed
@@ -354,6 +369,22 @@ plan and the application's current context (`generateContext()`,
   generator writes or imports is `PLAN_GENERATOR_TARGETS` in
   `plan/command-targets.ts`, total over the allowed generators; the name each
   element is judged by is `app-targets.ts`'s.
+- (amended, `alreadyHolds`) a behaviour whose test, as `plan:scaffold` would
+  write it, may pass before its implementation exists (§5's `mayPassNow`,
+  through the same `planMayPassNow()`), and a behaviour marked
+  `alreadyHolds` that does not hold before the plan's work: its route is
+  answered by nothing before its `tests` step, or added by an earlier task
+  of the plan, or, for an `unauthenticated` behaviour, given authentication
+  by the plan (on the route, or through an altered action's middleware, which
+  the scaffold writes onto it) where the registered route applies none now.
+  That reading is the middleware each registered route carries, which
+  `loadPlanAppState()` reads without importing the schema; a route not
+  registered once by its current name, or with an inline middleware, gets no
+  verdict. All are warnings, so `plan:render`'s page and JSON and the Dev
+  Center review show them (`plan:approve` prints the checks' failures alone), the first
+  one for the person to settle while the plan can still change: on a route
+  that exists, mark the behaviour or give it a setup or an expectation only
+  the work meets; on one an earlier task adds, move it to that task.
 
 **Amended in implementation:** a check against the application reads the app root
 the plan element names (`module`, absent meaning the project root), for models,
@@ -1056,7 +1087,7 @@ behaviours. Guren supplies the breakdown and the order, in
    | Step | Work | Verify |
    |---|---|---|
    | scaffold | deterministic, no model (see below) | codegen, then `typecheck` |
-   | tests | skeletons generated from `acceptance[]` (no model); the agent fills `given` setup and what `expect` cannot express | codegen, then every generated test runs and fails |
+   | tests | skeletons generated from `acceptance[]` (no model); the agent fills `given` setup and what `expect` cannot express | codegen, then every generated test runs and fails (amended: but one marked `alreadyHolds`, §1) |
    | data | what the scaffold's table cannot express, migration, model relationships | codegen, `db:migrate`, `typecheck` |
    | http | validator, resource, policy, controller, routes | codegen, `typecheck` (last `http` step only), `guren check`, the slice's tests |
    | pages | page components | codegen, `typecheck`, `guren check` |
@@ -1600,6 +1631,22 @@ the other emitters.
   task owns, which its task waits for, passes once that task is implemented;
   nothing lists it, and `tests:fail` refuses the step. Owning an action with
   its routes closes the case where Foundation took that work by default.
+- **Amended (`alreadyHolds`).** (a) and (c) are one rule now,
+  `planMayPassNow()` in `plan/scaffold-tests.ts`, which `plan:scaffold`
+  reports and the §2 checks warn on before approval: a behaviour of a step
+  that runs `tests:fail`, not marked `alreadyHolds`, whose skeleton has no
+  `given()` or `unwritten()` call, on a route that answers once the step runs
+  (`routeAnswersBefore()`: one the plan does not add, or one a task ahead of
+  it mounts, owning the route, or owning its action and none of that action's
+  routes). Before approval the skeleton is written as the scaffold would write
+  it, against the root models as the tasks ahead leave them (each model they
+  own added, renamed or dropped) and as the step's own scaffold step writes
+  them. A behaviour on a route that exists and guards what holds already is
+  marked rather than rewritten to fail; one on a route an earlier task adds
+  moves to that task; one that should fail first gets a setup or an
+  expectation only the work meets.
+  A step that runs `tests` alone asks its behaviours to pass, so none of its
+  behaviours is listed. (b) stays open.
 - The file compiles: the helpers, `expect` and each model import are written
   only when used, and a test renders it beside the scaffold step's output and
   typechecks it. Refused before the write, like the other scaffold writes: the
@@ -2012,7 +2059,10 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   cannot be listed. `tests` passes when every behaviour is `passing` *and* the
   run exited 0, since a file that fails to load shows only in the exit code;
   `tests:fail` when every behaviour has a case and each case failed, a skipped
-  case not being a run. An id the plan does not declare fails the command rather
+  case not being a run. (Amended, `alreadyHolds`: a marked behaviour is asked
+  for its case only, and a verified run records a red run for it only where
+  every case of it failed; a step all of whose behaviours were seen failing
+  before or are marked runs no `bun test`.) An id the plan does not declare fails the command rather
   than blocking it, and its behaviours are recorded `pending`: a report the
   reader refused verifies nothing. One `bun test` runs per file set and per
   invocation, and `tests` and `tests:fail` judge the same run.
@@ -2661,6 +2711,11 @@ shipped with these readings:
   gives the step a fresh mark. Cursor's `loop_count` stands in for
   `stop_hook_active` there, and a stall goes to stderr, since its hook can
   only follow up or stay silent.
+- A failed `tests:fail` step stalls at once when the behaviours it saw pass
+  were never seen failing by any record while the step running them as
+  `tests` has a verified record whose files are unchanged: no continuation
+  can make them fail again. (Amended, `alreadyHolds`: a marked behaviour is
+  never one of them, since `tests:fail` does not ask it to fail.)
 - A stalled step leaves the person three answers, and `plan:waive` is the
   third; the skill tells the agent to report the stall and never to waive on
   its own. The reviewer at the end of a task is the harness's `code-review`

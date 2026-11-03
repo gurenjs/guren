@@ -10,7 +10,7 @@ import { formatPlanScaffold, planScaffoldFile, planScaffoldMountFile, type PlanS
 import type { PlanVerifyReport } from '../src/plan-verify'
 import { ParseCache } from '../src/parse-cache'
 import { readBehaviourRequests } from '../src/plan/behaviour-requests'
-import { emitPlanTests, PLAN_TESTS_CSRF_ABSENT, type PlanTestsApp } from '../src/plan/scaffold-tests'
+import { emitPlanTests, PLAN_TESTS_CSRF_ABSENT, planMayPassNow, routeAnswersBefore, type PlanTestsApp } from '../src/plan/scaffold-tests'
 import { writePlanActiveStep } from '../src/plan/state'
 import { derivePlanTasks, findPlanStep } from '../src/plan/tasks'
 import { acceptanceTestFiles } from '../src/plan/verify'
@@ -113,8 +113,9 @@ async function scaffolded(name: string, options: Parameters<typeof createApp>[1]
 
 function emitted(document: Json = approvedAgainst(guestIndexPlan()), app: Partial<PlanTestsApp> = {}): ReturnType<typeof emitPlanTests> {
   const plan = parsePlanDocument(document)
-  const found = findPlanStep(derivePlanTasks(plan), TESTS)!
-  return emitPlanTests(plan, found.task, found.step, { slug: 'comments', planFile: PLAN_FILE }, { entry: 'src/app.ts', modelFiles: { Comment: 'app/Models/Comment.ts', Post: 'app/Models/Post.ts' }, ...app })
+  const derivation = derivePlanTasks(plan)
+  const found = findPlanStep(derivation, TESTS)!
+  return emitPlanTests(plan, derivation, found.task, found.step, { slug: 'comments', planFile: PLAN_FILE }, { entry: 'src/app.ts', modelFiles: { Comment: 'app/Models/Comment.ts', Post: 'app/Models/Post.ts' }, ...app })
 }
 
 describe('plan:scaffold on a tests step', () => {
@@ -355,6 +356,73 @@ describe('plan:scaffold on a tests step', () => {
     const output = emitted(document as unknown as Json)
     expect(output.unwritten.map((entry) => entry.element)).toEqual(['AC-comments-5'])
     expect(output.mayPassNow).toEqual([])
+  })
+
+  test('should not list a behaviour marked alreadyHolds, whose test is asked to pass', () => {
+    const document = guestIndexPlan() as { routes: Array<{ id: string; change: Json }>; tasks: Array<{ acceptance: Array<{ id: string; alreadyHolds?: true }> }> }
+    document.routes.find((route) => route.id === 'route.comments.index')!.change = { kind: 'existing' }
+    document.tasks[0]!.acceptance.find((behaviour) => behaviour.id === 'AC-comments-5')!.alreadyHolds = true
+
+    expect(emitted(document as unknown as Json).mayPassNow).toEqual([])
+  })
+
+  test('should list a behaviour on a route an earlier task mounts, and none of a step that runs no tests:fail', () => {
+    const document = guestIndexPlan() as { sideEffects?: Json[]; tasks: Array<Json & { covers: string[]; acceptance: Json[] }> }
+    const behaviour = document.tasks[0]!.acceptance.pop()!
+    document.sideEffects = [{ id: 'effect.comments.audit', change: { kind: 'add' }, kind: 'job', name: 'AuditCommentReads', trigger: 'A comment list is read.', description: 'Records who read the comments.' }]
+    document.tasks.push({ id: 'task.audit', entity: 'Audit trail', summary: 'Record who reads the comments.', covers: ['effect.comments.audit'], acceptance: [{ ...behaviour, id: 'AC-audit-1' }] })
+    const plan = parsePlanDocument(document as unknown as Json)
+    const derivation = derivePlanTasks(plan)
+    const story = findPlanStep(derivation, 'task/story/task.audit/tests')!
+    const app = { entry: 'src/app.ts', modelFiles: {} }
+
+    expect(emitPlanTests(plan, derivation, story.task, story.step, { slug: 'comments', planFile: PLAN_FILE }, app).mayPassNow).toEqual(['AC-audit-1'])
+    expect(routeAnswersBefore(plan, derivation, story.task, plan.routes.find((route) => route.id === 'route.comments.index')!)).toEqual({ kind: 'wired', route: 'route.comments.index', task: TASK })
+
+    // With no work of its own the story's tests step asks its behaviours to pass, so none of them is listed.
+    document.tasks[1]!.covers = []
+    document.sideEffects = []
+    const passing = parsePlanDocument(document as unknown as Json)
+    const derived = derivePlanTasks(passing)
+    const alone = findPlanStep(derived, 'task/story/task.audit/tests')!
+    expect(alone.step.verify).toEqual(['codegen', 'tests'])
+    expect(emitPlanTests(passing, derived, alone.task, alone.step, { slug: 'comments', planFile: PLAN_FILE }, app).mayPassNow).toEqual([])
+  })
+
+  test('should list before approval what the scaffold lists after it, counting a model from the scaffold step that writes it', () => {
+    // A guest's GET that writes no comment: its row is a query through Comment, which only the scaffold step puts on disk.
+    const document = guestIndexPlan() as { routes: Array<{ id: string; change: Json }>; tasks: Array<{ acceptance: Array<{ id: string; expect: Json }> }> }
+    document.routes.find((route) => route.id === 'route.comments.index')!.change = { kind: 'existing' }
+    document.tasks[0]!.acceptance.find((behaviour) => behaviour.id === 'AC-comments-5')!.expect = { redirect: '/login', database: [{ table: 'comments', missing: [{ name: 'body', json: '"spam"' }] }] }
+    const plan = parsePlanDocument(document as unknown as Json)
+
+    expect(planMayPassNow(plan, derivePlanTasks(plan), ['Post']).map(({ id, step }) => [id, step])).toEqual([['AC-comments-5', TESTS]])
+    expect(emitted(document as unknown as Json).mayPassNow).toEqual(['AC-comments-5'])
+    // An API-only application is never scaffolded, so its tests step finds no Comment to query and writes the row as unwritten().
+    expect(planMayPassNow(plan, derivePlanTasks(plan, { apiOnly: true }), ['Post'])).toEqual([])
+    expect(emitted(document as unknown as Json, { modelFiles: { Post: 'app/Models/Post.ts' } }).mayPassNow).toEqual([])
+  })
+
+  test('should count a model an earlier task adds from that task on, scaffolded or not, as it is on disk then', () => {
+    const document = guestIndexPlan() as { routes: Array<{ id: string; change: Json }>; sideEffects?: Json[]; tasks: Array<Json & { covers: string[]; acceptance: Json[] }> }
+    document.routes.find((route) => route.id === 'route.comments.index')!.change = { kind: 'existing' }
+    const behaviour = document.tasks[0]!.acceptance.pop()!
+    document.sideEffects = [{ id: 'effect.comments.audit', change: { kind: 'add' }, kind: 'job', name: 'AuditCommentReads', trigger: 'A comment list is read.', description: 'Records who read the comments.' }]
+    document.tasks.push({
+      id: 'task.audit',
+      entity: 'Audit trail',
+      summary: 'Record who reads the comments.',
+      covers: ['effect.comments.audit'],
+      acceptance: [{ ...behaviour, id: 'AC-audit-1', expect: { redirect: '/login', database: [{ table: 'comments', missing: [{ name: 'body', json: '"spam"' }] }] } }],
+    })
+    const plan = parsePlanDocument(document as unknown as Json)
+    // API-only: no scaffold step, so Comment exists once the comments task's data step has run, before the story's tests step.
+    const derivation = derivePlanTasks(plan, { apiOnly: true })
+    const story = findPlanStep(derivation, 'task/story/task.audit/tests')!
+    const onDisk = { entry: 'src/app.ts', modelFiles: { Comment: 'app/Models/Comment.ts', Post: 'app/Models/Post.ts' } }
+
+    expect(emitPlanTests(plan, derivation, story.task, story.step, { slug: 'comments', planFile: PLAN_FILE }, onDisk).mayPassNow).toEqual(['AC-audit-1'])
+    expect(planMayPassNow(plan, derivation, ['Post']).map(({ id, step }) => [id, step])).toEqual([['AC-audit-1', 'task/story/task.audit/tests']])
   })
 
   test('should match the exact message withCsrf() throws when no CSRF middleware issued a token', async () => {

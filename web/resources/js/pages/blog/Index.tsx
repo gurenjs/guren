@@ -24,7 +24,7 @@ export default function BlogIndex({ posts }: Props) {
         path="/blog"
         locale="en"
       />
-      <Header variant="docs" />
+      <Header variant="docs" section="Blog" />
 
       <main className="mx-auto w-full max-w-[760px] px-6 py-16">
         <header className="mb-12">
