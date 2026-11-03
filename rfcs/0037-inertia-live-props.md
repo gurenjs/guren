@@ -484,7 +484,10 @@ stream is unowned (opened before sign-in, or by a user object with no `id`,
 held on the `WebSocketClient` record and accepted nowhere as an input. SSE
 clients get none, since the transport does not use them.
 
-`broadcastEvent(event, { except })` takes the request (or the header value),
+`broadcastEvent(event, { except })` takes ~~the request (or the header value)~~
+**the request's context (`this.ctx` in a controller), or `{ socketId, user }`
+given by hand (amended in implementation: a `Request` or a bare header value
+carries no signed-in user to bind the match to)**,
 reads `X-Socket-Id`, and publishes the payload as
 `{ ...payload, __inertia: { socketId, userId } }`, where `userId` is the
 requester's id read the way `resolveClientUserId()` reads a socket's owner.
@@ -498,6 +501,15 @@ Exclusion happens on the server, in the one delivery callback
   the manager added removed. Neither the socket id nor the user id leaves the
   server, and no driver changes: they ride inside `data`, which `MemoryDriver`
   and `RedisDriver` already carry opaquely across instances.
+
+**Amended in implementation:** the two fields are reserved. Every publish
+path the manager offers (`broadcast()`, `broadcastEvent()`, a `Channel`'s
+`broadcast()`) removes them from the payload the app hands it before adding its
+own, so a payload an app relays from a user cannot carry a forged mark, and
+delivery removes them, valid or not, from every event. The user ids compare
+strictly, as `authMiddleware()` compares a stream's owner, and a user id JSON
+cannot carry (`NaN`, an infinity) marks nothing. A payload that is not a plain
+object is marked as the JSON a client would receive.
 
 The header is client-supplied, and binding the match to the requester's user is
 what makes a guessed or leaked value harmless: a user can only suppress
