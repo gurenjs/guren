@@ -98,7 +98,7 @@ import { posts } from '@/db/schema'
 export class Post extends defineModel(posts) {}
 ```
 
-Queries read like Laravel: `Post.find(1)`, `Post.findOrFail(1)` (throws a 404), `Post.where('published', true).get()`. Column types flow from the schema into every result. See the [Database Guide](./database.md).
+Queries read like Laravel: `Post.find(1)`, `Post.findOrFail(1)` (throws a 404), `Post.where('published', true).get()`. Column types flow from the schema into every result. See [Models](./models.md).
 
 ## 5. The resource
 

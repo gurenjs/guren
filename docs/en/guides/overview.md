@@ -139,7 +139,8 @@ Follow this path, in order:
 3. **Topic guides** for deep dives once you know your way around:
    - [Routing](./routing.md): route groups, middleware, and resource routes.
    - [Controllers](./controllers.md): request handling, input helpers, and validation.
-   - [Database](./database.md): Drizzle schemas, migrations, QueryBuilder, and relationships.
+   - [Database](./database.md): connections, Drizzle schemas, migrations, and seeding.
+   - [Models](./models.md): the QueryBuilder, creating and updating rows, scopes, and serialization. [Relationships](./relationships.md) covers relations and eager loading.
    - [Frontend](./frontend.md): Inertia-powered React pages and SSR.
    - [Testing](./testing.md): TestApp, fluent assertions, and test utilities.
    - [Spec-Anchored Development](./spec-anchored.md): generated diagrams, architecture decisions, verified links, and the Docs Graph.

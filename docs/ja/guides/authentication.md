@@ -1,6 +1,6 @@
 # 認証ガイド
 
-コマンド 1 つでアプリにログイン、新規登録、パスワードリセットを追加し、ルートを保護して、コントローラーでログイン中のユーザーを読めるようにします。このページの前半では生成されるものの使い方を、後半では動きを変えたいときのためにセッション、ガード、ユーザープロバイダーを説明します。
+コマンド 1 つでアプリにログイン、新規登録、パスワードリセットを追加し、ルートを保護して、コントローラーでログイン中のユーザーを読めるようにします。このページの前半では生成されるものの使い方を、後半では動きを変えたいときのためにガードとユーザープロバイダーを説明します。セッションと OAuth によるサインインは、それぞれ[セッション](./sessions.md)と [OAuth ガイド](./oauth.md)で扱います。
 
 ## クイックスタート
 
@@ -38,8 +38,8 @@ bun run dev
 |--------|------------|------|
 | `--minimal` | ログインだけを生成し、登録とパスワードリセットは省く | |
 | `--verify` | メール確認を追加する（[メール確認](#メール確認)を参照） | `--minimal` とは併用できない |
-| `--oauth github,google` | プロバイダーのログインボタンを追加する（[OAuth ログインボタン](#oauth-ログインボタン)を参照） | `--minimal` と併用できる |
-| `--oauth-only` | パスワードを使わず、プロバイダーのログインだけにする（[OAuth のみでサインインする](#oauth-のみでサインインする)を参照） | `--oauth` が必要。`--minimal` の効果を含む |
+| `--oauth github,google` | プロバイダーのログインボタンを追加する（[OAuth ログインボタン](./oauth.md#oauth-ログインボタン)を参照） | `--minimal` と併用できる |
+| `--oauth-only` | パスワードを使わず、プロバイダーのログインだけにする（[OAuth のみでサインインする](./oauth.md#oauth-のみでサインインする)を参照） | `--oauth` が必要。`--minimal` の効果を含む |
 | `--no-session` | セッションをデータベースのテーブルではなくプロセスのメモリに置く | 再起動やインスタンスをまたぐと失われる |
 
 ### `--install` を付けない場合
@@ -92,142 +92,7 @@ bunx guren make:auth --install --verify
 
 ## OAuth / ソーシャルログイン
 
-プロバイダーでのサインインを追加する方法は 2 つあります。
-
-| コマンド | 得られるもの |
-|----------|--------------|
-| `make:auth --oauth github,google` | 生成されるログインページと登録ページのボタン。アカウントの作成と紐付けまで実装済み |
-| `guren add oauth` | OAuth マネージャー、コールバックがスタブのコントローラー、ルート。サインインの流れは自分で書く |
-
-同じアプリで両方を実行しないでください。同じファイルを書き出すので、2 回目の実行は失敗します（`--force` を付けると 1 回目のファイルを上書きします）。
-
-### OAuth ログインボタン
-
-`--oauth` にカンマ区切りでプロバイダー名を渡すと、ログインページに「Continue with GitHub / Google / Discord」のボタンが生成されます（`--minimal` でなければ登録ページにも付きます）。
-
-```bash
-bunx guren make:auth --install --oauth github,google
-```
-
-このオプションを付けると、プロバイダーごとの `githubId` / `googleId` カラムが `users` テーブルに追加されます。あわせて、次の 2 つが生成されます。
-
-- `config/oauth.ts` の定義。`OAUTH_<PROVIDER>_CLIENT_ID`・`_CLIENT_SECRET`・`_REDIRECT_URI` がすべて設定されているプロバイダーだけを `OAuthManager` に登録します（キーはコマンドが `config/env.ts` に宣言します。後述の[OAuth / ソーシャルログイン](#oauth-ソーシャルログイン)を参照）
-- `redirectToProvider` / `callback` アクションを持つ `OAuthController`
-
-コールバックは、そのプロバイダーの ID に紐付いたユーザーでログインさせます。紐付いたユーザーがいない場合は、次のように動きます。
-
-- 同じメールアドレスの既存アカウントがあれば、自動で紐付けずに拒否します。そのアカウントには、作成したときの方法でサインインしてもらいます。
-- プロバイダーがそのアドレスを未検証と報告していれば（Google の `email_verified`、Discord の `verified`）、アカウントを作りません。未検証のまま作成すると、自分のものではないアドレスを名乗れてしまうためです。すでに紐付け済みのアカウントは、あとからプロバイダー側の状態が変わっても影響を受けません。
-- どちらでもなければ、**パスワードを持たない**アカウントを作ってログインさせます。サインアップのときにハッシュの計算は発生せず、生成される `users.passwordHash` カラムも nullable のままです。
-
-`--verify` を付けずに `--oauth` を使うと、プロフィールのメールアドレスは**読み取り専用**で生成されます。`ProfileUpdateSchema` からフィールドが除かれ、`ProfileController.update()` もメールアドレスを受け取らないので、フォームからでも、手で組み立てたリクエストからでも、プロバイダーが保証したアドレスからアカウントを付け替えることはできません。
-
-`--verify` も付けた場合は、メールアドレスを編集できます。その場合、変更後のアドレスは `emailVerifiedAt` がリセットされ、そのアドレスに届いたリンクで確認するまで検証済みになりません。
-
-なお、どのモードでも、アドレスは名乗られるだけで、誰かのために確保されるわけではありません。登録フォームは形式が正しいメールアドレスならすべて受け付け、`users.email` には一意制約があります。そのため、あるアドレスをすでに別のアカウントが使っていると、本来の持ち主が初めて OAuth でサインインしようとしても拒否されます。これが問題になるアプリでは、アドレスの所有を確かめる仕組みを独自に追加してください。
-
-コールバックを認可リダイレクトと結びつける OAuth の state は、データベースに保存します。`--oauth` は `db/schema.ts` に `oauth_states` テーブルを追加し、`users` や `sessions` と同じマイグレーションに含めます。
-
-`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡し、`--install` がその定義を `createApp({ config })` に追加します。これで、リダイレクトとコールバックが別々のプロセスに届いても動きます。Workers、Lambda、Vercel ではそれがふつうです（[Stateストレージ](./oauth.md#stateストレージ)を参照）。
-
-`db/schema.ts` がないアプリでは `stateStore` のない定義が生成され、state はプロセスのメモリに置かれます。
-
-この定義の形で生成されるのは、`config/env.ts` があり、`oauth` をバインドするプロバイダーがない場合です。それ以外の場合は、同じ内容を登録する `app/Providers/OAuthProvider.ts` を生成し、そちらを登録します（`db/schema.ts` がなければ `CoreOAuthServiceProvider` も登録します）。OAuth をサービスプロバイダーで設定しているアプリも、そのまま動きます。詳しくは[サービスプロバイダーを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
-
-### OAuth のみでサインインする
-
-`--oauth` だけを付けた場合は、パスワードでのログインも一緒に生成されます。パスワードでのログインを完全になくすには、`--oauth-only` を付けます。
-
-```bash
-bunx guren make:auth --install --oauth github --oauth-only
-```
-
-`/login` は資格情報の入力欄がない、プロバイダーのボタンだけのページになり、`POST /login` ルートは生成されません。`LoginController` にあるのは `show()` とログアウト用の `destroy()` だけになります。新規登録、パスワードリセット、ログインページとプロフィールページのパスワード欄、`LoginValidator`、デモ用の `UsersSeeder` は、どれも生成されません（サインインに使えないパスワードをシードしても意味がないためです）。
-
-`--oauth-only` を使うには、プロバイダーを 1 つ以上指定した `--oauth` が必要です（そうしないと、サインインする手段のないアプリになります）。`--oauth-only` には `--minimal` の効果も含まれます。プロバイダーから得たメールアドレスはすでに検証済みとして扱えるので、`--verify` は無視されます。
-
-`--verify` なしの `--oauth` と同じく、このモードでもプロフィールのメールアドレスは読み取り専用です（詳しくは上を参照）。
-
-`make:auth` はファイルを書き込むだけで、削除はしません。そのため、パスワード認証を使っている既存のアプリを `--oauth-only --force` で変換すると、以前の登録やリセット関連のファイルがディスク上に残ります（生成時に一覧が表示されます）。これらは削除してください。特に、残った `db/seeders/UsersSeeder.ts` はルートテーブルではなく `db:seed` から読み込まれるので、`routes/auth.ts` を書き換えただけでは無効になりません。
-
-Cloudflare Workers の無料プランのように CPU 時間で課金や制限がかかる実行環境では、この構成をおすすめします。どのハッシュアルゴリズムを選んでも、パスワードを 1 回ハッシュするだけで 1 リクエストあたりの CPU の上限を超えてしまうためです。
-
-### OAuth スキャフォールド
-
-Guren には、OAuth の部品と GitHub、Google、Discord 向けのプリセットがあります。`guren add oauth` は、`make:auth` のページを使わずにそれらを用意します。
-
-```bash
-bunx guren add oauth
-```
-
-次のファイルが生成されます。
-
-- `config/oauth.ts`
-- `app/Http/Controllers/Auth/OAuthController.ts`
-- `routes/oauth.ts`
-
-あわせて、`config/oauth.ts` の定義が `createApp({ config })` に追加されます。この定義が `oauth` マネージャーを登録します。中身は [OAuth ガイド](./oauth.md#マネージャーの登録)で説明しています。
-
-`db/schema.ts` には `oauth_states` テーブルが追加され、そのマイグレーションも生成されます。`drizzle-kit` をまだインストールしていない場合は、あとで `bun run db:make` を実行してください。`oauth-states:prune` コマンドも登録されます。
-
-`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡すので、認可リダイレクトを発行したのとは別のプロセスにコールバックが届いても動きます。Workers、Lambda、Vercel ではそれがふつうです（[Stateストレージ](./oauth.md#stateストレージ)を参照）。`CoreOAuthServiceProvider` は state をメモリ上に持つので、登録しません。
-
-`db/schema.ts` がないアプリでは、何も書き込まずにエラーで終了します。
-
-[`--oauth`](#oauth-ログインボタン) と同じく、`config/env.ts` がないアプリや、すでにプロバイダーが `oauth` をバインドしているアプリでは、同じ内容とストアを登録する `app/Providers/OAuthProvider.ts` が生成されます。
-
-### プロバイダー資格情報の設定
-
-コマンドはプロバイダーごとに 3 つのキーを `config/env.ts` に宣言し、値を空にして `.env` にも追加します。
-
-```bash
-OAUTH_GITHUB_CLIENT_ID=...
-OAUTH_GITHUB_CLIENT_SECRET=...
-OAUTH_GITHUB_REDIRECT_URI=https://your-app.test/auth/github/callback
-```
-
-`GOOGLE` / `DISCORD` にも同じ形のキーがあります。プロバイダーが登録されるのは、3 つのキーがすべて設定されたときだけです。
-
-### ルートフロー
-
-```ts
-router.get('/auth/:provider', [OAuthController, 'redirectToProvider'])
-router.get('/auth/:provider/callback', [OAuthController, 'callback'])
-```
-
-`redirectToProvider` は state を生成し、プロバイダーの同意画面にリダイレクトします。  
-`callback` は state を検証してから、認可コードをアクセストークンに交換し、プロフィールを取得します。
-
-### ログイン後リダイレクト(`redirectTo`)
-
-フローの開始時に `redirectTo` を渡しておくと、コールバックの後でサニタイズ済みの値として受け取れます。生成された `OAuthController`（`this.oauth()` でマネージャーを取得）なら、次のように書けます。
-
-```ts
-// /auth/github?redirectTo=/settings
-async redirectToProvider(): Promise<Response> {
-  const { url } = await this.oauth().authorize('github', {
-    redirectTo: this.request.query('redirectTo'),
-    session: this.auth.session(),
-  })
-  return this.redirect(url)
-}
-
-async callback(): Promise<Response> {
-  const { profile, redirectTo } = await this.oauth().handleCallback('github', {
-    code,
-    state,
-    session: this.auth.session(),
-  })
-  // ...ユーザーをログインさせる...
-  return this.redirect(redirectTo ?? '/')
-}
-```
-
-`redirectTo` は、フローの入口と出口の両方で、オープンリダイレクトを防ぐための検証を受けます。デフォルトで通るのは、アプリ内の相対パス（`/settings`）だけです。プロトコル相対 URL（`//evil.com`）、バックスラッシュを使った変形、http(s) 以外のスキーム、許可リストにないホストは捨てられ、`redirectTo` は `undefined` になってフォールバック先が使われます。
-
-特定の外部ホストを許可したい場合（ワイルドカードも使えます）は、`config/oauth.ts` の `stateConfig` に並べます。定義の例は、OAuth ガイドの[ログイン後のリダイレクト](./oauth.md#ログイン後のリダイレクト)にあります。
-
-> **Note:** オプトインの `createRedirectSafetyMiddleware` は、独自の `allowedHosts` オプションで `Location` ヘッダーを検証します。両方を使う場合は、2 つの許可リストをそろえてください。食い違っていると、許可したはずの外部リダイレクトがミドルウェアによって `/` に書き換えられます。
+プロバイダー（GitHub、Google、Discord）でのサインインは、生成されるページにボタンを足す `make:auth --oauth` か、自分で書くコントローラー向けにフローを用意する `guren add oauth` でスキャフォールドします。2 つのコマンドの違い、書き出されるファイル、その裏で動くフローは、[OAuth ガイド](./oauth.md#oauth-のスキャフォールド)で説明します。
 
 ## コントローラーとルート
 
@@ -337,7 +202,7 @@ export class User extends defineModel(users, {
 }) {}
 ```
 
-`make:auth` は、この `hidden` の設定を含むユーザーモデルを最初から生成します。このオプションと、引き続き使える `static hidden = [...]` の書き方については、[フィールドの非表示](./database.md#フィールドの非表示)を参照してください。
+`make:auth` は、この `hidden` の設定を含むユーザーモデルを最初から生成します。このオプションと、引き続き使える `static hidden = [...]` の書き方については、[フィールドの非表示](./models.md#フィールドの非表示)を参照してください。
 
 資格情報の検証は、内部で生のデータベースレコードに対して行われるので、ログインや remember me の動作には影響しません。サニタイズによって変わるのは、`auth.user()` がアプリケーションのコードに渡す内容だけです。
 
@@ -382,138 +247,9 @@ type SafeUser = Sanitized<UserRecord, 'twoFactorSecret' | 'credentialDigest'>
 - **Auth コンテキスト**: リクエストごとの窓口で、`auth.check()`, `auth.user()`, `auth.login()` などのヘルパーを持ちます。`AuthServiceProvider` が自動で取り付け、コントローラーでは `this.auth`、ミドルウェアでは `attachAuthContext` 経由で使えます。
 - **OAuthManager**: ソーシャルログイン用のヘルパーです。OAuth の state の管理、コードの交換、プロフィールの取得を扱います。
 
-## セッションの有効化
+## セッション
 
-ガードはセッションを使います。`createApp()` に `auth` オプションを渡すと、`AuthServiceProvider` がセッションのミドルウェア（と CSRF）を自動で付けます。設定を変えるときも、そこにオプションを渡します。
-
-```ts
-import { createApp } from '@guren/core'
-
-const app = createApp({
-  auth: {
-    autoSession: true, // 無効化したい場合は false
-    sessionOptions: {
-      cookieSecure: process.env.NODE_ENV === 'production',
-    },
-  },
-})
-```
-
-`auth` オプションを使わずに、セッションのミドルウェアを自分でマウントすることもできます。ただしその場合は、CSRF の保護もプロバイダーによるセッションの扱いも付きません。
-
-```ts
-import { createApp, createSessionMiddleware } from '@guren/core'
-
-const app = createApp()
-app.use('*', createSessionMiddleware())
-```
-
-`cookieSecure` は、セッション Cookie に `Secure` 属性を付けるかどうかを決めます。`Secure` は HTTPS のときだけ Cookie を送らせる属性なので、本番では `true` にしてください。ローカル開発は `http://localhost` で動かすので、デフォルトは `false` になっています。
-
-**Application の auth オプション**
-- `autoSession`（デフォルト `true`）: `createSessionMiddleware` を自動で付けます。
-- `sessionOptions`（`createSessionMiddleware` にそのまま渡されます）:
-  - `cookieName`(デフォルト `guren.session`)
-  - `cookieSecure`(本番は `true`、開発は `false` がデフォルト)
-  - `cookieSameSite`(デフォルト `Lax`)
-  - `cookieHttpOnly`(デフォルト `true`)
-  - `cookieMaxAgeSeconds`（任意。指定しなければ `ttlSeconds` を使います）
-  - `ttlSeconds`（デフォルトは 2 時間）
-  - `store`（デフォルトはメモリストア。複数インスタンスの構成では独自の実装に差し替えてください）。ストアそのものか、ストアを返す関数を渡します。関数は起動時ではなくリクエストごとに呼ばれます（結果は `SessionManager` 側でメモ化されます）。
-
-### `SessionManager` でストアを選ぶ
-
-`bunx guren add session` を実行すると、次のものが生成されます。
-
-- `sessions` テーブルとそのマイグレーション
-- `database` と `cookie` のストアを宣言した `config/session.ts`
-- `SESSION_DRIVER` キー（`config/env.ts` に `database` をデフォルトとして宣言し、`.env` と `.env.example` にも追加）
-- `sessions:prune` コマンド
-
-定義は `createApp({ config })` に追加されます。下の例のうち `redis` ストアだけは手で書き足す部分です。`@guren/core/redis` を import すると ioredis がすべてのバンドルに入るので、必要になるまで雛形には含めていません。
-
-`guren add auth` はこのコマンドを内部で実行するので、生成した直後のアプリでも、セッションは最初からデータベースに保存されます。以下は、手で組み込む場合に備えて、生成されるものを説明したものです。
-
-[`--oauth`](#oauth-ログインボタン) と同じく、`config/env.ts` がないアプリや、すでにプロバイダーが `session` をバインドしているアプリでは、プレーンな `SessionConfig` としての `config/session.ts` と、それをバインドする `app/Providers/SessionProvider.ts` が生成されます。
-
-使う可能性のあるストアが複数あるなら、まとめて宣言しておき、環境ごとに選びます。`defineSessionConfig` が `session` キーに `SessionManager` をバインドし、`AuthServiceProvider` は起動時に、それを組み込んだセッションミドルウェアを組み立てます。ストア自体は最初のリクエストのときに解決されます。
-
-```ts
-// config/session.ts
-import { defineSessionConfig } from '@guren/core'
-import { createRedisClient } from '@guren/core/redis'
-import { sessions } from '../db/schema'
-
-export default defineSessionConfig((env) => ({
-  default: env.SESSION_DRIVER,
-  ttlSeconds: 60 * 60 * 2,
-  stores: {
-    // 再起動・isolate・コールドスタートをまたいで残ります。接続は
-    // `configureOrm()` が確立済みのもの(Postgres / MySQL / SQLite / D1)を使います。
-    database: { driver: 'database', table: sessions },
-    cookie: { driver: 'cookie' },
-    // `client` は関数でも構いません。このストアが最初に使われたときに実行されるので、
-    // 宣言しただけで選ばれていないストアは接続を開きません。
-    redis: { driver: 'redis', client: () => createRedisClient({ url: env.REDIS_URL }) },
-  },
-}))
-```
-
-`REDIS_URL` は `config/env.ts` に宣言します。`@guren/core/redis` は ioredis を読み込むので、実際に使う設定ファイルでだけ import してください。定義は、データベースの定義と並べて登録します。
-
-```ts
-// src/app.ts
-import { createApp } from '@guren/core'
-import database from '../config/database.js'
-import env from '../config/env.js'
-import session from '../config/session.js'
-
-const app = createApp({
-  env,
-  config: [database, session],
-})
-```
-
-`defineSessionConfig()` は、マネージャーを `createSessionManager()` で組み立てます。`createSessionManager()` は、`new SessionManager()` に `database` ドライバーを登録したものです。このドライバーはテーブルを ORM のモデルで包むので、ORM に依存しない HTTP 層には置けず、`@guren/core` からしか提供できません。`database` ストアを宣言するときは、常にこちらを使ってください。
-
-別の方法で組み立てたマネージャーには、`registerDatabaseSessionDriver(manager)` でドライバーを追加できます。
-
-#### `cookie` ストア
-
-`{ driver: 'cookie' }` は、セッション全体を cookie の中に入れ、`APP_KEY` で暗号化します（AES-256-GCM。`APP_PREVIOUS_KEYS` も復号に使うので、鍵をローテーションしても全員がログアウトすることはありません）。**サーバ側のリソースをまったく必要としない**唯一のストアで、テーブルもマイグレーションも Redis も Workers のバインディングもいりません。
-
-```ts
-stores: {
-  cookie: { driver: 'cookie' },
-}
-```
-
-このストアにはできないことが 3 つあります。理解したうえで選んでください。
-
-- **セッションの中身がすべて cookie に入る**ので、サイズに上限があります。ミドルウェアは送り出す `Set-Cookie` 全体（名前と属性を含む）の大きさを測り、`maxCookieBytes`（既定は 4096。ブラウザが保持できる大きさ）を超えるとエラーにします。ブラウザに黙って捨てられる cookie を出すよりはよいからです。セッション本体に使えるのは約 2.9KB です。レコードはデータベースに置き、セッションにはその id だけを入れてください
-- **ログアウトしても、クライアントがすでに複製した cookie は失効させられません**。`invalidate()` が消すのはそのクライアントの cookie だけで、複製は期限まで有効なままです。失効させる必要があるものはデータベースに置いてください
-- **「すべての端末からログアウト」も、セッションの一覧表示もできません**。サーバ側に列挙できるものがないためです
-
-`ttlSeconds` はよく考えて設定してください。サーバ側から cookie を期限前に失効させる手段がないので、暗号化したペイロード自身の有効期限が唯一の上限になります。
-
-#### `database` ストアと起動時の検査
-
-`database` ドライバーを使うには、`db/schema.ts` の `sessions` テーブルとそのマイグレーションが必要です。カラムは `id`（text の主キー）・`data`・`expiresAt` の 3 つで、方言ごとの定義は [Cloudflare ガイド](./cloudflare.md#セッションと-oauth-state-はデータベースに保存する) にあります。
-
-期限切れの行は、`manager.pruneExpired()` を定期的に実行して片付けてください（`read()` は期限切れの行をすでに存在しないものとして扱います）。
-
-マネージャー側の cookie と TTL の設定が基本になり、`auth.sessionOptions` がそれをフィールドごとに上書きします。次の設定ミスは起動時にエラーになるので、`SESSION_DRIVER` の打ち間違いも最初のログインより前に見つかります。
-
-- `auth.sessionOptions.store` とマネージャーの両方を設定した（どちらかを黙って選ぶことはしません）
-- `default` のストアのドライバーが登録されていない
-- `default` の名前が `stores` に宣言されていない（`AuthServiceProvider` がマネージャーを組み立てる時点で検出します）
-
-`memory` は常に宣言済みなので、`SESSION_DRIVER=memory` はエントリを書かなくても動きます。マネージャーは、どのプロバイダーの boot よりも前にバインドされます。詳しくは [config 定義](./configuration.md#config-定義) を参照してください。
-
-プラグインがドライバーを追加するときは、`SessionDrivers` インターフェースを型の拡張（module augmentation）で広げ、`manager.registerDriver(name, factory)` を呼びます。ストアの解決は遅延して行われるので、プラグインの `register()` が設定の宣言より後に実行されても問題ありません。
-
-> [!WARNING]
-> Cloudflare Workers、AWS Lambda、Vercel ではリクエストの間でメモリを共有しないので、デフォルトの `MemorySessionStore` を使うと、ログインした直後のリクエストでセッションが失われます。ミドルウェアはこの状況を検出するとプロセスごとに 1 度警告を出し、`guren check` とデプロイのビルドは事前に警告します。
+ガードは、ログインしたユーザーの識別子をセッションに保存します。`createApp()` に `auth` オプションを渡せば、セッションのミドルウェアと CSRF 対策は自動で付き、`guren add auth` を実行したアプリでは最初からセッションがデータベースに保存されます。Cookie の設定、使えるストア、環境ごとのストアの選び方は[セッション](./sessions.md)で説明します。
 
 ## プロバイダーとガードの設定
 

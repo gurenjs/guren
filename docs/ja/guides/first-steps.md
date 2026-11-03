@@ -98,7 +98,7 @@ import { posts } from '@/db/schema'
 export class Post extends defineModel(posts) {}
 ```
 
-クエリは Laravel と同じ感覚で書けます。`Post.find(1)`、`Post.findOrFail(1)`（見つからなければ 404 を投げます）、`Post.where('published', true).get()` といった具合です。カラムの型はスキーマから引き継がれ、どのクエリ結果にも付きます。詳しくは [データベースガイド](./database.md) を参照してください。
+クエリは Laravel と同じ感覚で書けます。`Post.find(1)`、`Post.findOrFail(1)`（見つからなければ 404 を投げます）、`Post.where('published', true).get()` といった具合です。カラムの型はスキーマから引き継がれ、どのクエリ結果にも付きます。詳しくは [モデル](./models.md) を参照してください。
 
 ## 5. リソース
 

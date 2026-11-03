@@ -139,7 +139,8 @@ bun run dev                    # start the dev server
 3. **トピック別ガイド**: 全体像を掴んだあと、機能ごとに詳しく読むためのガイドです。
    - [ルーティング](./routing.md): ルートグループ、ミドルウェア、リソースルート。
    - [コントローラー](./controllers.md): リクエスト処理、入力ヘルパー、バリデーション。
-   - [データベース](./database.md): Drizzle スキーマ、マイグレーション、QueryBuilder、リレーションシップ。
+   - [データベース](./database.md): 接続、Drizzle スキーマ、マイグレーション、シード。
+   - [モデル](./models.md): QueryBuilder、行の作成と更新、スコープ、シリアライズ。リレーションと eager load は[リレーション](./relationships.md)で扱います。
    - [フロントエンド](./frontend.md): Inertia による React ページと SSR。
    - [テスト](./testing.md): TestApp、fluent なアサーション、テストユーティリティ。
    - [スペックアンカード開発](./spec-anchored.md): 生成図、アーキテクチャ上の意思決定、検証済みリンク、Docs Graph。

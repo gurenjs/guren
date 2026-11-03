@@ -175,7 +175,7 @@ Three rungs, in order:
 | Priority | Source | What the tool gets |
 |---|---|---|
 | 1 | the route's `output` schema | a JSON Schema `outputSchema`, and `structuredContent` on every successful call |
-| 2 | a [`resource` hint](./routing.md#resource-response-hints) | no schema; `bunx guren codegen` embeds the Resource's extracted payload type into the tool description |
+| 2 | a [`resource` hint](./route-contracts.md#resource-response-hints) | no schema; `bunx guren codegen` embeds the Resource's extracted payload type into the tool description |
 | 3 | neither | no output shape at all; `guren check` warns |
 
 `output` outranks the hint whenever both are declared: the `output` schema is
@@ -716,7 +716,7 @@ The full finding-key tables are in
 
 ## Related
 
-- [Routing — Agent tools](./routing.md#agent-tools): where `.agent()` sits among the other route contracts
+- [Routing — Agent tools](./route-contracts.md#agent-tools): where `.agent()` sits among the other route contracts
 - [Control and Audit Agent Tool Access](./agent-tool-governance.md): token scopes, approval gates and the audit trail
 - [API Tokens](./api-tokens.md): the store the MCP endpoint verifies bearers against
 - [Authorization](./authorization.md): the policies that decide what a principal may do

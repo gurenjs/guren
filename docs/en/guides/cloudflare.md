@@ -309,7 +309,7 @@ Two limits shape what an app can do:
 
 Cloudflare removed the compressed size limits (3 MB Free, 10 MB Paid) on 2026-09-04; only the uncompressed bundle counts now. Measure yours with `bunx guren cloudflare:size` (or `cloudflare:build --report-size`): it runs wrangler's dry run and lists the largest sources by package, which is where a bundle that grew unnoticed shows up. Two limits the number does not cover: startup time (1 s, `wrangler check startup`) and memory (128 MB per isolate), both of which large bundled data also eats.
 
-The CPU budget rules out password hashing entirely: a deliberately slow operation cannot fit in 10 ms. Apps on the free plan should authenticate through OAuth rather than passwords. See [Authentication](./authentication.md) for the OAuth flow.
+The CPU budget rules out password hashing entirely: a deliberately slow operation cannot fit in 10 ms. Apps on the free plan should authenticate through OAuth rather than passwords. See the [OAuth guide](./oauth.md) for the OAuth flow.
 
 The same budget rewards moving work off the request path: render Markdown when content is saved rather than when it is read, and prerender static content at build time. The paid plan lifts the CPU limit if your workload genuinely needs it.
 

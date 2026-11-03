@@ -113,9 +113,9 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(validation.includes('pages.posts.Index'), 'Validation guide must show typed page definitions in the mainline example.')
   assert(validation.includes("const router = new Router()"), 'Validation guide must use Router for middleware-based validation examples.')
 
-  const database = await read(root, 'docs/en/guides/database.md')
-  assert(database.includes('PaginatedPageProps<PostResourceData>'), 'Database guide must show paginated resource contracts.')
-  assert(database.includes('pages.posts.Index'), 'Database guide must use typed page definitions in pagination examples.')
+  const models = await read(root, 'docs/en/guides/models.md')
+  assert(models.includes('PaginatedPageProps<PostResourceData>'), 'Models guide must show paginated resource contracts.')
+  assert(models.includes('pages.posts.Index'), 'Models guide must use typed page definitions in pagination examples.')
 
   const architecture = await read(root, 'docs/en/guides/architecture.md')
   assert(architecture.includes('PaginatedPageProps<PostResourceData>'), 'Architecture guide must show paginated page props in controller examples.')
@@ -250,9 +250,9 @@ async function auditJapaneseDocs(root: string): Promise<void> {
   assert(validation.includes('pages.posts.Index'), 'Japanese validation guide must show typed page definitions in the mainline example.')
   assert(validation.includes("const router = new Router()"), 'Japanese validation guide must use Router for middleware-based validation examples.')
 
-  const database = await read(root, 'docs/ja/guides/database.md')
-  assert(database.includes('PaginatedPageProps<PostResourceData>'), 'Japanese database guide must show paginated resource contracts.')
-  assert(database.includes('pages.posts.Index'), 'Japanese database guide must use typed page definitions in pagination examples.')
+  const models = await read(root, 'docs/ja/guides/models.md')
+  assert(models.includes('PaginatedPageProps<PostResourceData>'), 'Japanese models guide must show paginated resource contracts.')
+  assert(models.includes('pages.posts.Index'), 'Japanese models guide must use typed page definitions in pagination examples.')
 
   const architecture = await read(root, 'docs/ja/guides/architecture.md')
   assert(architecture.includes('PaginatedPageProps<PostResourceData>'), 'Japanese architecture guide must show paginated page props in controller examples.')
