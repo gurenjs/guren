@@ -21,7 +21,7 @@ export function CopyCommand({ command }: { command: string }) {
     <button
       type="button"
       onClick={copy}
-      className="group inline-flex max-w-full items-center gap-2 rounded-md border border-white/15 bg-ink px-4 py-3 text-left font-mono text-[13px] text-crimson-50 transition hover:border-crimson-300/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crimson-300 sm:gap-3 sm:text-sm"
+      className="group inline-flex max-w-full items-center gap-2 rounded-md border border-home-line-strong bg-home-ink px-4 py-3 text-left font-mono text-[13px] text-home-text transition hover:border-crimson-300/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crimson-300 sm:gap-3 sm:text-sm"
       aria-label={`Copy command: ${command}`}
     >
       <span className="select-none text-crimson-400">$</span>
@@ -34,7 +34,7 @@ export function CopyCommand({ command }: { command: string }) {
           </Fragment>
         ))}
       </span>
-      <span className="select-none text-xs text-smoke/70 transition group-hover:text-smoke">
+      <span className="select-none text-xs text-home-text-2 transition group-hover:text-home-text-2">
         {copied ? 'copied' : 'copy'}
       </span>
     </button>
@@ -46,16 +46,16 @@ export function CopyBlock({ text, label, prompt = false }: { text: string; label
   const [copied, copy] = useCopy(text)
 
   return (
-    <div className="relative rounded-md border border-white/15 bg-ink">
+    <div className="relative rounded-md border border-home-line-strong bg-home-ink">
       <button
         type="button"
         onClick={copy}
-        className="absolute right-2 top-2 rounded px-2 py-1 text-xs text-smoke/70 transition hover:text-smoke focus-visible:outline-2 focus-visible:outline-crimson-300"
+        className="absolute right-2 top-2 rounded px-2 py-1 text-xs text-home-text-2 transition hover:text-home-text-2 focus-visible:outline-2 focus-visible:outline-crimson-300"
         aria-label={`Copy ${label}`}
       >
         {copied ? 'copied' : 'copy'}
       </button>
-      <pre className="overflow-x-auto whitespace-pre-wrap break-words px-4 py-3 pr-16 font-mono text-[13px] leading-[1.7] text-crimson-50 sm:text-sm">
+      <pre className="overflow-x-auto whitespace-pre-wrap break-words px-4 py-3 pr-16 font-mono text-[13px] leading-[1.7] text-home-text sm:text-sm">
         {prompt
           ? text
           : text.split('\n').map((line, i) => (

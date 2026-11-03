@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react'
-import { useState, type KeyboardEvent, type ReactNode } from 'react'
+import { Fragment, useState, type KeyboardEvent, type ReactNode } from 'react'
 interface Props {
   codeExamples: Record<string, string>
 }
@@ -9,7 +9,7 @@ import { ConventionGrid } from '../components/ConventionGrid.js'
 import { CopyCommand } from '../components/CopyCommand.js'
 import { Footer } from '../components/Footer.js'
 import { Header } from '../components/Header.js'
-import { FunctionIcon, GithubIcon, GlobeIcon, LayersIcon, ServerIcon } from '../components/icons.js'
+import { ChevronRightIcon, FunctionIcon, GithubIcon, GlobeIcon, LayersIcon, ServerIcon } from '../components/icons.js'
 import { InlineCode } from '../components/InlineCode.js'
 import { Seo } from '../components/Seo.js'
 import { TextLink } from '../components/TextLink.js'
@@ -80,30 +80,119 @@ const TAB_FILES: Record<TabKey, string> = {
   View: 'resources/js/pages/posts/Index.tsx',
 }
 
-function SectionHeading({ children }: { children: ReactNode }) {
-  return (
-    <>
-      <Tick />
-      <h2 className="mt-5 text-balance text-[2rem] font-bold leading-[1.1] tracking-[-0.025em] text-crimson-50 md:text-[2.5rem]">
-        {children}
-      </h2>
-    </>
-  )
-}
-
-function Lead({ children }: { children: ReactNode }) {
-  return <p className="mt-5 max-w-[34rem] text-[1.0625rem] leading-[1.65] text-smoke">{children}</p>
-}
-
 const PRIMARY_BUTTON =
   'inline-flex items-center rounded-md bg-crimson-600 px-6 py-3 font-bold text-crimson-50 transition hover:bg-crimson-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crimson-300'
 
+const SECONDARY_BUTTON =
+  'inline-flex items-center gap-2 rounded-md border border-home-line-strong px-6 py-3 font-bold text-home-text transition hover:border-home-text-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crimson-300'
+
+/** A plus mark where a section rule meets the frame's side rules. */
+function FrameCross({ side }: { side: 'left' | 'right' }) {
+  return (
+    <span
+      aria-hidden
+      className={`absolute -bottom-[6px] z-10 hidden size-[11px] lg:block ${side === 'left' ? '-left-[6px]' : '-right-[6px]'}`}
+    >
+      <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-home-text-2" />
+      <span className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-home-text-2" />
+    </span>
+  )
+}
+
+/**
+ * One band of the page: a rule below it, and inside it the centred column whose
+ * side rules run the full height of the page on wide screens.
+ */
+function Band({
+  children,
+  className = '',
+  frameClassName = '',
+  light = false,
+}: {
+  children: ReactNode
+  className?: string
+  frameClassName?: string
+  light?: boolean
+}) {
+  return (
+    <section className={`border-b ${light ? 'border-home-light-line bg-home-light text-home-light-text' : 'border-home-line'} ${className}`}>
+      <div
+        className={`relative mx-auto max-w-6xl lg:border-x ${light ? 'border-home-light-line' : 'border-home-line'} ${frameClassName}`}
+      >
+        <FrameCross side="left" />
+        <FrameCross side="right" />
+        {children}
+      </div>
+    </section>
+  )
+}
+
+function SectionLabel({ children, light = false }: { children: ReactNode; light?: boolean }) {
+  return (
+    <p
+      className={`flex items-center gap-3 font-mono text-xs uppercase tracking-[0.14em] ${light ? 'text-home-light-text-2' : 'text-home-text-2'}`}
+    >
+      <Tick />
+      {children}
+    </p>
+  )
+}
+
+function SectionHeading({ children, light = false }: { children: ReactNode; light?: boolean }) {
+  return (
+    <h2
+      className={`mt-5 text-balance text-[2rem] font-bold leading-[1.1] tracking-[-0.025em] md:text-[2.5rem] ${light ? 'text-home-light-text' : 'text-home-text'}`}
+    >
+      {children}
+    </h2>
+  )
+}
+
+function Lead({ children, light = false, center = false }: { children: ReactNode; light?: boolean; center?: boolean }) {
+  return (
+    <p
+      className={`mt-5 max-w-[34rem] text-[1.0625rem] leading-[1.65] ${light ? 'text-home-light-text-2' : 'text-home-text-2'} ${center ? 'mx-auto' : ''}`}
+    >
+      {children}
+    </p>
+  )
+}
+
 function HeroName() {
   return (
-    <figure aria-hidden className="hidden flex-col items-center lg:flex">
+    <figure aria-hidden className="relative flex flex-col items-center">
       <BurningName />
-      <figcaption className="mt-6 text-sm text-smoke">gu·ren, crimson lotus</figcaption>
+      <figcaption className="mt-6 font-mono text-xs uppercase tracking-[0.14em] text-home-text-2">
+        gu·ren, crimson lotus
+      </figcaption>
     </figure>
+  )
+}
+
+function AgentTerminal() {
+  return (
+    <div className="mx-auto max-w-3xl overflow-hidden rounded-lg border border-home-line-strong bg-home-ink/95 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] backdrop-blur">
+      <div className="flex items-center gap-2 border-b border-home-line px-4 py-3">
+        <span aria-hidden className="size-2.5 rounded-full bg-home-line-strong" />
+        <span aria-hidden className="size-2.5 rounded-full bg-home-line-strong" />
+        <span aria-hidden className="size-2.5 rounded-full bg-home-line-strong" />
+        <span className="ml-3 font-mono text-xs text-home-text-2">~/my-app</span>
+      </div>
+      <dl className="px-5 py-5 font-mono text-[13px] leading-[1.9] sm:px-6 sm:text-sm">
+        {agentCommands.map((c) => (
+          <div key={c.command} className="grid grid-cols-1 sm:grid-cols-[14rem_1fr] sm:gap-4">
+            <dt className="text-home-text">
+              <span className="select-none text-crimson-400">$ </span>
+              {c.command}
+            </dt>
+            <dd className="text-home-text-2">
+              <span className="select-none"># </span>
+              {c.detail}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   )
 }
 
@@ -127,26 +216,26 @@ export default function Home({ codeExamples }: Props) {
         path="/"
         jsonLd={[websiteJsonLd(), softwareJsonLd()]}
       />
-      <div className="min-h-dvh bg-crimson-950 font-home text-crimson-50 antialiased">
-        <Header variant="home" />
+      <div className="min-h-dvh overflow-x-clip bg-home-ground font-home text-home-text antialiased">
+        <Header variant="home" framed />
 
-        <section className="relative overflow-hidden border-b border-white/10">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 bg-[radial-gradient(52%_70%_at_82%_40%,rgba(255,60,40,.22),transparent_72%)]"
-          />
-          <div className="relative mx-auto grid grid-cols-1 max-w-6xl gap-12 px-6 pb-20 pt-14 md:pb-28 md:pt-24 lg:grid-cols-[1fr_auto] lg:items-center lg:gap-24">
-            <div>
-              <p className="flex items-baseline gap-3 text-sm text-smoke lg:hidden">
+        <main>
+          <Band frameClassName="grid grid-cols-1 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+            <div className="px-6 pb-16 pt-12 sm:px-10 md:pb-24 md:pt-20">
+              <p className="flex items-center gap-2.5 font-mono text-xs uppercase tracking-[0.14em] text-home-text-2">
+                <span aria-hidden className="size-1.5 rounded-full bg-ember" />
+                v2 · stable · MIT
+              </p>
+              <p className="mt-5 flex items-baseline gap-3 text-sm text-home-text-2 lg:hidden">
                 <span lang="ja" className="font-mincho text-2xl font-bold text-crimson-400">
                   紅蓮
                 </span>
                 gu·ren, crimson lotus
               </p>
-              <h1 className="mt-6 max-w-[19ch] text-balance text-[2.6rem] font-bold leading-[1.04] tracking-[-0.035em] text-crimson-50 sm:text-6xl lg:mt-0 lg:text-[4.5rem]">
+              <h1 className="mt-6 max-w-[19ch] text-balance text-[2.6rem] font-bold leading-[1.04] tracking-[-0.035em] text-home-text sm:text-6xl lg:text-[4.25rem]">
                 The <span className="whitespace-nowrap">Bun-first</span> fullstack TypeScript framework.
               </h1>
-              <p className="mt-7 max-w-[36rem] text-lg leading-[1.65] text-smoke">
+              <p className="mt-7 max-w-[34rem] text-lg leading-[1.65] text-home-text-2">
                 Laravel-style conventions, types from the route to the React component, and checks
                 your coding agent runs on its own work. Develop on Bun, deploy to Bun, AWS Lambda,
                 Vercel or Cloudflare Workers.
@@ -155,23 +244,35 @@ export default function Home({ codeExamples }: Props) {
                 <Link href="/start" className={PRIMARY_BUTTON}>
                   Get started
                 </Link>
+                <a href={GITHUB_URL} target="_blank" rel={OWN_REPO_LINK_REL} className={SECONDARY_BUTTON}>
+                  <GithubIcon className="size-4" />
+                  View on GitHub
+                </a>
+              </div>
+              <div className="mt-4">
                 <CopyCommand command="bunx create-guren-app my-app" />
               </div>
             </div>
-            <HeroName />
-          </div>
-        </section>
+            <div className="relative hidden items-center justify-center overflow-hidden border-l border-home-line lg:flex">
+              <div aria-hidden className="home-dots absolute inset-0" />
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 bg-[radial-gradient(45%_45%_at_50%_48%,rgba(255,60,40,.2),transparent_75%)]"
+              />
+              <HeroName />
+            </div>
+          </Band>
 
-        <section className="border-b border-white/10">
-          <div className="mx-auto grid grid-cols-1 max-w-6xl gap-12 px-6 py-20 md:py-28 lg:grid-cols-[minmax(0,4fr)_minmax(0,7fr)] lg:gap-16">
-            <div>
+          <Band frameClassName="grid grid-cols-1 lg:grid-cols-[minmax(0,4fr)_minmax(0,7fr)]">
+            <div className="px-6 py-16 sm:px-10 md:py-24">
+              <SectionLabel>The loop</SectionLabel>
               <SectionHeading>Route to React, one loop</SectionHeading>
               <Lead>
                 A route points at a controller, and the controller&apos;s props reach the React
                 component type-checked. There is no API client to write.
               </Lead>
               <div role="tablist" aria-label="Files in the loop" onKeyDown={moveTab} className="relative mt-10">
-                <span aria-hidden className="absolute bottom-5 left-[5px] top-5 w-px bg-white/15" />
+                <span aria-hidden className="absolute bottom-5 left-[5px] top-5 w-px bg-home-line-strong" />
                 {TAB_KEYS.map((tab) => {
                   const active = activeTab === tab
                   return (
@@ -189,14 +290,14 @@ export default function Home({ codeExamples }: Props) {
                       <span
                         aria-hidden
                         className={`relative mt-[7px] size-[11px] shrink-0 rounded-full border-2 transition ${
-                          active ? 'border-ember bg-ember' : 'border-crimson-50/40 bg-crimson-950 group-hover:border-crimson-50/70'
+                          active ? 'border-ember bg-ember' : 'border-home-text-2 bg-home-ground group-hover:border-home-text'
                         }`}
                       />
                       <span className="min-w-0">
-                        <span className={`block font-bold transition ${active ? 'text-crimson-50' : 'text-smoke group-hover:text-crimson-50'}`}>
+                        <span className={`block font-bold transition ${active ? 'text-home-text' : 'text-home-text-2 group-hover:text-home-text'}`}>
                           {tab}
                         </span>
-                        <span className={`block truncate font-mono text-xs transition ${active ? 'text-crimson-300' : 'text-smoke/70'}`}>
+                        <span className={`block truncate font-mono text-xs transition ${active ? 'text-crimson-300' : 'text-home-text-2'}`}>
                           {TAB_FILES[tab]}
                         </span>
                       </span>
@@ -205,71 +306,47 @@ export default function Home({ codeExamples }: Props) {
                 })}
               </div>
             </div>
-            <div
-              id="loop-panel"
-              role="tabpanel"
-              aria-labelledby={`loop-tab-${activeTab}`}
-              className="min-w-0 self-start overflow-hidden rounded-md border border-white/10 bg-ink"
-            >
-              <p className="border-b border-white/10 px-5 py-3 font-mono text-xs text-smoke">{TAB_FILES[activeTab]}</p>
-              <div className="overflow-x-auto p-5 text-[12.5px] leading-[1.7] [font-variant-ligatures:none] [&_.shiki]:!bg-transparent">
-                <div dangerouslySetInnerHTML={{ __html: codeExamples[activeTab] ?? '' }} />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="border-b border-white/10">
-          <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
-            <div className="grid grid-cols-1 items-start gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-16">
-              <div>
-                <SectionHeading>Built for AI coding agents</SectionHeading>
-                <p className="mt-4 font-mono text-sm text-crimson-300">
-                  derived where possible, declared where not, checked always
+            <div className="min-w-0 border-home-line px-6 pb-16 sm:px-10 lg:border-l lg:py-24">
+              <div
+                id="loop-panel"
+                role="tabpanel"
+                aria-labelledby={`loop-tab-${activeTab}`}
+                className="min-w-0 overflow-hidden rounded-lg border border-home-line-strong bg-home-ink"
+              >
+                <p className="flex items-center gap-2 border-b border-home-line px-5 py-3 font-mono text-xs text-home-text-2">
+                  <span aria-hidden className="size-1.5 rounded-full bg-ember" />
+                  {TAB_FILES[activeTab]}
                 </p>
-                <Lead>
-                  Your agent reads what the project knows from the code itself, and CI fails when
-                  the wiring, docs or spec drift.
-                </Lead>
-                <dl className="mt-8 border-b border-white/10">
-                  {agentCommands.map((c) => (
-                    <div key={c.command} className="grid grid-cols-1 gap-1 border-t border-white/10 py-3 sm:grid-cols-[12.5rem_1fr] sm:gap-4">
-                      <dt className="font-mono text-sm text-crimson-50">
-                        <span className="select-none text-smoke/60">$ </span>
-                        {c.command}
-                      </dt>
-                      <dd className="text-sm text-smoke">{c.detail}</dd>
-                    </div>
-                  ))}
-                </dl>
+                <div className="overflow-x-auto p-5 text-[12.5px] leading-[1.7] [font-variant-ligatures:none] [&_.shiki]:!bg-transparent">
+                  <div dangerouslySetInnerHTML={{ __html: codeExamples[activeTab] ?? '' }} />
+                </div>
               </div>
-              <figure>
-                <a
-                  href="/_guren/docs"
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label="Open the blog example's docs graph in the Guren docs viewer"
-                  className="block overflow-hidden rounded-md border border-white/10 bg-ink p-1.5 transition hover:border-crimson-300/40"
-                >
-                  <img
-                    src="/docs-graph.png"
-                    alt="The Guren docs viewer rendering a blog app's knowledge graph: decision records, generated spec views, model entities, and source files connected by verified links"
-                    width={1440}
-                    height={900}
-                    loading="lazy"
-                    className="w-full rounded-[3px]"
-                  />
-                </a>
-                <figcaption className="mt-4 text-sm leading-relaxed text-smoke">
-                  The blog example&apos;s docs graph. Your app gets the same view at{' '}
-                  <InlineCode>/_guren/docs</InlineCode>.
-                </figcaption>
-              </figure>
             </div>
+          </Band>
 
-            <div className="mt-16 grid grid-cols-1 gap-10 border-t border-white/10 pt-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
-              <div>
-                <p className="max-w-[34rem] text-[0.9375rem] leading-[1.65] text-smoke">
+          <Band>
+            <div className="px-6 pt-16 text-center sm:px-10 md:pt-24">
+              <div className="flex justify-center">
+                <SectionLabel>For coding agents</SectionLabel>
+              </div>
+              <SectionHeading>Built for AI coding agents</SectionHeading>
+              <p className="mt-4 font-mono text-sm text-crimson-300">
+                derived where possible, declared where not, checked always
+              </p>
+              <Lead center>
+                Your agent reads what the project knows from the code itself, and CI fails when
+                the wiring, docs or spec drift.
+              </Lead>
+            </div>
+            <div className="relative mt-12 px-6 pb-16 sm:px-10 md:pb-20">
+              <div aria-hidden className="home-burst pointer-events-none absolute inset-0" />
+              <div className="relative">
+                <AgentTerminal />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-px border-t border-home-line bg-home-line sm:grid-cols-2 lg:grid-cols-4">
+              <div className="bg-home-ground px-6 py-8 sm:px-8">
+                <p className="text-[0.9375rem] leading-[1.65] text-home-text-2">
                   Measured on 360 runs of 20 tasks across three models, with and without the
                   harness.
                 </p>
@@ -279,36 +356,56 @@ export default function Home({ codeExamples }: Props) {
                   </TextLink>
                 </p>
               </div>
-              <dl className="grid grid-cols-1 gap-6 sm:grid-cols-3 sm:gap-0">
-                {agentBenchmarkStats.map((s) => (
-                  <div key={s.label} className="flex flex-col sm:border-l sm:border-white/10 sm:px-6 sm:first:border-l-0 sm:first:pl-0">
-                    <dt className="order-2 mt-2 text-sm leading-snug text-smoke">{s.label}</dt>
-                    <dd className="order-1 text-[2.75rem] font-bold leading-none tracking-[-0.03em] text-foam tabular-nums">
-                      {s.value}
-                      {s.versus && (
-                        <>
-                          <span className="mx-1.5 text-lg font-normal text-smoke">vs</span>
-                          {s.versus}
-                        </>
-                      )}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+              {agentBenchmarkStats.map((s) => (
+                <dl key={s.label} className="flex flex-col bg-home-ground px-6 py-8 sm:px-8">
+                  <dt className="order-2 mt-3 text-sm leading-snug text-home-text-2">{s.label}</dt>
+                  <dd className="order-1 text-[2.75rem] font-bold leading-none tracking-[-0.03em] text-foam tabular-nums">
+                    {s.value}
+                    {s.versus && (
+                      <>
+                        <span className="mx-1.5 text-lg font-normal text-home-text-2">vs</span>
+                        {s.versus}
+                      </>
+                    )}
+                  </dd>
+                </dl>
+              ))}
             </div>
-          </div>
-        </section>
+            <figure className="grid grid-cols-1 items-center gap-8 border-t border-home-line px-6 py-12 sm:px-10 lg:grid-cols-[minmax(0,4fr)_minmax(0,7fr)] lg:gap-14">
+              <figcaption className="text-[0.9375rem] leading-relaxed text-home-text-2">
+                The blog example&apos;s docs graph. Your app gets the same view at{' '}
+                <InlineCode>/_guren/docs</InlineCode>.
+              </figcaption>
+              <a
+                href="/_guren/docs"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open the blog example's docs graph in the Guren docs viewer"
+                className="block overflow-hidden rounded-lg border border-home-line-strong bg-home-ink p-1.5 transition hover:border-crimson-300/40"
+              >
+                <img
+                  src="/docs-graph.png"
+                  alt="The Guren docs viewer rendering a blog app's knowledge graph: decision records, generated spec views, model entities, and source files connected by verified links"
+                  width={1440}
+                  height={900}
+                  loading="lazy"
+                  className="w-full rounded-[3px]"
+                />
+              </a>
+            </figure>
+          </Band>
 
-        <section className="border-b border-white/10">
-          <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
-            <SectionHeading>Conventions you know. Types you didn&apos;t have.</SectionHeading>
+          <Band>
+            <div className="px-6 pb-12 pt-16 sm:px-10 md:pt-24">
+              <SectionLabel>Conventions</SectionLabel>
+              <SectionHeading>Conventions you know. Types you didn&apos;t have.</SectionHeading>
+            </div>
             <ConventionGrid />
-          </div>
-        </section>
+          </Band>
 
-        <section className="border-b border-white/10">
-          <div className="mx-auto grid grid-cols-1 max-w-6xl gap-12 px-6 py-20 md:py-28 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
-            <div>
+          <Band frameClassName="grid grid-cols-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+            <div className="px-6 py-16 sm:px-10 md:py-24">
+              <SectionLabel>Performance</SectionLabel>
               <SectionHeading>Fast where it counts</SectionHeading>
               <Lead>
                 The same app on Guren and on a Node.js MVC framework, under identical conditions.
@@ -321,121 +418,118 @@ export default function Home({ codeExamples }: Props) {
                 <TextLink href="/docs/guides/why-guren">Read the full comparison</TextLink>
               </p>
             </div>
-            <div className="lg:pt-12">
+            <div className="border-home-line lg:border-l">
               {benchmarks.map((b) => (
                 <div
                   key={b.label}
-                  className="grid grid-cols-1 gap-x-6 gap-y-3 border-t border-white/10 py-6 last:border-b sm:grid-cols-[6.5rem_1fr]"
+                  className="grid grid-cols-1 gap-x-6 gap-y-3 border-t border-home-line px-6 py-8 sm:grid-cols-[6.5rem_1fr] sm:px-10 lg:first:border-t-0 lg:py-10"
                 >
                   <p className="text-[2.75rem] font-bold leading-none tracking-[-0.03em] text-foam tabular-nums">
                     {b.ratio}
                     <span className="ml-0.5 text-[0.6em] font-normal">×</span>
                   </p>
                   <div>
-                    <p className="font-bold text-crimson-50">{b.label}</p>
+                    <p className="font-bold text-home-text">{b.label}</p>
                     <div aria-hidden className="mt-4 space-y-1.5">
                       <div className="flex items-center gap-3">
                         <span className="h-2 flex-1 rounded-r-sm bg-gradient-to-r from-crimson-700 to-ember" />
-                        <span className="w-12 shrink-0 font-mono text-xs text-crimson-50">Guren</span>
+                        <span className="w-12 shrink-0 font-mono text-xs text-home-text">Guren</span>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="flex-1">
                           <span
-                            className="block h-2 rounded-r-sm bg-crimson-50/25"
+                            className="block h-2 rounded-r-sm bg-home-line-strong"
                             style={{ width: `${(100 / b.ratio).toFixed(2)}%` }}
                           />
                         </span>
-                        <span className="w-12 shrink-0 font-mono text-xs text-smoke">Node</span>
+                        <span className="w-12 shrink-0 font-mono text-xs text-home-text-2">Node</span>
                       </div>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
-          </div>
-        </section>
+          </Band>
 
-        <section className="border-b border-white/10">
-          <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
-            <SectionHeading>Develop on Bun. Ship where you want.</SectionHeading>
-            <Lead>
-              Pick a target, add its plugin, ship the same app.
-            </Lead>
-            <ul className="mt-12 border-b border-white/10">
+          <Band light>
+            <div className="px-6 pb-12 pt-16 text-center sm:px-10 md:pt-24">
+              <div className="flex justify-center">
+                <SectionLabel light>Deploy</SectionLabel>
+              </div>
+              <SectionHeading light>Develop on Bun. Ship where you want.</SectionHeading>
+              <Lead light center>
+                Pick a target, add its plugin, ship the same app.
+              </Lead>
+            </div>
+            <ul className="grid grid-cols-1 gap-px border-t border-home-light-line bg-home-light-line sm:grid-cols-2 lg:grid-cols-4">
               {deployTargets.map((t) => (
-                <li key={t.name} className="border-t border-white/10">
+                <li key={t.name} className="bg-home-light">
                   <Link
                     href={t.href}
-                    className="group grid grid-cols-1 gap-x-8 gap-y-1 py-5 transition hover:bg-white/[0.03] sm:grid-cols-[13rem_1fr_auto] sm:items-baseline sm:px-3"
+                    className="group flex h-full flex-col px-6 py-8 transition hover:bg-white focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-crimson-700 sm:px-8"
                   >
-                    <span className="flex items-center gap-3 font-bold text-crimson-50">
-                      <t.Icon aria-hidden className="size-6 shrink-0 text-crimson-300" />
-                      {t.name}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[0.9375rem] leading-relaxed text-smoke">{t.detail}</span>
-                      <code className="mt-2 block truncate font-mono text-[13px] text-crimson-50">
-                        <span className="select-none text-smoke/60">$ </span>
-                        {t.command}
-                      </code>
-                    </span>
-                    <span className="text-sm font-semibold text-smoke transition group-hover:text-crimson-300">
+                    <t.Icon aria-hidden className="size-7 text-crimson-700" />
+                    <span className="mt-5 font-bold text-home-light-text">{t.name}</span>
+                    <span className="mt-2 flex-1 text-[0.9375rem] leading-relaxed text-home-light-text-2">{t.detail}</span>
+                    <code className="mt-5 block rounded-md border border-home-light-line bg-white px-3 py-2 font-mono text-[12px] leading-relaxed text-home-light-text">
+                      <span className="select-none text-crimson-700">$ </span>
+                      {/* Break between words only: a flag's hyphens are line-break opportunities. */}
+                      {t.command.split(' ').map((word, i) => (
+                        <Fragment key={i}>
+                          {i > 0 && ' '}
+                          <span className="whitespace-nowrap">{word}</span>
+                        </Fragment>
+                      ))}
+                    </code>
+                    <span className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-home-light-text-2 transition group-hover:text-crimson-700">
                       Guide
+                      <ChevronRightIcon aria-hidden className="size-3.5" />
                     </span>
                   </Link>
                 </li>
               ))}
             </ul>
-          </div>
-        </section>
+          </Band>
 
-        <section className="relative overflow-hidden">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 bg-[radial-gradient(50%_80%_at_20%_100%,rgba(255,60,40,.18),transparent_70%)]"
-          />
-          <div className="relative mx-auto grid grid-cols-1 max-w-6xl gap-14 px-6 py-24 md:py-32 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-end lg:gap-20">
-            <div>
-              <h2 className="text-balance text-[2.25rem] font-bold leading-[1.08] tracking-[-0.03em] text-crimson-50 md:text-[3.25rem]">
+          <Band className="relative">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(50%_70%_at_50%_100%,rgba(255,60,40,.18),transparent_70%)]"
+            />
+            <div className="relative px-6 py-20 text-center sm:px-10 md:py-28">
+              <h2 className="mx-auto max-w-[22ch] text-balance text-[2.25rem] font-bold leading-[1.08] tracking-[-0.03em] text-home-text md:text-[3.25rem]">
                 Your first app is one command away
               </h2>
-              <p className="mt-5 text-lg text-smoke">
+              <p className="mt-5 text-lg text-home-text-2">
                 Guren v2 is stable. New apps start on SQLite with nothing to set up.
               </p>
-              <div className="mt-9">
+              <div className="mt-9 flex justify-center">
                 <CopyCommand command="bunx create-guren-app my-app" />
               </div>
-              <p className="mt-4 text-[0.9375rem] text-smoke">
+              <p className="mt-4 text-[0.9375rem] text-home-text-2">
                 Postgres, an API-only app, or a coding agent to set it up?{' '}
                 <TextLink href="/start">Pick your options</TextLink> and copy the command or the prompt.
               </p>
-              <div className="mt-5 flex flex-wrap gap-3">
+              <div className="mt-8 flex flex-wrap justify-center gap-3">
                 <Link href="/docs/guides/getting-started" className={PRIMARY_BUTTON}>
                   Read the quickstart
                 </Link>
-                <a
-                  href={GITHUB_URL}
-                  target="_blank"
-                  rel={OWN_REPO_LINK_REL}
-                  className="inline-flex items-center gap-2 rounded-md border border-white/25 px-6 py-3 font-bold text-crimson-50 transition hover:border-white/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crimson-300"
-                >
+                <a href={GITHUB_URL} target="_blank" rel={OWN_REPO_LINK_REL} className={SECONDARY_BUTTON}>
                   <GithubIcon className="size-4" />
                   View on GitHub
                 </a>
               </div>
-            </div>
-            <aside className="border-l-2 border-crimson-700 pl-6 text-[0.9375rem] leading-[1.7] text-smoke">
-              <p>
-                <em className="font-bold not-italic text-crimson-50">Guren</em> (
+              <p className="mx-auto mt-14 max-w-[36rem] text-[0.9375rem] leading-[1.7] text-home-text-2">
+                <em className="font-bold not-italic text-home-text">Guren</em> (
                 <span lang="ja" className="font-mincho text-crimson-300">
                   紅蓮
                 </span>
-) means &ldquo;crimson lotus&rdquo;: Laravel&apos;s conventions, re-grown in
+  ) means &ldquo;crimson lotus&rdquo;: Laravel&apos;s conventions, re-grown in
                 TypeScript. Same flower, different pond.
               </p>
-            </aside>
-          </div>
-        </section>
+            </div>
+          </Band>
+        </main>
 
         <Footer variant="home" />
       </div>

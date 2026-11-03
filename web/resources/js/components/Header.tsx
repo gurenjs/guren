@@ -16,6 +16,8 @@ interface HeaderProps {
   variant: 'home' | 'docs'
   basePath?: string
   locales?: LocaleLink[]
+  /** Home only: the side rules of the page frame, for a page laid out in it. */
+  framed?: boolean
 }
 
 function ColorModeButton({ variant }: { variant: 'home' | 'docs' }) {
@@ -28,7 +30,7 @@ function ColorModeButton({ variant }: { variant: 'home' | 'docs' }) {
       <button
         type="button"
         onClick={toggle}
-        className="text-white/80 transition hover:text-white"
+        className="text-home-text-2 transition hover:text-home-text"
         aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       >
         {isDark ? <SunIcon className="size-5" /> : <MoonIcon className="size-5" />}
@@ -48,29 +50,29 @@ function ColorModeButton({ variant }: { variant: 'home' | 'docs' }) {
   )
 }
 
-export function Header({ variant, basePath = '/docs', locales = [] }: HeaderProps) {
+export function Header({ variant, basePath = '/docs', locales = [], framed = false }: HeaderProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   if (variant === 'home') {
     return (
       <>
-        <header className="sticky top-0 z-50 border-b border-white/10 bg-crimson-950/85 backdrop-blur-xl">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-            <Link href="/" className="flex items-center gap-3 text-white no-underline">
-              <img src="/logo.svg" alt="Guren" className="size-9 rounded-xl p-0.5" />
-              <span className="text-lg font-bold tracking-tight">Guren</span>
+        <header className="sticky top-0 z-50 border-b border-home-line bg-home-ground/85 backdrop-blur-xl">
+          <div className={`mx-auto flex max-w-6xl items-center justify-between border-home-line px-6 py-3.5 ${framed ? 'lg:border-x' : ''}`}>
+            <Link href="/" className="flex items-center gap-2.5 text-home-text no-underline">
+              <img src="/logo.svg" alt="" className="size-8 rounded-lg p-0.5" />
+              <span className="text-[1.0625rem] font-bold tracking-tight">Guren</span>
             </Link>
             <div className="flex items-center gap-5">
-              <nav className="hidden items-center gap-6 text-sm font-medium text-white/80 md:flex">
-                <Link href="/start" className="transition hover:text-white">Get started</Link>
-                <Link href="/docs" className="transition hover:text-white">Docs</Link>
-                <Link href="/docs/tutorials/00-overview" className="transition hover:text-white">Tutorials</Link>
-                <Link href="/docs/agent-course/00-overview" className="transition hover:text-white">Agent Course</Link>
+              <nav aria-label="Main" className="hidden items-center gap-6 text-sm font-medium text-home-text-2 md:flex">
+                <Link href="/start" className="transition hover:text-home-text">Get started</Link>
+                <Link href="/docs" className="transition hover:text-home-text">Docs</Link>
+                <Link href="/docs/tutorials/00-overview" className="transition hover:text-home-text">Tutorials</Link>
+                <Link href="/docs/agent-course/00-overview" className="transition hover:text-home-text">Agent Course</Link>
                 <a
                   href="https://github.com/gurenjs/guren"
                   target="_blank"
                   rel={OWN_REPO_LINK_REL}
-                  className="flex items-center gap-1.5 transition hover:text-white"
+                  className="flex items-center gap-1.5 transition hover:text-home-text"
                 >
                   <GithubIcon className="size-4" />
                   GitHub
@@ -79,7 +81,7 @@ export function Header({ variant, basePath = '/docs', locales = [] }: HeaderProp
               <ColorModeButton variant="home" />
               <button
                 type="button"
-                className="text-white/80 transition hover:text-white md:hidden"
+                className="text-home-text-2 transition hover:text-home-text md:hidden"
                 onClick={() => setMobileOpen(true)}
                 aria-label="Open menu"
               >
