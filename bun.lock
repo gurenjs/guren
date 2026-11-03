@@ -31,7 +31,7 @@
         "@guren/plugin-ai": "workspace:*",
         "@guren/plugin-cloudflare": "workspace:*",
         "@guren/testing": "workspace:*",
-        "@inertiajs/react": "^3.6.1",
+        "@inertiajs/react": "^3.11.0",
         "ai": "^7.0.106",
         "drizzle-orm": "1.0.0-rc.4",
         "react": "^19.0.0",
@@ -79,8 +79,8 @@
         "@guren/inertia-client": "workspace:*",
         "@guren/orm": "workspace:*",
         "@guren/testing": "workspace:*",
-        "@inertiajs/core": "^3.6.1",
-        "@inertiajs/react": "^3.6.1",
+        "@inertiajs/core": "^3.11.0",
+        "@inertiajs/react": "^3.11.0",
         "drizzle-orm": "1.0.0-rc.4",
         "lucide-react": "^0.552.0",
         "postgres": "^3.4.3",
@@ -113,7 +113,7 @@
       "dependencies": {
         "@babel/parser": "^7.24.7",
         "@guren/orm": "^2.15.0",
-        "@guren/server": "^2.31.1",
+        "@guren/server": "^2.35.0",
         "@modelcontextprotocol/server": "^2.0.0",
         "citty": "^0.1.6",
         "consola": "^3.4.2",
@@ -124,8 +124,8 @@
         "@ai-sdk/openai": "^4.0.67",
         "@axe-core/playwright": "~4.14.0",
         "@babel/types": "^7.29.0",
-        "@guren/core": "^1.25.0",
-        "@inertiajs/react": "^3.6.1",
+        "@guren/core": "^1.26.0",
+        "@inertiajs/react": "^3.11.0",
         "@modelcontextprotocol/client": "^2.0.0",
         "@playwright/test": "^1.58.2",
         "@types/node": "^20.14.10",
@@ -156,9 +156,9 @@
         "guren": "./dist/bin.js",
       },
       "dependencies": {
-        "@guren/cli": "^2.32.0",
+        "@guren/cli": "^2.35.0",
         "@guren/orm": "^2.15.0",
-        "@guren/server": "^2.31.0",
+        "@guren/server": "^2.34.0",
       },
       "devDependencies": {
         "@types/node": "^20.14.10",
@@ -268,11 +268,11 @@
       "name": "@guren/plugin-ai",
       "version": "0.5.1",
       "dependencies": {
-        "@guren/core": "^1.21.0",
+        "@guren/core": "^1.26.0",
         "ai": "^7.0.106",
       },
       "devDependencies": {
-        "@guren/plugin-mcp": "^0.6.1",
+        "@guren/plugin-mcp": "^0.6.2",
         "@types/node": "^20.14.10",
         "drizzle-orm": "1.0.0-rc.4",
         "tsdown": "^0.22.14",
@@ -359,7 +359,7 @@
       "name": "@guren/plugin-mcp",
       "version": "0.6.2",
       "dependencies": {
-        "@guren/core": "^1.20.1",
+        "@guren/core": "^1.26.0",
         "@modelcontextprotocol/server": "^2.0.0",
       },
       "devDependencies": {
@@ -443,7 +443,7 @@
       "peerDependencies": {
         "@guren/core": ">=1.8.0",
         "@guren/plugin-ai": ">=0.1.0",
-        "@guren/server": ">=2.31.0",
+        "@guren/server": ">=2.34.0",
         "@inertiajs/react": "^3.6.1",
         "@testing-library/react": "^14.0.0 || ^15.0.0 || ^16.0.0",
         "ai": "^7.0.106",
@@ -472,7 +472,7 @@
         "@guren/plugin-cloudflare": "workspace:*",
         "@guren/plugin-markdown": "workspace:*",
         "@guren/testing": "workspace:*",
-        "@inertiajs/react": "^3.6.1",
+        "@inertiajs/react": "^3.11.0",
         "drizzle-orm": "1.0.0-rc.4",
         "marked": "^18.0.10",
         "react": "^19.0.0",
@@ -860,9 +860,9 @@
 
     "@img/sharp-win32-x64": ["@img/sharp-win32-x64@0.35.5", "", { "os": "win32", "cpu": "x64" }, "sha512-x76eH0vEiHlcMQu8Y8IenntaACtddpT6W0wmXtWrnKcnKI7ME5DdgqhAD6SEWOEl1v2zDvkZDhFA9KnURwpfqg=="],
 
-    "@inertiajs/core": ["@inertiajs/core@3.6.1", "", { "dependencies": { "@jridgewell/trace-mapping": "^0.3.31", "es-toolkit": "^1.33.0", "laravel-precognition": "^2.0.0" }, "peerDependencies": { "axios": "^1.15.2" }, "optionalPeers": ["axios"] }, "sha512-h6+qqkKfpcoZvxWENy/F5yyiD00PIm8lK+ruQkt6HGk4d3N0LMS9GeUbWVQ4+TDZzIxP/vQLurPktnYvDhYeew=="],
+    "@inertiajs/core": ["@inertiajs/core@3.11.0", "", { "dependencies": { "@jridgewell/trace-mapping": "^0.3.31", "es-toolkit": "^1.33.0", "laravel-precognition": "^2.1.1" }, "peerDependencies": { "axios": "^1.15.2" }, "optionalPeers": ["axios"] }, "sha512-YDqkKHsTiDUKofVzE3p6IduuU1u0ZwmheSpk2AZP6Eig3ZwhTlchDiLbUhFUCd138naqlhjRh2rTxIXeKrnmOQ=="],
 
-    "@inertiajs/react": ["@inertiajs/react@3.6.1", "", { "dependencies": { "@inertiajs/core": "3.6.1", "es-toolkit": "^1.33.0", "laravel-precognition": "^2.0.0" }, "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" } }, "sha512-z5TJIj80TmLqhJE6FD6RwfmbcYPFuMT63orrXayLW084yYAKLye4i9aeeCt6+mDxC1hMMP16Uf68ePiLtl0saA=="],
+    "@inertiajs/react": ["@inertiajs/react@3.11.0", "", { "dependencies": { "@inertiajs/core": "3.11.0", "es-toolkit": "^1.33.0", "laravel-precognition": "^2.1.1" }, "peerDependencies": { "@laravel/echo-react": "^2.0.0", "@types/react": "^19.0.0", "@types/react-dom": "^19.0.0", "react": "^19.0.0", "react-dom": "^19.0.0" }, "optionalPeers": ["@laravel/echo-react", "@types/react", "@types/react-dom"] }, "sha512-G5JZ5B27hPuwPEJ/vw3aW4eFJ4KmGvmcFkA+28IXXgOFQcse0GPCmv0/lLAw2vbbLMNqcsNzWNJH9XJmOZkejA=="],
 
     "@inquirer/external-editor": ["@inquirer/external-editor@1.0.3", "", { "dependencies": { "chardet": "^2.1.1", "iconv-lite": "^0.7.0" }, "peerDependencies": { "@types/node": ">=18" }, "optionalPeers": ["@types/node"] }, "sha512-RWbSrDiYmO4LbejWY7ttpxczuwQyZLBUyygsA9Nsv95hpzUWwnNTVQmAq3xuh7vNwCp07UTmE5i11XAEExx4RA=="],
 
@@ -1718,7 +1718,7 @@
 
     "kleur": ["kleur@4.1.5", "", {}, "sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ=="],
 
-    "laravel-precognition": ["laravel-precognition@2.0.0", "", { "dependencies": { "es-toolkit": "^1.32.0" }, "peerDependencies": { "axios": "^1.4.0" }, "optionalPeers": ["axios"] }, "sha512-dmA4HGc9m+TsVNsJs9/XQBI8u6j7coilN+qKkBuhuXQzH3HypwS/c5dFQ4UqUGjBbcxIM7zdk91kM/SRZwIvWQ=="],
+    "laravel-precognition": ["laravel-precognition@2.1.1", "", { "dependencies": { "es-toolkit": "^1.32.0" }, "peerDependencies": { "axios": "^1.4.0" }, "optionalPeers": ["axios"] }, "sha512-Wg05+puJ5qiNsE8rdO5JmSiqQ2xcEf7442AIZiDhZg1JyPOePv5SSCu0fO7z7LqmJcPMxNNuOIcZd6UatEmYug=="],
 
     "launder": ["launder@1.7.2", "", { "dependencies": { "dayjs": "^1.11.23" } }, "sha512-DLg3HPnHUfBi5/MxMLmJD12dmlMpFEC2HgMW6vkZ/9JR0RU00kXoRGvDxAvFmdO0o610OA77i4FgNTLucmhDVg=="],
 

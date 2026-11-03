@@ -9,6 +9,7 @@
  * <Form route="posts.store" method="post">...</Form>
  */
 import React from 'react'
+import type { Method } from '@inertiajs/core'
 import { Link as InertiaLink, router } from '@inertiajs/react'
 import type { InertiaLinkProps } from '@inertiajs/react'
 
@@ -58,6 +59,14 @@ function substituteParams(path: string, params?: Record<string, string | number>
 
 type OmitHref<T> = Omit<T, 'href'>
 
+const INERTIA_METHODS: ReadonlySet<string> = new Set<Method>(['get', 'post', 'put', 'patch', 'delete', 'query'])
+
+/** A route registered with `on()` under a custom verb has no Inertia method. */
+function inertiaMethodOf(routeMethod: string): Method | undefined {
+  const method = routeMethod.toLowerCase()
+  return INERTIA_METHODS.has(method) ? (method as Method) : undefined
+}
+
 export type TypedLinkProps<
   TManifest extends RouteManifestLike,
   TName extends keyof TManifest & string,
@@ -80,13 +89,17 @@ export function createTypedLink<TManifest extends RouteManifestLike>(manifest: T
   function TypedLink<TName extends keyof TManifest & string>(
     props: TypedLinkProps<TManifest, TName>,
   ) {
-    const { route: routeName, params, ...rest } = props as TypedLinkProps<TManifest, string> & { params?: Record<string, string | number> }
+    const { route: routeName, params, method, ...rest } = props as TypedLinkProps<TManifest, string> & { params?: Record<string, string | number> }
     const entry = manifest[routeName]
     if (!entry) throw new Error(`Route [${routeName}] not defined.`)
 
     const href = substituteParams(entry.path, params)
+    const routeMethod = inertiaMethodOf(entry.method)
+    const methodProp = method !== undefined
+      ? { method }
+      : routeMethod && routeMethod !== 'get' ? { method: routeMethod } : {}
 
-    return React.createElement(InertiaLink, { ...rest, href } as any)
+    return React.createElement(InertiaLink, { ...rest, href, ...methodProp } as any)
   }
 
   return TypedLink as <TName extends keyof TManifest & string>(
@@ -99,7 +112,7 @@ export type TypedFormProps<
   TName extends keyof TManifest & string,
 > = Omit<React.FormHTMLAttributes<HTMLFormElement>, 'action' | 'method'> & {
   route: TName
-  method?: 'get' | 'post' | 'put' | 'patch' | 'delete'
+  method?: Method
 } & (
   HasPathParams<TManifest[TName]['path']> extends true
     ? { params: PathParamsOf<TManifest[TName]['path']> }
@@ -119,13 +132,16 @@ export function createTypedForm<TManifest extends RouteManifestLike>(manifest: T
 
     const action = substituteParams(entry.path, params)
 
-    const httpMethod = method ?? entry.method.toLowerCase()
+    const httpMethod = method ?? inertiaMethodOf(entry.method)
+    if (!httpMethod) {
+      throw new Error(`Route [${routeName}] is registered for ${entry.method}, which an Inertia form cannot submit.`)
+    }
 
     const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
       const formData = new FormData(event.currentTarget)
       const data = Object.fromEntries(formData.entries())
-      ;(router as any)[httpMethod](action, data)
+      router.visit(action, { method: httpMethod, data })
     }
 
     return React.createElement('form', { ...rest, onSubmit: handleSubmit }, children)
