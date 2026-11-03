@@ -30,6 +30,8 @@ export interface DependencyInstance {
   declaredAs: DeclaredGroup[]
   /** Reachable from `dependencies` or `optionalDependencies`, which `bun install --production` installs. */
   installedInProduction: boolean
+  /** The ids of the instances that depend on this one directly. */
+  dependents: string[]
 }
 
 export interface DependencyTree {
@@ -153,6 +155,8 @@ export function dependencyTree(lock: BunLock, workspace = '', label = LOCKFILE):
   const reasons: GraphCoverage['reasons'] = []
   const instances = new Map<string, DependencyInstance>()
   const production = new Set<string>()
+  const idByKey = new Map<string, string>()
+  const parentsByKey = new Map<string, Set<string>>()
 
   for (const [direct, groups] of declared) {
     const directKey = resolveKey(lock, rootKey, direct)
@@ -186,6 +190,7 @@ export function dependencyTree(lock: BunLock, workspace = '', label = LOCKFILE):
         paths: {},
         declaredAs: [],
         installedInProduction: false,
+        dependents: [],
       }
       if (path.length === 1) {
         instance.direct = true
@@ -197,19 +202,30 @@ export function dependencyTree(lock: BunLock, workspace = '', label = LOCKFILE):
       instance.paths[direct] ??= path
       if (inProduction) production.add(id)
       instances.set(id, instance)
+      idByKey.set(key, id)
       for (const child of childrenOf(entry)) {
         const childKey = resolveKey(lock, key, child.name)
         if (childKey === null) {
           if (!child.optional) reasons.push({ code: 'unresolved', message: `${entry.name}@${entry.version} depends on ${child.name}, which has no entry in ${label}.` })
           continue
         }
+        parentsByKey.set(childKey, (parentsByKey.get(childKey) ?? new Set()).add(id))
         queue.push({ key: childKey, path: [...path, child.name] })
       }
     }
   }
 
+  const dependents = new Map<string, Set<string>>()
+  for (const [key, parents] of parentsByKey) {
+    const id = idByKey.get(key)
+    if (id !== undefined) dependents.set(id, new Set([...(dependents.get(id) ?? []), ...parents]))
+  }
   const packages = [...instances.values()]
-    .map((instance) => ({ ...instance, installedInProduction: production.has(instance.id) }))
+    .map((instance) => ({
+      ...instance,
+      installedInProduction: production.has(instance.id),
+      dependents: [...(dependents.get(instance.id) ?? [])].filter((parent) => parent !== instance.id).sort(),
+    }))
     .sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
   const unique = [...new Map(reasons.map((reason) => [reason.message, reason])).values()]
   return { coverage: { status: unique.length === 0 ? 'complete' : 'partial', reasons: unique }, packages }

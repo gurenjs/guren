@@ -81,6 +81,15 @@ describe('dependencyTree', () => {
     expect(byId.get('@guren/core@1.26.0')?.declaredAs).toEqual(['prod'])
   })
 
+  it('records which instances depend on each one', () => {
+    const byId = new Map(dependencyTree(readLock()).packages.map((instance) => [instance.id, instance]))
+
+    expect(byId.get('@scope/helper@1.0.0')?.dependents).toEqual(['test-tool@2.1.0'])
+    expect(byId.get('hono@4.13.13')?.dependents).toEqual(['@guren/server@2.35.0', '@scope/helper@1.0.0'])
+    expect(byId.get('hono@3.12.0')?.dependents).toEqual(['old-consumer@1.0.0'])
+    expect(byId.get('@guren/core@1.26.0')?.dependents).toEqual([])
+  })
+
   it('skips a missing optional dependency or peer, and reports a missing dependency as a gap', () => {
     const lock = readLock()
     delete lock.packages['@scope/helper']

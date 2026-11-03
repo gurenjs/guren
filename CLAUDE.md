@@ -117,6 +117,7 @@ bunx guren browser:serve        # One app instance for a browser verification se
 bunx guren model:list           # List models with relationships
 bunx guren model:list --format json  # Models as JSON
 bunx guren deps:why hono        # Every installed version of a package from bun.lock, with the path each direct dependency brings it in by and whether a production install has it (RFC 0039 §3); --json, exits 1 when absent or the lockfile reads incomplete
+bunx guren deps:exposure --package marked  # Which app files, placements (server/client/ssr/build/test) and routes reach each installed package, through runtime imports and the Application Graph (RFC 0039 §4); a package only @guren brings in is `framework`, --json, exits 1 while a reader is incomplete
 bunx guren tool:list            # Agent tools this app exposes (RFC 0016); --json for the raw derivation
 bunx guren tool:inspect posts.store  # One tool's full derivation: input, output, authorization, annotations
 bunx guren introspect --json    # Manifest of the registered, unbooted app (RFC 0026): providers and how each registered, routes with resolved middleware and controller files, session/auth/cache/storage/queue/attachments, and where the database lives (`describe()` on the bound factory under the app's env: local, remote or unknown, never the connection string); runs register() and the route registrars in a GUREN_INTROSPECT=1 child (routes are never mounted), never boot() or listen() (--timeout <s>, --app <dir>, --target cloudflare: register the branch `isWorkersRuntime()` takes, RFC 0035 §2.1)

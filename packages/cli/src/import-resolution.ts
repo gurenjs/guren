@@ -1,12 +1,25 @@
 /**
- * The one rule for which file a relative or `@/` import lands on. `guren check`'s
- * architecture and route-wiring stages both resolve through it, so the two cannot
- * disagree about one import. A directory is never the resolved file.
+ * The one rule for which file a relative or `@/` import lands on, and for which
+ * package a bare one names. `guren check`'s architecture and route-wiring stages and
+ * `guren deps:exposure` all resolve through it, so they cannot disagree about one
+ * import. A directory is never the resolved file.
  */
 
 import { readFile, stat } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 import { IMPORTABLE_EXTENSIONS } from './discovery'
+
+/** Anything not relative and not `@/`; `node:` and `bun:` builtins included. */
+export function isBareSpecifier(specifier: string): boolean {
+  return !specifier.startsWith('.') && !specifier.startsWith('@/')
+}
+
+/** `@scope/name/sub` → `@scope/name`, `name/sub` → `name`. */
+export function packageNameFromSpecifier(specifier: string): string {
+  const segments = specifier.split('/')
+  if (specifier.startsWith('@')) return segments.slice(0, 2).join('/')
+  return segments[0]!
+}
 
 /** Extensions a specifier without one may resolve to; the set's insertion order is the preference. */
 const RESOLVED_EXTENSIONS = [...IMPORTABLE_EXTENSIONS]
