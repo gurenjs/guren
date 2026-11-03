@@ -29,6 +29,15 @@ describe('defineModel allowlist options', () => {
     )
   })
 
+  // `guren plan:scaffold` writes a plan's `fillable: []` as this option for "the server sets every column".
+  it('should keep an empty fillable option, so set is accepted and every data key refused', () => {
+    class User extends defineModel(users, { fillable: [] }) {}
+
+    expect(User.fillable).toEqual([])
+    expect(User.filterFillable({}, { name: 'Alice' })).toEqual({ name: 'Alice' })
+    expect(() => User.filterFillable({ email: 'a@b.c' }, { name: 'Alice' })).toThrow(MassAssignmentException)
+  })
+
   it('a static fillable declaration on the subclass shadows the option', () => {
     class User extends defineModel(users, { fillable: ['name'] }) {
       static override fillable = ['email']

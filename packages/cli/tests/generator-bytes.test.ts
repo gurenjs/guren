@@ -112,12 +112,15 @@ describe('validator, resource and policy generators', () => {
       }
 
       export class PostPolicy extends Policy {
-        viewAny(_user: AuthUser | null): boolean {
-          return true
+        // Signed-in users only. To let guests list them too, return true and rename user to _user.
+        viewAny(user: AuthUser | null): boolean {
+          return user !== null
         }
 
-        view(_user: AuthUser | null, _post: PostLike): boolean {
-          return true
+        // Signed-in users only. To let guests in too, return true and rename user to _user.
+        // For the owner only, rename _post to post and return user !== null && user.id === post.userId.
+        view(user: AuthUser | null, _post: PostLike): boolean {
+          return user !== null
         }
 
         create(user: AuthUser | null): boolean {

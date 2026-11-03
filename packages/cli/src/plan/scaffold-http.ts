@@ -192,12 +192,16 @@ function leafOf(field: PlanValidator['fields'][number], format: string | undefin
   return TYPE_LEAVES[field.type]
 }
 
+/** Types whose leaf, with no format, is a bare `z.string()`, which accepts the `""` a blank form field sends. */
+const PLAIN_STRING_TYPES: ReadonlySet<PlanColumn['type']> = new Set(['string', 'text'])
+
 /** One field's zod expression, and each planned rule it does not write. */
 function validatorField(validator: PlanValidator, field: PlanValidator['fields'][number], textSourced: boolean, unwritten: PlanScaffoldUnwritten[]): string {
   const leave = (rule: string, reason: string): void => {
     unwritten.push({ element: validator.id, detail: `field ${field.name} rule ${rule}`, reason })
   }
   let format: string | undefined
+  let plannedMin = false
   const bounds: string[] = []
   for (const rule of field.rules) {
     const text = rule.trim()
@@ -209,12 +213,16 @@ function validatorField(validator: PlanValidator, field: PlanValidator['fields']
       else if (format !== undefined && format !== named) leave(rule, `the field already takes the ${format} format, and a value has one`)
       else format = named
     } else if (bound) {
-      if (BOUNDED_TYPES.has(field.type)) bounds.push(`.${bound[1]!.toLowerCase()}(${bound[2]})`)
-      else leave(rule, `plan:status reads a bound on a string's length or a number's value, not on a ${field.type}`)
+      if (BOUNDED_TYPES.has(field.type)) {
+        bounds.push(`.${bound[1]!.toLowerCase()}(${bound[2]})`)
+        plannedMin ||= bound[1]!.toLowerCase() === 'min'
+      } else leave(rule, `plan:status reads a bound on a string's length or a number's value, not on a ${field.type}`)
     } else {
       leave(rule, 'plan:status compares only min, max, email, url and uuid, so the rule is prose to implement')
     }
   }
+  // A planned `min` states the lower bound itself (`min 0` admits ""), and plan:status compares only the bounds a plan lists.
+  if (field.required && PLAIN_STRING_TYPES.has(field.type) && format === undefined && !plannedMin) bounds.unshift('.min(1)')
   return `${leafOf(field, format, textSourced)}${bounds.join('')}${field.required ? '' : '.nullable().optional()'}`
 }
 

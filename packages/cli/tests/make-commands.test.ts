@@ -224,6 +224,12 @@ describe('CLI make:* commands', () => {
       expect(content).toContain('user.id === post.userId')
     })
 
+    it('should grant a guest no ability, viewing included', async () => {
+      const content = fs.readFileSync(await makePolicy('Post'), 'utf-8')
+      expect(content).not.toMatch(/^ {4}return true$/mu)
+      expect(content.match(/^ {4}return user !== null/gmu)).toHaveLength(5)
+    })
+
     it('does not duplicate the Policy suffix', async () => {
       const result = await makePolicy('CommentPolicy')
       expect(result).toContain('app/Policies/CommentPolicy.ts')

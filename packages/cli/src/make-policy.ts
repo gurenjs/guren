@@ -3,7 +3,7 @@ import type { ScaffoldFileEntry, WriterOptions } from './utils'
 import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 
 export interface PolicyAbilitySource {
-  /** A line comment above the method, without the slashes. */
+  /** Line comments above the method, one per line of the text, without the slashes. */
   comment?: string
   /** The method's name and parameter list, e.g. `create(user: AuthUser | null)`. */
   signature: string
@@ -13,7 +13,7 @@ export interface PolicyAbilitySource {
 /** The policy source `make:policy` and `plan:scaffold` write: `plan/policy-abilities.ts` reads each ability as a method of a class extending `Policy`. */
 export function buildPolicySource(options: { className: string; declarations?: string; abilities: readonly PolicyAbilitySource[] }): string {
   const methods = options.abilities.map((ability) => {
-    const comment = ability.comment === undefined ? '' : `  // ${ability.comment}\n`
+    const comment = ability.comment === undefined ? '' : ability.comment.split('\n').map((line) => `  // ${line}\n`).join('')
     return `${comment}  ${ability.signature}: boolean {\n    ${ability.body}\n  }\n`
   })
   return `import { Policy, type AuthUser } from '@guren/core'
@@ -31,8 +31,19 @@ function policyTemplate(className: string): string {
     className,
     declarations: `interface ${modelName}Like {\n  userId?: string | number\n}\n`,
     abilities: [
-      { signature: 'viewAny(_user: AuthUser | null)', body: 'return true' },
-      { signature: `view(_user: AuthUser | null, _${variableName}: ${modelName}Like)`, body: 'return true' },
+      {
+        comment: 'Signed-in users only. To let guests list them too, return true and rename user to _user.',
+        signature: 'viewAny(user: AuthUser | null)',
+        body: 'return user !== null',
+      },
+      {
+        comment: [
+          'Signed-in users only. To let guests in too, return true and rename user to _user.',
+          `For the owner only, rename _${variableName} to ${variableName} and return user !== null && user.id === ${variableName}.userId.`,
+        ].join('\n'),
+        signature: `view(user: AuthUser | null, _${variableName}: ${modelName}Like)`,
+        body: 'return user !== null',
+      },
       { signature: 'create(user: AuthUser | null)', body: 'return user !== null' },
       { signature: `update(user: AuthUser | null, ${variableName}: ${modelName}Like)`, body: `return user !== null && user.id === ${variableName}.userId` },
       { signature: `delete(user: AuthUser | null, ${variableName}: ${modelName}Like)`, body: `return user !== null && user.id === ${variableName}.userId` },

@@ -107,6 +107,8 @@ Scaffold a policy with the CLI:
 bunx guren make:policy Post
 ```
 
+The generated policy lets a signed-in user list, view and create posts, and lets only the owner, matched on a `userId` column, update or delete one. A guest gets none of these; for a resource anyone may read, return `true` from `viewAny` and `view`.
+
 Or write one by hand:
 
 ```typescript

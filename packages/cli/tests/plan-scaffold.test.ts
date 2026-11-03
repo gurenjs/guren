@@ -126,6 +126,10 @@ function widgetsPlan(): WidgetsPlan {
           { name: 'contact', type: 'string', required: true, rules: ['email', 'max 255'] },
           { name: 'site', type: 'string', required: false, rules: ['url'] },
           { name: 'ref', type: 'string', required: true, rules: ['uuid'] },
+          // A blank form field arrives as "", which a required string without a planned min must refuse.
+          { name: 'code', type: 'string', required: true, rules: [] },
+          { name: 'summary', type: 'text', required: true, rules: ['max 280'] },
+          { name: 'note', type: 'string', required: true, rules: ['min 0'] },
         ],
       },
       {
@@ -136,6 +140,7 @@ function widgetsPlan(): WidgetsPlan {
           { name: 'page', type: 'integer', required: false, rules: ['min 1'] },
           { name: 'perPage', type: 'integer', required: true, rules: ['max 50'] },
           { name: 'archived', type: 'boolean', required: false, rules: [] },
+          { name: 'q', type: 'string', required: true, rules: [] },
         ],
       },
     ],
@@ -738,12 +743,16 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
           contact: z.email().max(255),
           site: z.url().nullable().optional(),
           ref: z.uuid(),
+          code: z.string().min(1),
+          summary: z.string().min(1).max(280),
+          note: z.string().min(0),
         })
 
         export const WidgetListQuerySchema = z.object({
           page: z.coerce.number().int().min(1).nullable().optional(),
           perPage: z.coerce.number().int().max(50),
           archived: z.stringbool().nullable().optional(),
+          q: z.string().min(1),
         })
         "
       `)
@@ -1353,6 +1362,58 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     expect(output.refusals).toContain(
       'validator.widget, validator.widgetQuery: the step adds model.widget and model.gadget, and the validator file is named after one model. Write the validators by hand in the http step, or split the models across tasks (plan:revise).',
     )
+  })
+
+  // With no fillable at all, create(data, { set }) refuses every set, so "the server sets every column" would fail at the first write.
+  test('should write a planned empty fillable as fillable: [], which create(data, { set }) accepts', () => {
+    const document = widgetsPlan()
+    document.models[3]!.fillable = []
+    const output = emitWidgets(document, 'pg')
+    const file = (path: string): string => output.files.find((candidate) => candidate.path === path)!.contents
+
+    expect(file('app/Models/Widget.ts')).toContain('export class Widget extends defineModel(widgets, {\n  fillable: [],\n}) {')
+    // Every column, not only the foreign keys, since the empty allowlist refuses each key of the data.
+    const controller = file('app/Http/Controllers/WidgetController.ts')
+    expect(controller).toContain(
+      "  // Widget's fillable is empty, so create() refuses every key of its data: name each column it writes in set, as Widget.create({}, { set: { title, body, count, ratio, price, active, releasedOn, publishedAt, meta, token, postId, parentId } }) (RFC 0031)\n  async store(): Promise<Response> {",
+    )
+    expect(controller).not.toContain('are not fillable: write them')
+  })
+
+  // create() drops id from its data and refuses it in set, so a key the database does not fill goes through forceCreate().
+  test('should name a uuid primary key the database does not fill, through forceCreate() when it is id', () => {
+    const storeNote = (document: WidgetsPlan): string | undefined => {
+      const controller = emitWidgets(document, 'pg').files.find((file) => file.path === 'app/Http/Controllers/WidgetController.ts')!.contents
+      return controller.split('\n').find((line) => line.includes("Widget's fillable is empty"))?.trim()
+    }
+    const uuidKey = (fields: Partial<ColumnInput>): WidgetsPlan => {
+      const document = widgetsPlan()
+      const widget = document.models[3]!
+      widget.fillable = []
+      widget.columns[0] = column('widget', fields.name ?? 'id', 'uuid', { primaryKey: true, ...fields })
+      return document
+    }
+    const rest = 'title, body, count, ratio, price, active, releasedOn, publishedAt, meta, token, postId, parentId'
+
+    expect(storeNote(uuidKey({}))).toBe(
+      `// Widget's fillable is empty, and create() takes id from neither its data nor set: write the record with Widget.forceCreate({ id, ${rest} }), naming each column and never spreading the request (RFC 0031)`,
+    )
+    expect(storeNote(uuidKey({ name: 'key' }))).toBe(
+      `// Widget's fillable is empty, so create() refuses every key of its data: name each column it writes in set, as Widget.create({}, { set: { key, ${rest} } }) (RFC 0031)`,
+    )
+    expect(storeNote(uuidKey({ default: 'gen_random_uuid()' }))).toBe(
+      `// Widget's fillable is empty, so create() refuses every key of its data: name each column it writes in set, as Widget.create({}, { set: { ${rest} } }) (RFC 0031)`,
+    )
+  })
+
+  test('should name the columns set writes on a POST action with no body, when the planned fillable is empty', () => {
+    const document = widgetsPlan()
+    document.models[3]!.fillable = []
+    delete document.controllers![0]!.actions[1]!.body
+    const controller = emitWidgets(document, 'pg').files.find((file) => file.path === 'app/Http/Controllers/WidgetController.ts')!.contents
+
+    expect(controller).toContain("// Widget's fillable is empty, so create() refuses every key of its data")
+    expect(controller).not.toContain('this.validateBody(')
   })
 
   test('should write a stubbed field whose name holds a line break or a line separator as a valid literal', () => {

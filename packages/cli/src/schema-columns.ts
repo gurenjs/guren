@@ -151,6 +151,11 @@ function snakeCase(value: string): string {
   return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
 }
 
+/** Whether a planned column is the key {@link autoIncrementPrimaryKey} writes: the table's only primary key, an integer, no foreign key. */
+export function isAutoIncrementPrimaryKey(column: PlanColumn, primaryKeys: number): boolean {
+  return column.primaryKey === true && primaryKeys === 1 && column.type === 'integer' && !column.references
+}
+
 /** An integer primary key the database numbers: `serial` on pg, `AUTO_INCREMENT` on MySQL, `AUTOINCREMENT` on SQLite. */
 export function autoIncrementPrimaryKey(dialect: SchemaDialect, sqlName: string): ColumnCode {
   switch (dialect) {

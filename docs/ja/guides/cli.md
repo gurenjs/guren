@@ -175,7 +175,7 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 | `make:notification <Name>` | 通知クラスを生成（`type` はクラス名で固定） | `bunx guren make:notification InvoicePaid` |
 | `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
 | `make:command <Name>` | `app/Console/Commands` にコンソールコマンドを生成。`--command <name>` で呼び出し名を指定。`src/console.ts` への登録が必要([コンソールコマンドガイド](./console.md)参照) | `bunx guren make:command SendDigest --command reports:digest` |
-| `make:policy <Name>` | 所有者ベースのデフォルトを備えた認可ポリシーを `app/Policies` に生成 | `bunx guren make:policy Post` |
+| `make:policy <Name>` | 認可ポリシーを `app/Policies` に生成。一覧・閲覧・作成はログイン中のユーザーに、更新と削除は `userId` が一致する所有者だけに許可する | `bunx guren make:policy Post` |
 | `make:ai-agent <Name>` | インプロセスの AI エージェント(`@guren/plugin-ai`)を `app/Ai/Agents` に生成する。`--tools` はルート由来のエージェントツールを付与し、`--output` は Zod の出力スキーマを加え、`--test` は `fakeAi()` のテストを書く | `bunx guren make:ai-agent SupportTriager --tools tickets_show --test` |
 | `make:agent <Name>` | 永続エージェントを `app/Agents` に生成し、`config/agents.ts` に登録し、モデルや ORM から遠ざける `guren.arch.ts` のルールを追加し、クラスが必要とする `config/bindings.ts` と tsconfig の `types` エントリも書き出す([永続エージェント](./durable-agents.md)参照) | `bunx guren make:agent Triager` |
 | `make:validator <Name>` | Zodバリデーションスキーマ(ルートパラメータ・一覧クエリ・ペイロード)を `app/Http/Validators` に生成。`--fields` は `make:feature` と同じ構文 | `bunx guren make:validator Post --fields "title:string,body:text"` |

@@ -108,6 +108,8 @@ gate.after((user, ability, result) => {
 bunx guren make:policy Post
 ```
 
+生成されるポリシーは、一覧・閲覧・作成をログイン中のユーザーに、更新と削除を `userId` 列が一致する所有者だけに許可します。ゲストにはどれも許可しないので、誰でも読めるリソースにするときは `viewAny` と `view` で `true` を返してください。
+
 手で書く場合は次のようになります。
 
 ```typescript

@@ -196,7 +196,7 @@ Guren keeps authorization rules in **policies**: one class per model, one method
 bunx guren make:policy Post
 ```
 
-The skeleton assumes an ownership column called `userId`; yours is `authorId`. Replace `app/Policies/PostPolicy.ts`:
+The skeleton assumes an ownership column called `userId`; yours is `authorId`. It also keeps guests from viewing posts, which this blog shows to everyone, so `viewAny` and `view` return `true` below. Replace `app/Policies/PostPolicy.ts`:
 
 ```ts file=app/Policies/PostPolicy.ts
 import { Policy, type AuthUser } from '@guren/core'
