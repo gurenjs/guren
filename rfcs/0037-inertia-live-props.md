@@ -462,9 +462,16 @@ What the transport does, as a `LiveTransport` (it routes by event name):
   between would be lost. With the Redis driver the answer still precedes the
   Redis subscription itself (`RedisDriver.subscribe()` does not wait for it),
   which Open Question 6 takes up. After five consecutive attempts that end
-  without a `connected` frame (a runtime that answers 501, §5, or a socket
-  closed with 1008), it stops, warns once, and the page keeps working with
-  static props.
+  without a `connected` frame (a runtime that answers 501, §5~~, or a socket
+  closed with 1008~~), it stops, warns once, and the page keeps working with
+  static props. **Amended in implementation:** it gives up only while no
+  connection has ever answered its replay, so a deploy that keeps the server
+  down for longer than the backoff does not stop live props for good; once one
+  has, it retries forever, the delay doubling to 30 s. The backoff starts over
+  only after a connection answers its replay, so a server that closes the
+  socket right after `connected` is retried more slowly each time. A frame that
+  carries a `channel` is always an event, so an app event named `connected` or
+  `subscription` is not read as a control frame.
 - **`socketId()`** returns the socket id from the `connected` frame (§4), or
   `null` before it arrives.
 

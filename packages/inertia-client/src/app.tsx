@@ -1,11 +1,11 @@
 import { createInertiaApp } from '@inertiajs/react'
-import * as inertiaCore from '@inertiajs/core'
+import * as inertiaReact from '@inertiajs/react'
 import type { HttpClient, Page } from '@inertiajs/core'
 import React from 'react'
 import { createRoot, hydrateRoot } from 'react-dom/client'
 import { createPagesResolver as createPagesResolverFactory, type ResolveComponent } from './resolve'
 import type { PageManifest } from './contracts'
-import type { LiveOptions, LiveTransport } from './live'
+import type { AnyLiveTransport, LiveOptions } from './live'
 import type { AnyPrototypeDefinition } from './prototype'
 import { recordTypedValues } from './typed-before-hydration'
 
@@ -43,7 +43,7 @@ export interface StartInertiaClientOptions {
    * `@guren/inertia-client/live`, or any transport Inertia 3.11 accepts.
    * Needs `@inertiajs/react` 3.11 or later; a prototype build ignores it.
    */
-  live?: LiveOptions | LiveTransport
+  live?: LiveOptions | AnyLiveTransport
 }
 
 export type PrototypeModule = { default: AnyPrototypeDefinition } | AnyPrototypeDefinition
@@ -149,10 +149,14 @@ async function startPrototypeClient(
   return mountInertiaApp(withoutLive, options.page ?? (await resolveInitialPage(http, window.location)), http)
 }
 
-/** Read off the namespace: a named import of `configureLive` fails to link against an Inertia older than 3.11. */
-function liveOption(live: StartInertiaClientOptions['live']): { live?: LiveOptions | LiveTransport } {
+/**
+ * The `@inertiajs/react` that consumes `live` is what has to be 3.11, and it
+ * pins its own core. `socketId` came with live props; `in` keeps the probe off
+ * the bundler's list of imports that must exist.
+ */
+function liveOption(live: StartInertiaClientOptions['live']): { live?: LiveOptions | AnyLiveTransport } {
   if (!live) return {}
-  if (typeof (inertiaCore as Record<string, unknown>).configureLive !== 'function') {
+  if (!('socketId' in inertiaReact)) {
     console.warn('Live props need @inertiajs/react 3.11 or later; the installed Inertia ignores the live option.')
     return {}
   }

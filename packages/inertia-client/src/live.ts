@@ -15,14 +15,25 @@ export interface LiveChannel {
 
 export type LiveEventHandler = (payload: unknown) => void
 
-export interface LiveTransport {
-  subscribe(channel: LiveChannel, event: string, handler: LiveEventHandler): () => void
+interface LiveTransportBase {
   socketId?: () => string | null | undefined
   onStatusChange?(callback: (connected: boolean) => void): () => void
 }
 
+export interface LiveTransport extends LiveTransportBase {
+  subscribe(channel: LiveChannel, event: string, handler: LiveEventHandler): () => void
+}
+
+/** Inertia's seam for a broadcaster with no event names (Action Cable); `liveTransport()` is not one. */
+export interface LiveChannelTransport extends LiveTransportBase {
+  subscribeToChannel(channel: LiveChannel, handler: LiveEventHandler): () => void
+  eventName?(payload: unknown): string | undefined
+}
+
+export type AnyLiveTransport = LiveTransport | LiveChannelTransport
+
 export interface LiveOptions {
-  transport: LiveTransport
+  transport: AnyLiveTransport
   throttle?: number
   pauseWhenHidden?: boolean
 }
@@ -43,7 +54,7 @@ export interface GurenLiveOptions {
 const MAX_OUTSTANDING = 16
 const RECONNECT_BASE = 1000
 const RECONNECT_MAX = 30_000
-/** Attempts in a row that end without `connected`: a runtime that answers 501 never will. */
+/** Attempts that end without `connected` before any ever did: a runtime that answers 501 never will. */
 const MAX_FAILED_ATTEMPTS = 5
 const DEFAULT_IDLE_TIMEOUT = 5000
 
@@ -90,7 +101,7 @@ function parseFrame(raw: unknown): Frame | undefined {
  * Inertia's `live` option for `startInertiaClient()`: one socket per tab,
  * opened by the first live prop, channels reference-counted by wire name.
  */
-export function liveTransport(options: GurenLiveOptions = {}): LiveOptions {
+export function liveTransport(options: GurenLiveOptions = {}): LiveOptions & { transport: LiveTransport } {
   const url = options.url ?? '/broadcasting/socket'
   const createSocket = options.webSocketFactory ?? ((target: string) => new WebSocket(target))
   const idleTimeout = options.idleTimeout ?? DEFAULT_IDLE_TIMEOUT
@@ -105,6 +116,7 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions {
   let connected = false
   let reported = false
   let failedAttempts = 0
+  let everConnected = false
   let stopped = false
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
   let idleTimer: ReturnType<typeof setTimeout> | undefined
@@ -143,13 +155,19 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions {
     const announced = (data ?? {}) as { socketId?: unknown }
     socketId = typeof announced.socketId === 'string' ? announced.socketId : null
     connected = true
-    failedAttempts = 0
     queue.length = 0
     outstanding = 0
     replayOwed = channelCounts.size
     for (const channel of channelCounts.keys()) queue.push({ action: 'subscribe', channel })
     flush()
-    if (replayOwed === 0) report(true)
+    if (replayOwed === 0) settled()
+  }
+
+  /** A connection that answered its replay counts as up: only then does the backoff start over. */
+  const settled = (): void => {
+    everConnected = true
+    failedAttempts = 0
+    report(true)
   }
 
   const onSubscription = (data: unknown): void => {
@@ -160,7 +178,7 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions {
     }
     if (replayOwed > 0) {
       replayOwed -= 1
-      if (replayOwed === 0) report(true)
+      if (replayOwed === 0) settled()
     }
     flush()
   }
@@ -178,14 +196,14 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions {
 
   const scheduleReconnect = (): void => {
     if (stopped || channelCounts.size === 0 || reconnectTimer) return
-    if (failedAttempts >= MAX_FAILED_ATTEMPTS) {
+    if (!everConnected && failedAttempts >= MAX_FAILED_ATTEMPTS) {
       warnOnce('gave-up', `Could not open ${url} after ${MAX_FAILED_ATTEMPTS} attempts; live props stay as rendered. Serve the app with Application.listen() on Bun and mount broadcast.webSocketMiddleware() there.`)
       return
     }
     const delay = Math.min(RECONNECT_MAX, RECONNECT_BASE * 2 ** Math.max(0, failedAttempts - 1))
     reconnectTimer = setTimeout(() => {
       reconnectTimer = undefined
-      open()
+      if (channelCounts.size > 0) open()
     }, delay)
   }
 
@@ -201,36 +219,38 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions {
       return
     }
     socket = current
-    let sawConnected = false
     current.addEventListener('message', (message) => {
       if (socket !== current) return
       const frame = parseFrame((message as MessageEvent).data)
       if (!frame) return
-      if (frame.event === 'connected') {
-        sawConnected = true
-        onConnected(frame.data)
-      } else if (frame.event === 'subscription') onSubscription(frame.data)
+      // The server's own frames carry no channel, so an app event named `connected` is still an event.
+      if (frame.channel !== undefined) onEvent(frame)
+      else if (frame.event === 'connected') onConnected(frame.data)
+      else if (frame.event === 'subscription') onSubscription(frame.data)
       else onEvent(frame)
     })
     current.addEventListener('close', () => {
       if (socket !== current) return
-      socket = undefined
-      socketId = null
-      connected = false
-      if (!sawConnected) failedAttempts += 1
-      if (channelCounts.size > 0) report(false)
+      detach()
+      failedAttempts += 1
       scheduleReconnect()
     })
+  }
+
+  /** Forget the socket now rather than on its `close` event, which a frozen page may receive late or never. */
+  const detach = (): WebSocket | undefined => {
+    const current = socket
+    socket = undefined
+    socketId = null
+    connected = false
+    if (channelCounts.size > 0) report(false)
+    return current
   }
 
   const closeIdle = (): void => {
     idleTimer = undefined
     if (channelCounts.size > 0 || !socket) return
-    const current = socket
-    socket = undefined
-    socketId = null
-    connected = false
-    current.close()
+    detach()?.close()
   }
 
   const acquire = (channel: string): void => {
@@ -253,7 +273,12 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions {
     }
     channelCounts.delete(channel)
     send('unsubscribe', channel)
-    if (channelCounts.size === 0 && !idleTimer) idleTimer = setTimeout(closeIdle, idleTimeout)
+    if (channelCounts.size > 0) return
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = undefined
+    }
+    if (!idleTimer) idleTimer = setTimeout(closeIdle, idleTimeout)
   }
 
   const transport: LiveTransport = {
@@ -289,7 +314,7 @@ export function liveTransport(options: GurenLiveOptions = {}): LiveOptions {
   if (typeof window !== 'undefined') {
     window.addEventListener('pagehide', () => {
       stopped = true
-      socket?.close()
+      detach()?.close()
     })
     // A page restored from the back/forward cache keeps its subscriptions but not its socket.
     window.addEventListener('pageshow', (event) => {

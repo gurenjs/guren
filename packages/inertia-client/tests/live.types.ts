@@ -1,12 +1,14 @@
 import type { LiveOption } from '@inertiajs/core'
-import { liveTransport, type LiveOptions, type LiveTransport } from '../src/live'
+import type { StartInertiaClientOptions } from '../src/app'
+import { liveTransport, type AnyLiveTransport, type LiveOptions } from '../src/live'
 
 /**
  * A type-only fixture: `bun run typecheck` is the assertion. The live module
- * restates Inertia 3.11's transport types so it admits an older Inertia; what
- * it returns must stay assignable to the real ones.
+ * restates Inertia 3.11's transport types so it admits an older Inertia, and
+ * the two must stay assignable both ways.
  */
 
 export const options: LiveOption = liveTransport({ throttle: 2000 })
 export const transport: LiveOption = liveTransport().transport
-export const fromInertia = (option: LiveOptions | LiveTransport): LiveOption => option
+export const toInertia = (option: LiveOptions | AnyLiveTransport): LiveOption => option
+export const fromInertia = (option: LiveOption): StartInertiaClientOptions['live'] => option

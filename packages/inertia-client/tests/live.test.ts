@@ -236,6 +236,52 @@ describe('liveTransport()', () => {
     expect(statuses).toEqual([true, false, true])
   })
 
+  it('opens no socket when the last live prop is gone before the reconnect fires', async () => {
+    const transport = create({ idleTimeout: 10 })
+    const off = transport.subscribe(order, 'OrderUpdated', () => {})
+    sockets[0]!.connected()
+    sockets[0]!.answer('private-orders.1')
+
+    sockets[0]!.close()
+    off()
+
+    await tick(1100)
+    expect(sockets).toHaveLength(1)
+  })
+
+  it('reports no disconnect for closing an idle socket, which missed no event', async () => {
+    const transport = create({ idleTimeout: 10 })
+    const statuses: boolean[] = []
+    transport.onStatusChange?.((connected) => statuses.push(connected))
+    const off = transport.subscribe(order, 'OrderUpdated', () => {})
+    sockets[0]!.connected()
+    sockets[0]!.answer('private-orders.1')
+
+    off()
+    await tick(30)
+
+    expect(sockets[0]!.closed).toBe(true)
+    expect(statuses).toEqual([true])
+  })
+
+  it('treats an app event named like a control frame as an event, since it carries a channel', () => {
+    const transport = create()
+    const statuses: boolean[] = []
+    const received: unknown[] = []
+    transport.onStatusChange?.((connected) => statuses.push(connected))
+    transport.subscribe(order, 'subscription', (payload) => received.push(payload))
+    transport.subscribe(order, 'connected', (payload) => received.push(payload))
+    const [socket] = sockets
+    socket!.connected(`s_${'d'.repeat(32)}`)
+
+    socket!.frame({ event: 'subscription', channel: 'private-orders.1', data: { plan: 'pro' } })
+    socket!.frame({ event: 'connected', channel: 'private-orders.1', data: { at: 1 } })
+
+    expect(received).toEqual([{ plan: 'pro' }, { at: 1 }])
+    expect(statuses).toEqual([])
+    expect(transport.socketId?.()).toBe(`s_${'d'.repeat(32)}`)
+  })
+
   it('subscribes nothing for a channel type Guren does not have', () => {
     const transport = create()
     const off = transport.subscribe({ name: 'x', type: 'encrypted-private' }, 'E', () => {})
