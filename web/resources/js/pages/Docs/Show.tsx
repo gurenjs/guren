@@ -7,6 +7,7 @@ import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
 import { ChevronRightIcon } from '../../components/icons.js'
+import { clientVisitHref } from '../../lib/doc-link.js'
 import { breadcrumbJsonLd, techArticleJsonLd } from '../../lib/structured-data.js'
 import { useColorMode } from './theme.js'
 
@@ -260,6 +261,38 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
       stop()
     }
   }, [])
+
+  // Rendered markdown links are plain anchors, so without this every link in a
+  // doc body is a full page load. Delegated on the container, which survives
+  // client-side visits between docs.
+  const hasDoc = Boolean(doc)
+  useEffect(() => {
+    if (!hasDoc) return
+
+    const container = document.querySelector('.docs-content')
+    if (!container) return
+
+    const handleClick = (event: Event) => {
+      if (!(event instanceof MouseEvent)) return
+      if (event.defaultPrevented || event.button !== 0) return
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+
+      const anchor = event.target instanceof Element ? event.target.closest('a') : null
+      if (!anchor || !container.contains(anchor)) return
+
+      const href = clientVisitHref(
+        { href: anchor.getAttribute('href'), target: anchor.target, download: anchor.hasAttribute('download') },
+        window.location,
+      )
+      if (!href) return
+
+      event.preventDefault()
+      router.visit(href)
+    }
+
+    container.addEventListener('click', handleClick)
+    return () => container.removeEventListener('click', handleClick)
+  }, [hasDoc])
 
   // Mermaid: the build-time renderer leaves ```mermaid fences as <pre class="mermaid">
   // (shiki has no grammar for them); the library loads lazily, client-only, and only
