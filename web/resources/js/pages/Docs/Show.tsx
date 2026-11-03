@@ -1,5 +1,6 @@
 import { Head, Link, router } from '@inertiajs/react'
 import { useEffect, useMemo, useState } from 'react'
+import { isInteractiveDiagramName } from '../../../../config/interactive-diagrams.js'
 import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
 import { DocSearch } from '../../components/DocSearch.js'
 import { Footer } from '../../components/Footer.js'
@@ -327,6 +328,68 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
       cancelled = true
     }
   }, [doc?.html, isDark])
+
+  // Interactive diagrams: the build-time renderer wraps a marked mermaid fence in
+  // `.doc-interactive`, and the fence stays the fallback until the component
+  // mounts beside it. The components load only on pages that have one.
+  useEffect(() => {
+    if (!doc) return
+
+    const container = document.querySelector('.docs-content')
+    if (!container?.querySelector('.doc-interactive')) return
+
+    let cancelled = false
+    const mounted: Array<{ root: import('react-dom/client').Root; host: HTMLElement; wrapper: HTMLElement }> = []
+
+    void (async () => {
+      let loaders: typeof import('../../components/diagrams/registry.js')['INTERACTIVE_DIAGRAM_LOADERS']
+      let createRoot: typeof import('react-dom/client')['createRoot']
+      try {
+        ;[{ INTERACTIVE_DIAGRAM_LOADERS: loaders }, { createRoot }] = await Promise.all([
+          import('../../components/diagrams/registry.js'),
+          import('react-dom/client'),
+        ])
+      } catch (error) {
+        console.error(error)
+        return
+      }
+
+      // Queried after the await for the same reason as the mermaid pass above.
+      for (const wrapper of container.querySelectorAll<HTMLElement>('.doc-interactive')) {
+        const name = wrapper.dataset.interactive ?? ''
+        if (!isInteractiveDiagramName(name) || wrapper.dataset.interactiveMounted) continue
+        let Diagram
+        try {
+          Diagram = await loaders[name]()
+        } catch (error) {
+          console.error(`Failed to load the interactive diagram "${name}"`, error)
+          continue
+        }
+        if (cancelled) return
+
+        const host = document.createElement('div')
+        host.className = 'doc-interactive-root'
+        wrapper.append(host)
+        const root = createRoot(host)
+        root.render(<Diagram locale={locale} />)
+        wrapper.dataset.interactiveMounted = 'true'
+        mounted.push({ root, host, wrapper })
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      const done = mounted.splice(0)
+      for (const { host, wrapper } of done) {
+        host.remove()
+        delete wrapper.dataset.interactiveMounted
+      }
+      // Unmounting a root synchronously from inside a commit makes React warn.
+      setTimeout(() => {
+        for (const { root } of done) root.unmount()
+      })
+    }
+  }, [doc?.html, locale])
 
   useEffect(() => {
     if (!doc) return

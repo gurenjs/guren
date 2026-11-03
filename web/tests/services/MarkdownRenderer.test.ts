@@ -182,3 +182,66 @@ describe('tutorial listings', () => {
     expect(html).not.toContain('doc-file')
   })
 })
+
+describe('feature lists', () => {
+  const block = (items: string) => `<!-- features -->\n\n${items}\n<!-- /features -->\n`
+
+  it('renders each bold-led paragraph as a card with its icon', async () => {
+    const html = await renderMarkdownToHtml(
+      block('<!-- feature-icon: bolt -->\n**Fast.** Runs on `Bun`.\n\n<!-- feature-icon: shield -->\n**Typed.** End to end.\n'),
+    )
+
+    expect(html).toContain('<ul class="doc-features">')
+    expect(html.match(/class="doc-feature"/g)).toHaveLength(2)
+    expect(html).toContain('<p><strong>Fast.</strong></p>\n<p>Runs on <code>Bun</code>.</p>\n</li>')
+    expect(html).toContain('aria-hidden="true"')
+    expect(html).not.toContain('<!--')
+  })
+
+  it('leaves inline HTML in a title or body to marked', async () => {
+    const html = await renderMarkdownToHtml(
+      block('<!-- feature-icon: bolt -->\n**Fast <strong>and</strong> typed.** <span title="</p>">Body</span>.\n'),
+    )
+
+    expect(html).toContain('<p><strong>Fast <strong>and</strong> typed.</strong></p>')
+    expect(html).toContain('<p><span title="</p>">Body</span>.</p>')
+  })
+
+  it('ignores markers in an attribute value or a code fence', async () => {
+    const attribute = '<div data-example="<!-- features -->hello<!-- /features -->">Visible prose</div>\n'
+    const fence = '```md\n<!-- features -->\n**Not a card.** Text.\n<!-- /features -->\n```\n'
+
+    expect(await renderMarkdownToHtml(attribute)).toContain('Visible prose')
+    expect(await renderMarkdownToHtml(fence)).not.toContain('doc-features')
+  })
+
+  it('refuses an icon the site does not ship', async () => {
+    await expect(renderMarkdownToHtml(block('<!-- feature-icon: rocket -->\n**Fast.** Body.\n'))).rejects.toThrow(
+      'Unknown feature icon "rocket"',
+    )
+  })
+
+  it('refuses a paragraph in the block without an icon or a bold opening', async () => {
+    await expect(
+      renderMarkdownToHtml(block('<!-- feature-icon: bolt -->\n**Fast.** Body.\n\n**Plain.** No icon.\n')),
+    ).rejects.toThrow('A <!-- features --> block may hold only')
+    await expect(renderMarkdownToHtml(block('<!-- feature-icon: bolt -->\nPlain *start*.\n'))).rejects.toThrow(
+      'A <!-- features --> block may hold only',
+    )
+  })
+
+  it('refuses a block that never closes', async () => {
+    await expect(renderMarkdownToHtml('<!-- features -->\n\n<!-- feature-icon: bolt -->\n**Fast.** Body.\n')).rejects.toThrow(
+      'missing its <!-- /features --> line',
+    )
+  })
+
+  it('renders the overview in both locales with the same seven features', async () => {
+    const { readFile } = await import('node:fs/promises')
+    for (const locale of ['en', 'ja'] as const) {
+      const source = await readFile(new URL(`../../../docs/${locale}/guides/overview.md`, import.meta.url), 'utf8')
+      const html = await renderMarkdownToHtml(source, { locale, category: 'guides' })
+      expect(html.match(/class="doc-feature"/g)).toHaveLength(7)
+    }
+  })
+})

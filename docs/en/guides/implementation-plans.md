@@ -6,6 +6,8 @@ A plan is worth writing when a change spans a table, several routes and a page, 
 
 For a walkthrough, [Building with an Agent](../agent-course/00-overview.md) takes two plans from request to close with Claude Code, with a checklist for each decision along the way.
 
+<!-- interactive: plan-lifecycle -->
+
 ```mermaid
 flowchart LR
   Write["plan.json<br/>written by you or your agent"]
