@@ -711,7 +711,7 @@ export default function PostShow({ post, canManage, comments }: Props) {
               </form>
             ) : (
               <p className="text-sm text-g-text-2">
-                <Link href={route('login')} className="text-g-accent-text hover:underline">Sign in</Link> to comment.
+                <Link href={route('login')} className="text-g-accent-text underline underline-offset-2 transition hover:no-underline">Sign in</Link> to comment.
               </p>
             )}
           </section>
@@ -1405,7 +1405,7 @@ export default function PostShow({ post, canManage, comments }: Props) {
               </form>
             ) : (
               <p className="text-sm text-g-text-2">
-                <Link href={route('login')} className="text-g-accent-text hover:underline">Sign in</Link> to comment.
+                <Link href={route('login')} className="text-g-accent-text underline underline-offset-2 transition hover:no-underline">Sign in</Link> to comment.
               </p>
             )}
           </section>

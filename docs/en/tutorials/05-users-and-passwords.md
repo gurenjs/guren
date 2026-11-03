@@ -559,7 +559,7 @@ export default function Register({ errors = {} }: Props) {
             </form>
             <p className="mt-6 text-sm text-g-text-2">
               Already have an account?{' '}
-              <Link href="/login" className="text-g-accent-text hover:underline">Sign in</Link>
+              <Link href="/login" className="text-g-accent-text underline underline-offset-2 transition hover:no-underline">Sign in</Link>
             </p>
           </section>
         </div>
@@ -619,7 +619,7 @@ export default function Login({ errors = {} }: Props) {
             </form>
             <p className="mt-6 text-sm text-g-text-2">
               No account yet?{' '}
-              <Link href="/register" className="text-g-accent-text hover:underline">Sign up</Link>
+              <Link href="/register" className="text-g-accent-text underline underline-offset-2 transition hover:no-underline">Sign up</Link>
             </p>
           </section>
         </div>
