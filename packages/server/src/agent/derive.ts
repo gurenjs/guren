@@ -441,6 +441,15 @@ function deriveAuthorization(
 
 const UI_AUDIENCES: ReadonlySet<string> = new Set(['model', 'app'])
 
+/** Never throws, unlike `JSON.stringify` on a bigint: the derivation is total. */
+function describeEntry(entry: unknown): string {
+  try {
+    return typeof entry === 'string' ? JSON.stringify(entry) : String(entry)
+  } catch {
+    return `a ${typeof entry}`
+  }
+}
+
 function pageIdOf(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const id = (value as { id?: unknown }).id
@@ -454,6 +463,9 @@ function pageIdOf(value: unknown): string | undefined {
 export function deriveAgentToolUi(declared: NonNullable<AgentRouteMetadata['ui']>): DerivedAgentToolUi | string {
   // Typed, but read as unknown: a routes file is JavaScript to the router, and `introspect` hands over JSON.
   const value: unknown = declared
+  if (pageIdOf(value) !== undefined && ('visibility' in (value as object) || 'page' in (value as object))) {
+    return 'a page contract mixed with { page, visibility } options; write { page, visibility }'
+  }
   const form = typeof value === 'string' || pageIdOf(value) !== undefined ? { page: value } : value
   if (typeof form !== 'object' || form === null || Array.isArray(form)) return 'neither a page nor a { page, visibility } object'
   const { page: rawPage, visibility: rawVisibility } = form as { page?: unknown; visibility?: unknown }
@@ -462,10 +474,11 @@ export function deriveAgentToolUi(declared: NonNullable<AgentRouteMetadata['ui']
   if (page !== undefined && page.trim() === '') return 'an empty page id'
   if (page === undefined && rawVisibility === undefined) return 'neither a page nor a visibility'
   if (rawVisibility !== undefined && !Array.isArray(rawVisibility)) return 'a visibility that is not a list'
-  const visibility: unknown[] = rawVisibility === undefined ? ['model', 'app'] : [...rawVisibility]
+  // `Array.from` turns a hole into `undefined`, which the entry check then refuses.
+  const visibility: unknown[] = rawVisibility === undefined ? ['model', 'app'] : Array.from(rawVisibility as unknown[])
   if (visibility.length === 0) return 'an empty visibility list'
-  const unknown = visibility.find((entry) => typeof entry !== 'string' || !UI_AUDIENCES.has(entry))
-  if (unknown !== undefined) return `the visibility entry ${JSON.stringify(unknown)}, which is neither "model" nor "app"`
+  const invalid = visibility.findIndex((entry) => typeof entry !== 'string' || !UI_AUDIENCES.has(entry))
+  if (invalid !== -1) return `the visibility entry ${describeEntry(visibility[invalid])}, which is neither "model" nor "app"`
   return {
     ...(page !== undefined ? { page } : {}),
     visibility: Array.from(new Set(visibility)) as Array<'model' | 'app'>,

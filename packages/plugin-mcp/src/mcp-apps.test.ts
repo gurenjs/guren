@@ -29,6 +29,7 @@ describe('mcpPlugin MCP Apps (RFC 0038)', () => {
   const store = new MemoryApiTokenStore()
   let app: Application
   let token: string
+  let narrowToken: string
 
   function registerRoutes(router: Router): void {
     router.get('/posts/:id', [PostController, 'show']).name('posts.show').agent({ ui: 'posts/Show' })
@@ -59,17 +60,30 @@ describe('mcpPlugin MCP Apps (RFC 0038)', () => {
 
     const issued = await createApiToken(store, { name: 'test', userId: 42, abilities: ['tools:*'] })
     token = issued.plainTextToken
+    const narrow = await createApiToken(store, { name: 'narrow', userId: 42, abilities: ['tool:posts.update'] })
+    narrowToken = narrow.plainTextToken
   })
 
-  async function connectClient(): Promise<Client> {
+  async function connectClient(bearer: string = token): Promise<Client> {
     const transport = new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
       fetch: (input, init) => app.fetch(new Request(input, init)),
-      requestInit: { headers: { Authorization: `Bearer ${token}` } },
+      requestInit: { headers: { Authorization: `Bearer ${bearer}` } },
     })
     const client = new Client({ name: 'mcp-apps', version: '1.0.0' })
     await client.connect(transport)
     return client
   }
+
+  test('publishes no page to a token that can call no tool naming it', async () => {
+    const client = await connectClient(narrowToken)
+    const { resources } = await client.listResources()
+    expect(resources.map((resource) => resource.uri)).toEqual(['ui://guren-app/bridge'])
+    await expect(client.readResource({ uri: 'ui://guren-app/pages/posts/Show?v=abc123' })).rejects.toThrow()
+
+    const { contents } = await client.readResource({ uri: 'ui://guren-app/bridge' })
+    const catalogue = JSON.parse((contents[0] as { text: string }).text) as { tools: Array<{ toolName: string }> }
+    expect(catalogue.tools.map((tool) => tool.toolName)).toEqual(['posts.update'])
+  })
 
   test('advertises resources and the extension', async () => {
     const client = await connectClient()

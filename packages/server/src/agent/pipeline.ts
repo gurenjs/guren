@@ -455,6 +455,7 @@ export function createAgentInvocationPipeline(
         const outcome = await mapToolResponse(
           tool,
           await options.app.fetch(request, options.env, options.executionCtx),
+          request.url,
         )
         record.invoked(audited, auditArgs, outcome.status, elapsed(startedAt))
         return { status: 'executed', outcome }

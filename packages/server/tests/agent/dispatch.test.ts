@@ -423,6 +423,22 @@ describe('mapToolResponse facts for MCP Apps (RFC 0038)', () => {
     expect(outcome.location).toBe('/posts/12')
   })
 
+  test('resolves a relative location against the dispatched request', async () => {
+    const response = new Response(null, { status: 303, headers: { Location: '../13' } })
+    const outcome = await mapToolResponse(plainTool(), response, 'http://app.test/posts/12/edit')
+    expect(outcome.location).toBe('http://app.test/posts/13')
+  })
+
+  test('keeps the location on a tool whose output schema a redirect cannot satisfy', async () => {
+    const outputTool = toolFor((router) => {
+      router.post('/posts', { output: z.object({ ok: z.boolean() }) }, () => ({ ok: true })).name('posts.store').agent({})
+    }, 'posts.store')
+    const response = new Response(null, { status: 303, headers: { Location: '/posts/12' } })
+    const outcome = await mapToolResponse(outputTool, response)
+    expect(outcome.isError).toBe(true)
+    expect(outcome.location).toBe('/posts/12')
+  })
+
   test('carries the errors object of a 422', async () => {
     const response = new Response(JSON.stringify({ message: 'Invalid', errors: { title: ['Required'] } }), {
       status: 422,

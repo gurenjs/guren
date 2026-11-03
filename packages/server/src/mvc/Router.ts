@@ -239,6 +239,11 @@ function cloneAgentMetadata(metadata: AgentRouteMetadata): AgentRouteMetadata {
  * `deriveAgentToolUi()` to judge, so a malformed declaration is reported as written.
  */
 function pageIdsOf(ui: unknown): AgentRouteMetadata['ui'] {
+  // A contract spread with options keeps them, so the derivation can refuse the mixed shape.
+  if (isPageLike(ui) && ('visibility' in ui || 'page' in ui)) {
+    const { visibility, page } = ui as { visibility?: unknown; page?: unknown }
+    return { id: ui.id, visibility, page } as unknown as AgentRouteMetadata['ui']
+  }
   if (isPageLike(ui)) return ui.id
   if (typeof ui === 'object' && ui !== null && isPageLike((ui as { page?: unknown }).page)) {
     return { ...(ui as AgentRouteUi), page: (ui as { page: { id: string } }).page.id }

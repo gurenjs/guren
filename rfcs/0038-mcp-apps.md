@@ -646,7 +646,9 @@ the build is per page (§4) so one admission publishes one page.
 external origin. Under that default `connect-src` is `'none'` and no external
 script, style, image or font loads, so the view reaches nothing except through
 the host's tool calls. Every origin an app adds widens that, and `guren audit`
-warns on each:
+warns on each (**amended in implementation:** the audit warnings land in Phase 3
+with the rest of the developer surface; Phase 1 passes the declared origins
+through):
 
 ```ts
 mcpPlugin({

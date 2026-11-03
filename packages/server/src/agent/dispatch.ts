@@ -259,7 +259,11 @@ export interface ToolCallOutcome {
    * route as a rehearsal that never ran.
    */
   preflightVerdict?: boolean
-  /** A 3xx response's `Location`, as sent. Read by adapters instead of parsing `content`. */
+  /**
+   * A 3xx response's `Location`, resolved against the dispatched request's URL
+   * when the caller passes it (a relative `../13` means the route's own path).
+   * Read by adapters instead of parsing `content`.
+   */
   location?: string
   /** A 422 response's `errors` object, when the body carries one (RFC 0038 §6). */
   errors?: Record<string, string[]>
@@ -287,6 +291,7 @@ export function advertisesStructuredOutput(tool: DerivedAgentTool): boolean {
 export async function mapToolResponse(
   tool: DerivedAgentTool,
   response: Response,
+  requestUrl?: string,
 ): Promise<ToolCallOutcome> {
   const status = response.status
   const structured = advertisesStructuredOutput(tool)
@@ -294,8 +299,10 @@ export async function mapToolResponse(
   if (status === 204 || (status >= 300 && status < 400)) {
     const location = response.headers.get('Location')
     const text = location ? `HTTP ${status} (Location: ${location})` : `HTTP ${status}`
-    if (structured) return inconsistentOutput(tool, text, status)
-    return { content: [{ type: 'text', text }], status, ...(location ? { location } : {}) }
+    // Kept on the inconsistent-output error too: a view still needs to follow the redirect.
+    const facts = location ? { location: resolveLocation(location, requestUrl) } : {}
+    if (structured) return { ...inconsistentOutput(tool, text, status), ...facts }
+    return { content: [{ type: 'text', text }], status, ...facts }
   }
 
   const raw = await response.text()
@@ -374,6 +381,15 @@ function parseJsonBody(response: Response, raw: string): unknown | undefined {
     return JSON.parse(raw) as unknown
   } catch {
     return undefined
+  }
+}
+
+function resolveLocation(location: string, requestUrl: string | undefined): string {
+  if (!requestUrl) return location
+  try {
+    return new URL(location, requestUrl).href
+  } catch {
+    return location
   }
 }
 

@@ -719,9 +719,18 @@ describe('ui (RFC 0038)', () => {
       ui: { visibility: ['app', 'browser' as 'app'] },
     })
     router.get('/notes/:id', handler).name('notes.show').agent({ ui: 42 as unknown as string })
+    router.put('/notes/:id', handler).name('notes.update').agent({
+      ui: { visibility: [undefined, 'browser'] as unknown as Array<'app'> },
+    })
+    const page = { id: 'notes/Show', props: () => page }
+    router.patch('/notes/:id', handler).name('notes.patch').agent({
+      ui: { ...page, visibility: ['app'] } as unknown as string,
+    })
 
     const { tools, warnings } = deriveAgentTools(router.definitions())
     expect(tools.map((tool) => tool.toolName)).toEqual([])
+    expect(warnings.some((warning) => warning.includes('notes.update') && warning.includes('entry undefined'))).toBe(true)
+    expect(warnings.some((warning) => warning.includes('notes.patch') && warning.includes('mixed'))).toBe(true)
     expect(warnings.some((warning) => warning.includes('posts.update') && warning.includes('empty visibility'))).toBe(true)
     expect(warnings.some((warning) => warning.includes('drafts.update') && warning.includes('"browser"'))).toBe(true)
     expect(warnings.some((warning) => warning.includes('notes.show') && warning.includes('neither a page nor a { page'))).toBe(true)
