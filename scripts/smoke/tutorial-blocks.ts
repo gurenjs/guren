@@ -9,6 +9,8 @@
  */
 import { readdir } from 'node:fs/promises'
 
+import { parseHighlightLines } from '../../web/config/code-highlight'
+
 export interface BlockIssue {
   file: string
   line: number
@@ -20,6 +22,8 @@ interface BlockBase {
   line: number
   lang: string
   body: string
+  /** The `highlight=` value as written; the site marks those lines. Any block may carry one. */
+  highlight?: string
 }
 
 export interface IllustrativeBlock extends BlockBase {
@@ -179,8 +183,17 @@ export function parseTutorialBlocks(markdown: string, file = '<markdown>'): Pars
     if (!closed) {
       issues.push({ file, line: openLine, message: 'unterminated fence' })
     }
-    const [lang = '', ...attrs] = info.split(/\s+/u).filter((token) => token.length > 0)
+    const [lang = '', ...tokens] = info.split(/\s+/u).filter((token) => token.length > 0)
     const base: BlockBase = { line: openLine, lang, body: body.join('\n') }
+    const highlights = tokens.filter((token) => token.startsWith('highlight='))
+    const attrs = tokens.filter((token) => !token.startsWith('highlight='))
+    if (highlights.length > 1) {
+      issues.push({ file, line: openLine, message: `duplicate attribute on fence: ${highlights.join(' ')}` })
+    } else if (highlights.length === 1) {
+      base.highlight = highlights[0]!.slice('highlight='.length)
+      const parsed = parseHighlightLines(base.highlight, body.length)
+      if ('error' in parsed) issues.push({ file, line: openLine, message: parsed.error })
+    }
     const { block, issue } = classify(lang, attrs, base, file)
     blocks.push(block)
     if (issue) issues.push(issue)
@@ -194,17 +207,19 @@ export function executableBlocks(blocks: readonly TutorialBlock[]): ExecutableBl
 
 /**
  * One line per executable block, everything the smoke acts on and nothing
- * else: kind, mode, path, fallback, body. The locale check compares these, so
+ * else: kind, mode, path, fallback, body, plus the highlighted lines, which
+ * must match across locales because the bodies do. The locale check compares these, so
  * translated prose around a block never counts and a translated body does.
  */
 export function executableSignature(block: ExecutableBlock): string {
+  const highlight = block.highlight === undefined ? '' : ` highlight=${block.highlight}`
   switch (block.kind) {
     case 'run':
-      return `run ${block.mode}${block.fallback ? ' fallback' : ''}\n${block.body}`
+      return `run ${block.mode}${block.fallback ? ' fallback' : ''}${highlight}\n${block.body}`
     case 'file':
-      return `file=${block.path}${block.fallback ? ' fallback' : ''}\n${block.body}`
+      return `file=${block.path}${block.fallback ? ' fallback' : ''}${highlight}\n${block.body}`
     case 'manual':
-      return `manual\n${block.body}`
+      return `manual${highlight}\n${block.body}`
   }
 }
 

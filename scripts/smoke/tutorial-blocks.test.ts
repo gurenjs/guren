@@ -102,6 +102,28 @@ describe('parseTutorialBlocks', () => {
     const { issues } = parseTutorialBlocks('```bash run\nbun test\n', 'ch.md')
     expect(issues).toEqual([{ file: 'ch.md', line: 1, message: 'unterminated fence' }])
   })
+
+  test('highlight= rides beside any attribute set and is checked against the body', () => {
+    const { blocks, issues } = parseTutorialBlocks(
+      [fence('ts file=a.ts fallback highlight=1-2', 'a\nb\nc'), fence('ts highlight=3', 'a\nb\nc')].join('\n'),
+      'ch.md',
+    )
+    expect(issues).toEqual([])
+    expect(blocks).toMatchObject([
+      { kind: 'file', path: 'a.ts', fallback: true, highlight: '1-2' },
+      { kind: 'illustrative', highlight: '3' },
+    ])
+
+    const bad = parseTutorialBlocks(
+      [fence('ts file=a.ts highlight=4', 'a\nb'), fence('ts highlight=2-1', 'a\nb'), fence('ts highlight=x', 'a')].join('\n'),
+      'ch.md',
+    )
+    expect(bad.issues.map((issue) => issue.message)).toEqual([
+      'highlight= line 4 is past the end of the block (2 lines)',
+      'highlight= range 2-1 is empty or starts before line 1',
+      'highlight= takes line ranges like 3-5,9, got: x',
+    ])
+  })
 })
 
 describe('validateFilePath', () => {
@@ -127,7 +149,7 @@ describe('compareExecutableSequences', () => {
     expect(compareExecutableSequences(en, ja)).toEqual([])
   })
 
-  test('a translated body, a changed attribute, or a missing block is reported once, at the first divergence', () => {
+  test('a translated body, a changed attribute or highlight, or a missing block is reported once, at the first divergence', () => {
     const translatedBody = parseTutorialBlocks(`${fence('bash run', 'bun test')}\n${fence('ts file=a.ts', 'y')}`, 'ja.md')
     expect(compareExecutableSequences(en, translatedBody)).toMatchObject([{ file: 'ja.md', line: 4 }])
 
@@ -137,6 +159,9 @@ describe('compareExecutableSequences', () => {
     const missing = parseTutorialBlocks(fence('bash run', 'bun test'), 'ja.md')
     expect(compareExecutableSequences(en, missing)).toMatchObject([{ file: 'ja.md', line: 0 }])
     expect(compareExecutableSequences(en, missing)[0].message).toContain('missing executable block #2')
+
+    const changedHighlight = parseTutorialBlocks(`${fence('bash run', 'bun test')}\n${fence('ts file=a.ts highlight=1', 'x')}`, 'ja.md')
+    expect(compareExecutableSequences(en, changedHighlight)).toMatchObject([{ file: 'ja.md', line: 4 }])
 
     const extra = parseTutorialBlocks(`${fence('bash run', 'bun test')}\n${fence('ts file=a.ts', 'x')}\n${fence('bash manual', 'x')}`, 'ja.md')
     expect(compareExecutableSequences(en, extra)[0].message).toContain('extra executable block #3')

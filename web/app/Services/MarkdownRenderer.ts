@@ -1,9 +1,10 @@
 import { posix } from 'node:path'
 
-import { codeToHtml } from 'shiki'
+import { codeToHtml, type ShikiTransformer } from 'shiki'
 
 import { createMarkdownRenderer, escapeHtml } from '@guren/plugin-markdown'
 
+import { highlightAttribute, parseHighlightLines } from '../../config/code-highlight.js'
 import { MARKDOWN_CODE_THEMES, SITE_ALERT_LABELS } from '../../config/markdown.js'
 import { docPaths, GITHUB_URL } from '../../config/site.js'
 import {
@@ -139,6 +140,29 @@ function withFileCaption(html: string, path: string, lines: number): string {
   return `${opened}${caption}${html.slice(openTag[0].length)}`
 }
 
+/**
+ * Marks the lines a `highlight=` fence attribute names, and the `<pre>` as having
+ * some, which app.css reads to dim the rest. A range the block does not have
+ * fails the render rather than highlighting nothing.
+ */
+function highlightTransformers(code: string, info: string | undefined): ShikiTransformer[] {
+  const value = highlightAttribute(info)
+  if (value === null) return []
+  const result = parseHighlightLines(value, code.replace(/\n$/u, '').split('\n').length)
+  if ('error' in result) throw new Error(`${result.error} (fence: ${info})`)
+  const lines = new Set(result.lines)
+  return [
+    {
+      pre(node) {
+        this.addClassToHast(node, 'has-highlighted')
+      },
+      line(node, line) {
+        if (lines.has(line)) this.addClassToHast(node, 'highlighted')
+      },
+    },
+  ]
+}
+
 // The full shiki entry rather than the plugin's fine-grained adapter, because
 // docs fences carry arbitrary languages. Affordable only because docs render at
 // build time; the Worker bundle never sees this import.
@@ -150,11 +174,12 @@ async function highlightDocsCode(code: string, lang?: string, info?: string): Pr
   if (normalizedLang === 'mermaid') {
     return `<pre class="mermaid">${escapeHtml(code)}</pre>`
   }
+  const transformers = highlightTransformers(code, info)
   let html: string
   try {
-    html = await codeToHtml(code, { lang: normalizedLang, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
+    html = await codeToHtml(code, { lang: normalizedLang, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light', transformers })
   } catch {
-    html = await codeToHtml(code, { lang: DEFAULT_LANGUAGE, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
+    html = await codeToHtml(code, { lang: DEFAULT_LANGUAGE, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light', transformers })
   }
 
   const path = fencePath(info)

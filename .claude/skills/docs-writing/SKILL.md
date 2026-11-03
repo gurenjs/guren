@@ -15,6 +15,7 @@ The rules live in `.claude/rules/prose.md`. This skill is the order to apply the
   - `grep -n "<file name>" scripts/smoke/docs-audit.ts`: strings the audit asserts literally.
   - Headings: other pages and `web/tests` link to them by anchor. Change one only together with every `](#…)` and `](./page.md#…)` that points at it.
   - Code fences: in the tutorial and the agent course, `bash run`, `file=` and `manual` blocks are byte-compared with the English chapter by `audit:tutorial-blocks`.
+  - `highlight=3-5,9` after the language marks the lines a reader should look at on guren.dev and dims the rest; GitHub ignores it. Use it where a `file=` block reprints a whole file to add a few lines. Set the same value in both locales, and renumber it whenever the block's body changes: the audit refuses a line past the end, but not one that has shifted.
 
 ## 2. Writing Japanese
 
