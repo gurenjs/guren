@@ -559,6 +559,9 @@ export async function snapshotTree(dir: string): Promise<Record<string, string |
   return tree
 }
 
+/** `minimumReleaseAge = 0` states the release-age gate (off), which `guren doctor` otherwise warns about. */
+const TEMP_WORKSPACE_BUNFIG = '[install]\nauto = "disable"\nminimumReleaseAge = 0\n'
+
 /**
  * Known hazard, deliberately left in place: the `process.chdir()` below is
  * global state in Bun's shared test process, so an overrunning test can chdir
@@ -574,7 +577,7 @@ export async function createTempWorkspace(prefix: string): Promise<TempWorkspace
   // *published* `@guren/*` (measured: `@guren/core@1.7.0`) instead of this
   // checkout. Written before the chdir because bunfig lookup is cwd-only and an
   // await after it is a suspension point a timed-out test abandons with cwd moved.
-  await writeFile(join(dir, 'bunfig.toml'), '[install]\nauto = "disable"\n')
+  await writeFile(join(dir, 'bunfig.toml'), TEMP_WORKSPACE_BUNFIG)
 
   const originalCwd = process.cwd()
   process.chdir(dir)

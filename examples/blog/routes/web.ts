@@ -3,6 +3,7 @@ import PostController from '../app/Http/Controllers/PostController.js'
 import { Post } from '../app/Models/Post.js'
 import { PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
 import { registerAuthenticatedAreaRoutes } from './authenticated.js'
+import { registerBroadcastingRoutes } from './broadcasting.js'
 
 export function registerWebRoutes(baseRouter: Router): void {
   const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
@@ -17,6 +18,7 @@ export function registerWebRoutes(baseRouter: Router): void {
   router.get('/health', (c) => c.json({ status: 'ok' })).name('health')
 
   registerAuthenticatedAreaRoutes(router)
+  registerBroadcastingRoutes(router)
 
   router.group('/posts', (posts) => {
     posts.get('/', [PostController, 'index']).name('posts.index')

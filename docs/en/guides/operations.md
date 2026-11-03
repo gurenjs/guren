@@ -49,3 +49,34 @@ After deploy:
 - verify health checks
 - verify migrations completed
 - verify key user journeys
+
+## Dependency Updates
+
+A scaffolded app ships a `bunfig.toml` that holds back package versions published less than three days ago:
+
+```toml
+[install]
+minimumReleaseAge = 259200
+minimumReleaseAgeExcludes = [
+  "@guren/cli",
+  "@guren/core",
+  # every @guren package published when the app was scaffolded
+]
+```
+
+Most compromised npm releases are found and pulled within hours or days, so an install that waits three days rarely picks one up. The gate applies whenever Bun resolves a version (`bun install` without a lockfile entry, `bun add`), for direct and transitive dependencies alike. A range that only versions younger than the gate satisfy fails the install with `blocked by minimum-release-age`; widen the range, or wait for the version to age. Versions already in `bun.lock` are not affected.
+
+The `@guren` packages are listed by name, because Bun does not read a scope pattern such as `@guren/*` there, and an upgrade asks for Guren releases newer than the gate allows. The list covers every `@guren` package published when the app was scaffolded, plugins included; add a package published later the same way.
+
+When a security fix is newer than three days, let that one version through instead of turning the gate off, then update:
+
+```toml
+minimumReleaseAgeExcludes = [
+  # ...
+  "some-package@1.2.4",
+]
+```
+
+`guren doctor` reports `supply-chain-cooldown` when `bunfig.toml` sets no `minimumReleaseAge`, or when the list leaves out a `@guren` package the app has. `guren upgrade` writes the block, or adds the missing names, unless the file has an `[install]` table or a list it did not write; doctor then prints the line to add.
+
+Run `guren audit` to see the advisories `bun audit` finds for the installed packages. To see which direct dependency brings a flagged package in, and whether production installs it, run `guren deps:why <package>`.

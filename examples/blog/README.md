@@ -62,6 +62,15 @@ bun ../../packages/cli/src/bin.ts runtime:errors --json --url http://127.0.0.1:3
 
 with its route (for a failing `GET /posts/1`, method `GET`, pattern `/posts/:id`, name `posts.show`) and project-relative stack locations, which lead back to the nodes the graph reports. A production build mounts neither endpoint.
 
+## Live Props
+
+The posts index and each post's page update without a refresh when someone else writes. Open http://localhost:3333/posts in a private window, sign in as `demo@guren.dev` in another, and create or edit a post: the private window shows the change. The pieces, as the [Live Props guide](../../docs/en/guides/live-props.md) describes them:
+
+- `PostController` marks the index's `data` and `pagination` live on `PostsChanged`, and the show page's `post` live on `PostUpdated` for that post.
+- `store`, `update` and `destroy` send those events with `broadcastEvent(…, { except: this.ctx })`, so the author's own tab does not reload a second time.
+- `routes/broadcasting.ts` mounts the socket at `/broadcasting/socket`, and `resources/js/app.tsx` passes `liveTransport()` to `startInertiaClient()`.
+- `e2e/live-props.spec.ts` checks both pages from a second browser context, and that the watching page was never reloaded.
+
 ## Shutting Down
 
 ```bash

@@ -122,10 +122,14 @@ minimumReleaseAgeExcludes = [
 The template ranges are written at `changeset version` to the version being
 released, so without exclusions `create-guren-app` fails to install for three
 days after every release, as the first row shows. `smoke:starter:npm` and
-`guren upgrade` stall the same way. The list is the closure of `@guren/*`
+`guren upgrade` stall the same way. ~~The list is the closure of `@guren/*`
 packages reachable from the template's dependencies in the release being cut
 (the default template's is above; `@guren/server` arrives through
-`@guren/core`, and the api-only template has no `@guren/inertia-client`). An
+`@guren/core`, and the api-only template has no `@guren/inertia-client`).~~
+**Amended in implementation:** the list is every `@guren/*` package the
+workspace publishes, the same in both templates. An app adds plugins after
+scaffolding, and a release can make a package it has depend on a `@guren/*`
+package its scaffold never listed; the closure covered neither. An
 exact name per package is required, since the scope pattern does nothing.
 `sync:template-deps` writes the list from the same manifest read that writes
 the ranges, and `audit:template-deps` fails CI when they disagree.
@@ -133,11 +137,24 @@ the ranges, and `audit:template-deps` fails CI when they disagree.
 Excluding them means a compromised `@guren/*` publish is not delayed; that risk
 sits with the release process (provenance, 2FA), not with each app.
 
-The exact `drizzle-orm` and `drizzle-kit` pins hit the same wall: a release that
+~~The exact `drizzle-orm` and `drizzle-kit` pins hit the same wall: a release that
 adopts a drizzle version younger than the gate scaffolds apps that cannot
 install. `sync:template-deps` refuses such a pin by reading the version's
 publish time from the registry (the pin today, `1.0.0-rc.4`, was published on
-2026-06-27).
+2026-06-27).~~
+**Amended in implementation:** the wall is not drizzle's alone. On 2026-11-03
+the default template asked for `@inertiajs/react@^3.11.0`, which only a
+release from the day before satisfied. `sync-template-deps.ts --gate-ages`, the
+first step of `version-packages` (before `changeset version`, so a refusal
+leaves nothing half done), therefore checks every third-party range a scaffold
+or a `guren add` resolves at the top of its tree: the templates' own, the
+driver `create-guren-app --db` adds, the `ai` and `@ai-sdk/*` ranges `guren add
+ai` pins, and the dependencies and required peers of each `@guren/*` package a
+scaffold installs. It refuses the release while one admits only versions
+younger than the gate, or when the registry cannot say. The check depends on the
+date, so it never runs on a PR. The smokes that
+install this checkout's builds lift the gate in the scaffolded app, and
+`smoke:starter:npm`, which installs from the registry, keeps it.
 
 The gate also delays the fix for an advisory. §5 handles that by naming the
 exact `name@version` exclusion, never by turning the gate off.
@@ -149,11 +166,19 @@ For existing apps:
   choice and passes.
 - `guren upgrade` offers to add the block, as it does for other configuration
   autofixes. `guren doctor --fix` stays limited to generated files.
-- An app's exclusion list is the closure of the first-party packages it
+- ~~An app's exclusion list is the closure of the first-party packages it
   installs, which grows past the template's set once it adds a plugin. `guren
   upgrade` (which moves every installed `@guren/*` dependency), `guren add` and
   `guren plugin` rewrite the list from the installed manifests, and
-  `supply-chain-cooldown` reports a first-party package missing from it.
+  `supply-chain-cooldown` reports a first-party package missing from it.~~
+  **Amended in implementation:** the scaffold lists every published `@guren`
+  package, so `guren add` and `guren plugin` leave the file alone.
+  `supply-chain-cooldown` reports any `@guren` package the app declares or has
+  under `node_modules/@guren` that the list leaves out, and `guren upgrade` adds
+  it, or writes the whole block when the app has no `bunfig.toml` or no
+  `[install]` table. An `[install]` table the scaffold did not write, or a list
+  written other than one entry per line, is left to the author with the line to
+  add (`packages/cli/src/release-age.ts`).
 
 The Renovate `minimumReleaseAge` and Dependabot `cooldown` settings govern bot
 PRs only. The bunfig gate also covers `bun add` from a person or an agent, so
@@ -165,6 +190,17 @@ it is the default; the docs recommend setting both.
 text lockfile (`lockfileVersion: 1`, JSON with trailing commas) and
 `dependencyTree(lock, appWorkspace)` returns one entry per installed package
 instance, since one package can be installed at several versions:
+
+**Amended in implementation:** Bun 1.4.4 writes `lockfileVersion: 2` for a new
+install, with the same tables, so versions 1 and 2 are read. A workspace app's
+own nested copies are keyed under its package name (`@scope/plugin/vitest`), and
+its direct dependencies resolve there first. An entry is one installed
+`name@version` (nested copies of one version merge) and carries `installedAs`,
+the names it sits under in `node_modules`, which differ from `name` for an npm
+alias. A peer, optional ones included, is followed once the lockfile resolves it:
+a production install of a probe app installed a resolved optional peer. A path
+through one may therefore name a dependency that is not why the package is
+there, which the fix path of §5 has to account for.
 
 ```ts
 interface DependencyTree {
