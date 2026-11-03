@@ -2,9 +2,18 @@ import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace, snapshotTree, type TempWorkspace } from './helpers'
+import type { BunImages } from '../src/docker-image'
 import { DOCKER_RUNTIME_DIRECTORIES, DOCKER_RUNTIME_FILES, scaffoldDeploy } from '../src/deploy'
 
 const createAppTemplates = join(import.meta.dir, '../../create-app/templates')
+
+// The images examples/deploy/docker/Dockerfile carries; the recipe test compares against them.
+const PINNED: BunImages = {
+  builder: 'oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d',
+  runtime: 'oven/bun:1.4.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4',
+  notes: [],
+}
+const pinned = async (): Promise<BunImages> => PINNED
 
 // A template entry absent from both this map and the runtime lists fails the
 // copy test: that is how `lang/` and `tsconfig.json` went missing from the image.
@@ -56,17 +65,17 @@ describe('scaffoldDeploy', () => {
   })
 
   it('creates Docker recipe by default', async () => {
-    const files = await scaffoldDeploy()
+    const files = await scaffoldDeploy({ resolveImages: pinned })
     expect(files).toHaveLength(1)
     expect(files.some((file) => file.endsWith('Dockerfile'))).toBe(true)
 
     const dockerfile = await readFile('Dockerfile', 'utf8')
-    expect(dockerfile).toContain('FROM oven/bun:1 AS builder')
+    expect(dockerfile).toContain(`FROM ${PINNED.builder} AS builder`)
     expect(dockerfile).toContain('EXPOSE 3333')
   })
 
   it('creates Fly recipe with inferred app name and shared Dockerfile', async () => {
-    const files = await scaffoldDeploy({ target: 'fly' })
+    const files = await scaffoldDeploy({ resolveImages: pinned, target: 'fly' })
     expect(files).toHaveLength(2)
     expect(files.some((file) => file.endsWith('Dockerfile'))).toBe(true)
     expect(files.some((file) => file.endsWith('fly.toml'))).toBe(true)
@@ -78,6 +87,7 @@ describe('scaffoldDeploy', () => {
 
   it('creates all provider recipe files with custom app and port', async () => {
     const files = await scaffoldDeploy({
+      resolveImages: pinned,
       target: 'all',
       appName: 'My App',
       port: 4000,
@@ -98,7 +108,7 @@ describe('scaffoldDeploy', () => {
   })
 
   it('creates a Cloudflare deploy workflow that runs one deploy per Worker at a time', async () => {
-    const files = await scaffoldDeploy({ target: 'cloudflare' })
+    const files = await scaffoldDeploy({ resolveImages: pinned, target: 'cloudflare' })
 
     expect(files).toHaveLength(1)
     const workflow = await readFile('.github/workflows/deploy-cloudflare.yml', 'utf8')
@@ -113,14 +123,14 @@ describe('scaffoldDeploy', () => {
   it('builds an app that ships the OAuth provider with --mcp-oauth in the workflow too', async () => {
     await writeFile('package.json', JSON.stringify({ name: 'oauth-app', dependencies: { '@cloudflare/workers-oauth-provider': '^0.10.3' } }), 'utf8')
 
-    await scaffoldDeploy({ target: 'cloudflare' })
+    await scaffoldDeploy({ resolveImages: pinned, target: 'cloudflare' })
 
     expect(await readFile('.github/workflows/deploy-cloudflare.yml', 'utf8')).toContain('run: bunx guren cloudflare:deploy --yes --mcp-oauth')
   })
 
   it('reports no overwrites on a fresh app', async () => {
     const overwritten: string[] = []
-    const files = await scaffoldDeploy({ target: 'all', overwritten })
+    const files = await scaffoldDeploy({ resolveImages: pinned, target: 'all', overwritten })
 
     expect(files).toHaveLength(3)
     expect(overwritten).toEqual([])
@@ -130,12 +140,12 @@ describe('scaffoldDeploy', () => {
     await writeFile('Dockerfile', 'FROM scratch\n', 'utf8')
 
     const overwritten: string[] = []
-    const files = await scaffoldDeploy({ target: 'all', force: true, overwritten })
+    const files = await scaffoldDeploy({ resolveImages: pinned, target: 'all', force: true, overwritten })
 
     expect(files).toHaveLength(3)
     expect(overwritten).toHaveLength(1)
     expect(overwritten[0]!.endsWith('Dockerfile')).toBe(true)
-    expect(await readFile('Dockerfile', 'utf8')).toContain('FROM oven/bun:1 AS builder')
+    expect(await readFile('Dockerfile', 'utf8')).toContain(`FROM ${PINNED.builder} AS builder`)
   })
 
   it('writes no recipe while one it would write is already there', async () => {
@@ -143,7 +153,7 @@ describe('scaffoldDeploy', () => {
     await writeFile('railway.json', '{}\n', 'utf8')
     const before = await snapshotTree(workspace.dir)
 
-    await expect(scaffoldDeploy({ target: 'all' })).rejects.toThrow([
+    await expect(scaffoldDeploy({ resolveImages: pinned, target: 'all' })).rejects.toThrow([
       'Scaffolding would overwrite 2 files that already exist:',
       '  Dockerfile',
       '  railway.json',
@@ -155,14 +165,14 @@ describe('scaffoldDeploy', () => {
   it('keeps the committed Docker recipe identical to what `guren deploy` writes', async () => {
     // A reader copies examples/deploy/docker, so a hand edit there is a fix the
     // generator never gets, or one the generator got and the recipe missed.
-    await scaffoldDeploy()
+    await scaffoldDeploy({ resolveImages: pinned })
     const recipe = await readFile(join(import.meta.dir, '../../../examples/deploy/docker/Dockerfile'), 'utf8')
 
     expect(recipe).toBe(await readFile('Dockerfile', 'utf8'))
   })
 
   it('copies every runtime entry the create-app templates ship into the production image', async () => {
-    await scaffoldDeploy()
+    await scaffoldDeploy({ resolveImages: pinned })
     const dockerfile = await readFile('Dockerfile', 'utf8')
     const copied = new Set(
       [...dockerfile.matchAll(/^COPY --from=builder \/app\/(\S+) \.\/\1$/gmu)].map((match) => match[1]),
@@ -186,7 +196,7 @@ describe('scaffoldDeploy', () => {
   })
 
   it('creates every runtime directory in the builder so a COPY never names a missing source', async () => {
-    await scaffoldDeploy()
+    await scaffoldDeploy({ resolveImages: pinned })
     const dockerfile = await readFile('Dockerfile', 'utf8')
     const builderStage = dockerfile.slice(0, dockerfile.indexOf('# Production stage'))
     const mkdir = builderStage.match(/^RUN mkdir -p (.+)$/mu)
@@ -196,7 +206,7 @@ describe('scaffoldDeploy', () => {
   })
 
   it('rejects invalid ports', async () => {
-    await expect(scaffoldDeploy({ port: 0 })).rejects.toThrow('Port must be a positive integer.')
-    await expect(scaffoldDeploy({ port: 3000.5 })).rejects.toThrow('Port must be a positive integer.')
+    await expect(scaffoldDeploy({ resolveImages: pinned, port: 0 })).rejects.toThrow('Port must be a positive integer.')
+    await expect(scaffoldDeploy({ resolveImages: pinned, port: 3000.5 })).rejects.toThrow('Port must be a positive integer.')
   })
 })

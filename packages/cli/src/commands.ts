@@ -1739,8 +1739,10 @@ const deployCommand = defineCommand({
     }
 
     const overwritten: string[] = []
+    const notes: string[] = []
     const files = await scaffoldDeploy({
       overwritten,
+      notes,
       target: rawTarget as DeployTarget,
       appName: args.app ? String(args.app) : undefined,
       port,
@@ -1748,6 +1750,7 @@ const deployCommand = defineCommand({
     })
 
     announceWrittenFiles(files, overwritten)
+    for (const note of notes) consola.warn(note)
   },
 })
 

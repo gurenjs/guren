@@ -61,6 +61,8 @@ bunx guren deploy --target docker
 
 The file is a two-stage build. The builder stage installs every dependency and runs `bun run build`. The production stage installs only runtime dependencies, copies only what the server reads at runtime, and runs `bun bin/serve.ts` with `NODE_ENV=production`. Open the file to see the exact list.
 
+Both stages use the Bun release running the command, pinned to the image digest Docker Hub reports for it, for example `oven/bun:1.4.4@sha256:…`. A rebuild therefore gets the same runtime even if the tag is pushed again. When Docker Hub cannot be reached, the command keeps the exact tag without a digest and says so; when it has no image for that release yet (a canary build, or a release published minutes ago), it writes the floating `oven/bun:1` tag instead. To move to a newer Bun, upgrade Bun and run the command again with `--force`.
+
 A Guren app has no `dist/` output and no `start` script, so a Dockerfile adapted from another Bun project will not start. Pass `--port` if the app listens on a port other than 3333. The command stops when a `Dockerfile` already exists; after upgrading Guren, run it again with `--force` to pick up changes to the recipe, then reapply any edits of your own.
 
 Build and test locally:
