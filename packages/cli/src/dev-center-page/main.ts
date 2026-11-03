@@ -309,11 +309,19 @@ async function readReadiness(slug: string, decision: PlanDecision, elementId?: s
   }
   return body
 }
+/** `plan:approve --dry-run --json`'s `acceptedWithoutBehaviour`, read defensively: the report is another process's output. */
+function acceptedWithoutBehaviour(readiness: PlanReadiness): string[] {
+  const report = readiness.report as { acceptedWithoutBehaviour?: unknown } | undefined
+  const entries = Array.isArray(report?.acceptedWithoutBehaviour) ? report.acceptedWithoutBehaviour : []
+  return entries.flatMap((entry: unknown) => (entry && typeof (entry as { id?: unknown }).id === 'string' ? [(entry as { id: string }).id] : []))
+}
 /** The CLI's answer and the command to paste; with no `command` (a waiver with no reason yet), the answer alone. */
 function readinessBlock(readiness: PlanReadiness, command: string | undefined): HTMLElement[] {
   const when = `checked ${readiness.checkedAt}`
   const copy = (label: string) => (command === undefined ? [] : [commandRow(command, label)])
-  if (readiness.status === 'ready') return [text('p', `Would go through (${when}).${command === undefined ? '' : ' Run it in your terminal:'}`, 'meta'), ...copy('copy')]
+  const accepted = readiness.decision === 'approve' && readiness.status === 'ready' ? acceptedWithoutBehaviour(readiness) : []
+  const accepts = accepted.length > 0 ? [text('p', `Approving accepts these as complete on their step's verified run, since no behaviour can reach them: ${accepted.join(', ')}.`, 'meta')] : []
+  if (readiness.status === 'ready') return [text('p', `Would go through (${when}).${command === undefined ? '' : ' Run it in your terminal:'}`, 'meta'), ...accepts, ...copy('copy')]
   if (readiness.status === 'refused') return [text('p', `Would be refused (${when}):`, 'meta warning'), text('pre', readiness.message ?? '', 'refusal'), ...copy('copy anyway')]
   return [text('p', `Could not check (${when}): ${readiness.message ?? 'no answer'}`, 'meta warning'), ...copy('copy anyway')]
 }

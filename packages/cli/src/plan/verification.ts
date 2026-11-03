@@ -10,9 +10,10 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import { toPosixRelative } from '../discovery'
+import { approvedAcceptance, readPlanApprovalStanding, type PlanApprovalStanding } from './approvals'
 import { planDecisionsPath, planWaiverHash, readPlanDecisions, type PlanDecisions, type PlanWaiver } from './decisions'
 import { canonicalJson } from './identity'
-import { behaviourCanReach, behaviourCarriers } from './reach'
+import { behaviourCanReach, behaviourCarriers, planElementsWithoutBehaviour } from './reach'
 import type { Plan, PlanDraft } from './schema'
 import { planDigest, planSlug, planStatePath, readPlanState, type PlanRedRun, type PlanStepRecord, type PlanStepWork } from './state'
 import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus, type PlanVerificationHold } from './status'
@@ -72,11 +73,11 @@ export function cannotFingerprint(element: Pick<PlanElementStatus<PlanElementSta
 }
 
 /**
- * An element its step verified is `verified` while every fingerprinted file still hashes the
- * same, `drifted` once one does not or cannot be read. Lifted: one at its completion state or
- * `unjudged`, in files the record covers, since a result nothing could expire is not one. A
- * `drop` has no file, its absence re-read per status. An element for which `restsOnReach()` holds
- * is lifted only while a behaviour of a standing step, in any task, reaches it.
+ * A verified step lifts its element to `verified` while every fingerprinted file hashes the same,
+ * `drifted` once one does not or cannot be read: one at its completion state or `unjudged`, in
+ * files the record covers. A `drop` has no file. One `restsOnReach()` holds for needs a behaviour
+ * of a standing step reaching it, or to be of `planElementsWithoutBehaviour()` and in `accepted`
+ * (the approval's, `undefined` where none stands), which lifts it to `accepted` instead.
  */
 export function applyVerification(
   status: PlanStatus,
@@ -85,6 +86,7 @@ export function applyVerification(
   digest: string,
   hashes: ReadonlyMap<string, string | null>,
   plan: PlanDraft | Plan,
+  accepted?: ReadonlySet<string>,
 ): { status: PlanStatus<PlanElementState>; staleSteps: string[] } {
   const lifted = new Map<string, PlanElementStatus<PlanElementState>>(status.elements.map((element) => [element.id, { ...element, notes: [...element.notes] }]))
   const staleSteps: string[] = []
@@ -97,9 +99,16 @@ export function applyVerification(
       .map(([stepId]) => stepId),
   )
   const reachable = behaviourCanReach(plan)
+  const withoutBehaviour = new Set(planElementsWithoutBehaviour(plan).map((entry) => entry.id))
   const unreached = (element: PlanElementStatus<PlanElementState>): string => {
     const reaching = carriers.get(element.id) ?? []
-    if (reaching.length === 0 && !reachable.has(element.id)) return 'no verified behaviour reaches it, so that result is not counted: no behaviour can reach it, so waive it'
+    if (reaching.length === 0 && !reachable.has(element.id)) {
+      // Only an approval recorded before plan:approve accepted these leaves one out; approving again records it.
+      if (accepted !== undefined && withoutBehaviour.has(element.id)) {
+        return 'no verified behaviour reaches it, so that result is not counted: no behaviour can reach it, and the approval of this hash did not accept it as complete without one, so approve the plan again (plan:approve records that), or waive it'
+      }
+      return 'no verified behaviour reaches it, so that result is not counted: no behaviour can reach it, so waive it'
+    }
     const steps = `no verified run of a step whose behaviours reach it (${reaching.join(', ')}) holds now`
     // Neither a carrier's run nor a behaviour added to the plan would lift it, so neither is suggested.
     if (cannotFingerprint(element)) {
@@ -130,13 +139,16 @@ export function applyVerification(
           element.hold = { kind, note }
         }
         // `reason` is why the readers left it `unjudged`; the lifted state and its hold carry their own account.
-        const settle = (state: 'verified' | 'drifted'): void => {
+        const settle = (state: 'verified' | 'accepted' | 'drifted'): void => {
           element.state = state
           delete element.reason
         }
+        const reachHeld = unmatched && !(carriers.get(id) ?? []).some((stepId) => standing.has(stepId))
+        const byAcceptance = reachHeld && withoutBehaviour.has(id) && accepted?.has(id) === true
+        // A hold added to this chain goes before the `byAcceptance` settle, or an accepted element skips it.
         if (!awaitsVerification(element)) {
           hold('incomplete', `${verifiedBy}, and no longer at the state that completes it.`)
-        } else if (unmatched && !(carriers.get(id) ?? []).some((stepId) => standing.has(stepId))) {
+        } else if (reachHeld && !byAcceptance) {
           hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and ${unreached(element)}.`)
         } else if (cannotFingerprint(element)) {
           hold('unfingerprinted', `${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
@@ -146,6 +158,9 @@ export function applyVerification(
         } else if (changed.length > 0) {
           settle('drifted')
           hold('expired', `${verifiedBy}; changed since: ${changed.join(', ')}.`)
+        } else if (byAcceptance) {
+          settle('accepted')
+          element.notes.push(`${verifiedBy}. No behaviour can reach it, and the approval accepted it as complete on that run.`)
         } else {
           settle('verified')
         }
@@ -160,9 +175,9 @@ export function applyVerification(
 /**
  * A waiver lifts an element to `waived` whatever the readers found, since a person accepted
  * it incomplete (RFC 0030 §6). Two elements keep their state, with a note saying the waiver
- * is not needed: one its step verified, a stronger answer than acceptance, and an `existing`
- * one, which the plan changes nothing about and which `plan:waive` refuses. The second is
- * reached only through a hand-edited log.
+ * is not needed: one its step verified (`verified` or `accepted`), a stronger answer than a
+ * waiver, and an `existing` one, which the plan changes nothing about and which `plan:waive`
+ * refuses. The second is reached only through a hand-edited log.
  */
 export function applyWaivers(status: PlanStatus<PlanElementState>, waivers: ReadonlyMap<string, PlanWaiver>): PlanStatus<PlanElementState> {
   if (waivers.size === 0) return status
@@ -170,7 +185,7 @@ export function applyWaivers(status: PlanStatus<PlanElementState>, waivers: Read
     const waiver = waivers.get(element.id)
     if (!waiver) return element
     const taken = `Waived ${waiver.at}${waiver.by ? ` by ${waiver.by}` : ''}: ${waiver.reason}`
-    if (element.state === 'verified') return { ...element, notes: [...element.notes, `${taken}. It is verified, so the waiver is not needed.`] }
+    if (element.state === 'verified' || element.state === 'accepted') return { ...element, notes: [...element.notes, `${taken}. It is ${element.state}, so the waiver is not needed.`] }
     if (element.change === 'existing') return { ...element, notes: [...element.notes, `${taken}. It is an existing element, no part of completion, so the waiver is not needed.`] }
     const { hold: _hold, reason: _reason, ...rest } = element
     return { ...rest, state: 'waived', notes: [...element.notes, taken] }
@@ -207,8 +222,8 @@ export async function readPlanWaivers(planPath: string, plan: PlanDraft | Plan):
 
 /**
  * Reads the plan's records under `root` and the decision log beside the plan, and lays both
- * over `status`. What every command reports through; a file that will not read lifts nothing
- * and says so.
+ * over `status`, with what the approval of the plan's current hash accepted. What every command
+ * reports through; a file that will not read lifts nothing and says so.
  */
 export async function overlayVerification(
   root: string,
@@ -221,13 +236,16 @@ export async function overlayVerification(
     replacedUnreadable?: string
     /** The log this run already read, so a command judges and reports through one reading of it. */
     waivers?: PlanWaiversRead
+    /** The approval this run already read, for the same reason; `undefined` is a draft nobody approved. */
+    approval?: PlanApprovalStanding
   } = {},
 ): Promise<{ status: PlanStatus<PlanElementState>; verification: PlanVerificationSummary }> {
   const slug = planSlug(planPath)
   const read = await readPlanState(root, slug)
   const records = read.state?.steps ?? {}
   const files = Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files))
-  const applied = applyVerification(status, derivation, records, planDigest(plan), await hashFiles(root, files), plan)
+  const approval = 'approval' in options ? options.approval : await readPlanApprovalStanding(planPath, plan)
+  const applied = applyVerification(status, derivation, records, planDigest(plan), await hashFiles(root, files), plan, approvedAcceptance(approval))
   const unreadable =
     read.unreadable ?? (options.replacedUnreadable ? `${options.replacedUnreadable}; this run replaced it, and its other records are gone` : undefined)
   const log = options.waivers ?? (await readPlanWaivers(planPath, plan))
@@ -276,14 +294,15 @@ export function recordDrift(record: PlanStepRecord, digest: string, hashes: Read
 }
 
 /**
- * A behaviour as its test is written from: every field but its description, with the route and the
- * expected page read through to what a test spells (method and path, page and module). A red run
- * seen for one shape says nothing of another. `undefined` for an id the plan does not declare.
+ * A behaviour as its test is written from: every field but its description and `alreadyHolds`, with
+ * the route and the expected page read through to what a test spells (method and path, page and
+ * module). A red run seen for one shape says nothing of another; marking a behaviour changes no test,
+ * so a red run outlives the mark. `undefined` for an id the plan does not declare.
  */
 export function behaviourShape(plan: PlanDraft | Plan, id: string): string | undefined {
   const behaviour = plan.tasks.flatMap((task) => task.acceptance).find((candidate) => candidate.id === id)
   if (!behaviour) return undefined
-  const { description: _description, route: routeId, expect, ...rest } = behaviour
+  const { description: _description, alreadyHolds: _alreadyHolds, route: routeId, expect, ...rest } = behaviour
   const route = plan.routes.find((candidate) => candidate.id === routeId)
   const view = expect.inertia === undefined ? undefined : plan.views.find((candidate) => candidate.id === expect.inertia)
   const page = view ? { page: view.page, ...(view.module === undefined ? {} : { module: view.module }) } : expect.inertia
@@ -300,7 +319,8 @@ export function behaviourShape(plan: PlanDraft | Plan, id: string): string | und
  * The behaviours of `ids` whose red run one of `records` carries to `plan`: seen failing in a
  * verified `tests:fail` run at the shape the plan states now, whatever plan hash or step that run
  * named (a revision may move a behaviour to another task). Once the implementation exists the run
- * cannot be repeated, so a revision leaving a behaviour's test as it was keeps the observation.
+ * cannot be repeated, so a revision leaving a behaviour's test as it was keeps the observation. A
+ * behaviour marked `alreadyHolds` keeps one too: a revision that drops the mark asks for it again.
  */
 export function carriedRedRuns(records: Iterable<PlanStepRecord>, plan: PlanDraft | Plan, ids: readonly string[]): Map<string, PlanRedRun> {
   const recorded = recordedRedRuns(records)

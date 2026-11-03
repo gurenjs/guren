@@ -44,12 +44,21 @@ import {
 } from './schema'
 import { derivePlanTasks, planLaterRelationships, type PlanLaterRelationship, type PlanTaskDerivation } from './tasks'
 
-/** Every state of RFC 0030 §6. `plan:status` sets the ones in {@link PlanStatusState}. */
-export type PlanElementState = 'planned' | 'present' | 'wired' | 'verified' | 'drifted' | 'unjudged' | 'blocked' | 'waived'
+/**
+ * Every state of RFC 0030 §6. `plan:status` sets the ones in {@link PlanStatusState}; the overlay
+ * sets `verified`, `drifted` and `accepted` (its step verified it and no behaviour can reach it,
+ * which the approval accepted), and the decision log `waived`.
+ */
+export type PlanElementState = 'planned' | 'present' | 'wired' | 'verified' | 'accepted' | 'drifted' | 'unjudged' | 'blocked' | 'waived'
 
-export type PlanStatusState = Exclude<PlanElementState, 'verified' | 'waived'>
+export type PlanStatusState = Exclude<PlanElementState, 'verified' | 'accepted' | 'waived'>
 
-export const PLAN_ELEMENT_STATES = ['planned', 'present', 'wired', 'verified', 'drifted', 'unjudged', 'blocked', 'waived'] as const satisfies readonly PlanElementState[]
+export const PLAN_ELEMENT_STATES = ['planned', 'present', 'wired', 'verified', 'accepted', 'drifted', 'unjudged', 'blocked', 'waived'] as const satisfies readonly PlanElementState[]
+
+/** Whether the element leaves nothing for `plan:close` to refuse (RFC 0030 §7); an `existing` one is no part of completion. */
+export function closesPlan(element: Pick<PlanElementStatus<PlanElementState>, 'change' | 'state'>): boolean {
+  return element.change === 'existing' || element.state === 'verified' || element.state === 'accepted' || element.state === 'waived'
+}
 
 export type { PlanPropertyStatus, PlanPropertyVerdict } from './property-status'
 
@@ -222,17 +231,20 @@ function readingOf(element: { id: string; label: string }, property: PlanPropert
   }
 }
 
-/** `reachable`: whether a behaviour could reach the element (`behaviourCanReach()`), or only a waiver lifts it. */
+/** `reachable`: whether a behaviour could reach the element (`behaviourCanReach()`), or only its step's run under an approval's acceptance, or a waiver, lifts it. */
 function unreadableAlterReason(properties: PlanPropertyStatus[], reachable: boolean): string {
   const setAside = properties.flatMap((property) => SET_ASIDE.get(property) ?? [])
-  const lift = reachable ? 'verify the change through a behaviour that reaches it' : 'waive it, since no behaviour can reach it'
+  const lift = reachable
+    ? 'verify the change through a behaviour that reaches it'
+    : "let its step's verified run complete it, which approving the plan accepts since no behaviour can reach it, or waive it"
   if (setAside.includes('unrecorded')) {
     return `The approval recorded no reading of the planned properties that match, so none can be told from one that already held, and a reading taken now would find them held: ${lift}.`
   }
   if (setAside.length > 0) {
     return `Every planned property that matches already held when the plan was approved, so none shows the change: state the change in a property the application did not hold, or ${lift}.`
   }
-  return 'No planned property of this change has a reader.'
+  // An altered side effect plans no property, so the acceptance path is all there is to name.
+  return reachable ? 'No planned property of this change has a reader.' : `No planned property of this change has a reader: ${lift}.`
 }
 
 function conclude(judgement: Judgement, credit: AlterCredit, reachable: ReadonlySet<string>): PlanElementStatus {

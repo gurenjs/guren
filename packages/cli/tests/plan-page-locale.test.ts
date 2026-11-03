@@ -48,6 +48,20 @@ describe('the plan page in en', () => {
   })
 })
 
+describe('a behaviour marked alreadyHolds', () => {
+  test('should say on its card, in each locale, that its test is not asked to fail first', () => {
+    const plan = richPlan()
+    plan.tasks[0]!.acceptance[0]!.alreadyHolds = true
+
+    for (const [uiLocale, badge, note] of [['en', 'holds already', 'its test is not asked to fail first'], ['ja', 'すでに成り立つ', '先に失敗することを求めず']] as const) {
+      const card = open({ plan, uiLocale }).byId('el-AC-comments-1')
+      expect(card.textContent).toContain(badge)
+      expect(card.textContent).toContain(note)
+    }
+    expect(open().byId('el-AC-comments-1').textContent).not.toContain('holds already')
+  })
+})
+
 describe('the plan page in ja', () => {
   test('should put the actor and the route where Japanese puts them, with the route still a link', () => {
     const page = open({ uiLocale: 'ja' })

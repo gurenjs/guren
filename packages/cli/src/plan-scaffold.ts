@@ -202,7 +202,7 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
   const found = findPlanStep(derivation, options.step)
   if (found?.step.kind === 'tests') {
     await requireMark(root, path, planPath, found.step.id, SCAFFOLD)
-    return planScaffoldTests({ root, path, plan, hash }, found)
+    return planScaffoldTests({ root, path, plan, hash }, derivation, found)
   }
   if (await isApiOnly(root)) refuse([API_ONLY])
   if (!found || found.step.kind !== 'scaffold') {
@@ -307,6 +307,7 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
  */
 async function planScaffoldTests(
   approved: { root: string; path: string; plan: Plan; hash: string },
+  derivation: PlanTaskDerivation,
   found: NonNullable<ReturnType<typeof findPlanStep>>,
 ): Promise<PlanScaffoldTestsReport> {
   const { root, path, plan, hash } = approved
@@ -321,7 +322,7 @@ async function planScaffoldTests(
     else if (!(exportedNames(ast, 'anywhere') ?? []).includes('default')) refusals.push(`The tests boot the application ${entry} exports by default, and ${entry} has no default export.`)
   }
 
-  const output = emitPlanTests(plan, task, step, { slug: planSlug(path), planFile: basename(path) }, {
+  const output = emitPlanTests(plan, derivation, task, step, { slug: planSlug(path), planFile: basename(path) }, {
     entry: entry ?? 'src/app.ts',
     modelFiles: await rootModelFiles(root, new ParseCache()),
   })
@@ -402,8 +403,8 @@ function formatPlanTestsScaffold(report: PlanScaffoldTestsReport, planArgument: 
     'Replace every given() call; keep each title’s id and the request, which is how plan:verify finds the behaviour and its route.',
   )
   if (report.mayPassNow.length > 0) {
-    lines.push('', `On a route that exists already, with nothing to set up, so the test may pass now and plan:verify refuse the step: ${report.mayPassNow.join(', ')}.`)
-    lines.push('  Make each fail before its implementation: set up what the behaviour changes, or assert what the route does not do yet.')
+    lines.push('', `On a route that answers already (it exists, or an earlier task mounts it), with nothing to set up, so the test may pass now and plan:verify refuse the step: ${report.mayPassNow.join(', ')}.`)
+    lines.push('  Make each fail before its implementation: set up what the behaviour changes, or assert what the route does not do yet. One on a route an earlier task adds belongs to that task; one that guards what an existing route does today takes "alreadyHolds": true in the plan, through plan:revise and a new approval.')
   }
   if (report.unwritten.length > 0) {
     lines.push('', 'Expectations written as an unwritten() call, to write as assertions:')

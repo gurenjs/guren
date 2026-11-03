@@ -13,6 +13,9 @@ const manifest = {
   'posts.pair': { method: 'GET', path: '/posts/:id/:idx' },
   'posts.index': { method: 'GET', path: '/posts' },
   'status.show': { method: 'GET', path: '/status/foo:bar' },
+  'posts.search': { method: 'QUERY', path: '/posts/search' },
+  'posts.store': { method: 'POST', path: '/posts' },
+  'posts.purge': { method: 'PURGE', path: '/posts' },
 } as const
 
 const Link = createTypedLink(manifest)
@@ -50,6 +53,32 @@ describe('createTypedLink param substitution', () => {
   })
 })
 
+describe('createTypedLink method', () => {
+  function methodOf(element: ReactElement): unknown {
+    return (element.props as { method?: unknown }).method
+  }
+
+  it('visits a QUERY route with the query method', () => {
+    expect(methodOf(Link({ route: 'posts.search' }))).toBe('query')
+  })
+
+  it('visits a POST route with the post method', () => {
+    expect(methodOf(Link({ route: 'posts.store' }))).toBe('post')
+  })
+
+  it('leaves the method off a GET route', () => {
+    expect(methodOf(Link({ route: 'posts.index' }))).toBeUndefined()
+  })
+
+  it('keeps a method the caller passes', () => {
+    expect(methodOf(Link({ route: 'posts.search', method: 'get' }))).toBe('get')
+  })
+
+  it('leaves the method off a route under a verb Inertia has no method for', () => {
+    expect(methodOf(Link({ route: 'posts.purge' }))).toBeUndefined()
+  })
+})
+
 describe('createTypedLink types', () => {
   it('rejects an unknown route name and missing params at compile time', () => {
     // Never called: the directives are what the root typecheck verifies.
@@ -67,33 +96,55 @@ describe('createTypedLink types', () => {
   })
 })
 
-describe('createTypedForm param substitution', () => {
-  const originalGet = (router as unknown as Record<string, unknown>).get
+describe('createTypedForm submission', () => {
+  const originalVisit = router.visit
   const OriginalFormData = globalThis.FormData
 
   afterEach(() => {
-    ;(router as unknown as Record<string, unknown>).get = originalGet
+    router.visit = originalVisit
     globalThis.FormData = OriginalFormData
   })
 
-  it('submits to the substituted action', () => {
-    const element = Form({ route: 'items.show', params: { id: 7 }, method: 'get' })
-
+  function submit(element: ReactElement): unknown[][] {
     const calls: unknown[][] = []
-    ;(router as unknown as Record<string, unknown>).get = (...args: unknown[]) => {
+    router.visit = ((...args: unknown[]) => {
       calls.push(args)
-    }
+    }) as typeof router.visit
     // Bun has no DOM, so `new FormData(form)` needs a stand-in.
     globalThis.FormData = class {
       entries(): IterableIterator<[string, string]> {
-        return [][Symbol.iterator]() as IterableIterator<[string, string]>
+        return [['q', 'guren']][Symbol.iterator]() as IterableIterator<[string, string]>
       }
     } as unknown as typeof FormData
 
     const onSubmit = (element.props as { onSubmit: (event: FormEvent<HTMLFormElement>) => void }).onSubmit
     onSubmit({ preventDefault() {}, currentTarget: {} } as unknown as FormEvent<HTMLFormElement>)
+    return calls
+  }
+
+  it('submits to the substituted action', () => {
+    const calls = submit(Form({ route: 'items.show', params: { id: 7 }, method: 'get' }))
 
     expect(calls).toHaveLength(1)
     expect(calls[0]![0]).toBe('/items/7')
+    expect(calls[0]![1]).toEqual({ method: 'get', data: { q: 'guren' }, preserveState: false })
+  })
+
+  it('submits a QUERY route with the query method', () => {
+    const calls = submit(Form({ route: 'posts.search' }))
+
+    expect(calls[0]).toEqual(['/posts/search', { method: 'query', data: { q: 'guren' }, preserveState: true }])
+  })
+
+  it('preserves page state on a POST submission, as router.post() does', () => {
+    const calls = submit(Form({ route: 'posts.store' }))
+
+    expect(calls[0]).toEqual(['/posts', { method: 'post', data: { q: 'guren' }, preserveState: true }])
+  })
+
+  it('throws on a route under a verb Inertia cannot submit', () => {
+    expect(() => Form({ route: 'posts.purge' })).toThrow(
+      'Route [posts.purge] is registered for PURGE, which an Inertia form cannot submit.',
+    )
   })
 })

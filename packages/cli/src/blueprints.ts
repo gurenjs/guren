@@ -1,5 +1,6 @@
 import { consola } from 'consola'
 import { addAttachments, appBindsStorage } from './add-attachments'
+import { ADMIN_DASHBOARD_CONTROLLER_PATH, BLUEPRINT_SAMPLES } from './blueprint-samples'
 import { addCache } from './add-cache'
 import { addLint } from './add-lint'
 import { addOAuth } from './add-oauth'
@@ -124,7 +125,7 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
       const routeGuard = withAuth ? `, requireAuthenticated({ redirectTo: '/login' })` : ''
       const created = await writeScaffoldFiles([
         {
-          path: 'app/Http/Controllers/Admin/AdminDashboardController.ts',
+          path: ADMIN_DASHBOARD_CONTROLLER_PATH,
           contents: `import { Controller } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
 
@@ -186,8 +187,8 @@ export default registerAdminRoutes
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
       const created = await writeScaffoldFiles([
-        eventFile('OrderPlaced', writerOptions),
-        listenerFile('SendOrderReceipt', { ...writerOptions, event: 'OrderPlaced' }),
+        eventFile(BLUEPRINT_SAMPLES.event, writerOptions),
+        listenerFile(BLUEPRINT_SAMPLES.listener, { ...writerOptions, event: BLUEPRINT_SAMPLES.event }),
         scaffoldTemplateFile('events', 'app/Providers/EventProvider.ts'),
       ], writerOptions)
 
@@ -204,7 +205,7 @@ export default registerAdminRoutes
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
       const existingMail = await appMailBindings()
-      const mailable = mailFile('WelcomeEmail', writerOptions)
+      const mailable = mailFile(BLUEPRINT_SAMPLES.mail, writerOptions)
       if (existingMail.length > 0) {
         const created = await writeScaffoldFiles([mailable], writerOptions)
         await reportKeptMail(existingMail, 'only the sample mailable was written')
@@ -230,7 +231,7 @@ export default registerAdminRoutes
 QUEUE_CONNECTION=sync
 `,
         }],
-      }, writerOptions, [jobFile('ProcessWelcomeSequence', writerOptions)])
+      }, writerOptions, [jobFile(BLUEPRINT_SAMPLES.job, writerOptions)])
     },
   },
   notifications: {
@@ -238,7 +239,7 @@ QUEUE_CONNECTION=sync
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
       const created = await writeScaffoldFiles([
-        notificationFile('WelcomeUser', writerOptions),
+        notificationFile(BLUEPRINT_SAMPLES.notification, writerOptions),
         scaffoldTemplateFile('notifications', 'app/Providers/NotificationProvider.ts'),
       ], writerOptions)
 

@@ -89,6 +89,9 @@ describe('create-guren-app CLI', () => {
       expect(env).not.toContain('\nVITE_DEV_SERVER_URL=')
       expect(envExample).toContain('# VITE_DEV_SERVER_URL=http://localhost:5173')
       expect(env).toContain('# VITE_DEV_SERVER_URL=http://localhost:5173')
+      // Commented out: defineEnv() refuses GUREN_* keys, and an assigned key must be declared there.
+      expect(envExample).toContain('\n# GUREN_VITE_PORT=5173\n')
+      expect(envExample).not.toContain('\nGUREN_VITE_PORT=')
 
       const readme = await readFile(join(appRoot, 'README.md'), 'utf8')
       expect(readme).toContain('# My App')

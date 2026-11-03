@@ -21,6 +21,7 @@ import { advisoryCheckResults } from '../manifest-section'
 import { bunExecutable, type CapturedExec, type CapturedRun } from '../subprocess'
 import {
   acceptanceStatus,
+  alreadyHoldingIds,
   planAcceptanceIds,
   SKELETON_BOOT_FAILED,
   type AcceptanceBehaviourStatus,
@@ -186,16 +187,21 @@ function notPassing(ids: readonly string[], behaviours: readonly AcceptanceBehav
   return findings
 }
 
+/** Every case of the behaviour ran and failed; a skipped case is not a run. */
+function seenFailing(behaviour: AcceptanceBehaviourStatus | undefined): boolean {
+  return behaviour !== undefined && behaviour.cases.length > 0 && behaviour.cases.every((entry) => entry.outcome === 'failed')
+}
+
 /**
- * `tests:fail`: every behaviour must have a case, and each case must have failed; a skipped case is
- * not a run. A `carried` behaviour was seen failing before its implementation, so only its case is asked for.
+ * `tests:fail`: every behaviour must have a case, and each case must have failed. An `exempt` one,
+ * seen failing before its implementation or marked `alreadyHolds`, is asked for its case only.
  */
-function notFailing(ids: readonly string[], behaviours: readonly AcceptanceBehaviourStatus[], carried: ReadonlyMap<string, PlanRedRun>): string[] {
+function notFailing(ids: readonly string[], behaviours: readonly AcceptanceBehaviourStatus[], exempt: ReadonlySet<string>): string[] {
   const findings: string[] = []
   for (const id of ids) {
     const behaviour = behaviours.find((candidate) => candidate.id === id)
     if (!behaviour || behaviour.cases.length === 0) findings.push(`[${id}] has no test`)
-    else if (!carried.has(id) && !behaviour.cases.every((entry) => entry.outcome === 'failed')) {
+    else if (!exempt.has(id) && !seenFailing(behaviour)) {
       findings.push(`[${id}] must fail before its implementation exists${describeCases(behaviour.cases)}`)
     }
   }
@@ -204,6 +210,7 @@ function notFailing(ids: readonly string[], behaviours: readonly AcceptanceBehav
 
 /** Why a judgement without a run fails: `recheckTests()` and a `tests:fail` step whose every behaviour is carried share it. */
 const NOT_CARRIED = 'the test files no longer carry the behaviours the step saw fail'
+const NOT_CARRIED_ONCE = 'a behaviour is carried by no test file, or by several'
 
 /** Each id carried by no selected test file, or by more than one: what a judgement without a run reads instead. */
 function carrierFindings(ids: readonly string[], carriers: ReadonlyMap<string, readonly string[]>): { missing: string[]; findings: string[] } {
@@ -257,6 +264,7 @@ export class PlanVerifier {
   private readonly outcomes = new Map<string, Promise<TestOutcome>>()
   private readonly requestChecks = new Map<string, Promise<ReturnType<typeof behaviourRequestFailure>>>()
   private readonly declaredIds: string[]
+  private readonly holding: Set<string>
   private readonly check: () => Promise<CheckReport>
   private readonly testFiles: () => Promise<string[]>
   private readonly drizzleKit: () => Promise<AppDrizzleKit>
@@ -270,6 +278,7 @@ export class PlanVerifier {
     private readonly options: PlanVerifierOptions,
   ) {
     this.declaredIds = planAcceptanceIds(plan)
+    this.holding = alreadyHoldingIds(plan)
     this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true, introspect: true }))
     this.testFiles = options.testFiles ?? (() => discoverTestFiles(options.root))
     this.drizzleKit = options.drizzleKit ?? (() => resolveAppDrizzleKit(options.root))
@@ -396,9 +405,11 @@ export class PlanVerifier {
     const acceptance = step.acceptanceIds.map((id): PlanStepRecord['acceptance'][number] => {
       const red = carried.get(id)
       if (red) return { id, status: 'failing', red }
-      const status = behaviours.find((behaviour) => behaviour.id === id)?.status ?? 'pending'
-      const shape = seenRed ? behaviourShape(this.plan, id) : undefined
-      return { id, status, ...(shape === undefined ? {} : { red: { shape, ranAt } }) }
+      const behaviour = behaviours.find((candidate) => candidate.id === id)
+      // A marked behaviour was not asked to fail, so a verified run saw its red run only if it saw it fail.
+      const observed = seenRed && (!this.holding.has(id) || seenFailing(behaviour))
+      const shape = observed ? behaviourShape(this.plan, id) : undefined
+      return { id, status: behaviour?.status ?? 'pending', ...(shape === undefined ? {} : { red: { shape, ranAt } }) }
     })
     // A status judged behind a failed command would blame the code for what that command left unwritten.
     return { outcome, commands, acceptance, incomplete: outcome === 'failed' || outcome === 'blocked' ? [] : incomplete, waived, fingerprint }
@@ -588,8 +599,9 @@ export class PlanVerifier {
   /**
    * `tests` passes when every behaviour passes and the run exits 0, since a file that
    * fails to load and a throwing `beforeAll` show only there; `tests:fail` when every
-   * behaviour has a case and each case failed. An id the plan does not declare fails the
-   * command: the test, not the environment, is wrong.
+   * behaviour has a case and each case failed, of one seen failing before or marked
+   * `alreadyHolds` its case alone. An id the plan does not declare fails the command:
+   * the test, not the environment, is wrong.
    */
   private async tests(command: 'tests' | 'tests:fail', step: PlanDerivedStep): Promise<CommandOutcome> {
     const ids = step.acceptanceIds
@@ -604,14 +616,21 @@ export class PlanVerifier {
     const requests = await this.requestCheck(step)
     if (requests) return { label: `not run: the requests ${files.join(', ')} makes were read`, status: 'fail', reason: requests.reason, findings: capFindings(requests.findings) }
     const carried = command === 'tests:fail' ? this.carried(step) : new Map<string, PlanRedRun>()
-    const carriedNote = carried.size > 0 ? `${[...carried.keys()].map((id) => `[${id}]`).join(', ')} seen failing before, at the test the plan still states, so not asked to fail again` : undefined
+    const holding = command === 'tests:fail' ? ids.filter((id) => this.holding.has(id) && !carried.has(id)) : []
+    const exempt = new Set([...carried.keys(), ...holding])
+    const bracketed = (list: readonly string[]): string => list.map((id) => `[${id}]`).join(', ')
+    const notes = [
+      ...(carried.size > 0 ? [`${bracketed([...carried.keys()])} seen failing before, at the test the plan still states, so not asked to fail again`] : []),
+      ...(holding.length > 0 ? [`${bracketed(holding)} ${holding.length === 1 ? 'holds' : 'hold'} already, so not asked to fail`] : []),
+    ]
+    const exemptNote = notes.length > 0 ? notes.join('; ') : undefined
     // Nothing left to see fail: a run would only show the implementation passing, which the later step judges.
-    if (carried.size === ids.length) {
+    if (exempt.size === ids.length) {
       const { findings } = carrierFindings(ids, carriers)
       return {
-        label: 'not run: every behaviour was seen failing before its implementation existed',
+        label: holding.length === 0 ? 'not run: every behaviour was seen failing before its implementation existed' : 'not run: no behaviour is left to see fail before its implementation exists',
         status: findings.length > 0 ? 'fail' : 'pass',
-        reason: findings.length > 0 ? NOT_CARRIED : carriedNote,
+        reason: findings.length > 0 ? (holding.length === 0 ? NOT_CARRIED : NOT_CARRIED_ONCE) : exemptNote,
         findings,
       }
     }
@@ -629,13 +648,13 @@ export class PlanVerifier {
     if (command === 'tests:fail' && `${result.stdout}\n${result.stderr}`.split('\n').some((line) => line.startsWith(`error: ${SKELETON_BOOT_FAILED}`))) {
       return { label, status: 'blocked', reason: 'the application did not boot, so a case failed without reaching its route', findings: tail }
     }
-    const findings = command === 'tests' ? notPassing(ids, report.behaviours) : notFailing(ids, report.behaviours, carried)
+    const findings = command === 'tests' ? notPassing(ids, report.behaviours) : notFailing(ids, report.behaviours, exempt)
     if (findings.length > 0) {
       return { label, status: 'fail', reason: command === 'tests' ? 'a behaviour is not passing' : 'a behaviour is not failing', findings: capFindings(findings) }
     }
     if (command === 'tests' && result.exitCode !== 0) {
       return { label, status: 'fail', reason: `\`${label}\` exited ${result.exitCode} with every behaviour passing: a test file failed to load, or a test outside the plan failed`, findings: tail }
     }
-    return { label, status: 'pass', ...(carriedNote === undefined ? {} : { reason: carriedNote }), findings: [] }
+    return { label, status: 'pass', ...(exemptNote === undefined ? {} : { reason: exemptNote }), findings: [] }
   }
 }

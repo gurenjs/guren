@@ -308,8 +308,8 @@ html {
 
 body {
   font-family: var(--font-family-display);
-  background-color: var(--color-crimson-950);
-  color: var(--color-crimson-50);
+  background-color: var(--home-ground);
+  color: var(--home-text);
 }
 
 body.docs-theme {
@@ -1018,6 +1018,141 @@ body.docs-theme {
   }
 }
 
+/* ─── File trees: ```tree fences, drawn by app/Services/doc-tree.ts ─── */
+.docs-content pre.doc-tree {
+  white-space: normal;
+  word-break: normal;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--docs-border-soft);
+  border-radius: var(--g-r-card);
+  background: var(--docs-surface-raised);
+  color: var(--docs-text-primary);
+  font-family: var(--font-family-display);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.docs-content .doc-tree ul {
+  display: block;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.docs-content .doc-tree ul ul {
+  margin-left: 1.05rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--docs-border-soft);
+}
+
+.docs-content .doc-tree li {
+  padding: 0;
+  line-height: inherit;
+}
+
+.doc-tree-row {
+  display: flex;
+  align-items: center;
+  column-gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--g-r-ctl);
+}
+
+summary.doc-tree-row {
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.doc-tree-row::-webkit-details-marker {
+  display: none;
+}
+
+summary.doc-tree-row:hover {
+  background: color-mix(in srgb, var(--docs-text-primary) 6%, transparent);
+}
+
+summary.doc-tree-row:focus-visible {
+  outline: 2px solid var(--docs-accent-strong);
+  outline-offset: -2px;
+}
+
+/* a leaf has no chevron, so it starts where a folder's icon does */
+.doc-tree-row--leaf {
+  padding-left: 2rem;
+}
+
+.doc-tree-chevron,
+.doc-tree-icon,
+.doc-tree-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.doc-tree-chevron {
+  width: 1rem;
+  color: var(--docs-text-muted);
+  transition: transform 150ms ease;
+}
+
+details[open] > summary .doc-tree-chevron {
+  transform: rotate(90deg);
+}
+
+.doc-tree svg {
+  width: 100%;
+  height: 100%;
+}
+
+.doc-tree-icon {
+  color: var(--docs-text-secondary);
+}
+
+.doc-tree-badge {
+  font-family: var(--g-font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--docs-text-secondary);
+}
+
+.doc-tree-badge--ts { color: #2f6db5; }
+.doc-tree-badge--js { color: #a16207; }
+:root.dark .doc-tree-badge--ts { color: #7aaef0; }
+:root.dark .doc-tree-badge--js { color: #f6c177; }
+
+.doc-tree-name {
+  flex-shrink: 0;
+  color: var(--docs-heading);
+}
+
+/* a long note wraps inside its own right-aligned column */
+.doc-tree-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: 1.5rem;
+  color: var(--docs-text-secondary);
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+/* narrow screens: the note drops under the name instead of squeezing it */
+@media (max-width: 640px) {
+  .doc-tree-row {
+    flex-wrap: wrap;
+  }
+
+  .doc-tree-note {
+    flex-basis: 100%;
+    margin-left: 1.6rem;
+    padding-left: 0;
+    text-align: left;
+  }
+}
+
 .docs-content a {
   color: var(--docs-accent-strong);
   font-weight: 500;
@@ -1058,6 +1193,24 @@ body.docs-theme {
 .docs-content .shiki,
 .docs-content .shiki span {
   color: var(--shiki-dark) !important;
+}
+
+/* rose-pine-moon's comment colour (#6e6a86) measures 3.57:1 on the ink; its
+   own subtle (#908caa) measures 5.72:1. Matched on the inline style, so it
+   also reaches blog HTML stored at save time and the home page's samples. */
+.shiki span[style*="#6e6a86" i],
+.docs-content .shiki span[style*="#6e6a86" i] {
+  color: #908caa !important;
+}
+
+/* The docs index title's accent: crimson on the light page, a lighter red in
+   the dark theme, where crimson-900 sinks into the ground. */
+.docs-index-accent {
+  background-image: linear-gradient(to bottom right, #db1b1b, #7f1d1d);
+}
+
+:root.dark .docs-index-accent {
+  background-image: linear-gradient(to bottom right, #ff7a6b, #eb6f92);
 }
 
 /* Lines a `highlight=` fence attribute names (MarkdownRenderer.ts). The band
@@ -1330,6 +1483,10 @@ pre:hover .docs-copy-btn,
   text-align: left;
   padding: 0.75rem 1rem;
   color: var(--docs-text-secondary);
+  /* .docs-content breaks words anywhere; a header word stays whole and the
+     table scrolls instead */
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .docs-content table td {
@@ -1380,14 +1537,25 @@ pre:hover .docs-copy-btn,
 }
 
 /* ─── Doc card hover ─── */
-.docs-card {
-  transition: all 0.2s ease;
+/* ─── Docs index: the three ways in, and the directory of pages ─── */
+.docs-entry,
+.docs-index-link {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: background-color 150ms ease, outline-color 150ms ease;
 }
 
-.docs-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--docs-shadow-floating);
-  border-color: var(--docs-accent-strong) !important;
+.docs-entry:hover {
+  background-color: var(--docs-surface-raised);
+}
+
+.docs-index-link:hover {
+  background-color: var(--docs-accent-tint);
+}
+
+.docs-entry:focus-visible,
+.docs-index-link:focus-visible {
+  outline-color: var(--docs-accent-strong);
 }
 
 /* Color-mode toggle icons on server-rendered content pages (app/View/Header):

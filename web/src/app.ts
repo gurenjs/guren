@@ -1,5 +1,6 @@
 import {
   createApp,
+  inertia,
   AuthServiceProvider as CoreAuthServiceProvider,
 } from '@guren/core'
 import { redirectToCanonicalHost } from '../app/Http/Middleware/canonical-host.js'
@@ -13,6 +14,7 @@ import {
 } from '../config/document-theme.js'
 import env from '../config/env.js'
 import oauth from '../config/oauth.js'
+import { pageTitle } from '../config/site.js'
 import session from '../config/session.js'
 import { LIGHT_SURFACE_BODY_CLASS, usesLightSurface } from '../config/theme.js'
 import { blogModule } from '../modules/blog/index.js'
@@ -55,5 +57,21 @@ app.use('*', redirectToCanonicalPath)
 
 // After the canonical redirect, so www.-redirect responses are not counted.
 app.use('*', recordSiteAnalytics)
+
+// A browser visit to a URL no route answers gets the site's 404 page; any
+// other caller (an asset, a feed reader, a JSON client) keeps the plain one.
+app.hono.notFound((ctx) => {
+  const request = ctx.req.raw
+  const wantsPage =
+    (request.method === 'GET' || request.method === 'HEAD') &&
+    (request.headers.has('X-Inertia') || (request.headers.get('Accept') ?? '').includes('text/html'))
+  if (!wantsPage) return ctx.text('404 Not Found', 404)
+  return inertia('NotFound', { path: new URL(request.url).pathname }, {
+    request,
+    container: app.container,
+    status: 404,
+    title: pageTitle('Page not found'),
+  })
+})
 
 export default app

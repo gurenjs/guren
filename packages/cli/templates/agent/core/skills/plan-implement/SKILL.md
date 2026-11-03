@@ -33,7 +33,9 @@ step's own: finish or discard them first.
 approval names: one edited after it was approved, or one nobody approved. The
 Stop hook stalls the marked step on it. Approving is the person's call, like
 closing: report the refusal and wait. Do not run `plan:approve` yourself, and do
-not edit the plan to get past it.
+not edit the plan to get past it. In a session nobody approves from (a
+non-interactive run) the same holds: report the unapproved plan and stop, and
+do not build what it describes by hand.
 
 For an approved plan it also holds a step whose context changed after
 approval: an element the step owns or names that another commit moved, so the
@@ -85,7 +87,11 @@ it, and do not edit the application back or the plan to make it pass.
   configured database; open it with `await ready()`, so a failed boot, not a
   database error, is what each test reports.
   The step verifies with `tests:fail`, so a test that already passes, or is skipped (`test.skip`,
-  `test.todo`), fails the step. Each test must still request its behaviour's
+  `test.todo`), fails the step. A behaviour `plan:next` lists as holding already
+  (`"alreadyHolds": true` in the plan) guards what the app does today: write its
+  test to pass, since `tests:fail` does not ask it to fail. One that `plan:scaffold`
+  reports as possibly passing now, with no such mark, is to be made to fail first,
+  or marked by the person through a plan revision. Each test must still request its behaviour's
   route through a `TestApp`, with a path it spells, in its own body or a
   function of the same file it calls: `plan:verify` reads the requests before
   it runs the tests, and fails one that requests another route, nothing, or
@@ -247,7 +253,11 @@ bunx guren plan:close docs/plans/<slug>/plan.json --dry-run
 ```
 
 and run it without `--dry-run` only when asked. It refuses while any element is
-neither verified nor waived, and names them. It writes the plan's document under
+neither verified, accepted nor waived, and names them. An element no behaviour
+can reach (a command, a side effect, an altered column) reads `accepted` once
+its step verifies, since approving the plan accepted it that way, so it needs
+no waiver; when `plan:close` sends one to `plan:approve`, the approval predates
+that acceptance, and approving again is the person's call. It writes the plan's document under
 `docs/plans/` and draft blocks between `<!-- guren:plan … -->` markers in
 `docs/entities/<Entity>.md`; edit the text outside the markers freely, since a
 second close replaces only what is inside them.

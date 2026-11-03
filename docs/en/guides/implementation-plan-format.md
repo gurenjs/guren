@@ -95,7 +95,7 @@ A task intent names an entity, the elements it covers, and the behaviours that p
 }
 ```
 
-`kind` is one of `success`, `validation`, `unauthenticated`, `forbidden`, `not-found` and `state`. The checks count them: a route with a validator and no `validation` behaviour, or with authentication and no `unauthenticated` one, is reported. `expect` takes `status`, `redirect`, `inertia`, `errors` and `database`; request `input` and database values are written as `{ "name": "body", "json": "\"Nice post\"" }`, the value as JSON text.
+`kind` is one of `success`, `validation`, `unauthenticated`, `forbidden`, `not-found` and `state`. The checks count them on the routes the plan adds or alters: a route with a validator and no `validation` behaviour, or with authentication and no `unauthenticated` one, is reported. `expect` takes `status`, `redirect`, `inertia`, `errors` and `database`; request `input` and database values are written as `{ "name": "body", "json": "\"Nice post\"" }`, the value as JSON text.
 
 Each behaviour becomes a test whose title carries its id in brackets. Start acceptance ids with `AC-`: `plan:verify` reports a bracketed `AC-` token that the plan does not declare, which is how a mistyped id gets caught.
 
@@ -107,6 +107,25 @@ test("[AC-comments-4] a user cannot delete someone else's comment", async () => 
 ```
 
 Guren redirects a non-GET request with 303, so a behaviour that expects the redirect after a form post says `"status": 303`.
+
+A behaviour that holds before the plan's work carries `"alreadyHolds": true`. The usual one is an `unauthenticated` behaviour on a route the plan alters and that is behind authentication today: a guest is sent to sign in already, and the plan must keep it that way.
+
+```json
+{
+  "id": "AC-comments-6",
+  "description": "A guest is sent to sign in before editing a post.",
+  "kind": "unauthenticated",
+  "actor": "guest",
+  "route": "route.posts.edit",
+  "given": [],
+  "alreadyHolds": true,
+  "expect": { "redirect": "/login" }
+}
+```
+
+The `tests` step asks every behaviour's test to fail before the implementation exists, which a test of what already holds cannot do. A marked behaviour is asked for its test only, and the step that runs the tests still needs it to pass. Leave the mark off when the plan adds the guard itself: that test fails until the work is done. An `existing` route needs no `unauthenticated` behaviour at all.
+
+`plan:render` warns on its page, which the Dev Center review shows, about a behaviour whose test may pass before its implementation exists: one with nothing to set up, on a route that exists already or that an earlier task mounts. On a route that exists, mark it if it guards what already holds, or give it a setup or an expectation that only the planned work meets. On a route an earlier task adds, move it to that task, whose tests step sees it fail. A mark is a warning too where the behaviour cannot hold yet: nothing answers its route, an earlier task of the plan adds the route, or the plan puts authentication on a route the application serves without it today.
 
 ## Questions
 
@@ -136,3 +155,11 @@ A plan with an open question cannot be approved. Answer it by editing the plan: 
 ```
 
 A command passes when it reads `guren <subcommand>` or `bunx guren <subcommand>` and the subcommand is a `make:*` generator other than `make:migration`, `lang:publish`, or `add <blueprint>` other than `add plugin`. Arguments may hold letters, digits and `_-.,:/=@+%`, with single or double quotes around a value that has spaces (`--fields "title:string,body:text?"`). A shell operator, `$`, a backslash or an unclosed quote fails the check, and so does an argument that is an absolute path or climbs out with `..` (`--path /etc`, `--app=../other`). The check bounds shell syntax and where a generator may write; it does not judge each generator's other flags, such as `--force`. Every other command fails too: `bun run db:migrate` runs as the `data` step's verify command, not from the plan. `plan:approve` refuses while this check fails, and `plan:next` hands out no step of a plan that carries such a command, draft or not.
+
+The commands run first, before any step builds what the plan declares, so `commands` are for what the plan does not declare. A second check fails a generator for an element the plan adds or renames where running it first breaks a later step:
+
+- In an app that is not API-only, `plan:scaffold` writes each model the plan adds in the project root, with its table, validators, resources, policies, controllers, routes and side effects, and refuses a target that already exists. `guren make:model Comment` beside an added `Comment` model is refused there.
+- A blueprint that declares an added model's table in `db/schema.ts` makes a second declaration beside the data step's, and some blueprints generate a migration for it too: `guren add session` beside an added model on the `sessions` table does both.
+- Output that imports what no step has written yet fails the commands step's typecheck: `guren make:factory CommentFactory` imports a `Comment` model the plan adds.
+
+A stub that no scaffold writes and nothing imports passes, such as a job the plan adds in a task with no added model: its step edits the stub. The finding names the element and the step that writes it, and `plan:approve` refuses on it too.

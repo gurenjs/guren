@@ -4,7 +4,8 @@
  * that already carries a baseline (a revision carries its parent's) is never restamped,
  * since the baseline is inside the hash every approval and waiver names.
  * It refuses while a §2 check fails or a question is open: silence approves nothing. On a
- * baselined plan, a finding the plan's own finished work explains is settled first.
+ * baselined plan, a finding the plan's own finished work explains is settled first. Approving
+ * accepts the elements no behaviour can reach as complete on their step's run, and says which.
  */
 
 import { realpath } from 'node:fs/promises'
@@ -18,7 +19,7 @@ import { approvalReadings, heldAlters, planApprovalsPath, readPlanApprovals, rec
 import { gitAuthor, planBesideExclusions, writeFileAtomic } from './plan/beside'
 import { stampContextHash, type PlanContextStamp } from './plan/freshness'
 import { planHash } from './plan/identity'
-import { behaviourCanReach } from './plan/reach'
+import { behaviourCanReach, groupElementsWithoutBehaviour, planElementsWithoutBehaviour, type PlanElementWithoutBehaviour } from './plan/reach'
 import { hasBaseline } from './plan/render'
 import { PlanSchema, type Plan, type PlanDraft } from './plan/schema'
 import { savedFeedbackFile } from './plan/saved-feedback'
@@ -51,6 +52,13 @@ export interface PlanApproveReport {
    * judged on the approval entry's readings, so none of those can complete them. Absent when none.
    */
   heldAlters?: Array<HeldAlter & { message: string }>
+  /**
+   * The elements no behaviour can reach (RFC 0030 §4), which the approval entry accepts as complete
+   * on their step's verified run alone, `plan:status` then reporting them `accepted`. Absent when none.
+   */
+  acceptedWithoutBehaviour?: PlanElementWithoutBehaviour[]
+  /** The ids of those this run added to an entry approved before plan:approve recorded them; absent when it added none. */
+  acceptanceRecorded?: string[]
 }
 
 export interface PlanApproveFileOptions {
@@ -126,15 +134,20 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
   const by = await gitAuthor(appRoot, exec)
   const current = readAlterProperties(approved, app)
   const readings = approvalReadings(approvals, approved, current)
+  // Computed from the approved plan alone, never carried from another hash's entry.
+  const withoutBehaviour = planElementsWithoutBehaviour(approved)
   const approval: PlanApproval = {
     hash,
     approvedAt: (options.now ?? (() => new Date()))().toISOString(),
     ...(by ? { approvedBy: by } : {}),
     ...(readings.properties.length > 0 ? { readings } : {}),
+    ...(withoutBehaviour.length > 0 ? { acceptedWithoutBehaviour: withoutBehaviour.map((entry) => entry.id) } : {}),
   }
   const recorded = await recordPlanApproval(path, approvals, approval, { dryRun: options.dryRun })
   const readingsRecorded = [...new Set(recorded.readingsAdded.map((reading) => reading.element))]
   const entry = recorded.existing ?? approval
+  const acceptedIds = new Set(entry.acceptedWithoutBehaviour ?? [])
+  const accepted = withoutBehaviour.filter((element) => acceptedIds.has(element.id))
   const reachable = behaviourCanReach(approved)
   const warnings = heldAlters(approved, current, entry.readings?.properties ?? []).map((alter) => ({ ...alter, message: heldAlterMessage(alter, reachable.has(alter.element)) }))
   return {
@@ -148,6 +161,8 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     ...(settled.built.length > 0 ? { builtByPlan: settled.built } : {}),
     ...(readingsRecorded.length > 0 ? { readingsRecorded } : {}),
     ...(warnings.length > 0 ? { heldAlters: warnings } : {}),
+    ...(accepted.length > 0 ? { acceptedWithoutBehaviour: accepted } : {}),
+    ...(recorded.existing && recorded.acceptedAdded.length > 0 ? { acceptanceRecorded: recorded.acceptedAdded } : {}),
   }
 }
 
@@ -162,7 +177,9 @@ function heldAlterMessage(alter: HeldAlter, reachable: boolean): string {
   } else {
     shows += ' (it is not read now, so this rests on the readings recorded at approval)'
   }
-  const otherwise = reachable ? 'it completes only through a verified behaviour that reaches it, or by a waiver' : 'only a waiver completes it, since no behaviour can reach it'
+  const otherwise = reachable
+    ? 'it completes only through a verified behaviour that reaches it, or by a waiver'
+    : "this approval accepts its step's verified run as completing it, since no behaviour can reach it, though no reading will show the change"
   return `${alter.element} (${alter.label}): every readable planned property already held at approval (${alter.held.join(', ')}); ${shows}. State the change in a property the application does not hold yet and approve the plan again, or expect that ${otherwise}.`
 }
 
@@ -227,13 +244,24 @@ export function formatPlanApprove(report: PlanApproveReport): string {
     lines.push(`Approved ${report.plan.hash}, recorded in ${report.approvalsFile}.`)
   } else if (report.readingsRecorded) {
     lines.push(`Already approved at ${report.approval.approvedAt}; recorded the readings it lacked in ${report.approvalsFile}: ${report.readingsRecorded.join(', ')}.`)
+    if (report.acceptanceRecorded) lines.push('It lacked the acceptance below too, which is recorded there now.')
+  } else if (report.acceptanceRecorded) {
+    lines.push(`Already approved at ${report.approval.approvedAt}; recorded the acceptance below, which it lacked, in ${report.approvalsFile}.`)
   } else {
     lines.push(`Already approved at ${report.approval.approvedAt}; ${report.approvalsFile} was left alone.`)
   }
+  if (report.acceptedWithoutBehaviour) lines.push('', ...acceptanceLines(report.acceptedWithoutBehaviour, 'Accepted'))
   if (report.heldAlters) {
     lines.push('', 'Warning, advisory (the approval stands):', ...report.heldAlters.map((alter) => `  ${alter.message}`))
   }
   return lines.join('\n')
+}
+
+function acceptanceLines(elements: readonly PlanElementWithoutBehaviour[], verb: string): string[] {
+  return [
+    `${verb} as complete on their step's verified run, since no behaviour can reach them (plan:status reports each one accepted once that run holds, and plan:close needs no waiver for it):`,
+    ...groupElementsWithoutBehaviour(elements).map((line) => `  ${line}`),
+  ]
 }
 
 function formatDryRun(report: PlanApproveReport, lines: string[]): string {
@@ -241,7 +269,9 @@ function formatDryRun(report: PlanApproveReport, lines: string[]): string {
   if (report.builtByPlan) lines.push(`Built as the plan leaves them: ${report.builtByPlan.join(', ')}`)
   if (!report.alreadyApproved) lines.push(`Would approve ${report.plan.hash}, recorded in ${report.approvalsFile}.`)
   else if (report.readingsRecorded) lines.push(`Already approved; would record the readings it lacks: ${report.readingsRecorded.join(', ')}.`)
-  else lines.push(`Already approved at ${report.approval.approvedAt}; a real run writes nothing.`)
+  else if (!report.acceptanceRecorded) lines.push(`Already approved at ${report.approval.approvedAt}; a real run writes nothing.`)
+  if (report.acceptanceRecorded) lines.push(`Already approved; would record the acceptance it lacks: ${report.acceptanceRecorded.join(', ')}.`)
+  if (report.acceptedWithoutBehaviour) lines.push('', ...acceptanceLines(report.acceptedWithoutBehaviour, 'Would accept'))
   if (report.heldAlters) lines.push('', 'Warning, advisory:', ...report.heldAlters.map((alter) => `  ${alter.message}`))
   lines.push('', 'Dry run: nothing was written.')
   return lines.join('\n')

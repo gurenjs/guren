@@ -1,6 +1,6 @@
 /**
- * `guren plan:close` (RFC 0030 §7): end an approved plan whose every element is verified or
- * waived, judged by `planStatusFile()`, the one reading `plan:status` prints. It writes the
+ * `guren plan:close` (RFC 0030 §7): end an approved plan whose every element is verified,
+ * accepted or waived, judged by `planStatusFile()`, the one reading `plan:status` prints. It writes the
  * plan's doc node and the entity documents' marker-fenced blocks, and deletes nothing: under
  * the file store the plan, its approvals and its decision log stay committed as the archive.
  * It offers `make:adr` for each waiver rather than writing one, since an ADR is a person's text.
@@ -17,7 +17,7 @@ import { refuseSharedPlanSlug } from './plan-check'
 import { planStatusFile } from './plan-status'
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
-import { requirePlanApproval, type PlanApproval } from './plan/approvals'
+import { approvedAcceptance, requirePlanApproval, type PlanApproval } from './plan/approvals'
 import { refuseWriteInDryRun, writeFileAtomic } from './plan/beside'
 import { shellQuote } from './shell-quote'
 import { entityDocPath, planDocPath, renderEntityDoc, renderPlanDoc, touchedModels, type PlanCloseContext } from './plan/close-docs'
@@ -25,6 +25,7 @@ import { describeCloseBlockers, formatCloseBlocker } from './plan/close-remedy'
 import type { PlanWaiver } from './plan/decisions'
 import { hasBaseline } from './plan/render'
 import { planSlug } from './plan/state'
+import { closesPlan } from './plan/status'
 import { derivePlanTasks } from './plan/tasks'
 import { readPlanWaivers } from './plan/verification'
 
@@ -49,6 +50,8 @@ export interface PlanCloseReport {
   writes: PlanCloseWrite[]
   /** The waivers the plan closed with: each is a deviation `make:adr` is offered for. */
   waivers: PlanWaiver[]
+  /** Elements no behaviour can reach that closed `accepted`, as the approval accepted them: no deviation, so no `make:adr`. */
+  accepted: string[]
   adrCommands: string[]
   /** What the run could not do for a document, which a person may want to fix by hand. */
   notes: string[]
@@ -95,17 +98,17 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
   const app = typeof options.app === 'function' ? await options.app() : options.app
   const status = await planStatusFile(path, { app, appRoot, read, waivers: waiverRead, approval: approved })
   const verification = status.verification
-  const open = status.elements.filter((element) => element.change !== 'existing' && element.state !== 'verified' && element.state !== 'waived')
+  const open = status.elements.filter((element) => !closesPlan(element))
   const blockers: string[] = []
   if (open.length > 0) {
     const derivation = derivePlanTasks(plan, { apiOnly: app.apiOnly })
-    blockers.push(...describeCloseBlockers(plan, derivation, open, planPath).map(formatCloseBlocker))
+    blockers.push(...describeCloseBlockers(plan, derivation, open, planPath, approvedAcceptance(approved)).map(formatCloseBlocker))
   }
   if (verification?.unreadable) blockers.push(`  verification records: ${verification.unreadable}`)
   if (verification?.decisionsUnreadable) blockers.push(`  decision log: ${verification.decisionsUnreadable}`)
   if (blockers.length > 0) {
     throw new CliError(
-      `${path} is not closed: every element must be verified or waived with a reason (guren plan:waive), and these are not, each with what holds it and what moves it:\n${blockers.join('\n')}`,
+      `${path} is not closed: every element must be verified, accepted at approval, or waived with a reason (guren plan:waive), and these are not, each with what holds it and what moves it:\n${blockers.join('\n')}`,
     )
   }
 
@@ -114,6 +117,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
     const waiver = element.state === 'waived' ? waiverRead.waivers.get(element.id) : undefined
     if (waiver) waived.set(element.id, waiver)
   }
+  const accepted = status.elements.filter((element) => element.state === 'accepted').map((element) => element.id)
   const planFile = toPosixRelative(appRoot, path)
   const context: PlanCloseContext = {
     plan,
@@ -122,6 +126,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
     approval,
     elements: status.elements,
     waived,
+    accepted,
     ...(planFile.startsWith('../') ? {} : { planFile }),
   }
 
@@ -165,6 +170,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
     dryRun: options.dryRun === true,
     writes,
     waivers: closedWith,
+    accepted,
     adrCommands: closedWith.map((waiver) => `guren make:adr ${shellQuote(`${plan.title}: ${waiver.elementId} waived`)}`),
     notes,
   }
@@ -191,6 +197,9 @@ export function formatPlanClose(report: PlanCloseReport): string {
     }
   }
   for (const note of report.notes) lines.push('', note)
+  if (report.accepted.length > 0) {
+    lines.push('', `Accepted at approval as complete on their step's verified run, since no behaviour can reach them: ${report.accepted.join(', ')}`)
+  }
   if (report.adrCommands.length > 0) {
     lines.push('', 'The plan closed with waivers. Record the ones worth keeping as decisions:')
     for (const command of report.adrCommands) lines.push(`  ${command}`)

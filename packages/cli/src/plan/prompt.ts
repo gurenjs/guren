@@ -101,7 +101,8 @@ const TASKS = `## Tasks and acceptance behaviours
 
 - A task names an \`entity\`, a \`summary\`, the element ids it \`covers\`, and its \`acceptance\` behaviours. A task says what a slice must achieve, never when: ordering advice goes in \`hints\`.
 - Each behaviour's \`id\` starts with \`AC-\` and names the task (\`AC-comments-1\`). The implementation's tests carry it in brackets in their titles.
-- \`kind\` is \`success\`, \`validation\`, \`unauthenticated\`, \`forbidden\`, \`not-found\` or \`state\`. Cover the unwanted cases: a route whose action names a validator needs a \`validation\` behaviour, a route behind authentication an \`unauthenticated\` one, and an action that enforces a policy a \`forbidden\` one.
+- \`kind\` is \`success\`, \`validation\`, \`unauthenticated\`, \`forbidden\`, \`not-found\` or \`state\`. Cover the unwanted cases: a route whose action names a validator needs a \`validation\` behaviour, a route the plan adds or alters behind authentication an \`unauthenticated\` one, and an action that enforces a policy a \`forbidden\` one. Put each in the task that covers its route. An \`existing\` route needs no \`unauthenticated\` behaviour.
+- Mark a behaviour that holds before the plan's work with \`"alreadyHolds": true\`, such as an \`unauthenticated\` one on an altered route that is behind authentication today. The tests step runs every behaviour's test before the implementation exists and needs it to fail, and a test of what already holds passes then; a marked one is only asked to pass once the work is done. Leave the mark off when the plan adds the guard: that test fails today.
 - \`route\` is a route id. \`input\`, and the \`has\` and \`missing\` of \`expect.database\`, are lists of \`{ "name": "body", "json": "\\"Nice post\\"" }\`, the value written as JSON text.
 - Guren redirects a non-GET request with 303, so a behaviour that expects the redirect after a form post says \`"status": 303\`.`
 
@@ -109,7 +110,9 @@ const COMMANDS = `## Commands
 
 \`commands\` holds only the Guren generators the change needs before it is implemented, each written as ${PLAN_COMMAND_FORM}. The subcommands allowed: ${planGeneratorNames()
   .map((name) => `\`${name}\``)
-  .join(', ')}. Nothing else passes: not \`make:migration\` or \`add plugin\`, not \`bun run db:migrate\` (the data step runs migrations), not \`codegen\`. Arguments hold letters, digits and \`_-.,:/=@+%\`, with single or double quotes around a value that has spaces. A shell operator, \`$\`, a backslash, an absolute path or a \`..\` segment fails the check.`
+  .join(', ')}. Nothing else passes: not \`make:migration\` or \`add plugin\`, not \`bun run db:migrate\` (the data step runs migrations), not \`codegen\`. Arguments hold letters, digits and \`_-.,:/=@+%\`, with single or double quotes around a value that has spaces. A shell operator, \`$\`, a backslash, an absolute path or a \`..\` segment fails the check.
+
+The commands run before every other step. Keep \`commands\` for what the plan does not declare: a generator for an element the plan adds or renames fails the check where running it first breaks a later step. In an app that is not API-only, \`plan:scaffold\` writes each model the plan adds in the project root, with its table, validators, resources, policies, controllers, routes and side effects, and refuses a target that already exists (\`make:model\`, \`make:feature\`). A blueprint that declares an added model's table in \`db/schema.ts\` declares it a second time beside the data step's, some with a migration as well (\`add session\` beside an added \`sessions\` table). Output that imports what no step has written yet fails the commands step's typecheck (\`make:factory\` or \`make:resource\` for an added model).`
 
 const CHECK = `## Check the plan
 

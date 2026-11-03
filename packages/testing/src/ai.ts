@@ -492,6 +492,7 @@ export class FakeAi implements AiManager, Disposable {
     return {
       agent: bound.agent,
       continue: (id) => this.recording(name, principal, bound.continue(id)),
+      history: (id) => bound.history(id),
       prompt: (input, options) => record(input, async (call) => {
         const response = await bound.prompt(input, options)
         call.response = response

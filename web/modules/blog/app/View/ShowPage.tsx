@@ -20,6 +20,7 @@ type BlogPostView = {
 
 export const ShowPage: FC<{ post: BlogPostView }> = ({ post }) => (
   <ContentShell
+    section="Blog"
     head={
       <Seo
         title={pageTitle(post.title)}
@@ -56,6 +57,7 @@ export const ShowPage: FC<{ post: BlogPostView }> = ({ post }) => (
 /** The 404 counterpart, its own component because `view()` binds per call. */
 export const PostNotFoundPage: FC = () => (
   <ContentShell
+    section="Blog"
     head={
       <>
         <title>{pageTitle('Post not found')}</title>

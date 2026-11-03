@@ -36,9 +36,13 @@ const RULES = [
   '`plan:approve` warns about an `alter` whose readable properties all hold already',
   "Each behaviour's `id` starts with `AC-`",
   'Cover the unwanted cases',
+  'An `existing` route needs no `unauthenticated` behaviour',
+  'Mark a behaviour that holds before the plan\'s work with `"alreadyHolds": true`',
+  'Leave the mark off when the plan adds the guard',
   'the value written as JSON text',
   '`"status": 303`',
   'an absolute path or a `..` segment fails the check',
+  'Keep `commands` for what the plan does not declare',
   'Do not run `plan:approve`',
 ]
 

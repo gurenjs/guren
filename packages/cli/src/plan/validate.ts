@@ -27,8 +27,11 @@ import {
 } from './app-state'
 import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
 import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
+import { planCommandTargets, type PlanCommandTargetHit } from './command-targets'
 import { elementsAtPlannedEnd, judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
+import { planMayPassNow, routeAnswersBefore } from './scaffold-tests'
+import { derivePlanTasks, type PlanTaskDerivation } from './tasks'
 import {
   findDuplicatePlanIds,
   hasBaseline,
@@ -122,6 +125,7 @@ export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResul
 
   checkDuplicateIds(plan, results)
   checkCommands(plan, results)
+  checkCommandTargets(plan, app, results)
   checkInternalReferences(plan, index, results)
   checkChangeConsistency(plan, results)
   checkAgainstApp(plan, app, results)
@@ -129,6 +133,7 @@ export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResul
   checkRouteAuthorization(plan, index, results)
   checkDataMigrations(plan, results)
   checkAcceptanceCoverage(plan, index, results)
+  checkRedRuns(plan, app, results)
   checkApiOnlyViews(plan, app, results)
 
   return results
@@ -175,6 +180,7 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 const TITLES: Record<string, string> = {
   'plan:duplicate-id': 'Plan element ids',
   'plan:command': 'Plan commands',
+  'plan:command-target': 'Plan commands',
   'plan:reference': 'Plan references',
   'plan:change-consistency': 'Plan change consistency',
   'plan:app-collision': 'Plan against the application',
@@ -188,6 +194,8 @@ const TITLES: Record<string, string> = {
   'plan:data-migration': 'Plan data migrations',
   'plan:rename-pair': 'Plan data migrations',
   'plan:acceptance': 'Plan acceptance coverage',
+  'plan:may-pass-now': 'Plan acceptance coverage',
+  'plan:already-holds': 'Plan acceptance coverage',
   'plan:flow-self-loop': 'Plan flows',
 }
 
@@ -223,6 +231,64 @@ function checkCommands(plan: PlanDraft, results: PlanCheckResult[]): void {
       }),
     )
   }
+}
+
+/**
+ * The commands run before every step that builds what the plan adds or renames. A command breaks the
+ * plan where `plan:scaffold` then refuses a target it left, where it declares a table the data step
+ * declares (some blueprints with a migration), or where its output imports what no step has written
+ * yet, which fails the commands step's own typecheck. Any other write is a stub its step edits.
+ */
+function checkCommandTargets(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
+  let derived: PlanTaskDerivation | undefined
+  const derivation = (): PlanTaskDerivation => (derived ??= derivePlanTasks(plan, { apiOnly: app.apiOnly }))
+  for (const { id, quoted, hits } of planCommandTargets(plan, app, derivation)) {
+    const commandsStep = derivation().tasks.flatMap((task) => task.steps).find((step) => step.kind === 'commands')?.id
+    results.push(
+      finding('plan:command-target', 'fail', `The command ${quoted} runs before the steps that build what the plan adds: ${targetClauses(hits, commandsStep).join('; ')}.`, {
+        elementId: id,
+        section: 'commands',
+        suggestion: '`commands` are for what the plan does not declare. Drop this command: the step that owns each element writes it, and a factory or seeder for an element belongs in a step after the element exists.',
+      }),
+    )
+  }
+}
+
+function targetClauses(hits: readonly PlanCommandTargetHit[], commandsStep: string | undefined): string[] {
+  const later = (step: PlanCommandTargetHit['step']): string => (step === undefined ? 'a later step' : `step ${step.id}`)
+  const typecheck = `so the commands step${commandsStep === undefined ? '' : ` (${commandsStep})`} fails its typecheck`
+  const named = (hit: PlanCommandTargetHit): string => `${hit.label} (${hit.elementId})`
+  return [
+    ...groupByStep(hits.filter((hit) => hit.problem.kind === 'scaffold')).map(({ step, hits: group }) =>
+      `it writes ${listHits(group)}, which plan:scaffold writes at ${later(step)}, refusing a target that already exists`),
+    ...hits.flatMap(({ problem, ...hit }) =>
+      problem.kind === 'table'
+        ? [`it declares ${hit.label} (${hit.elementId}) in db/schema.ts${problem.migration ? ' and generates a migration for it' : ''}, before ${later(hit.step)} declares that table`]
+        : []),
+    ...groupByStep(hits.filter((hit) => hit.problem.kind === 'imports')).map(({ step, hits: group }) =>
+      `it imports ${listHits(group)}, which ${later(step)} writes, ${typecheck}`),
+    ...hits.flatMap((hit) => {
+      const { problem } = hit
+      if (problem.kind === 'schema') return [`it writes ${named(hit)} importing \`${problem.identifier}\` from db/schema, which does not declare it yet, ${typecheck}`]
+      if (problem.kind === 'page') return [`it writes ${named(hit)} rendering the page ${problem.page}, which the application does not have, ${typecheck}`]
+      return []
+    }),
+  ]
+}
+
+function listHits(hits: readonly PlanCommandTargetHit[]): string {
+  const names = hits.map((hit) => `${hit.label} (${hit.elementId})`)
+  return names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+}
+
+function groupByStep(hits: readonly PlanCommandTargetHit[]): Array<{ step: PlanCommandTargetHit['step']; hits: PlanCommandTargetHit[] }> {
+  const groups = new Map<string | undefined, { step: PlanCommandTargetHit['step']; hits: PlanCommandTargetHit[] }>()
+  for (const hit of hits) {
+    const group = groups.get(hit.step?.id) ?? { step: hit.step, hits: [] }
+    group.hits.push(hit)
+    groups.set(hit.step?.id, group)
+  }
+  return [...groups.values()]
 }
 
 /**
@@ -788,6 +854,72 @@ function checkAcceptanceCoverage(plan: PlanDraft, index: PlanIndex, results: Pla
       )
     }
   }
+}
+
+/**
+ * The behaviours whose test may pass before the implementation exists, as `plan:scaffold` reports
+ * them after approval, and a mark `alreadyHolds` on a behaviour that does not hold before the plan's
+ * work, which only gives up the red run (RFC 0030 §5). An unread model section reads the plan's root models.
+ */
+function checkRedRuns(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
+  const derivation = derivePlanTasks(plan, { apiOnly: app.apiOnly })
+  const rootModels = isUnreadable(app.models)
+    ? plan.models.filter((model) => !model.module && (model.change.kind === 'existing' || model.change.kind === 'alter')).map((model) => model.name)
+    : app.models.filter((model) => model.module === null).map((model) => model.name)
+  const routes = new Map(plan.routes.map((route) => [route.id, route]))
+  const actions = new Map(plan.controllers.flatMap((controller) => controller.actions.map((action) => [action.id, action] as const)))
+
+  for (const { id, step, because } of planMayPassNow(plan, derivation, rootModels)) {
+    const name = routes.get(because.route)?.name ?? because.route
+    const answers = because.kind === 'exists' ? `"${name}" exists already (${because.change})` : `${because.task} mounts "${name}" before this behaviour's tests step`
+    results.push(
+      finding('plan:may-pass-now', 'warn', `Behaviour "${id}" may pass before its implementation exists: ${answers}, and its test has nothing to set up, so tests:fail would refuse ${step}.`, {
+        elementId: id,
+        section: 'acceptance',
+        suggestion:
+          because.kind === 'exists'
+            ? 'If it guards what the route does today, mark it "alreadyHolds": true (not where the plan adds that guard, whose test fails today); otherwise give it a setup or an expectation the route meets only once the work is done.'
+            : `Move it to ${because.task}, which adds the route: its tests step sees the test fail before that work exists.`,
+      }),
+    )
+  }
+
+  for (const task of derivation.tasks) {
+    const step = task.steps.find((candidate) => candidate.kind === 'tests')
+    if (!step?.verify.includes('tests:fail')) continue
+    for (const behaviour of plan.tasks.flatMap((intent) => intent.acceptance)) {
+      if (behaviour.alreadyHolds !== true || !step.acceptanceIds.includes(behaviour.id)) continue
+      const route = routes.get(behaviour.route)
+      if (!route) continue
+      const before = routeAnswersBefore(plan, derivation, task, route)
+      const unheld = (why: string, suggestion: string): void => {
+        results.push(finding('plan:already-holds', 'warn', `Behaviour "${behaviour.id}" is marked "alreadyHolds", but ${why}.`, { elementId: behaviour.id, section: 'acceptance', suggestion }))
+      }
+      const dropTheMark = 'Drop the mark, so tests:fail sees its test fail before the implementation exists.'
+      if (!before) unheld(`nothing answers its route "${route.name}" before its tests step, so it cannot hold yet`, dropTheMark)
+      else if (before.kind === 'wired') {
+        unheld(`its route "${route.name}" is added by ${before.task}, so it holds only through this plan's work`, `Move it to ${before.task} and drop the mark: that task's tests step sees it fail before the route exists.`)
+      } else if (behaviour.kind === 'unauthenticated' && addsAuthentication(route, actions.get(route.action), app)) {
+        unheld(`the plan puts authentication on "${route.name}", which the application's route does not apply now, so its test fails today`, dropTheMark)
+      }
+    }
+  }
+}
+
+/**
+ * Whether the plan puts authentication on a route that lacks it now: the route's or its action's
+ * middleware authenticates, and the registered route (`loadPlanAppState()` reads its middleware) does
+ * not. `false` without that evidence: no route read once by its current name, an inline middleware.
+ * An existing route counts too, since the scaffold writes an altered action's middleware onto it.
+ */
+function addsAuthentication(route: PlanRoute, action: PlanAction | undefined, app: PlanAppState): boolean {
+  if (isUnreadable(app.routes)) return false
+  if (!classifyMiddleware([...route.middleware, ...(action?.authorization.middleware ?? [])]).authenticates) return false
+  const name = route.change.kind === 'rename' ? route.change.from : route.name
+  const registered = app.routes.filter((candidate) => candidate.name === name)
+  const found = registered.length === 1 ? registered[0]! : undefined
+  if (!found?.middleware || found.hasInlineMiddleware || found.authenticationRequired) return false
+  return !classifyMiddleware(found.middleware).authenticates
 }
 
 function checkApiOnlyViews(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {

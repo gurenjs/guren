@@ -7,6 +7,7 @@ const vite = createViteDevServerMocks()
 await mock.module('../../src/http/vite-dev-server', vite.moduleFactory)
 
 const { Application } = await import('../../src/http/Application')
+type StartViteDevServerOptions = import('../../src/http/vite-dev-server').StartViteDevServerOptions
 
 const originalEnv = { ...process.env }
 const originalServe = Bun.serve
@@ -15,6 +16,8 @@ beforeEach(() => {
   process.env = { ...originalEnv }
   process.env.NODE_ENV = 'development'
   process.env.GUREN_DEV_BANNER = '0'
+  // Developers set it to keep parallel sessions apart; carried in, it would decide the ports asserted below.
+  delete process.env.GUREN_VITE_PORT
   vite.clear()
   // A still-listening record on `globalThis` sends the next `listen()` down the
   // hot-reload reuse path instead of the one under test, and Bun shares a process
@@ -79,6 +82,78 @@ describe('Application.listen', () => {
     // proves nothing; only this call's teardown clears these env vars.
     expect(process.env.VITE_DEV_SERVER_URL).toBeUndefined()
     expect(process.env.GUREN_MANAGED_VITE_DEV_SERVER).toBeUndefined()
+  })
+})
+
+describe('Application.listen Vite port', () => {
+  /** The options the managed start was handed, read back from the mock. */
+  function startOptions(): StartViteDevServerOptions | undefined {
+    return (vite.startViteDevServer.mock.calls[0] as unknown[] | undefined)?.[0] as StartViteDevServerOptions | undefined
+  }
+
+  it('starts Vite on GUREN_VITE_PORT', async () => {
+    stubBunServe()
+    process.env.GUREN_VITE_PORT = '5188'
+
+    await new Application().listen({ port: 3333, hostname: '127.0.0.1' })
+
+    expect(startOptions()?.port).toBe(5188)
+  })
+
+  it("leaves the port to the project's Vite config when GUREN_VITE_PORT is unset or blank", async () => {
+    // An inline 5173 would override a `server.port` the app's vite.config.ts sets.
+    stubBunServe()
+    await new Application().listen({ port: 3333, hostname: '127.0.0.1' })
+    expect(startOptions()).toBeDefined()
+    expect(startOptions()?.port).toBeUndefined()
+
+    vite.clear()
+    resetGurenGlobals()
+    process.env.GUREN_VITE_PORT = '  '
+    await new Application().listen({ port: 3333, hostname: '127.0.0.1' })
+    expect(startOptions()).toBeDefined()
+    expect(startOptions()?.port).toBeUndefined()
+  })
+
+  it('lets an explicit vite.port win over GUREN_VITE_PORT', async () => {
+    stubBunServe()
+    process.env.GUREN_VITE_PORT = '5188'
+
+    await new Application().listen({ port: 3333, hostname: '127.0.0.1', vite: { port: 6100 } })
+
+    expect(startOptions()?.port).toBe(6100)
+  })
+
+  it('fails before starting Vite or binding when GUREN_VITE_PORT is not a port', async () => {
+    const serveMock = stubBunServe()
+    process.env.GUREN_VITE_PORT = '51 73'
+
+    await expect(new Application().listen({ port: 3333, hostname: '127.0.0.1' })).rejects.toThrow(
+      'Failed to start Vite dev server: GUREN_VITE_PORT must be a port number from 0 to 65535, got "51 73".',
+    )
+
+    expect(vite.startViteDevServer).not.toHaveBeenCalled()
+    expect(serveMock).not.toHaveBeenCalled()
+  })
+
+  it('names the port Vite bound in the banner and the published URL, not the one asked for', async () => {
+    // The stub reports binding 5174, as Vite does after walking past a busy 5188.
+    stubBunServe()
+    process.env.GUREN_VITE_PORT = '5188'
+    delete process.env.GUREN_DEV_BANNER
+    const log = spyOn(console, 'log').mockImplementation(() => {})
+    let banner = ''
+    try {
+      await new Application().listen({ port: 3333, hostname: '127.0.0.1' })
+      banner = log.mock.calls.flat().join('\n')
+    } finally {
+      log.mockRestore()
+    }
+
+    expect(banner).toContain('http://localhost:5174 (Vite, started by Guren)')
+    expect(banner).not.toContain('5188')
+    expect(process.env.VITE_DEV_SERVER_URL).toBe('http://localhost:5174')
+    expect(process.env.GUREN_INERTIA_ENTRY).toBe('http://localhost:5174/resources/js/dev-entry.ts')
   })
 })
 

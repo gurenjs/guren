@@ -581,7 +581,8 @@ const { messages, sendMessage } = useChat({
 - **`stream()` itself:** `stream(input, options)` takes the same options as `prompt()` and returns
   `result.toUIMessageStreamResponse()` from `ToolLoopAgent.stream({ messages })`, not
   `createAgentUIStreamResponse()`. The latter takes UI messages, and the stored history is
-  `ModelMessage`, which the SDK does not convert back into UI messages.
+  `ModelMessage`~~, which the SDK does not convert back into UI messages~~. (Part 2e converts it for
+  display; `stream()` still replays the stored `ModelMessage` history, never UI messages.)
 - **`ChatTurnSchema`:** it is `{ conversation: string | null, message: string }`, one user turn as text.
   A controller passes `{ conversation: conversation ?? true }`, since `continue()` takes no `null`, and
   `signal: this.request.raw.signal` (the controller's `request` is Hono's wrapper).
@@ -599,13 +600,34 @@ const { messages, sendMessage } = useChat({
 - **Structured output:** an agent that declares `output` is refused by `stream()`, which would send
   its JSON as plain text. `prompt()` returns the parsed value.
 - **`createChatTransport()`:** the initial conversation comes from its `conversation` option, not
-  `useChat({ id })`, and `onConversation` reports a new one. The transport refuses
+  `useChat({ id })`, and `onConversation` reports a new one. ~~A reloaded page starts with no
+  messages.~~ (Part 2e: the page passes `useChat({ id, messages })` the history its props carry.) The transport refuses
   `regenerate-message`, since the server holds the history, and a user message with a file part, which
   a text turn would drop. It is a `DefaultChatTransport` with
   `prepareSendMessagesRequest` and a `fetch` that reads the header.
 - **`fakeAi()`:** `simulateStreamingMiddleware()` answers `doStream` from its script, and a streamed
   call's `toolCalls` fill in as the body is read.
 - **`broadcast()`:** it moves after `queue()` (Part 2c) into Part 2d, below.
+
+**Amended in implementation (Part 2e):** the reload of the bullet above ships. The SDK has no
+`ModelMessage` to `UIMessage` conversion, so the plugin writes the inverse of
+`convertToModelMessages()`:
+
+- **`toUIMessages(messages, { idPrefix })`** is public. One turn's assistant and tool messages become
+  one assistant `UIMessage` with a `step-start` before each model call, the shape `useChat` builds
+  from the live stream. A tool call becomes a `tool-<name>` part in its final state (`output-available`,
+  `output-error`, `output-denied`, or an approval state), a stored file a data URL, and a system message
+  and provider metadata are dropped. An application tool's error is stored as the exception's message for
+  the model, so it is restored as `stream()`'s masked text, which `stream()` now names as its `onError`.
+  A `dynamicTool()` call is restored as `tool-<name>`, and a `toModelOutput` result as what the model saw. Ids are `<idPrefix>-<n>`, so a reload renders under the same keys.
+- **`BoundAgent.history(id)`** reads a conversation through the same owner check as `continue()`,
+  plus the `agentName` check, and returns the converted messages, with the conversation id as the
+  prefix. An unknown id, another principal's conversation and another agent's all return `null`, so a
+  page renders an empty chat rather than failing; `as(null)` and an anonymous `agent()` still throw.
+- **The page** reads the conversation id from its query, passes `history(id) ?? []` and the id in its
+  props, and gives `useChat({ id, messages })` and `createChatTransport({ conversation })` both. The
+  messages are for display only: the next turn still sends `{ conversation, message }`, and the
+  server replays its own history.
 
 `broadcast(input, channel)` (Part 2) queues the prompt (§6) and emits each
 UI-message chunk over `BroadcastManager` to the channel, which is
@@ -1283,7 +1305,9 @@ Additive. No existing call changes behaviour.
 4. **Conversation row shape.** `ModelMessage` (provider-neutral, what the
    model saw) or `UIMessage` (what the client rendered, parts included)? The
    client can be rebuilt from `ModelMessage`; the reverse loses provider
-   metadata. Leaning `ModelMessage` with `UIMessage` conversion at `stream()`.
+   metadata. ~~Leaning `ModelMessage` with `UIMessage` conversion at `stream()`.~~
+   **Resolved in Part 2e:** `ModelMessage`, converted to `UIMessage` by
+   `toUIMessages()` when a page reads the history, not at `stream()`.
 5. **Embeddings and a vector column.** `embed()` in Part 3 returns numbers;
    where they go is the ORM's business, and `@guren/orm` has no vector type
    today. Out of scope here, noted because the first RAG user will ask.

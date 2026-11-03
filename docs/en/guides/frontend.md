@@ -350,6 +350,14 @@ Codegen rewrites the import path so `pages.gen.ts` can reference the same type.
 ## Hot Reloading
 Running `bun run dev` automatically launches the Vite dev server from the Bun process, so changes to TSX files trigger instant reloads without extra commands.
 
+Vite listens on port 5173 and moves to the next free port when that one is busy. The banner's **Asset server** line, the asset URLs in your pages and the HMR connection all use the port Vite actually bound. To start it on another port, for example when two apps run side by side, set `GUREN_VITE_PORT`:
+
+```bash
+GUREN_VITE_PORT=5180 bun run dev
+```
+
+`GUREN_VITE_PORT` only moves the Vite server Guren starts. To use a Vite dev server you run yourself, set `VITE_DEV_SERVER_URL` to its URL; Guren then starts none.
+
 Backend files reload too: `dev:server` runs `NODE_ENV=development bun --hot bin/serve.ts`, so edits to controllers, routes, and models take effect on the next request without a restart. Adding a route re-runs codegen and reloads once more, then settles. State held in the process does not survive a reload: the memory-backed session and cache stores are rebuilt empty, and module-level variables are reinitialized. External stores (Redis, your database) are unaffected, so you stay signed in as long as sessions live outside the process.
 
 If your project predates these defaults, set the script yourself. `NODE_ENV=development` is what keeps boot-time seeding on (see [Database](./database.md)):

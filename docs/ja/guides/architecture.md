@@ -10,13 +10,18 @@ Guren は、Laravel の設計思想を TypeScript で組み立て直し、Bun・
 5. **アプリ起動**: `createApp({ routes, providers })` がルートとサービスをまとめ、Bun/Hono サーバーを起動します。
 
 ## プロジェクト構成
-- `app/Http/Controllers/`: コントローラー
-- `app/Models/`: Drizzle をバックエンドにしたモデル (`Model<T>`)
-- `config/`: アプリやデータベースの設定ファイル
-- `db/`: スキーマ定義、マイグレーション、シーダー
-- `resources/js/pages/`: Inertia で描画する React ページ
-- `routes/`: ルートの宣言（`routes/web.ts`）
-- `src/`: アプリのブートストラップ（`src/main.ts`, `src/app.ts`）
+
+```tree
+my-app/
+├── app/
+│   ├── Http/Controllers/   # コントローラー
+│   └── Models/             # Drizzle をバックエンドにしたモデル（`Model<T>`）
+├── config/                 # アプリやデータベースの設定ファイル
+├── db/                     # スキーマ定義、マイグレーション、シーダー
+├── resources/js/pages/     # Inertia で描画する React ページ
+├── routes/                 # ルートの宣言（`routes/web.ts`）
+└── src/                    # アプリのブートストラップ（`src/main.ts`, `src/app.ts`）
+```
 
 ## 命名規約
 - コントローラー、モデル、HTTP アプリのように、クラスや型を 1 つだけエクスポートするファイルは `PascalCase.ts` とし、ファイル名をエクスポート名に揃えます。
@@ -154,6 +159,8 @@ const { Cache, Events, Log, Mail, Queue } = createFacades(app.container)
    ```
 
    別のポートに移らず、`EADDRINUSE` ですぐに失敗させたい場合は、`portFallback: false` を渡すか `GUREN_STRICT_PORT=1` を設定します。
+
+   どちらもアプリのサーバーのポートにだけ効きます。`listen()` が起動する Vite dev サーバーは `GUREN_VITE_PORT`（未設定なら 5173）から始めて、使用中なら自分で次のポートに移ります。バナーには実際にバインドしたポートが表示されます。詳しくは[ホットリロード](./frontend.md#ホットリロード)を参照してください。
 
 この処理は Bun 上でネイティブモジュールとして動き、`bun run dev` で起動します。
 

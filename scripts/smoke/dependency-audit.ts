@@ -27,8 +27,8 @@ const IGNORED_ADVISORIES: IgnoredAdvisory[] = [
     id: 'GHSA-238p-pmpm-9mq7',
     reason:
       'katex <0.18.2 trust-restriction bypass that needs an existing prototype pollution; low ' +
-      'severity. The only holder is mermaid (`bun pm why katex`), a devDependency of web, ' +
-      'examples/blog and the default scaffold template; mermaid 11.16.1 and 12.1.0 both require ' +
+      'severity. The only holder is mermaid (`bun pm why katex`), a devDependency of web and ' +
+      'examples/blog (the scaffold templates ship none); mermaid 11.16.1 and 12.1.0 both require ' +
       'katex ^0.16, so no mermaid release admits the fix. An override would not reach what ships: ' +
       'the web docs and the docs viewer serve mermaid/dist/mermaid.min.js, which inlines its own ' +
       'katex. Remove once a mermaid release depends on katex >=0.18.2.',
