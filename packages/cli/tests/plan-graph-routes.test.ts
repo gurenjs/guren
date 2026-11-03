@@ -94,9 +94,9 @@ for (const [description, scenario] of Object.entries(scenarios)) {
         models: isUnreadable(current.models) ? current.models : undefined, validators: await readValidatorExports(workspace.dir, new ParseCache()),
       })
       const legacyRoutes = Array.isArray(legacy.routes) ? legacy.routes.map(({ name, method, path }) => ({ name, method, path })) : legacy.routes
-      // Each route also carries its registered middleware, which the legacy reading left out.
+      // Each route also carries its registered middleware, which the legacy reading left out; no routes file means no definitions and no routes.
       expect(isUnreadable(current.routes) ? current.routes : current.routes.map(({ name, method, path }) => ({ name, method, path }))).toEqual(legacyRoutes)
-      if (!isUnreadable(current.routes)) expect(current.routes.map((route) => route.middleware)).toEqual(legacy.definitions!.map((definition) => definition.middlewareNames ?? []))
+      if (!isUnreadable(current.routes)) expect(current.routes.map((route) => route.middleware)).toEqual((legacy.definitions ?? []).map((definition) => definition.middlewareNames ?? []))
       expect(current.detail).toEqual(detail)
       const previous = { ...current, routes: legacyRoutes, detail }
       const plan = PlanDraftSchema.parse(loadCommentsPlan())
