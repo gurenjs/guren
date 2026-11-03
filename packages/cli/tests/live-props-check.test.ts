@@ -98,6 +98,16 @@ describe('guren check live props', () => {
     expect(unpinned[0]?.suggestion).toContain('app/Events/OrderEvents.ts')
   })
 
+  it('reads broadcastOn() written as a class field, as the runtime calls it', async () => {
+    const { results } = await liveResults({
+      [CONTROLLER]: controller('{ order: live(1, { on: new OrderUpdated(1) }) }'),
+      [EVENTS]: 'export class OrderUpdated {\n  constructor(readonly orderId: number) {}\n  broadcastOn = () => [`private-orders.${this.orderId}`]\n}\nexport class OrderShipped {}\n',
+      [ROUTES]: SOCKET_ROUTE,
+    })
+
+    expect(results.map((result) => result.key)).toContain('live-props:event-name:OrderController.show:OrderUpdated')
+  })
+
   it('warns on live() inside always() or a deferred callback', async () => {
     const { results } = await liveResults({
       [CONTROLLER]: controller(

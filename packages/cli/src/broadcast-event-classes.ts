@@ -4,9 +4,12 @@
  * `broadcastChannelsOf()` in `@guren/server` compute them at runtime. `guren
  * check`'s live-props rule and `channels.gen.ts` both read it, so the two agree.
  */
-import type { ClassDeclaration, ClassMethod, Node, Statement } from '@babel/types'
+import type { ClassDeclaration, Node, Statement } from '@babel/types'
 import { literalString, memberKeyName, unwrapTypeAssertion } from './ast-walk'
+import { classActionMembers, type ClassActionMember } from './controller-methods'
 import { extractClassDeclaration } from './model-parser'
+
+type MemberBody = ClassActionMember['body']
 
 export interface BroadcastEventClass {
   name: string
@@ -38,22 +41,21 @@ export function readBroadcastEventClasses(
 
 function readClass(declaration: ClassDeclaration, filePath: string): BroadcastEventClass | undefined {
   const name = declaration.id!.name
-  let broadcastOn: ClassMethod | undefined
-  let broadcastAs: ClassMethod | undefined
-  let broadcastWith: ClassMethod | undefined
+  let broadcastOn: MemberBody | undefined
+  let broadcastAs: MemberBody | undefined
+  let broadcastWith: MemberBody | undefined
   let staticEventName: string | null | undefined
 
+  // Both member forms, as at runtime: `broadcastOn() {}` and `broadcastOn = () => […]`.
+  for (const { member, name: key, body } of classActionMembers(declaration)) {
+    if (member.static) continue
+    if (key === 'broadcastOn') broadcastOn = body
+    else if (key === 'broadcastAs') broadcastAs = body
+    else if (key === 'broadcastWith') broadcastWith = body
+  }
   for (const member of declaration.body.body) {
-    const key = 'key' in member
-      ? memberKeyName({ computed: Boolean((member as { computed?: boolean }).computed), key: member.key as unknown as { type: string; name?: string } })
-      : undefined
-    if (member.type === 'ClassMethod' && !member.static) {
-      if (key === 'broadcastOn') broadcastOn = member
-      else if (key === 'broadcastAs') broadcastAs = member
-      else if (key === 'broadcastWith') broadcastWith = member
-    } else if (member.type === 'ClassProperty' && member.static && key === 'eventName') {
-      staticEventName = member.value ? literalString(member.value) : null
-    }
+    if (member.type !== 'ClassProperty' || !member.static) continue
+    if (memberKeyName(member) === 'eventName') staticEventName = member.value ? literalString(member.value) : null
   }
   if (!broadcastOn) return undefined
 
@@ -68,16 +70,17 @@ function readClass(declaration: ClassDeclaration, filePath: string): BroadcastEv
   }
 }
 
-/** The expression a method's single `return` hands back. */
-function returnedValue(method: ClassMethod): Node | undefined {
-  const returns = method.body.body.filter((statement) => statement.type === 'ReturnStatement')
+/** The expression a member's single `return` hands back, or an arrow's expression body. */
+function returnedValue(body: MemberBody): Node | undefined {
+  if (body.type !== 'BlockStatement') return unwrapTypeAssertion(body)
+  const returns = body.body.filter((statement) => statement.type === 'ReturnStatement')
   if (returns.length !== 1) return undefined
   const argument = (returns[0] as { argument?: Node | null }).argument
   return argument ? unwrapTypeAssertion(argument) : undefined
 }
 
-function objectReturned(method: ClassMethod): Node | undefined {
-  const value = returnedValue(method)
+function objectReturned(body: MemberBody): Node | undefined {
+  const value = returnedValue(body)
   return value?.type === 'ObjectExpression' ? value : undefined
 }
 
