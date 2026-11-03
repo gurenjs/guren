@@ -3,6 +3,7 @@ import figlet from 'figlet'
 import standard from 'figlet/importable-fonts/Standard.js'
 import packageJson from '../../package.json' with { type: 'json' }
 import { formatHostPort, isWildcardHost } from './host-port'
+import { DEFAULT_DEV_SERVER_URL } from './vite-manifest'
 
 figlet.parseFont('Standard', standard)
 
@@ -44,7 +45,7 @@ const ASSET_SERVER_LABELS = {
 export function logDevServerBanner({
   hostname,
   port,
-  assetsUrl = 'http://localhost:5173',
+  assetsUrl = DEFAULT_DEV_SERVER_URL,
   assetServer,
 }: DevBannerOptions): void {
   const localUrl = `http://localhost:${port}`

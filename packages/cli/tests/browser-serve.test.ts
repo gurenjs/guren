@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import { databaseRefusal, reportedPort } from '../src/browser-serve'
+import { VITE_PORT_ENV } from '../../server/src/http/vite-dev-server'
+import { databaseRefusal, reportedPort, vitePortEnv } from '../src/browser-serve'
 
 describe('databaseRefusal', () => {
   test('lets a local database through', () => {
@@ -23,6 +24,25 @@ describe('databaseRefusal', () => {
 
   test('refuses an app that binds no database rather than assuming it has none', () => {
     expect(databaseRefusal({ status: 'described', value: undefined })).toContain('binds no database')
+  })
+})
+
+describe('vitePortEnv', () => {
+  test('hands the app the port after its own for Vite, under the name the server reads', () => {
+    expect(vitePortEnv(4317, {})).toEqual({ [VITE_PORT_ENV]: '4318' })
+  })
+
+  test('keeps a Vite port the caller already chose', () => {
+    expect(vitePortEnv(4317, { GUREN_VITE_PORT: '5188' })).toEqual({})
+  })
+
+  test('reads a blank GUREN_VITE_PORT as unset, as the server does', () => {
+    expect(vitePortEnv(4317, { GUREN_VITE_PORT: ' ' })).toEqual({ GUREN_VITE_PORT: '4318' })
+  })
+
+  test('hands none past the last port, which the server would refuse', () => {
+    expect(vitePortEnv(65535, {})).toEqual({})
+    expect(vitePortEnv(65534, {})).toEqual({ GUREN_VITE_PORT: '65535' })
   })
 })
 

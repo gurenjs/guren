@@ -155,6 +155,8 @@ const { Cache, Events, Log, Mail, Queue } = createFacades(app.container)
 
    別のポートに移らず、`EADDRINUSE` ですぐに失敗させたい場合は、`portFallback: false` を渡すか `GUREN_STRICT_PORT=1` を設定します。
 
+   どちらもアプリのサーバーのポートにだけ効きます。`listen()` が起動する Vite dev サーバーは `GUREN_VITE_PORT`（未設定なら 5173）から始めて、使用中なら自分で次のポートに移ります。バナーには実際にバインドしたポートが表示されます。詳しくは[ホットリロード](./frontend.md#ホットリロード)を参照してください。
+
 この処理は Bun 上でネイティブモジュールとして動き、`bun run dev` で起動します。
 
 ### 起動の失敗と再試行

@@ -17,7 +17,10 @@ import { trimTrailingSlashes } from '../support/trim-slashes'
  */
 export const PUBLIC_ASSETS_URL_PREFIX = '/public/assets/'
 
-/** The Vite default the framework assumes when no dev-server URL is set. */
+/**
+ * The Vite default the framework assumes when no dev-server URL is set. Not
+ * `GUREN_VITE_PORT`: a managed start publishes the URL Vite bound instead.
+ */
 export const DEFAULT_DEV_SERVER_URL = 'http://localhost:5173'
 
 /**

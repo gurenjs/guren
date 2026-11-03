@@ -238,7 +238,9 @@ that race into a failed start rather than a server on the wrong port.
   child's output goes to stderr. `--timeout <s>` sets the readiness wait.
 - A stop this process asked for exits 0; the app ending on its own is a failure.
 - `GUREN_STRICT_PORT` covers the app's port, not the Vite dev server's, which
-  picks its own.
+  picks its own. The child gets `GUREN_VITE_PORT=<port + 1>` unless the caller
+  set it, so Vite starts clear of a `guren dev` holding 5173, and walks past a
+  busy port from there.
 - A refusal reason never echoes the connection setting: the SQLite driver's
   own refusal names the value, which may carry a password.
 - ~~No banner is parsed~~ (step 5): an HTTP answer alone can come from a
