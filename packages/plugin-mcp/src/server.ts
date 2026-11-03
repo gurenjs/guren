@@ -6,7 +6,7 @@
  * which would validate (and coerce/transform) a second time on top of the
  * route's own validation (RFC 0016 §3.2).
  */
-import { Server, type CallToolResult } from '@modelcontextprotocol/server'
+import { ProtocolError, ProtocolErrorCode, ResourceNotFoundError, Server, type CallToolResult } from '@modelcontextprotocol/server'
 import {
   advertisesStructuredOutput,
   APPROVAL_STATUS_TOOL_NAME,
@@ -25,6 +25,14 @@ import {
 } from '@guren/core'
 
 import { describeApprovalStatusTool, readApprovalStatusArguments } from './approval-status'
+import {
+  listUiResources,
+  MCP_APPS_EXTENSION_ID,
+  readUiResource,
+  resultMeta,
+  toolUiMeta,
+  type AppMcpUi,
+} from './mcp-apps'
 import { describePreflightTool, readPreflightArguments, toPreflightVerdict } from './preflight'
 import type { AgentRateLimiter } from './rate-limit'
 
@@ -76,6 +84,10 @@ export interface AppMcpServerOptions {
    */
   onInvoked(tool: AuditedTool, args: Record<string, unknown>, status: number, durationMs: number): void
   onDenied(tool: AuditedTool, args: Record<string, unknown>, reason: AgentToolDenialReason): void
+  /** MCP Apps (RFC 0038). Served only when some tool declares `ui`. */
+  ui?: AppMcpUi
+  /** The application's origin, which a view's hand-off to the browser is made absolute against. */
+  appOrigin?: string
 }
 
 /**
@@ -83,8 +95,6 @@ export interface AppMcpServerOptions {
  * the endpoint's handler builds one from each request's options.
  */
 export function createAppMcpServer(options: AppMcpServerOptions): Server {
-  const server = new Server(options.serverInfo, { capabilities: { tools: {} } })
-
   // A route that claimed a reserved meta-tool name never reaches the catalog
   // (RFC 0016 §5.4). `guren check` fails the build over it, but the endpoint
   // must not depend on that: an MCP client answers a duplicated name in
@@ -93,6 +103,16 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
   const tools = options.tools.filter((tool) => !isReservedAgentToolName(tool.toolName))
 
   const approvalsConfigured = options.approvals !== undefined
+  // An app with no `ui` tool advertises exactly what it did before RFC 0038.
+  const servesUi = tools.some((tool) => tool.ui)
+  const server = new Server(options.serverInfo, {
+    capabilities: servesUi
+      ? { tools: {}, resources: {}, extensions: { [MCP_APPS_EXTENSION_ID]: {} } }
+      : { tools: {} },
+  })
+  // The `tools/list` filter, which therefore also decides what a caller may read as a resource.
+  const listedTools = (): DerivedAgentTool[] =>
+    tools.filter((tool) => gateToolCall(tool, options.abilities, { approvalsConfigured }).allowed)
 
   // Listed only if `gateToolCall` would admit it: offering a tool the call then
   // refuses maps the write surface to a read-only token. With a queue an
@@ -100,9 +120,7 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
   // limits are runtime state, not capability. Resolving approvals here would
   // page approvers on every connection, so only the synchronous gate runs.
   server.setRequestHandler('tools/list', () => {
-    const listed = tools
-      .filter((tool) => gateToolCall(tool, options.abilities, { approvalsConfigured }).allowed)
-      .map((tool) => describeTool(tool))
+    const listed = listedTools().map((tool) => describeTool(tool, options.ui))
 
     // Listed only for a token that can check something: advertising the
     // companion to a token that grants nothing would map the existence of the
@@ -147,16 +165,33 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
     // protocol: turning one of the pipeline's three results into the
     // `CallToolResult` shape an MCP client reads.
     const result = await options.pipeline.invoke({ tool, args })
+    // On every route tool, not only `ui` ones: a view must be able to settle any visit it sends.
+    const _meta = resultMeta(tool, result, options.appOrigin ?? 'http://localhost')
 
-    if (result.status === 'denied') return denial(result.denial)
-    if (result.status === 'failed') return errorResult(result.message)
+    if (result.status === 'denied') return { ...denial(result.denial), _meta }
+    if (result.status === 'failed') return { ...errorResult(result.message), _meta }
 
     const { outcome } = result
-    const callResult: CallToolResult = { content: outcome.content }
+    const callResult: CallToolResult = { content: outcome.content, _meta }
     if (outcome.structuredContent) callResult.structuredContent = outcome.structuredContent
     if (outcome.isError) callResult.isError = true
     return callResult
   })
+
+  if (servesUi) {
+    server.setRequestHandler('resources/list', () => ({ resources: listUiResources(listedTools(), options.ui) }))
+
+    // Metered like `guren_approval_status`, the other read that never enters the pipeline.
+    server.setRequestHandler('resources/read', (request) => {
+      const uri = request.params.uri
+      if (options.limiter && !options.limiter.take(options.rateKey, { write: false })) {
+        throw new ProtocolError(ProtocolErrorCode.InvalidRequest, 'Rate limit exceeded for this token. Retry later.')
+      }
+      const contents = readUiResource(uri, listedTools(), options.ui)
+      if (!contents) throw new ResourceNotFoundError(uri)
+      return { contents: [contents] }
+    })
+  }
 
   return server
 }
@@ -263,8 +298,10 @@ async function handleApprovalStatus(
   }
 }
 
-function describeTool(tool: DerivedAgentTool) {
+function describeTool(tool: DerivedAgentTool, ui: AppMcpUi | undefined) {
+  const _meta = toolUiMeta(tool, ui)
   return {
+    ...(_meta ? { _meta } : {}),
     name: tool.toolName,
     ...(tool.description ? { description: tool.description } : {}),
     inputSchema: tool.inputSchema as { type: 'object'; [key: string]: unknown },

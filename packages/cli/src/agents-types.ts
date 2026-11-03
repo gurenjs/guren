@@ -212,6 +212,13 @@ export function buildAgentToolsContent(
     : ''
 
   const dataImport = importsData ? "\nimport type { Data } from './data.gen'\n" : ''
+  const uiPages = Array.from(new Set(sorted.flatMap((tool) => (tool.ui?.page ? [tool.ui.page] : [])))).sort()
+  const uiPagesExport = uiPages.length === 0
+    ? ''
+    : `
+/** The Inertia pages \`.agent({ ui })\` names, which \`vite build --mode mcp-app\` builds (RFC 0038). */
+export const agentUiPages = ${JSON.stringify(uiPages)} as const
+`
 
   return `// Generated — DO NOT EDIT
 // Run \`guren codegen\` to regenerate.
@@ -244,7 +251,7 @@ ${entries.join('\n')}
 } as const
 
 export type AgentToolName = keyof typeof agentTools
-
+${uiPagesExport}
 /**
  * The payload shape each tool's route declares through a \`resource\` response
  * hint — declared, not validated: the server never checks its response
@@ -339,6 +346,7 @@ function renderTool(tool: DerivedAgentTool, enrichment: ResourceEnrichment | und
   if (tool.approval) fields.push(`approval: ${JSON.stringify(tool.approval)}`)
   if (tool.redact) fields.push(`redact: ${renderLiteral(tool.redact, '    ')}`)
   fields.push(`expose: ${renderLiteral(tool.expose, '    ')}`)
+  if (tool.ui) fields.push(`ui: ${renderLiteral(tool.ui, '    ')}`)
 
   return `  ${renderToolKey(tool.toolName)}: {\n${fields.map((field) => `    ${field},`).join('\n')}\n  },`
 }

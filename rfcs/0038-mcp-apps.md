@@ -328,8 +328,11 @@ Any other URI, including a page URI with a stale `v`, answers the SDK's
 in its data on every protocol revision (it maps a handler's `-32002` to
 `-32602` at the era seam). Resource reads go through the same authentication
 the endpoint already applies before any MCP framing, through the rate limiter,
-and into the audit trail as their own event (`AgentResourceRead`), since a
-template read is not a tool invocation.
+~~and into the audit trail as their own event (`AgentResourceRead`), since a
+template read is not a tool invocation.~~ **Amended in implementation (Phase 1):**
+the audit event is not written yet. It needs a record kind beside the two the
+trail stores today (`AgentToolInvoked`, `AgentToolDenied`) and a reader for it,
+which is its own change; a resource read is authenticated and metered meanwhile.
 
 **`tools/call`.** Unchanged for the pipeline. Only the result metadata differs
 (§6).
@@ -438,10 +441,13 @@ method, path and input sources of the tools the caller may call. It does not
 bundle `agents.gen.ts`: that manifest names every tool, its description,
 schemas, policy ability and approval and redaction settings, and a template is
 handed to every token that can see one page. Instead the view reads
-`ui://<server>/bridge?v=<hash>` with `readServerResource()` after connecting.
-The server answers it per caller, from the same filter as `tools/list`, with
+~~`ui://<server>/bridge?v=<hash>`~~ `ui://<server>/bridge` with
+`readServerResource()` after connecting. **Amended in implementation (Phase 1):**
+no build hash, since the catalogue is computed per request and never cached as
+a template. The server answers it per caller, from the same filter as `tools/list`, with
 `{ toolName, method, path, inputSources }` per tool in route registration
-order. What this discloses beyond `tools/list` is the method and path of tools
+order (**amended:** plus `inputBodyNested` and `bridgeable`, false for a tool
+whose derivation reported an input-name collision, `DerivedAgentTool.inputCollisions`). What this discloses beyond `tools/list` is the method and path of tools
 the caller can already call, which the guide states.
 
 1. **Initial page.** The bridge connects `App` from
@@ -560,7 +566,10 @@ type GurenToolResponse =
 `ToolCallOutcome` gains the HTTP facts `mapToolResponse()` already reads
 (`location`, the 422 `errors` object) as fields, so the adapter never parses
 its own text. `url` and `location` are made absolute in the adapter, from the
-app's configured URL; `mapToolResponse()` cannot, since it also runs in the
+~~app's configured URL~~ origin the MCP request reached the endpoint on
+(**amended in implementation:** the same origin the re-entrant request is
+already dispatched with, so a host-authorization middleware and the hand-off
+agree on the app's address); `mapToolResponse()` cannot, since it also runs in the
 browser for the WebMCP client (through `@guren/core/agent`) and has no
 application URL. The text stays as it is, so a reworded message never breaks a
 view, the same reason `DerivedAgentTool.warnings` exists beside the prefixed

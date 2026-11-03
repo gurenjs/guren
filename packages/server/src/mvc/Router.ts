@@ -207,6 +207,19 @@ export interface AgentRouteMetadata {
   approval?: 'required'
   /** Argument fields masked in agent audit logs. */
   redact?: string[]
+  /** Render this tool's result in an MCP Apps host with an Inertia page (RFC 0038). */
+  ui?: AgentUiPage | AgentRouteUi
+}
+
+/** A page by id: a generated `PageContract` (anything with a string `id`), or the id itself. */
+export type AgentUiPage = { readonly id: string } | string
+
+/** The object form of `AgentRouteMetadata.ui` (RFC 0038 §1). */
+export interface AgentRouteUi {
+  /** Absent for a tool a view calls but that renders no view of its own. */
+  page?: AgentUiPage
+  /** MCP Apps `_meta.ui.visibility`. Default `['model', 'app']`. */
+  visibility?: ReadonlyArray<'model' | 'app'>
 }
 
 /**
@@ -215,7 +228,31 @@ export interface AgentRouteMetadata {
  * `schemas` and the spread OpenAPI metadata still alias the registry.
  */
 function cloneAgentMetadata(metadata: AgentRouteMetadata): AgentRouteMetadata {
-  return structuredClone(metadata)
+  if (metadata.ui === undefined) return structuredClone(metadata)
+  // A generated `PageContract` carries a `props()` method, which `structuredClone` throws on.
+  const { ui, ...rest } = metadata
+  return { ...structuredClone(rest), ui: normalizeAgentUi(ui) }
+}
+
+/**
+ * Plain data, with the page reduced to its id. Anything unreadable becomes an
+ * empty id or an empty visibility list, which `deriveAgentTools()` refuses,
+ * so a malformed declaration is never stored as a wider one.
+ */
+function normalizeAgentUi(ui: unknown): AgentRouteUi {
+  const form = typeof ui === 'string' || isPageLike(ui) ? { page: ui } : ui
+  if (typeof form !== 'object' || form === null) return { page: '' }
+  const { page, visibility } = form as { page?: unknown; visibility?: unknown }
+  const normalized: AgentRouteUi = {}
+  if (page !== undefined) normalized.page = typeof page === 'string' ? page : isPageLike(page) ? page.id : ''
+  if (visibility !== undefined) {
+    normalized.visibility = Array.isArray(visibility) ? visibility.map((entry) => String(entry)) as Array<'model' | 'app'> : []
+  }
+  return normalized
+}
+
+function isPageLike(value: unknown): value is { id: string } {
+  return typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'string'
 }
 
 interface RegisteredRoute {

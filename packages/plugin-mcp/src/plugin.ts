@@ -1,5 +1,6 @@
 import {
   AGENT_AUDIT_BINDING,
+  AGENT_SHARED_PROPS_BINDING,
   AgentToolDenied,
   AgentToolInvoked,
   createAgentApprovalContext,
@@ -27,6 +28,7 @@ import type { Context } from 'hono'
 
 import { readExternalMcpAuth, type ExternalMcpAuth } from './external-auth'
 import { AgentRateLimiter, createRateLimitInterposition, type RateLimitConfig } from './rate-limit'
+import { uiAuthority, unbuiltPages, type AppMcpUi, type McpUiConfig } from './mcp-apps'
 import { APP_MCP_REQUEST, createAppMcpServer, type AppMcpServerOptions } from './server'
 
 export interface McpPluginConfig {
@@ -77,6 +79,12 @@ export interface McpPluginConfig {
     /** @default 1 hour (`DEFAULT_AGENT_APPROVAL_TTL_MS`) */
     ttlMs?: number
   }
+  /**
+   * MCP Apps (RFC 0038): the built pages a `.agent({ ui })` route's view loads,
+   * their presentation and CSP, and the shared Inertia props a tool call carries.
+   * @default undefined — no pages; every shared prop is withheld from tool calls
+   */
+  ui?: McpUiConfig
 }
 
 /**
@@ -88,10 +96,12 @@ export interface McpPluginConfig {
  */
 const factory = definePlugin<McpPluginConfig>({
   name: 'mcp',
-  register(): void {
+  register(container, config): void {
     // The audit emitter, this plugin's one service, cannot be registered here:
     // it closes over a sink resolved asynchronously and over the event manager,
     // neither of which exists until `boot`. Everything else binds per request.
+    // Bound unconditionally: an App MCP tool call carries no shared prop the app did not name (RFC 0038 §6).
+    container.instance(AGENT_SHARED_PROPS_BINDING, [...(config.ui?.sharedProps ?? [])])
   },
   async boot(container, config): Promise<void> {
     const app = container.make<Application>('app')
@@ -128,6 +138,16 @@ const factory = definePlugin<McpPluginConfig>({
     const serverInfo = {
       name: config.serverInfo?.name ?? 'guren-app',
       version: config.serverInfo?.version ?? '1.0.0',
+    }
+    const ui = await loadUi(config.ui, serverInfo.name)
+    const unbuilt = unbuiltPages(exposed, ui)
+    if (unbuilt.length > 0) {
+      // Listed without a view, never without their visibility (RFC 0038 §3).
+      console.warn(
+        `[@guren/plugin-mcp] No built MCP App page for ${unbuilt.map((page) => `"${page}"`).join(', ')}, so the `
+        + 'tools naming them are listed without a view. Build the pages with `bunx vite build --mode mcp-app` '
+        + "and pass ui: { pages: () => import('@/.guren/mcp-app/index.gen') } to mcpPlugin().",
+      )
     }
     // Per-token, in this process. An app's own rate-limit middleware keys on
     // `server.requestIP()`, which is null for the synthesized re-entrant request
@@ -254,6 +274,8 @@ const factory = definePlugin<McpPluginConfig>({
         pipeline,
         limiter,
         rateKey,
+        ...(ui ? { ui } : {}),
+        appOrigin: new URL(c.req.url).origin,
         onInvoked: (tool, args, status, durationMs) => {
           record(
             new AgentToolInvoked(
@@ -399,6 +421,20 @@ function executionContext(c: Context): ExecutionContext | undefined {
 }
 
 type ExecutionContext = Parameters<Application['fetch']>[2]
+
+/** The pages module, loaded once at boot. A loader that throws leaves the app serving every tool without a view. */
+async function loadUi(config: McpUiConfig | undefined, serverName: string): Promise<AppMcpUi | undefined> {
+  if (!config) return undefined
+  let pages: AppMcpUi['pages']
+  if (config.pages) {
+    try {
+      pages = (await config.pages()).mcpAppPages
+    } catch (error) {
+      console.error('[@guren/plugin-mcp] The MCP App pages module failed to load:', error)
+    }
+  }
+  return { authority: uiAuthority(serverName), pages, config }
+}
 
 function unauthorized(c: Context, message: string): Response {
   c.header('WWW-Authenticate', 'Bearer')

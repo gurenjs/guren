@@ -1014,3 +1014,89 @@ export const providers = [mcpPlugin({ path: '/mcp' })]
     })
   })
 })
+
+describe('checkAgentRoutes: MCP Apps ui (RFC 0038)', () => {
+  let tempDir: string
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'guren-agent-ui-'))
+  })
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true })
+  })
+
+  async function writeApp(body: string, pages: string[] = ['posts/Show']): Promise<void> {
+    await writeWorkspaceFiles(tempDir, {
+      'app/Http/Controllers/PostController.ts': `
+import { Controller } from '@guren/core'
+
+export class PostController extends Controller {
+  async show() {
+${body}
+  }
+}
+`,
+      ...Object.fromEntries(pages.map((page) => [`resources/js/pages/${page}.tsx`, 'export default function Page() { return null }\n'])),
+    })
+  }
+
+  function showRoute(agent: Record<string, unknown>, schemas?: RouteDefinition['schemas']): RouteDefinition {
+    return route({
+      path: '/posts/:id',
+      name: 'posts.show',
+      agent,
+      controller: { name: 'PostController', action: 'show' },
+      schemas,
+    })
+  }
+
+  it('fails a ui page that does not exist', async () => {
+    await writeApp("    return this.inertia('posts/Index', {})", [])
+    const results = await run([showRoute({ ui: 'posts/Index' })], tempDir)
+    expect(results.find((result) => result.key === 'agent-route-ui-page:GET:/posts/:id')?.status).toBe('fail')
+  })
+
+  it('warns when the action renders another page', async () => {
+    await writeApp("    return this.inertia('posts/Index', {})", ['posts/Show', 'posts/Index'])
+    const results = await run([showRoute({ ui: 'posts/Show' })], tempDir)
+    const finding = results.find((result) => result.key === 'agent-route-ui-renders:GET:/posts/:id')
+    expect(finding?.status).toBe('warn')
+    expect(finding?.message).toContain('"posts/Index"')
+  })
+
+  it('passes the renders rule for the page the action renders through the manifest', async () => {
+    await writeApp('    return this.inertia(pages.posts.Show, {})')
+    const results = await run([showRoute({ ui: 'posts/Show' })], tempDir)
+    expect(keys(results).filter((key) => key.startsWith('agent-route-ui-'))).toEqual([])
+  })
+
+  it('fails ui.page together with an output schema', async () => {
+    await writeApp("    return this.inertia('posts/Show', {})")
+    const results = await run([showRoute({ ui: 'posts/Show' }, OUTPUT)], tempDir)
+    expect(results.find((result) => result.key === 'agent-route-ui-output:GET:/posts/:id')?.status).toBe('fail')
+  })
+
+  it('fails a malformed ui instead of reading it as a wider one', async () => {
+    await writeApp("    return this.inertia('posts/Show', {})")
+    const results = await run([showRoute({ ui: { visibility: [] } })], tempDir)
+    expect(results.find((result) => result.key === 'agent-route-ui-shape:GET:/posts/:id')?.status).toBe('fail')
+  })
+
+  it('warns on a deferred prop in a ui action', async () => {
+    await writeApp("    return this.inertia('posts/Show', { comments: defer(() => []) })")
+    const results = await run([showRoute({ ui: 'posts/Show' })], tempDir)
+    expect(results.find((result) => result.key === 'agent-route-ui-deferred:GET:/posts/:id')?.status).toBe('warn')
+  })
+
+  it('warns when the mcpPlugin call has no ui option', async () => {
+    await writeApp("    return this.inertia('posts/Show', {})")
+    await writeWorkspaceFiles(tempDir, {
+      'src/app.ts': "import { mcpPlugin } from '@guren/plugin-mcp'\n\nexport const providers = [mcpPlugin({ path: '/mcp' })]\n",
+    })
+    const results = await run([showRoute({ ui: 'posts/Show' })], tempDir)
+    const finding = results.find((result) => result.key === 'agent-route-ui-pages-module')
+    expect(finding?.status).toBe('warn')
+    expect(finding?.filePath).toBe('src/app.ts')
+  })
+})

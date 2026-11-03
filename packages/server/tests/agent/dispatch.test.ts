@@ -409,3 +409,37 @@ describe('auth refusals on a tool call', () => {
     expect(outcome.content[0]!.text).toBe('HTTP 303 (Location: /posts/1)')
   })
 })
+
+describe('mapToolResponse facts for MCP Apps (RFC 0038)', () => {
+  function plainTool(): DerivedAgentTool {
+    return toolFor((router) => {
+      router.get('/posts', handler).name('posts.index').agent({})
+    }, 'posts.index')
+  }
+
+  test('carries a redirect location as a field', async () => {
+    const response = new Response(null, { status: 303, headers: { Location: '/posts/12' } })
+    const outcome = await mapToolResponse(plainTool(), response)
+    expect(outcome.location).toBe('/posts/12')
+  })
+
+  test('carries the errors object of a 422', async () => {
+    const response = new Response(JSON.stringify({ message: 'Invalid', errors: { title: ['Required'] } }), {
+      status: 422,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const outcome = await mapToolResponse(plainTool(), response)
+    expect(outcome.errors).toEqual({ title: ['Required'] })
+  })
+
+  test('keeps the whole Inertia page beside the unwrapped props', async () => {
+    const page = { component: 'posts/Index', props: { posts: [1] }, url: '/posts', version: 'v' }
+    const response = new Response(JSON.stringify(page), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'X-Inertia': 'true' },
+    })
+    const outcome = await mapToolResponse(plainTool(), response)
+    expect(outcome.inertiaPage).toEqual(page)
+    expect(JSON.parse(outcome.content[0]!.text)).toEqual({ posts: [1] })
+  })
+})

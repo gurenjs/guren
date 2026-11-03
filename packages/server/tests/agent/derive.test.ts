@@ -693,3 +693,54 @@ describe('input sources (request reconstruction)', () => {
     expect(tool.inputSources).toEqual({ body: 'body' })
   })
 })
+
+describe('ui (RFC 0038)', () => {
+  const handler = () => new Response('ok')
+
+  test('takes a page contract by its id and defaults visibility to both audiences', () => {
+    const router = new Router()
+    const page = { id: 'posts/Show', component: 'posts/Show', props: () => page }
+    router.get('/posts/:id', handler).name('posts.show').agent({ ui: page })
+
+    expect(toolNamed(router, 'posts.show').ui).toEqual({ page: 'posts/Show', visibility: ['model', 'app'] })
+  })
+
+  test('derives an app-only tool with no page', () => {
+    const router = new Router()
+    router.put('/posts/:id', handler).name('posts.update').agent({ ui: { visibility: ['app'] } })
+
+    expect(toolNamed(router, 'posts.update').ui).toEqual({ visibility: ['app'] })
+  })
+
+  test('leaves out a tool whose ui is malformed instead of widening it', () => {
+    const router = new Router()
+    router.put('/posts/:id', handler).name('posts.update').agent({ ui: { visibility: [] } })
+    router.put('/drafts/:id', handler).name('drafts.update').agent({
+      ui: { visibility: ['app', 'browser' as 'app'] },
+    })
+
+    const { tools, warnings } = deriveAgentTools(router.definitions())
+    expect(tools.map((tool) => tool.toolName)).toEqual([])
+    expect(warnings.some((warning) => warning.includes('posts.update') && warning.includes('empty visibility'))).toBe(true)
+    expect(warnings.some((warning) => warning.includes('drafts.update') && warning.includes('"browser"'))).toBe(true)
+  })
+
+  test('stores the declaration as plain data the definitions snapshot can clone', () => {
+    const router = new Router()
+    const page = { id: 'posts/Show', props: () => page }
+    router.get('/posts/:id', handler).name('posts.show').agent({ ui: page })
+
+    expect(router.definitions()[0]!.agent?.ui).toEqual({ page: 'posts/Show' })
+  })
+
+  test('records input names two sources declared', () => {
+    const router = new Router()
+    router.post(
+      '/posts/:id',
+      { query: z.object({ id: z.string() }), body: z.object({ id: z.coerce.number(), title: z.string() }) },
+      handler,
+    ).name('posts.update').agent({})
+
+    expect(toolNamed(router, 'posts.update').inputCollisions).toEqual(['id'])
+  })
+})

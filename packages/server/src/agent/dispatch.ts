@@ -258,6 +258,20 @@ export interface ToolCallOutcome {
    * route as a rehearsal that never ran.
    */
   preflightVerdict?: boolean
+  /** A 3xx response's `Location`, as sent. Read by adapters instead of parsing `content`. */
+  location?: string
+  /** A 422 response's `errors` object, when the body carries one (RFC 0038 §6). */
+  errors?: Record<string, string[]>
+  /** The whole Inertia page an Inertia action answered with, before `content` unwraps it to its props. */
+  inertiaPage?: InertiaPageObject
+}
+
+/** The Inertia page object as the engine serializes it for a JSON request. */
+export interface InertiaPageObject {
+  component: string
+  props: Record<string, unknown>
+  url: string
+  version?: string | null
 }
 
 /**
@@ -288,16 +302,18 @@ export async function mapToolResponse(
     const location = response.headers.get('Location')
     const text = location ? `HTTP ${status} (Location: ${location})` : `HTTP ${status}`
     if (structured) return inconsistentOutput(tool, text, status)
-    return { content: [{ type: 'text', text }], status }
+    return { content: [{ type: 'text', text }], status, ...(location ? { location } : {}) }
   }
 
   const raw = await response.text()
 
   if (status >= 400) {
+    const errors = status === 422 ? readValidationErrors(response, raw) : undefined
     return {
       content: [{ type: 'text', text: raw || `HTTP ${status}` }],
       isError: true,
       status,
+      ...(errors ? { errors } : {}),
     }
   }
 
@@ -320,6 +336,7 @@ export async function mapToolResponse(
   }
 
   const payload = unwrapInertiaProps(tool, response, parsed)
+  const inertiaPage = readInertiaPage(response, parsed)
 
   if (structured && !isRecord(payload)) {
     return inconsistentOutput(tool, `a ${Array.isArray(payload) ? 'JSON array' : typeof payload} body`, status)
@@ -328,6 +345,7 @@ export async function mapToolResponse(
   const outcome: ToolCallOutcome = {
     content: [{ type: 'text', text: JSON.stringify(payload) }],
     status,
+    ...(inertiaPage ? { inertiaPage } : {}),
   }
   if (structured && isRecord(payload)) {
     outcome.structuredContent = payload
@@ -363,6 +381,25 @@ function parseJsonBody(response: Response, raw: string): unknown | undefined {
   } catch {
     return undefined
   }
+}
+
+/** `{ errors: { field: string[] } }`, the body a non-Inertia request's `ValidationException` renders. */
+function readValidationErrors(response: Response, raw: string): Record<string, string[]> | undefined {
+  const parsed = parseJsonBody(response, raw)
+  if (!isRecord(parsed) || !isRecord(parsed.errors)) return undefined
+  const errors: Record<string, string[]> = {}
+  for (const [field, messages] of Object.entries(parsed.errors)) {
+    if (Array.isArray(messages)) errors[field] = messages.map((message) => String(message))
+    else if (typeof messages === 'string') errors[field] = [messages]
+  }
+  return errors
+}
+
+function readInertiaPage(response: Response, parsed: unknown): InertiaPageObject | undefined {
+  if (response.headers.get('X-Inertia') !== 'true' || !isRecord(parsed)) return undefined
+  const { component, props, url, version } = parsed
+  if (typeof component !== 'string' || !isRecord(props) || typeof url !== 'string') return undefined
+  return { component, props, url, ...(typeof version === 'string' || version === null ? { version } : {}) }
 }
 
 function unwrapInertiaProps(tool: DerivedAgentTool, response: Response, parsed: unknown): unknown {

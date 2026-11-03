@@ -8,7 +8,7 @@
  * result, and `guren check` turns those warnings into a failing build. Opt-in —
  * a route becomes a tool only by declaring `.agent()` *and* carrying a name.
  */
-import type { ResourceResponseShape, RouteDefinition } from '../mvc/Router'
+import type { AgentRouteMetadata, AgentRouteUi, ResourceResponseShape, RouteDefinition } from '../mvc/Router'
 import { extractPathParamNames } from '../internal/route-path'
 import { derivableAbility } from '../authorization/middleware'
 import {
@@ -42,6 +42,16 @@ export interface DerivedAgentToolAnnotations {
 export interface DerivedAgentToolExposure {
   mcp: boolean
   webMcp: boolean
+}
+
+/**
+ * MCP Apps metadata (RFC 0038), resolved: `visibility` always present, so no
+ * consumer re-applies the specification's both-audiences default.
+ */
+export interface DerivedAgentToolUi {
+  /** The Inertia page rendering this tool's result. Absent for a tool only a view calls. */
+  page?: string
+  visibility: Array<'model' | 'app'>
 }
 
 export interface DerivedAgentTool {
@@ -98,6 +108,14 @@ export interface DerivedAgentTool {
   redact?: string[]
   expose: DerivedAgentToolExposure
   /**
+   * Input names two sources declared, of which the later one won. A visit that
+   * carries both cannot be rebuilt into one flat call, so the MCP Apps bridge
+   * leaves such a tool alone (RFC 0038 §5). Absent when there were none.
+   */
+  inputCollisions?: string[]
+  /** Declared `ui`, normalized (RFC 0038). Absent when the route declares none. */
+  ui?: DerivedAgentToolUi
+  /**
    * What could not be expressed while deriving *this* tool, unprefixed. The
    * same lines appear prefixed in {@link DeriveAgentToolsResult.warnings};
    * attributing by parsing the prefix back off would couple every consumer to a
@@ -135,6 +153,7 @@ type InputSource = AgentToolInputSource
 interface MergedInput {
   properties: Record<string, AgentToolSchema>
   required: Set<string>
+  collisions: Set<string>
   /** Property name → the source that currently owns it. */
   owner: Map<string, InputSource>
 }
@@ -194,6 +213,14 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
       continue
     }
 
+    // Leaving the tool out, not dropping `ui`: an omitted visibility means both
+    // audiences, so dropping a malformed declaration would widen an app-only tool.
+    const ui = agent.ui === undefined ? undefined : deriveAgentToolUi(agent.ui)
+    if (typeof ui === 'string') {
+      warnings.push(`${toolName}: ${where} (route "${routeName}") declares a malformed agent ui (${ui}), so it is not exposed as a tool.`)
+      continue
+    }
+
     const toolWarnings: string[] = []
     const readOnlyHint = agent.readOnlyHint ?? READ_ONLY_METHODS.has(method)
     const input = buildInputSchema(definition, method, toolWarnings)
@@ -206,6 +233,7 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
       inputSchema: input.schema,
       inputSources: input.sources,
       inputBodyNested: input.nestedBody,
+      ...(input.collisions.length > 0 ? { inputCollisions: input.collisions } : {}),
       outputSchema: buildOutputSchema(definition, method, toolWarnings),
       // Declared, not derived — see the field's own doc for why an
       // unrepresentable `output` must still suppress the hint.
@@ -225,6 +253,7 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
         mcp: agent.expose?.mcp ?? true,
         webMcp: agent.expose?.webMcp ?? true,
       },
+      ...(ui ? { ui } : {}),
       warnings: toolWarnings,
     }
 
@@ -249,6 +278,7 @@ interface BuiltInput {
   schema: AgentToolSchema
   sources: Record<string, AgentToolInputSource>
   nestedBody: boolean
+  collisions: string[]
 }
 
 function buildInputSchema(
@@ -264,6 +294,7 @@ function buildInputSchema(
   const merged: MergedInput = {
     properties: Object.create(null) as Record<string, AgentToolSchema>,
     required: new Set(),
+    collisions: new Set(),
     owner: new Map(),
   }
   const pathParamNames = extractPathParamNames(definition.path)
@@ -343,6 +374,7 @@ function buildInputSchema(
     },
     sources: { ...sources },
     nestedBody,
+    collisions: Array.from(merged.collisions),
   }
 }
 
@@ -361,6 +393,7 @@ function mergeProperties(
   for (const [name, schema] of Object.entries(properties)) {
     const previous = merged.owner.get(name)
     if (previous) {
+      merged.collisions.add(name)
       warnings.push(
         `input key "${name}" is declared by both the ${previous} and the ${source} schema; `
           + `the ${source} definition wins. Rename one — merged tool input has one namespace.`,
@@ -404,4 +437,25 @@ function deriveAuthorization(
   // tool comes to advertise an ability the middleware stopped checking.
   const ability = derivableAbility(definition.capabilities?.authorization, method)
   return ability === undefined ? undefined : { ability }
+}
+
+const UI_AUDIENCES: ReadonlySet<string> = new Set(['model', 'app'])
+
+/**
+ * The declared `ui` resolved, or why it is malformed. The one rule: the
+ * derivation and `guren check` both judge a declaration through it.
+ */
+export function deriveAgentToolUi(declared: NonNullable<AgentRouteMetadata['ui']>): DerivedAgentToolUi | string {
+  const form: AgentRouteUi = typeof declared === 'string' || 'id' in declared ? { page: declared } : declared
+  const page = form.page === undefined ? undefined : typeof form.page === 'string' ? form.page : form.page.id
+  if (page !== undefined && page.trim() === '') return 'an empty page id'
+  if (page === undefined && form.visibility === undefined) return 'neither a page nor a visibility'
+  const visibility: string[] = form.visibility === undefined ? ['model', 'app'] : [...form.visibility]
+  if (visibility.length === 0) return 'an empty visibility list'
+  const unknown = visibility.find((entry) => !UI_AUDIENCES.has(entry))
+  if (unknown !== undefined) return `the visibility entry "${unknown}", which is neither "model" nor "app"`
+  return {
+    ...(page !== undefined ? { page } : {}),
+    visibility: Array.from(new Set(visibility)) as Array<'model' | 'app'>,
+  }
 }

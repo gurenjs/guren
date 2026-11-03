@@ -71,6 +71,8 @@ export type {
 export type {
   BindableModel,
   AgentRouteMetadata,
+  AgentRouteUi,
+  AgentUiPage,
   RouteBuilder,
   RouteContractOptions,
   RouteDefinition,
@@ -85,7 +87,7 @@ export type {
 // Agent Contract (RFC 0016): protocol-independent derivation of agent tools
 // from the contracts routes already carry. Consumed by the CLI's
 // `.guren/agents.gen.ts` and by protocol adapters, which must not derive twice.
-export { deriveAgentTools } from './agent/derive'
+export { deriveAgentToolUi, deriveAgentTools } from './agent/derive'
 export type {
   AgentToolInputSource,
   AgentToolSchema,
@@ -93,6 +95,7 @@ export type {
   DerivedAgentTool,
   DerivedAgentToolAnnotations,
   DerivedAgentToolExposure,
+  DerivedAgentToolUi,
 } from './agent/derive'
 // The dispatch contract (RFC 0016 §3): a tool call re-enters the application as
 // a real HTTP request. Here rather than in a protocol adapter because every
@@ -108,6 +111,7 @@ export {
 export type {
   BuildToolRequestOptions,
   BuiltToolRequest,
+  InertiaPageObject,
   ToolCallOutcome,
   ToolRequestBuildFailure,
 } from './agent/dispatch'
@@ -151,6 +155,8 @@ export type {
 // `@guren/plugin-mcp` binds one as `'agent.audit'`, `guren tool:call` resolves
 // that binding to record the `'cli'` surface.
 export { AGENT_AUDIT_BINDING, createAuditEmitter } from './agent/audit-emitter'
+// The shared Inertia props an App MCP tool call may carry (RFC 0038 §6), bound by `@guren/plugin-mcp`.
+export { AGENT_SHARED_PROPS_BINDING } from './internal/agent-request'
 export type { AgentAuditEmitter, AgentAuditSink, AuditEmitterOptions } from './agent/audit-emitter'
 // Not in `@guren/server/agent`: the file branch writes to disk.
 export { resolveAgentAuditSink } from './agent/audit-sink'

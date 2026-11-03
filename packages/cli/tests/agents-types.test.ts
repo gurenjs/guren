@@ -487,3 +487,25 @@ export function registerBillingRoutes(router: Router): void {
     expect(await appDeclaresAgentRoutes(dir)).toBe(true)
   })
 })
+
+describe('buildAgentToolsContent: MCP Apps ui (RFC 0038)', () => {
+  function uiDefinitions(): RouteDefinition[] {
+    const router = new Router()
+    router.get('/posts/:id', [PostController, 'index']).name('posts.show').agent({ ui: 'posts/Show' })
+    router.put('/posts/:id', [PostController, 'index']).name('posts.update').agent({ ui: { visibility: ['app'] } })
+    return router.definitions()
+  }
+
+  test('carries each tool ui and the pages the MCP App build needs', () => {
+    const { tools } = deriveAgentTools(uiDefinitions())
+    const content = buildAgentToolsContent(tools)
+
+    expect(content).toContain('ui: {\n      "page": "posts/Show",')
+    expect(content).toContain('export const agentUiPages = ["posts/Show"] as const')
+  })
+
+  test('writes no agentUiPages when no tool names a page', () => {
+    const { tools } = deriveAgentTools(fixtureDefinitions())
+    expect(buildAgentToolsContent(tools, { resources })).not.toContain('agentUiPages')
+  })
+})

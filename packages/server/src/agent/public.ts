@@ -18,6 +18,7 @@ export {
 export type {
   BuildToolRequestOptions,
   BuiltToolRequest,
+  InertiaPageObject,
   ToolCallOutcome,
   ToolRequestBuildFailure,
 } from './dispatch'
@@ -27,5 +28,6 @@ export type {
   DerivedAgentTool,
   DerivedAgentToolAnnotations,
   DerivedAgentToolExposure,
+  DerivedAgentToolUi,
 } from './derive'
 export type { AgentSurface } from './events'

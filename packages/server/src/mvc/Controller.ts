@@ -15,6 +15,7 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 import { getApiTokenOrFail } from '../auth/api-token'
 import { resolveGate, type Gate } from '../authorization/Gate'
 import { resolveOptional } from '../container/resolve-optional'
+import { agentSharedPropsAllowlist } from '../internal/agent-request'
 import { withDefaultHeaders } from '../support/default-headers'
 import type { AuthUser } from '../authorization/types'
 import {
@@ -282,7 +283,10 @@ export class Controller {
         : componentOrPage.component ?? componentOrPage.id
 
     // Shared props go through the same partial-reload filter as the page's own.
-    const sharedProps = await resolveSharedInertiaProps(ctx, this._container)
+    const sharedProps = projectSharedProps(
+      await resolveSharedInertiaProps(ctx, this._container),
+      agentSharedPropsAllowlist(ctx, this._container),
+    )
 
     // The engine derives the page url (path + query string) from the request
     // when options.url is absent.
@@ -546,4 +550,15 @@ export class Controller {
   private async getBody(): Promise<Record<string, unknown>> {
     return asRecord(await this.getRawBody())
   }
+}
+
+/** Shared props narrowed to an App MCP allowlist; unlisted values are dropped before any lazy one resolves. */
+function projectSharedProps(
+  shared: ResolvedSharedInertiaProps,
+  allowed: ReadonlySet<string> | undefined,
+): ResolvedSharedInertiaProps {
+  if (!allowed) return shared
+  return Object.fromEntries(
+    Object.entries(shared as Record<string, unknown>).filter(([key]) => allowed.has(key)),
+  ) as ResolvedSharedInertiaProps
 }
