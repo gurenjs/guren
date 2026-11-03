@@ -141,7 +141,8 @@ export function createTypedForm<TManifest extends RouteManifestLike>(manifest: T
       event.preventDefault()
       const formData = new FormData(event.currentTarget)
       const data = Object.fromEntries(formData.entries())
-      router.visit(action, { method: httpMethod, data })
+      // router.post()/put()/patch()/delete()/query() default this; visit() does not.
+      router.visit(action, { method: httpMethod, data, preserveState: httpMethod !== 'get' })
     }
 
     return React.createElement('form', { ...rest, onSubmit: handleSubmit }, children)

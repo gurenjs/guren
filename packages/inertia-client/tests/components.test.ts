@@ -127,13 +127,19 @@ describe('createTypedForm submission', () => {
 
     expect(calls).toHaveLength(1)
     expect(calls[0]![0]).toBe('/items/7')
-    expect(calls[0]![1]).toEqual({ method: 'get', data: { q: 'guren' } })
+    expect(calls[0]![1]).toEqual({ method: 'get', data: { q: 'guren' }, preserveState: false })
   })
 
   it('submits a QUERY route with the query method', () => {
     const calls = submit(Form({ route: 'posts.search' }))
 
-    expect(calls[0]).toEqual(['/posts/search', { method: 'query', data: { q: 'guren' } }])
+    expect(calls[0]).toEqual(['/posts/search', { method: 'query', data: { q: 'guren' }, preserveState: true }])
+  })
+
+  it('preserves page state on a POST submission, as router.post() does', () => {
+    const calls = submit(Form({ route: 'posts.store' }))
+
+    expect(calls[0]).toEqual(['/posts', { method: 'post', data: { q: 'guren' }, preserveState: true }])
   })
 
   it('throws on a route under a verb Inertia cannot submit', () => {
