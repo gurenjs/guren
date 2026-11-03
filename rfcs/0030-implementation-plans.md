@@ -340,6 +340,20 @@ plan and the application's current context (`generateContext()`,
   it. The other kinds are deliberately unconstrained: a `store` step may name
   a model or a resource, a `decision` a validator or a policy, and an `actor`
   names nothing at all.
+- (amended in implementation) a `commands` entry whose generator, run first
+  in Foundation, breaks a later step by writing early what the plan adds or
+  renames: a target `plan:scaffold` writes, which it then refuses; an added
+  model's table, which a blueprint declares a second time in `db/schema.ts`,
+  some with a migration (judged in any root); or output that imports what no
+  step has written yet
+  (`make:factory` or `make:resource` for an added model, a model whose
+  `db/schema` export or a controller whose page is missing), which fails the
+  commands step's typecheck. A stub no scaffold writes and nothing imports
+  passes, since its step edits it. The finding (`plan:command-target`, a
+  failure) names the element and the step that writes it. What each
+  generator writes or imports is `PLAN_GENERATOR_TARGETS` in
+  `plan/command-targets.ts`, total over the allowed generators; the name each
+  element is judged by is `app-targets.ts`'s.
 
 **Amended in implementation:** a check against the application reads the app root
 the plan element names (`module`, absent meaning the project root), for models,
@@ -2908,7 +2922,11 @@ Claude Code docs as read on 2026-09-23:
   classified. `PlanCommandSchema` still takes a string, so a plan with a
   refused command parses and shows the finding. `plan:next` refuses such a
   plan before it marks a step, drafts included, since a draft never passes
-  `plan:approve`. `check --plan` warns on an approved one.
+  `plan:approve`. `check --plan` warns on an approved one. An allowed
+  command can still break the plan: a generator that writes early what
+  `plan:scaffold` or the data step is to write, or whose output imports what no
+  step has written yet, fails `plan:command-target` (§2), and the prompt says
+  `commands` are for what the plan does not declare.
 
 `guren plan --print-prompt` writes the prompt and the schema to stdout and
 calls nothing, for any other agent, and for a Claude Code session already in
@@ -2944,7 +2962,11 @@ runs `guren plan "<request>" --print-prompt` and follows it, adding what the
 prompt cannot say: ask in the client's own way and wait before writing the
 JSON, report the page, open questions and warnings left after
 `plan:render --json`, record review changes with `plan:revise`, and hand an
-approved plan to `plan-implement`.
+approved plan to `plan-implement`. In a session nobody approves from (a
+non-interactive run, a request that says nobody will review) it writes no
+plan for a requested change and the agent builds the change directly, since
+an unapproved plan never reaches `plan:next`; a request for the plan itself
+still gets one, and `plan-implement` reports an unapproved plan and stops.
 The plan's conventions stay in `buildPlanPrompt()` alone.
 
 **Two producers, for two situations.** The headless one cannot ask anything:

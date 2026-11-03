@@ -33,7 +33,9 @@ step's own: finish or discard them first.
 approval names: one edited after it was approved, or one nobody approved. The
 Stop hook stalls the marked step on it. Approving is the person's call, like
 closing: report the refusal and wait. Do not run `plan:approve` yourself, and do
-not edit the plan to get past it.
+not edit the plan to get past it. In a session nobody approves from (a
+non-interactive run) the same holds: report the unapproved plan and stop, and
+do not build what it describes by hand.
 
 For an approved plan it also holds a step whose context changed after
 approval: an element the step owns or names that another commit moved, so the

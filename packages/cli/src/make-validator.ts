@@ -50,23 +50,27 @@ function zodFieldType(field: FieldDefinition): string {
   return field.nullable ? `${schema}.nullable().optional()` : schema
 }
 
-/**
- * `collection` is pluralized directly rather than through `collectionName()`:
- * it names a generated type, not one of the three in the schema/model/check
- * triangle, so `Status` yields `ListStatusesQuerySchema`. See inflect.ts.
- */
 function generateValidator(singular: string, fields: FieldDefinition[]): string {
-  const collection = pluralize(singular)
+  const schemas = validatorSchemaNames(singular)
   const fieldSchemas = fields.length > 0
     ? fields.map((f) => `${f.name}: ${zodFieldType(f)},`)
     : ['// Add one entry per column, e.g. title: z.string().trim().min(1),']
 
   return `${ZOD_IMPORT}
-${zodObjectExport(`${singular}IdParamSchema`, ['id: z.coerce.number().int().positive(),'])}
-${zodObjectExport(`List${collection}QuerySchema`, ['page: z.coerce.number().int().min(1).default(1),'])}
-${zodObjectExport(`${singular}PayloadSchema`, fieldSchemas)}
-export type ${singular}Payload = z.infer<typeof ${singular}PayloadSchema>
+${zodObjectExport(schemas.params, ['id: z.coerce.number().int().positive(),'])}
+${zodObjectExport(schemas.list, ['page: z.coerce.number().int().min(1).default(1),'])}
+${zodObjectExport(schemas.payload, fieldSchemas)}
+export type ${singular}Payload = z.infer<typeof ${schemas.payload}>
 `
+}
+
+/**
+ * The schemas `make:validator` exports for an entity. The collection is pluralized directly
+ * rather than through `collectionName()`: it names a generated type, not one of the three in
+ * the schema/model/check triangle, so `Status` yields `ListStatusesQuerySchema`. See inflect.ts.
+ */
+export function validatorSchemaNames(singular: string): { params: string; list: string; payload: string } {
+  return { params: `${singular}IdParamSchema`, list: `List${pluralize(singular)}QuerySchema`, payload: `${singular}PayloadSchema` }
 }
 
 /** The first line of every validator file `make:validator` and `plan:scaffold` write, and the blank line after it. */
