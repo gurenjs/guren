@@ -113,12 +113,16 @@ adapter's `HasLiveUpdates.php` and `PropsResolver.php`:
   event may cancel one update.
 
 - **Socket ids.** When the transport reports `socketId()`, Inertia sends it as
-  `X-Socket-Id` on every same-origin request, and drops any event whose payload
-  carries `__inertia.socketId` equal to its own.
+  `X-Socket-Id` on every same-origin request its own HTTP client makes, unless
+  the request already sets the header or the app registered its own resolver
+  (`socketId.resolveUsing()`). It drops any event whose payload carries
+  `__inertia.socketId` equal to its own.
 
-- **Values in the event** (`__inertia.props`), an optional mode in which the
-  event carries the new prop value and no reload is made. This RFC does not
-  adopt it; see [Values carried by the event](#values-carried-by-the-event).
+- **Values in the event** (`__inertia.props`): when a payload carries a value
+  for a prop the subscription feeds, the client writes it into the page and
+  makes no reload. There is no option to turn this off; any payload with that
+  key takes effect. This RFC does not adopt the mode and has the transport
+  remove the key (§3); see [Values carried by the event](#values-carried-by-the-event).
 
 - **Merge props cannot be live**; the Laravel adapter throws.
 
@@ -152,7 +156,9 @@ export class OrderController extends Controller {
 ```
 
 The signature, in `packages/server/src/mvc/inertia/props.ts` beside `always()`
-and `defer()` (so `@guren/core` re-exports it through `export *`):
+and `defer()`. `live` and `isLiveProp` join their entry in the explicit export
+list of `packages/server/src/index.ts`, and the types join the `export type`
+list beside it; `@guren/core` forwards both through its `export *`:
 
 ```ts
 const LIVE_BRAND = Symbol.for('guren.inertia.live')
@@ -173,11 +179,20 @@ export interface LiveOptions {
   readonly throttle?: number
 }
 
+/** The wire shape of one `liveProps` entry, restated from `@inertiajs/core`, which the server does not depend on. */
+export interface LivePropEntry {
+  readonly listeners: readonly {
+    readonly channel: { readonly name: string; readonly type: 'public' | 'private' | 'presence' }
+    readonly events: readonly string[]
+  }[]
+  readonly throttle?: number
+}
+
+/** The controller-side wrapper. Its `toJSON()` is the value's; the entry is built apart from it. */
 export interface LiveProp<V> {
   readonly [LIVE_BRAND]: true
   readonly value: V
-  readonly listeners: readonly LiveListener[]
-  readonly throttle?: number
+  readonly entry: LivePropEntry
   toJSON(): unknown
 }
 
@@ -185,7 +200,7 @@ export function live<V>(value: V, options: LiveOptions): LiveProp<V>
 export function isLiveProp(value: unknown): value is LiveProp<unknown>
 ```
 
-`live()` computes its listeners when it is called, not when the response is
+`live()` computes its entry when it is called, not when the response is
 written, so a mistake throws inside the controller action with a stack that
 points at it:
 
@@ -271,10 +286,12 @@ from those classes rather than restated. Listeners are grouped per
 | `live(always(…), …)`                    | sent                               | sent on every partial reload     | every response              |
 | `live(always(defer(…)), …)`             | announced                          | sent on every partial reload     | every response              |
 
-`always(live(…))` and `defer(…)` around a `LiveProp` throw at runtime with a
-message naming the outer-most form, and their types reject a `LiveProp`
-argument through an overload. One spelling per combination is what lets
-`guren check` read them (§7). This mirrors `always(defer(…))`, where the
+`always(live(…))` throws when it is called, and `always()`'s parameter type
+excludes `LiveProp`. `defer()` takes a callback, so the form to refuse there is
+`defer(() => live(…))`: its callback's return type excludes `LiveProp`, and
+since the value only exists once the deferred request runs it, the resolver
+throws when a deferred callback, or a lazy function, returns a `LiveProp`. One
+spelling per combination is what lets `guren check` read them (§7). This mirrors `always(defer(…))`, where the
 modifier also wraps the value. The Laravel adapter's
 `Inertia::defer(…)->live(…)` chain is not copied, because Guren's prop helpers
 are frozen brand objects rather than builders (Alternatives).
@@ -286,7 +303,7 @@ refresh would append rather than replace.
 #### The page object
 
 `InertiaPagePayload` (`InertiaEngine.ts`) and `ResolvedInertiaPage` (`props.ts`)
-gain `liveProps?: Record<string, LiveProp>` in Inertia's shape, present only
+gain `liveProps?: Record<string, LivePropEntry>` in Inertia's shape, present only
 when non-empty, the way `deferredProps` is. `resolveInertiaProps()` decides it
 with the adapter's rule:
 
@@ -295,13 +312,24 @@ with the adapter's rule:
 - **A partial reload** lists a live key only when it resolves that key: the key
   is selected by `only`/`except`, or wrapped in `always()`. The client keeps the
   entries it already has for every other key.
+- **A key that stops being live.** The client merges `liveProps` shallowly over
+  what it holds (`response.ts` in `@inertiajs/core`), so leaving a key out never
+  removes its listeners. A partial reload that resolves a key as a plain prop
+  (a controller that makes `order` live only while the order is open) lists it
+  as `{ listeners: [] }`, on which the client drops its subscriptions. The
+  Laravel adapter does not do this; the entry costs a few bytes per selected
+  key and is never sent on a full visit, where the client replaces the whole
+  map.
 
-`@guren/testing`'s controller mock already builds its page through
-`buildInertiaPage()`, so it carries `liveProps` with no change of its own, and a
-test can assert on `page.liveProps.order.listeners`. The prototype client
+`@guren/testing`'s controller mock builds its page through
+`buildInertiaPage()`, so the payload carries `liveProps` with no change there,
+and a test can assert on `page.liveProps.order.listeners`. The mock's module
+object lists its exports one by one (`packages/testing/src/controller.ts`), so
+`live` and `isLiveProp` are added to it, or a controller importing `live` from
+the mocked `@guren/core` fails to load. The prototype client
 (`@guren/inertia-client/prototype`, RFC 0021) answers fixtures without a
-server and never sees a live prop; its partial-reload rule is restated from
-`propNames()` and does not change.
+server and never sees a live prop; its own partial-reload filter does not
+change.
 
 ### 2. A `channel` on every WebSocket frame
 
@@ -320,7 +348,8 @@ The frame gains the channel the driver delivered the event on:
 ```
 
 `WebSocketClient.send(event, data)` becomes `send(event, data, channel?)`.
-`subscribeWebSocketClient()` passes the channel; `webSocketMiddleware()`'s
+`subscribeWebSocketClient()` passes the channel (and so does `subscribeClient()`
+for `SSEClient.send`, whose SSE route ignores it); `webSocketMiddleware()`'s
 `send` writes it when present. Control frames (`connected`, `subscription`)
 carry none. A JSON consumer that ignores unknown keys sees no change, and a
 custom socket route registered through `registerWebSocketClient()` may ignore
@@ -378,20 +407,36 @@ What the transport does, as a `LiveTransport` (it routes by event name):
   channel tracker is not exported from `@inertiajs/core`, so the transport keeps
   its own count. Subscriptions requested before the socket is open are queued
   and sent after `connected`.
+- **Paced subscriptions.** The server closes a socket with 1008 once 32
+  messages wait for an answer, and an authorizer may be slow, so the transport
+  keeps at most 16 `subscribe`/`unsubscribe` messages outstanding and sends the
+  next one as each `subscription` answer arrives.
 - **Routing** by the frame's `channel` and `event` to the handlers registered
   for that pair. A frame without a channel (an older server) is dropped, never
   guessed, and the transport warns once naming the minimum `@guren/server`.
+- **No values from the wire.** Before a payload reaches Inertia's handler the
+  transport removes its `__inertia` key. Inertia writes `__inertia.props`
+  straight into the page with no option to refuse it, and `broadcast()` forwards
+  whatever data an app hands it, so an app that relays user-supplied data on a
+  channel would otherwise let that data overwrite another user's props. While
+  this RFC adopts no value mode, every event only ever triggers a reload.
 - **A refused channel** (`subscription` with `authorized: false`) is warned
   about once, naming the channel, and its handlers stay registered without
   traffic, the same outcome Inertia's own transports give: the prop stays at
   the value the page rendered.
+- **Status.** The transport reports `false` through `onStatusChange` when the
+  socket closes; Inertia refreshes only on a `true` that follows a `false`.
 - **Reconnects** with backoff (1 s doubling to 30 s). A reconnected socket is a
   new `clientId` with no subscriptions on the server, so the transport sends
-  `subscribe` for every channel it holds, then reports `connected` through
-  `onStatusChange`, on which Inertia refreshes every live prop for the events
-  missed while it was down. After five failed attempts that never reached
-  `open` (a runtime that answers 501, §5), it stops, warns once, and the page
-  keeps working with static props.
+  `subscribe` for every channel it holds and reports `true` only after every one
+  of them is answered. Reporting earlier would let Inertia's catch-up reload
+  read the state before a subscription is active, and an event published in
+  between would be lost. With the Redis driver the answer still precedes the
+  Redis subscription itself (`RedisDriver.subscribe()` does not wait for it),
+  which Open Question 6 takes up. After five consecutive attempts that end
+  without a `connected` frame (a runtime that answers 501, §5, or a socket
+  closed with 1008), it stops, warns once, and the page keeps working with
+  static props.
 - **`socketId()`** returns the socket id from the `connected` frame (§4), or
   `null` before it arrives.
 
@@ -406,34 +451,43 @@ the broadcast of the same change, which reloads the prop a second time. Inertia
 handles this by sending the transport's socket id as `X-Socket-Id` and dropping
 an event whose envelope carries the same id.
 
-`clientId` is not used as that id. It travels in the envelope of every event to
-every subscriber of the channel, and `POST /broadcasting/auth` attaches
-channels to a `clientId` it is given when the stream is unowned (opened before
-sign-in). Handing it to other users widens that. The `connected` frame gains a
-second, unrelated value:
+`clientId` is not used as that id. Today it reaches only its own connection,
+in the `connected` frame, but as a socket id it would sit in the envelope of
+every excluded event, in front of every subscriber of the channel, and
+`POST /broadcasting/auth` attaches channels to a `clientId` it is given when the
+stream is unowned (opened before sign-in, or by a user object with no `id`,
+`sub` or `userId`). The `connected` frame gains a second, unrelated value:
 
 ```json
 { "event": "connected", "data": { "clientId": "ws_…", "socketId": "s_…", "channels": [] } }
 ```
 
 `socketId` is 16 random bytes from the same `randomHex()` the client id uses,
-held on the `WebSocketClient` record and accepted nowhere as an input.
+held on the `WebSocketClient` record and accepted nowhere as an input. SSE
+clients get none, since the transport does not use them.
 
 `broadcastEvent(event, { except })` takes the request (or the header value),
 reads `X-Socket-Id`, and publishes the payload as
-`{ ...payload, __inertia: { socketId } }`. Exclusion then happens twice, and
-either one suffices:
+`{ ...payload, __inertia: { socketId, userId } }`, where `userId` is the
+requester's id read the way `resolveClientUserId()` reads a socket's owner.
+Exclusion happens on the server, in the one delivery callback
+`openDriverSubscription()` wraps for both transports:
 
-- **On the server.** `subscribeWebSocketClient()`'s delivery callback skips the
-  client whose `socketId` matches, and removes `__inertia.socketId` from the
-  frame it sends to everyone else. The value never leaves the server, and no
-  driver changes: the id rides inside `data`, which `MemoryDriver` and
-  `RedisDriver` already carry opaquely across instances.
-- **In the browser.** Inertia drops an event whose envelope matches, which
-  covers a custom socket route that does not strip it.
+- A WebSocket client is skipped only when its `socketId` matches **and** its
+  owner is the same `userId`. A socket with no owner, or a request with no
+  user, is never skipped.
+- Every client, WebSocket or SSE, receives the payload with the `__inertia` key
+  the manager added removed. Neither the socket id nor the user id leaves the
+  server, and no driver changes: they ride inside `data`, which `MemoryDriver`
+  and `RedisDriver` already carry opaquely across instances.
 
-The header is client-supplied. The worst a forged value does is suppress the
-sender's own delivery, which it could do by not subscribing.
+The header is client-supplied, and binding the match to the requester's user is
+what makes a guessed or leaked value harmless: a user can only suppress
+deliveries to their own sockets, which they could do by not subscribing. A
+custom route registered through `registerWebSocketClient()` goes through the
+same callback, so it strips the key as well. Inertia's own browser-side check
+(dropping an event whose envelope matches) then never fires for Guren's
+transports, and does no harm for others.
 
 ### 5. Authorization and runtimes without broadcasting
 
@@ -442,13 +496,29 @@ message on the socket, authorized by the channel's registered authorizer
 against the user of the upgrade request, exactly as today. The `liveProps`
 entries name channels in the page JSON; they confer nothing, because every
 subscription still goes through `authorize()`, and an unregistered
-`private-`/`presence-` name is denied by default. An event, forged or
-replayed, can only make the client reload a prop, and the reload is an
-ordinary request through the controller's middleware and policies, so it
-returns only what the user may already see. A user who signs out keeps the
-socket they opened (the guide's existing note) until the app removes their
-clients; their next live reload then meets the auth middleware like any other
-request.
+`private-`/`presence-` name is denied by default. Since the transport strips
+`__inertia` (§3), an event can only make the client reload a prop, and the
+reload is an ordinary request through the controller's middleware and
+policies, so the *prop* never holds more than the user may see.
+
+The socket is another matter, and live props inherit its existing limits
+rather than fixing them:
+
+- A socket keeps the user it opened with for its lifetime. Every later
+  `subscribe` is authorized against that user, and delivery never asks again,
+  so a user who signs out or loses access keeps receiving the raw payload of
+  every event on the channels they hold until the app removes their clients
+  (the guide's existing note). Live props add events to those channels, not new
+  channels, but the payload is what leaks. The live props guide therefore tells
+  apps to keep the payload of an event a live prop listens for to identifiers
+  (`broadcastWith()` returning `{ orderId }`), since the prop's value arrives by
+  reload anyway.
+- An unowned stream accepts channels from anyone holding its `clientId`. This
+  RFC does not widen who learns a `clientId` (§4).
+
+Closing a user's sockets at sign-out, and claiming an unowned stream for the
+first user who attaches to it, are fixes to broadcasting itself; Open
+Question 7 asks whether they belong in this RFC's milestone 2 or a separate one.
 
 **Presence channels** subscribe the same way. A live prop listens for events on
 them and joins no member list; joining stays the app's call.
@@ -474,15 +544,29 @@ seam is Inertia's, so it needs nothing from this one.
 ### 6. Types and codegen
 
 ```ts
-export type InertiaPropInput<T> =
-  | T
-  | DeferredProp<T>
-  | AlwaysProp<T>
-  | (() => T | Promise<T>)
-  | LiveProp<T | DeferredProp<T> | AlwaysProp<T> | AlwaysProp<DeferredProp<T>> | (() => T | Promise<T>)>
+/** What a prop accepts today, every `always()` composition the resolver runs included. */
+type PlainPropInput<T> = T | DeferredProp<T> | (() => T | Promise<T>)
+type BasePropInput<T> = PlainPropInput<T> | AlwaysProp<PlainPropInput<T>>
 
-export type ResolvedInertiaProp<V> = V extends LiveProp<infer Inner> ? ResolvedInertiaProp<Inner> : /* existing branches */
+export type InertiaPropInput<T> = BasePropInput<T> | LiveProp<BasePropInput<T>>
+
+export type ResolvedInertiaProp<V> = V extends LiveProp<infer Inner>
+  ? ResolvedInertiaProp<Inner>
+  : V extends AlwaysProp<infer Inner>
+    ? ResolvedInertiaProp<Inner>
+    : V extends DeferredProp<unknown>
+      ? Awaited<ReturnType<V['resolve']>>
+      : V extends () => infer R
+        ? Awaited<R>
+        : V
 ```
+
+The `AlwaysProp` branch recurses, where today it stops at `V['value']`: the
+resolver unwraps `always()` and then runs a deferred or lazy value, so
+`always(defer(() => 1))` and `always(() => 1)` resolve to `number` at runtime
+while their type stays the wrapper. `AlwaysProp<PlainPropInput<T>>` widens the
+input the same way, so `always(defer(…))`, which `guren check` already reads,
+also typechecks.
 
 `PagePropsMap` and the page's `Props` do not change: a live prop arrives as
 the value it resolves to, and the page cannot tell it apart, which is the
@@ -509,7 +593,8 @@ wrapper is Open Question 4.
     transport could ever connect;
   - an event class passed to `live()` that neither defines `broadcastAs()` nor
     pins a static `eventName`, since its wire name is its class name (§1);
-  - a `live()` call wrapped in `always()` or `defer()` (also a runtime error).
+  - `always(live(…))`, or `defer(() => live(…))` whose callback returns the
+    call literally (both also runtime errors).
 
   A spread or a non-literal options argument is reported unverifiable, never
   passed. Matching a channel against the registered authorizers is left out:
@@ -524,7 +609,9 @@ that a reload runs, so every subscriber of the channel receives the same value,
 and a prop that depends on who is looking (a policy-filtered list, a
 translated string, `canEdit`) leaks or goes wrong. It also needs a server
 helper that resolves values the way `resolveInertiaProps()` does without a
-request. A later RFC can add one once an app has measured that reloads are the
+request. Until then the transport removes the key from every payload (§3), so
+no value written by a sender can reach a page. A later RFC can add one once an
+app has measured that reloads are the
 cost worth removing.
 
 ### Milestones
@@ -533,10 +620,11 @@ cost worth removing.
    `resolveInertiaProps()` and `InertiaPagePayload`, `broadcastNameOf()` /
    `broadcastChannelsOf()`, `BroadcastManager.broadcastEvent()`, the types, and
    the broadcasting guide's "Broadcasting from Events" section rewritten around
-   `broadcastEvent()`.
+   `broadcastEvent()`, and `live`/`isLiveProp` in `@guren/testing`'s module
+   mock.
 2. **Socket protocol.** `channel` on WebSocket frames, `socketId` on
-   `connected`, server-side exclusion and stripping in
-   `subscribeWebSocketClient()`, `broadcastEvent({ except })`.
+   `connected`, user-bound exclusion and `__inertia` stripping in the delivery
+   callback both transports share, `broadcastEvent({ except })`.
 3. **Client.** `@guren/inertia-client/live` and `startInertiaClient({ live })`,
    with a browser test against the blog example (an order page in two
    contexts, one saving, one refreshing).
@@ -593,7 +681,7 @@ Additive. No existing call changes meaning:
 
 - `live()`, `broadcastEvent()`, `broadcastNameOf()`, `broadcastChannelsOf()`
   and `@guren/inertia-client/live` are new names. `InertiaPropInput` widens.
-- `WebSocketClient.send` gains an optional parameter; a custom route's
+- `WebSocketClient.send` and `SSEClient.send` gain an optional parameter; a custom route's
   implementation that ignores it keeps working, and so does a client that
   ignores the frame's `channel` key.
 - `connected` gains `socketId`; a client reading `clientId` and `channels`
@@ -642,3 +730,14 @@ left to that command.
    the last channel is released. A few seconds covers navigation between two
    live pages; a longer value saves reconnects at the cost of an idle
    connection per tab.
+6. **Subscription readiness with Redis.** The `subscription` answer is sent
+   once the manager has registered the callback, while `RedisDriver.subscribe()`
+   sends `SUBSCRIBE` without waiting for Redis to confirm it. An event published
+   in that gap is lost to the reconnect's catch-up reload. Should the driver
+   interface gain an optional readiness promise the answer waits for, or is the
+   gap small enough to document?
+7. **Socket lifetime fixes.** Closing a user's sockets at sign-out (an auth
+   event the broadcast manager listens for) and claiming an unowned stream for
+   the first user who attaches to it close the two limits §5 names. They change
+   broadcasting for every app, live props or not. Part of milestone 2, or an
+   RFC of their own?
