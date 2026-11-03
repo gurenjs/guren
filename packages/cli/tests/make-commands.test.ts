@@ -226,7 +226,7 @@ describe('CLI make:* commands', () => {
 
     it('should grant a guest no ability, viewing included', async () => {
       const content = fs.readFileSync(await makePolicy('Post'), 'utf-8')
-      expect(content).not.toContain('return true')
+      expect(content).not.toMatch(/^ {4}return true$/mu)
       expect(content.match(/^ {4}return user !== null/gmu)).toHaveLength(5)
     })
 
