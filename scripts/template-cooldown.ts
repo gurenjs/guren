@@ -171,7 +171,7 @@ export async function youngRanges(ranges: readonly ResolvedRange[], fetchPackume
 }
 
 export async function fetchNpmPackument(name: string): Promise<Packument> {
-  const response = await fetch(`https://registry.npmjs.org/${name.replace('/', '%2f')}`, { signal: AbortSignal.timeout(15_000) })
+  const response = await fetch(`https://registry.npmjs.org/${name.replaceAll('/', '%2f')}`, { signal: AbortSignal.timeout(15_000) })
   if (!response.ok) throw new Error(`npm answered ${response.status}`)
   return await response.json() as Packument
 }
