@@ -313,6 +313,28 @@ stable snapshot, 1 with the partial document for incomplete coverage or a
 changed snapshot, and 1 with a versioned error object when nothing could be
 collected.
 
+**Amended in implementation:**
+
+- Every scaffolded client and SSR entry loads its pages through
+  `import.meta.glob('./pages/**/*.tsx')` and `import(pageManifest[name] ??
+  \`./pages/${name}.tsx\`)`. Read as unfollowed constructs, they made the import scan
+  partial in every app, so a literal glob, and that resolver when `pageManifest` is
+  imported from `.guren/pages.gen`, expand to the files they match.
+- The entries themselves are no graph node. A package they reach is attributed
+  to every route that renders a page (`importedBy[].entries` names the entry).
+- An import of a `@guren` package does not count as importing what it brings in;
+  without that, every package behind `@guren/core` reached every route of
+  `examples/blog` and none read as `framework`.
+- `none-found` rests on the tree and the import scan alone when every importer
+  is a test or build file, since no route serves those. Otherwise an incomplete
+  graph makes it `unknown`. On `examples/blog`, whose graph reads
+  `validates` and `usesMiddleware` partially, 482 instances split into 18
+  `routes`, 58 `framework`, 291 `none-found` and 115 `unknown`, the last
+  mostly reached only by `resources/js/dev-entry.ts` and build configuration.
+- Placement evidence is `import` only for now: the Vite build manifest is not read
+  yet. `coverage.runtime` stays `unavailable` until §6's check lands, and
+  `guren_get_dependency_exposure` ships with the audit integration of §5.
+
 The names say what was read. `importedBy` means an import exists on a path
 from that file; it does not mean the vulnerable function runs. Following RFC
 0032, nothing here becomes a pass or fail.

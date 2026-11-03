@@ -2,6 +2,8 @@ import { defineCommand } from '../define-command'
 import { markCommandFailed } from '../command-status'
 import { loadDependencyTree, type LoadedDependencyTree } from '../dependency-tree-load'
 import type { DependencyInstance } from '../dependency-tree'
+import type { ExposedPackage } from '../dependency-exposure'
+import { isCompleteExposure, loadDependencyExposure, type DependencyExposure } from '../dependency-exposure-load'
 
 function describeInstance(instance: DependencyInstance): string[] {
   const facts = [
@@ -50,5 +52,61 @@ export const depsWhyCommand = defineCommand({
     console.log(args.json
       ? JSON.stringify({ schemaVersion: 1, lockfile: tree.lockfile, workspace: tree.workspace, coverage: tree.coverage, packages: matches })
       : renderDepsWhy(name, tree, matches))
+  },
+})
+
+function describeExposure(entry: ExposedPackage): string[] {
+  const where = entry.placement.map((placement) => placement.at).join(', ') || 'not imported by the app'
+  const lines = [`${entry.id} (${entry.attribution}; ${where})`]
+  if (entry.note) lines.push(`  ${entry.note}`)
+  for (const route of entry.routes) {
+    lines.push(`  ${route.method} ${route.path}${route.name ? ` (${route.name})` : ''}${route.authentication === 'required' ? ', signed in' : ''}`)
+  }
+  for (const site of entry.importedBy) {
+    const from = [...new Set([...site.entries, ...site.nodes.map((node) => node.chain[0]!)])]
+    lines.push(`  imported as ${site.imports} by ${site.file}:${site.line}${from.length > 0 ? `, reached from ${from.join(', ')}` : ''}`)
+  }
+  return lines
+}
+
+export function renderDepsExposure(exposure: DependencyExposure, filter: string | undefined): string {
+  const lines: string[] = []
+  const shown = filter === undefined
+    ? exposure.packages.filter((entry) => entry.importedBy.length > 0)
+    : exposure.packages.filter((entry) => (entry.name === filter || entry.installedAs.includes(filter)))
+  if (filter === undefined) {
+    const framework = exposure.packages.filter((entry) => entry.attribution === 'framework').length
+    lines.push(`${exposure.packages.length} installed packages (${exposure.lockfile ?? 'no lockfile'}); ${shown.length} imported by the app, ${framework} brought in only by @guren packages.`)
+  } else if (shown.length === 0) {
+    lines.push(`${filter} is not installed in this app.`)
+  }
+  for (const entry of shown) lines.push('', ...describeExposure(entry))
+  const incomplete = Object.entries(exposure.coverage).filter(([key, coverage]) => key !== 'runtime' && coverage.status !== 'complete')
+  if (incomplete.length > 0 || exposure.snapshot.consistency === 'changed') {
+    lines.push('', 'Incomplete, so a route or an import may be missing:')
+    if (exposure.snapshot.consistency === 'changed') lines.push('  files changed while they were read')
+    for (const [key, coverage] of incomplete) {
+      for (const reason of coverage.reasons) lines.push(`  ${key}: ${reason.message}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+export const depsExposureCommand = defineCommand({
+  meta: { name: 'deps:exposure', description: 'Show which routes and files reach each installed package, through imports and the Application Graph (RFC 0039).' },
+  args: {
+    package: { type: 'string', description: 'Only this package, e.g. hono.' },
+    json: { type: 'boolean', description: 'Print the versioned exposure document.' },
+    app: { type: 'string', description: 'Application root directory.' },
+    introspect: { type: 'boolean', default: true, description: 'Disable registration introspection with --no-introspect.' },
+  },
+  async run({ args }) {
+    const exposure = await loadDependencyExposure({ cwd: args.app ?? process.cwd(), introspect: args.introspect !== false })
+    const filter = args.package === undefined ? undefined : String(args.package)
+    if (!isCompleteExposure(exposure)) markCommandFailed()
+    const document = filter === undefined
+      ? exposure
+      : { ...exposure, packages: exposure.packages.filter((entry) => (entry.name === filter || entry.installedAs.includes(filter))) }
+    console.log(args.json ? JSON.stringify(document) : renderDepsExposure(exposure, filter))
   },
 })

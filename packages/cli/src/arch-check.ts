@@ -9,7 +9,14 @@ import {
   IMPORTABLE_EXTENSIONS,
 } from './discovery'
 import { matchesAnyGlob } from './glob-match'
-import { cachedFileProbe, moduleEntryFile, resolveImportPath, type FileProbe } from './import-resolution'
+import {
+  cachedFileProbe,
+  isBareSpecifier,
+  moduleEntryFile,
+  packageNameFromSpecifier,
+  resolveImportPath,
+  type FileProbe,
+} from './import-resolution'
 import { literalString, walk } from './ast-walk'
 import { loadArchConfig } from './arch-config'
 import type { ArchLayers, ArchRule, ArchRuleSet } from './arch/index'
@@ -323,16 +330,6 @@ function dedupeResolvedImports(imports: ResolvedImport[]): ResolvedImport[] {
     }
   }
   return [...byTarget.values()]
-}
-
-function isBareSpecifier(specifier: string): boolean {
-  return !specifier.startsWith('.') && !specifier.startsWith('@/')
-}
-
-function packageNameFromSpecifier(specifier: string): string {
-  const segments = specifier.split('/')
-  if (specifier.startsWith('@')) return segments.slice(0, 2).join('/')
-  return segments[0]!
 }
 
 async function resolveImportSpecifier(
