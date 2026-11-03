@@ -431,7 +431,7 @@ await driver.publish('test-channel', 'TestEvent', data)
 
 ## Broadcasting from Events
 
-Integrate broadcasting with the event system:
+An event class that implements `BroadcastableEvent` says where and as what it is broadcast, and `broadcast.broadcastEvent()` sends it:
 
 ```ts
 import { Event } from '@guren/core'
@@ -461,17 +461,13 @@ export class OrderShipped extends Event {
   }
 }
 
-// Usage
-const event = new OrderShipped('123', 'ABC456')
-
-for (const channel of event.broadcastOn()) {
-  await broadcast.broadcast(
-    channel,
-    event.broadcastAs?.() ?? event.eventName,
-    event.broadcastWith?.() ?? {}
-  )
-}
+// Publishes broadcastWith() as 'OrderShipped' on private-orders.123
+await broadcast.broadcastEvent(new OrderShipped('123', 'ABC456'))
 ```
+
+The name an event is sent as is `broadcastAs()`, else its `eventName` (a `static eventName` you declare, or the class name), and its channels are what `broadcastOn()` returns. `broadcastNameOf(event)` and `broadcastChannelsOf(event)` from `@guren/core` read the same two values, so code that subscribes to an event can ask for exactly the name it is sent under. Without `broadcastWith()` the payload is `{}`.
+
+When the class name is the event's name, pin it with `broadcastAs()` or `static eventName`: a production bundle can rename a class whose name another module also declares (`OrderShipped2`), and a client listening for `OrderShipped` then hears nothing.
 
 ## Presence Channel Members
 

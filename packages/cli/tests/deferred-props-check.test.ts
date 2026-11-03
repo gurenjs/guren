@@ -128,6 +128,23 @@ type Props = PageProps<typeof pages.posts.Index>`),
     expect(results.map((result) => result.status)).toEqual(['warn'])
   })
 
+  it('sees a deferred prop inside live(), and passes a live prop that is not deferred', async () => {
+    const imports = "import { Controller, always, defer, live } from '@guren/core'"
+    const on = "{ on: { event: 'PostCreated', channel: 'posts' } }"
+    const { results } = await deferredResults({
+      [CONTROLLER]: controller(
+        `{ posts: live(defer(() => []), ${on}), drafts: live(always(defer(() => [])), ${on}), title: live('Posts', ${on}) }`,
+        { imports },
+      ),
+      [PAGE]: page('interface Props { posts: Post[]; drafts: Post[]; title: string }'),
+    })
+
+    expect(results.map((result) => result.key).sort()).toEqual([
+      'deferred-prop:PostController.index:posts/Index:drafts',
+      'deferred-prop:PostController.index:posts/Index:posts',
+    ])
+  })
+
   it('contributes nothing for a controller that does not import defer from the framework', async () => {
     const { results } = await deferredResults({
       [CONTROLLER]: controller("{ posts: defer(() => []) }", { imports: "import { Controller } from '@guren/core'\nimport { defer } from '../../helpers'" }),
