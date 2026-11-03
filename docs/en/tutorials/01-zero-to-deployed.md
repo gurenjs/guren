@@ -50,7 +50,7 @@ Keep the dev server running in this terminal. Run everything below in a second o
 
 A fresh app is small enough to read in one sitting. These are the files this chapter touches:
 
-```text
+```tree
 guren-blog/
 ├── app/Http/Controllers/HomeController.ts   # the one controller
 ├── resources/js/pages/Home.tsx              # the one page

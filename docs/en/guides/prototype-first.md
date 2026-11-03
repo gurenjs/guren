@@ -137,7 +137,7 @@ bun run build:prototype
 
 The script regenerates the manifests, runs `guren check --prototype`, and builds `dist/prototype/`:
 
-```text
+```tree
 dist/prototype/
 ├── index.html        # the shell, <meta name="robots" content="noindex, nofollow">
 ├── 404.html          # a copy of index.html, for hosts that serve it on unknown paths
