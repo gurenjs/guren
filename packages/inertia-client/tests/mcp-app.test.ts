@@ -360,6 +360,17 @@ describe('startMcpApp', () => {
     expect(calls).toEqual([{ name: 'posts.show', arguments: { id: '13' } }])
   })
 
+  it('says where it runs when no host answers', async () => {
+    const { element } = installDom()
+    const { host } = fakeHost(undefined)
+    host.connect = async () => {
+      throw new Error('Method not found')
+    }
+    await startMcpApp({ host, resolve: async () => ({ default: () => null }) })
+    expect(element.textContent).toContain('inside an MCP Apps host')
+    expect(createInertiaAppMock).not.toHaveBeenCalled()
+  })
+
   it('shows that the call was cancelled and mounts nothing', async () => {
     const { element } = installDom()
     const { host } = fakeHost(undefined)

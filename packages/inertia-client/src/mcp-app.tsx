@@ -124,7 +124,13 @@ export async function startMcpApp(options: StartMcpAppOptions): Promise<unknown>
     host.ontoolresult = (params) => resolve(params)
     host.ontoolcancelled = () => resolve(undefined)
   })
-  await host.connect()
+  try {
+    await host.connect()
+  } catch {
+    // Opened outside a host (or a host that refused `ui/initialize`): nothing will answer.
+    status('This view runs inside an MCP Apps host, such as Claude or ChatGPT.')
+    return undefined
+  }
   const capabilities = host.getHostCapabilities()
   host.onhostcontextchanged = (context) => update({ hostContext: { ...state.hostContext, ...context } })
   update({
