@@ -29,12 +29,23 @@ export interface DevBannerOptions {
   hostname: string
   port: number
   assetsUrl?: string
+  /**
+   * `managed` when `listen()` started or adopted the Vite dev server at `assetsUrl`; `external` when it
+   * started none (`VITE_DEV_SERVER_URL`, `assetsUrl`, `vite: false`, `GUREN_DEV_VITE=0`). Omitted, the line reads `(Vite)`.
+   */
+  assetServer?: 'managed' | 'external'
 }
+
+const ASSET_SERVER_LABELS = {
+  managed: 'Vite, started by Guren',
+  external: 'not started by Guren, run it yourself',
+} as const
 
 export function logDevServerBanner({
   hostname,
   port,
   assetsUrl = 'http://localhost:5173',
+  assetServer,
 }: DevBannerOptions): void {
   const localUrl = `http://localhost:${port}`
   const boundUrl = `http://${formatHostPort(hostname, port)}`
@@ -55,7 +66,7 @@ export function logDevServerBanner({
     ...header,
     detail('App URL', localUrl),
     detail('Bound address', `${boundUrl}${boundLabel}`),
-    detail('Asset server', `${assetsUrl} (Vite)`),
+    detail('Asset server', `${assetsUrl} (${assetServer ? ASSET_SERVER_LABELS[assetServer] : 'Vite'})`),
     '',
     chalk.yellowBright('Press Ctrl+C to douse the flames.'),
     '',

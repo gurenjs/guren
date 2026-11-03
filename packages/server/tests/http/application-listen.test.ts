@@ -111,6 +111,51 @@ describe('Application.listen startup line', () => {
   })
 })
 
+describe('Application.listen dev banner asset server', () => {
+  async function bannerOf(start: () => Promise<unknown>): Promise<string> {
+    delete process.env.GUREN_DEV_BANNER
+    const log = spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await start()
+      return log.mock.calls.flat().join('\n')
+    } finally {
+      log.mockRestore()
+    }
+  }
+
+  it('says Guren started the Vite dev server it launched', async () => {
+    stubBunServe()
+    delete process.env.VITE_DEV_SERVER_URL
+    delete process.env.GUREN_DEV_VITE
+
+    const banner = await bannerOf(() => new Application().listen({ port: 3333, hostname: '127.0.0.1' }))
+
+    expect(vite.startViteDevServer).toHaveBeenCalledTimes(1)
+    expect(banner).toContain('http://localhost:5174 (Vite, started by Guren)')
+  })
+
+  it('says an asset server named by VITE_DEV_SERVER_URL is not one Guren started', async () => {
+    stubBunServe()
+    delete process.env.GUREN_MANAGED_VITE_DEV_SERVER
+    process.env.VITE_DEV_SERVER_URL = 'http://localhost:4241'
+
+    const banner = await bannerOf(() => new Application().listen({ port: 3333, hostname: '127.0.0.1' }))
+
+    expect(vite.startViteDevServer).not.toHaveBeenCalled()
+    expect(banner).toContain('http://localhost:4241 (not started by Guren, run it yourself)')
+  })
+
+  it('says so when Vite is turned off and no asset server is named', async () => {
+    stubBunServe()
+    delete process.env.VITE_DEV_SERVER_URL
+
+    const banner = await bannerOf(() => new Application().listen({ port: 3333, hostname: '127.0.0.1', vite: false }))
+
+    expect(vite.startViteDevServer).not.toHaveBeenCalled()
+    expect(banner).toContain('(not started by Guren, run it yourself)')
+  })
+})
+
 describe('Application.address', () => {
   it('is undefined before listen()', () => {
     expect(new Application().address).toBeUndefined()
