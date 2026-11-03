@@ -289,11 +289,17 @@ from those classes rather than restated. Listeners are grouped per
 | `live(always(…), …)`                    | sent                               | sent on every partial reload     | every response              |
 | `live(always(defer(…)), …)`             | announced                          | sent on every partial reload     | every response              |
 
-`always(live(…))` throws when it is called, and `always()`'s parameter type
-excludes `LiveProp`. `defer()` takes a callback, so the form to refuse there is
-`defer(() => live(…))`: its callback's return type excludes `LiveProp`, and
+`always(live(…))` throws when it is called~~, and `always()`'s parameter type
+excludes `LiveProp`~~. `defer()` takes a callback, so the form to refuse there is
+`defer(() => live(…))`~~: its callback's return type excludes `LiveProp`, and~~**;**
 since the value only exists once the deferred request runs it, the resolver
-throws when a deferred callback, or a lazy function, returns a `LiveProp`. One
+throws when a deferred callback, or a lazy function, returns a `LiveProp`.
+**Amended in implementation:** the helpers' parameter types are unchanged.
+Excluding `LiveProp` there (an intersection with `{ [LIVE_BRAND]?: never }`)
+rejected `always()` of a `string | undefined`, `unknown` or `null` value and
+every generic pass-through, which the frontend guide's own `always(getFlash(…))`
+is. The type-level refusal is `InertiaPropInput`'s: `always(live(…))` is no
+input `this.inertia()` accepts for any prop. One
 spelling per combination is what lets `guren check` read them (§7). This mirrors `always(defer(…))`, where the
 modifier also wraps the value. The Laravel adapter's
 `Inertia::defer(…)->live(…)` chain is not copied, because Guren's prop helpers
@@ -317,18 +323,27 @@ with the adapter's rule:
   entries it already has for every other key.
 - **A key that stops being live.** The client merges `liveProps` shallowly over
   what it holds (`response.ts` in `@inertiajs/core`), so leaving a key out never
-  removes its listeners. A partial reload that resolves a key as a plain prop
+  removes its listeners. ~~A partial reload that resolves a key as a plain prop
   (a controller that makes `order` live only while the order is open) lists it
   as `{ listeners: [] }`, on which the client drops its subscriptions. The
   Laravel adapter does not do this; the entry costs a few bytes per selected
   key and is never sent on a full visit, where the client replaces the whole
-  map.
+  map.~~ **Amended in implementation:** no empty entry is sent, as in the
+  Laravel adapter. After a reconnect Inertia reloads every key it holds an
+  entry for, an empty one included, and a partial reload cannot tell a key that
+  stopped being live from one that never was: the client's own deferred-group
+  fetch would have left an empty entry for every plain deferred key, each then
+  reloaded on every reconnect. A key that stops being live keeps its listeners
+  until the next full visit, and each of its events costs one reload that
+  returns the plain value.
 
 `@guren/testing`'s controller mock builds its page through
 `buildInertiaPage()`, so the payload carries `liveProps` with no change there,
 and a test can assert on `page.liveProps.order.listeners`. The mock's module
 object lists its exports one by one (`packages/testing/src/controller.ts`), so
-`live` and `isLiveProp` are added to it, or a controller importing `live` from
+~~`live` and `isLiveProp` are added to it~~ **(amended in implementation:
+`always`, `defer` and `live` are added, since `always` and `defer` were missing
+too, and nothing in a controller calls `isLiveProp`)**, or a controller importing `live` from
 the mocked `@guren/core` fails to load. The prototype client
 (`@guren/inertia-client/prototype`, RFC 0021) answers fixtures without a
 server and never sees a live prop; its own partial-reload filter does not

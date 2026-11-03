@@ -428,7 +428,7 @@ await driver.publish('test-channel', 'TestEvent', data)
 
 ## イベントからのブロードキャスト
 
-イベントシステムとブロードキャスティングは組み合わせて使えます。
+`BroadcastableEvent` を実装したイベントクラスには、どのチャンネルにどの名前で送るかが書かれています。送るときは `broadcast.broadcastEvent()` を呼びます。
 
 ```ts
 import { Event } from '@guren/core'
@@ -458,17 +458,13 @@ export class OrderShipped extends Event {
   }
 }
 
-// 使用方法
-const event = new OrderShipped('123', 'ABC456')
-
-for (const channel of event.broadcastOn()) {
-  await broadcast.broadcast(
-    channel,
-    event.broadcastAs?.() ?? event.eventName,
-    event.broadcastWith?.() ?? {}
-  )
-}
+// broadcastWith() の内容を 'OrderShipped' として private-orders.123 に送る
+await broadcast.broadcastEvent(new OrderShipped('123', 'ABC456'))
 ```
+
+送るときのイベント名は `broadcastAs()` の戻り値で、無ければ `eventName`（宣言した `static eventName`、なければクラス名）になります。チャンネルは `broadcastOn()` が返すものです。`@guren/core` の `broadcastNameOf(event)` と `broadcastChannelsOf(event)` も同じ値を読むので、イベントを購読する側は送られる名前をそのまま使えます。`broadcastWith()` が無いときの payload は `{}` です。
+
+クラス名をそのままイベント名にしている場合は、`broadcastAs()` か `static eventName` で名前を固定してください。本番用のバンドルでは、別のモジュールに同じ名前のクラスがあるとクラス名が変わることがあり（`OrderShipped2`）、`OrderShipped` を待っているクライアントには何も届かなくなります。
 
 ## Presenceチャンネルメンバー
 
