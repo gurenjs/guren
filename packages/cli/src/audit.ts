@@ -25,7 +25,9 @@ import {
   primaryClassificationId,
   type AuditClassification,
 } from './audit-taxonomy'
-import { dependencyFindingsFromOutput, startDependencyScan, type DependencyScan } from './audit-deps'
+import { dependencyFindingsFromOutput, startDependencyScan, type DependencyAdvisory, type DependencyScan } from './audit-deps'
+import { attachExposures, exposureUnavailable, type DependencyExposureSummary } from './dependency-advisory-exposure'
+import type { ExposedPackage } from './dependency-exposure'
 import {
   classUsesAuthenticatableBase,
   extractClassDeclaration,
@@ -102,6 +104,12 @@ export interface AuditFinding {
    * controller body or the routes file loaded on its own did.
    */
   evidence?: CheckEvidence
+  /** A `deps:*` advisory: the package and every affected range of its GHSA (RFC 0039 §5). */
+  advisory?: DependencyAdvisory
+  /** Every installed instance inside any of `advisory.ranges`, with the routes it reaches. */
+  exposures?: ExposedPackage[]
+  /** Why `exposures` is empty or could not be read; an empty list alone never means "not exposed". */
+  exposureReason?: string
 }
 
 export interface AuditReport {
@@ -119,6 +127,8 @@ export interface AuditReport {
   routeSource: { from: 'manifest' } | { from: 'routes-file'; reason?: string }
   /** Present when the dependency scan ran (or was skipped via options). */
   dependencyScan?: DependencyScan
+  /** The exposure document's snapshot and coverage, read once for every advisory (RFC 0039 §5). */
+  dependencyExposure?: DependencyExposureSummary
   /** Coverage of the installed-package scan for CSRF exemptions. */
   csrfExemptionScan: CsrfExemptionScan
   /**
@@ -139,6 +149,11 @@ export interface RunAuditOptions {
    * command enables it unless invoked with --no-deps.
    */
   deps?: boolean
+  /**
+   * Join each advisory to `deps:exposure` (RFC 0039 §5), which reads the lockfile, every import and
+   * the Application Graph. Only `guren audit` asks for it, and only an advisory finding triggers it.
+   */
+  exposure?: boolean
   /**
    * Judge the route-level rules against the introspected app (RFC 0026 §5). `guren audit` sets it
    * unless `--no-introspect`, and the gate passes the run its check stage shares.
@@ -395,6 +410,12 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
 
   await applyIgnoreConfig(cwd, options.auditConfigFile, findings)
 
+  const dependencyExposure = options.exposure && findings.some((entry) => entry.advisory && entry.status !== 'ignored')
+    ? await import('./dependency-exposure-load')
+      .then(({ loadDependencyExposure }) => loadDependencyExposure({ cwd, introspect: options.introspect !== undefined && options.introspect !== false }))
+      .then((exposure) => attachExposures(findings, exposure), (error: unknown) => exposureUnavailable(findings, error))
+    : undefined
+
   return {
     cwd,
     findings,
@@ -405,6 +426,7 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
     routesAnalyzed: routes.analyzed,
     routeSource: manifest ? { from: 'manifest' } : { from: 'routes-file', ...(routes.staticReason ? { reason: routes.staticReason } : {}) },
     dependencyScan,
+    ...(dependencyExposure ? { dependencyExposure } : {}),
     csrfExemptionScan,
     ...(aiLocalTools ? { aiLocalTools } : {}),
   }
@@ -1383,6 +1405,38 @@ function ownerColumnsOf(
   return result
 }
 
+const SHOWN_ROUTES = 5
+
+const ATTRIBUTION_TEXT: Record<ExposedPackage['attribution'], string> = {
+  routes: 'reaches',
+  framework: 'reaches every route through @guren packages',
+  'none-found': 'no route found to reach it',
+  unknown: 'routes unknown (see the exposure coverage)',
+}
+
+function describeExposures(finding: AuditFinding): string[] {
+  const lines = finding.exposureReason ? [`exposure: ${finding.exposureReason}`] : []
+  for (const instance of finding.exposures ?? []) {
+    const where = instance.placement.map((entry) => entry.at).join(', ') || 'not imported'
+    if (instance.attribution !== 'routes') {
+      lines.push(`${instance.id} (${where}): ${ATTRIBUTION_TEXT[instance.attribution]}`)
+      continue
+    }
+    const shown = instance.routes.slice(0, SHOWN_ROUTES).map((route) => `${route.method} ${route.path}`).join(', ')
+    const more = instance.routes.length > SHOWN_ROUTES ? ` and ${instance.routes.length - SHOWN_ROUTES} more` : ''
+    lines.push(`${instance.id} (${where}): ${ATTRIBUTION_TEXT.routes} ${shown}${more}`)
+  }
+  return lines
+}
+
+function describeExposureCoverage(summary: DependencyExposureSummary | undefined): string | null {
+  if (!summary) return null
+  if ('error' in summary) return summary.error.message
+  const parts = Object.entries(summary.coverage).map(([key, coverage]) => `${key} ${coverage.status}`)
+  const changed = summary.snapshot.consistency === 'changed' ? ', files changed while it was read' : ''
+  return `Dependency exposure coverage: ${parts.join(', ')}${changed} (guren deps:exposure lists the reasons).`
+}
+
 export function renderAuditReport(report: AuditReport): void {
   consola.box(`Guren security audit for ${report.cwd}`)
 
@@ -1427,7 +1481,10 @@ export function renderAuditReport(report: AuditReport): void {
     if (f.suggestion) {
       consola.info(`       → ${f.suggestion}`)
     }
+    for (const line of describeExposures(f)) consola.info(`       ${line}`)
   }
+  const exposureLine = describeExposureCoverage(report.dependencyExposure)
+  if (exposureLine) consola.info(exposureLine)
 
   console.log('')
   console.log(

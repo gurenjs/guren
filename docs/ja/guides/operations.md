@@ -80,3 +80,34 @@ minimumReleaseAgeExcludes = [
 `bunfig.toml` に `minimumReleaseAge` がないときや、アプリが入れている `@guren` のパッケージが一覧から漏れているときは、`guren doctor` が `supply-chain-cooldown` として知らせます。`guren upgrade` を実行すると、この設定を書き足すか、漏れている名前を一覧に加えます。ただし、自分で書いた `[install]` の表や、1 行に 1 つずつではない形の一覧があるファイルには手を加えず、doctor が足すべき行を表示します。
 
 インストール済みのパッケージに脆弱性情報があるかどうかは、`guren audit` を実行すると `bun audit` の結果として表示されます。指摘されたパッケージがどの直接の依存から入っていて、本番の install でも入るかどうかは、`guren deps:why <パッケージ名>` で確かめられます。どのルートから届くのか、サーバーとブラウザのどちらで動くのかは、`guren deps:exposure --package <パッケージ名>` で分かります。
+
+`guren audit` は、脆弱性情報ごとに、影響する範囲に入るインストール済みの版と、それぞれに届くルートを表示します。内容は `deps:exposure` と同じ文書から読んでいます。`@guren` のパッケージを通してだけ入っている版には「reaches every route through @guren packages」と表示されます。どのルートから届くかを読み切れなかった版には「routes unknown」と表示され、指摘の一覧のあとの行に、どの読み取りが途中までだったかが出ます。範囲に入る版が見つからない脆弱性情報には、空のままにせず理由を表示します。`--json` では、`deps:*` の指摘ごとに `advisory`（GHSA と影響するすべての範囲）、`exposures`、一覧が空のときは `exposureReason` が付きます。
+
+### 新しい脆弱性情報に気づく
+
+最後のデプロイのあとに公開された脆弱性情報は、だれかが audit を実行し直すまで気づかれません。定期実行のワークフローを置いておくと、公開された日のうちに分かります。まず、いまのレポートを基準としてコミットします。
+
+```bash
+bunx guren audit --json > audit-baseline.json
+```
+
+そのうえで、毎日この基準と比べて audit を実行します。
+
+```yaml
+name: Dependency advisories
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bunx guren audit --deps-baseline audit-baseline.json
+```
+
+`--deps-baseline` を付けると、脆弱性情報の指摘のキーが基準のファイルに無いときと、依存パッケージのスキャンが最後まで終わらなかったときに exit 1 になります。レジストリに届かなかった日も、成功ではなく失敗として残ります。基準のファイルには、以前の `guren audit --json` のレポートか、指摘のキーを並べた JSON の配列を使えます。`config/audit.ts` で無視している脆弱性情報は、新しいものとして数えません。このフラグは終了条件を足すだけなので、high か critical の脆弱性情報は、基準のファイルにあってもなくても `guren audit` を失敗させます。当面そのままにすると決めたものは理由を添えて `config/audit.ts` に書き、修正のたびに基準のファイルを作り直してください。
