@@ -25,11 +25,14 @@ import {
   ServiceProvider,
   ValidationException,
   acceptsJson,
+  always,
   collect,
+  defer,
   defineModule,
   definePlugin,
   formatValidationErrors,
   buildInertiaPage,
+  live,
   mergeInertiaVary,
   serializePage,
   withDefaultHeaders,
@@ -248,6 +251,9 @@ export function createGurenControllerModule() {
     parseRequestPayload: async (ctx: ControllerContext) =>
       asRecord(await parseRequestBody(ctx as unknown as RequestBodyContext)),
     formatValidationErrors,
+    always,
+    defer,
+    live,
   }
 }
 

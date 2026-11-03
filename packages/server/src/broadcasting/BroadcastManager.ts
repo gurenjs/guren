@@ -11,8 +11,10 @@ import type {
   SSEClient,
   WebSocketClient,
   BroadcastEvent,
+  BroadcastableEvent,
   PresenceMember,
 } from './types'
+import { broadcastChannelsOf, broadcastNameOf } from './event-target'
 import { Channel, PrivateChannel, PresenceChannel } from './channels'
 import { MemoryDriver } from './drivers'
 import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
@@ -204,6 +206,19 @@ export class BroadcastManager {
     data: unknown
   ): Promise<void> {
     await this.driver().publish(channelName, event, data)
+  }
+
+  /**
+   * Publishes `broadcastWith()` (else `{}`) as `broadcastNameOf(event)` on every
+   * channel `broadcastOn()` names: the name a `live()` prop listening for this
+   * event subscribes to.
+   */
+  async broadcastEvent(event: BroadcastableEvent): Promise<void> {
+    const name = broadcastNameOf(event)
+    const data = event.broadcastWith?.() ?? {}
+    for (const channel of broadcastChannelsOf(event)) {
+      await this.broadcast(channel, name, data)
+    }
   }
 
   toChannel(name: string): Channel {
