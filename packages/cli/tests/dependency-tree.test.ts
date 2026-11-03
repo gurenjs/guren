@@ -9,9 +9,9 @@ import { CLI_BIN_PATH } from './helpers'
 
 const SHA = (seed: string) => `sha512-${seed}==`
 
-/** A lockfile shaped as Bun 1.4 writes it: trailing commas, nested copies keyed `parent/child`. */
+/** A lockfile shaped as Bun 1.4.4 writes a new one: version 2, trailing commas, nested copies keyed `parent/child`. */
 const LOCK_TEXT = `{
-  "lockfileVersion": 1,
+  "lockfileVersion": 2,
   "configVersion": 1,
   "workspaces": {
     "": {
@@ -48,6 +48,11 @@ describe('readBunLock', () => {
     const reading = readBunLock('{ "lockfileVersion": 9, "workspaces": {}, "packages": {} }')
 
     expect(reading).toEqual({ kind: 'unreadable', reason: 'bun.lock has lockfileVersion 9, which this reader does not know' })
+    expect(readBunLock('{ "lockfileVersion": 0, "workspaces": {}, "packages": {} }').kind).toBe('unreadable')
+  })
+
+  it('reads a version 1 lockfile, which older installs wrote', () => {
+    expect(readBunLock(LOCK_TEXT.replace('"lockfileVersion": 2', '"lockfileVersion": 1')).kind).toBe('read')
   })
 })
 
@@ -117,8 +122,60 @@ describe('dependencyTree', () => {
     expect(tree.packages.map((instance) => instance.id)).toEqual(['hono@4.13.13', 'shared@workspace:packages/shared'])
   })
 
-  it('is unavailable for a workspace the lockfile does not have', () => {
-    expect(dependencyTree(readLock(), 'apps/missing').coverage.status).toBe('unavailable')
+  it('is unavailable for a workspace the lockfile does not have, naming the lockfile', () => {
+    const tree = dependencyTree(readLock(), 'apps/missing', '../bun.lock')
+
+    expect(tree.coverage).toEqual({ status: 'unavailable', reasons: [{ code: 'no-workspace', message: '../bun.lock has no workspace "apps/missing".' }] })
+  })
+
+  it('reads the nested copies a workspace app owns under its package name, before the hoisted ones', () => {
+    const lock = readLock(`{
+      "lockfileVersion": 2,
+      "workspaces": {
+        "": { "name": "repo", "devDependencies": { "vitest": "^5.0.0" } },
+        "packages/plugin": { "name": "@scope/plugin", "devDependencies": { "vitest": "^4.1.0" } },
+      },
+      "packages": {
+        "@scope/plugin": ["@scope/plugin@workspace:packages/plugin"],
+        "vitest": ["vitest@5.0.5", "", {}, "${SHA('v5')}"],
+        "@scope/plugin/vitest": ["vitest@4.1.12", "", { "dependencies": { "pathe": "^2.0.0" } }, "${SHA('v4')}"],
+        "@scope/plugin/vitest/pathe": ["pathe@2.0.3", "", {}, "${SHA('pathe')}"],
+      },
+    }`)
+
+    const tree = dependencyTree(lock, 'packages/plugin')
+
+    expect(tree.packages.map((instance) => instance.id)).toEqual(['pathe@2.0.3', 'vitest@4.1.12'])
+    expect(tree.packages[1]).toMatchObject({ direct: true, declaredAs: ['dev'] })
+  })
+
+  it('falls back from a/b/c to a/c, then to the hoisted c', () => {
+    const lock = readLock()
+    lock.packages['test-tool/@scope/helper'] = ['@scope/helper@1.1.0', '', { dependencies: { hono: '^4.0.0', extra: '^1.0.0' } }, SHA('helper-nested')]
+    lock.packages['test-tool/hono'] = ['hono@4.1.0', '', {}, SHA('hono-mid')]
+    lock.packages.extra = ['extra@1.0.0', '', {}, SHA('extra')]
+
+    const ids = dependencyTree(lock).packages.filter((instance) => instance.paths['test-tool']).map((instance) => instance.id)
+
+    expect(ids).toEqual(['@scope/helper@1.1.0', 'extra@1.0.0', 'hono@4.1.0', 'test-tool@2.1.0'])
+  })
+
+  it('records an npm alias under the name it is installed as', () => {
+    const lock = readLock()
+    lock.workspaces['']!.dependencies!['str'] = 'npm:string-width@4.2.3'
+    lock.packages.str = ['string-width@4.2.3', '', {}, SHA('sw')]
+
+    const instance = dependencyTree(lock).packages.find((entry) => entry.name === 'string-width')
+
+    expect(instance).toMatchObject({ installedAs: ['str'], direct: true, paths: { str: ['str'] } })
+  })
+
+  it('reports a workspace package whose workspaces entry is missing', () => {
+    const lock = readLock()
+    lock.workspaces['']!.dependencies!['shared'] = 'workspace:*'
+    lock.packages.shared = ['shared@workspace:packages/shared']
+
+    expect(dependencyTree(lock).coverage.reasons.map((reason) => reason.code)).toEqual(['unreadable-entry'])
   })
 })
 
@@ -181,5 +238,11 @@ describe('loadDependencyTree and deps:why', () => {
     expect(JSON.parse(found.stdout)).toMatchObject({ schemaVersion: 1, lockfile: 'bun.lock', workspace: '', packages: [{ id: 'test-tool@2.1.0' }] })
     expect(missing.code).toBe(1)
     expect(missing.stdout).toContain('left-pad is not installed in this app (bun.lock).')
+
+    await writeFile(join(root, 'bun.lock'), LOCK_TEXT.replace(/^\s+"@scope\/helper": .*\n/mu, ''), 'utf8')
+    const partial = await run('test-tool')
+
+    expect(partial.code).toBe(1)
+    expect(partial.stdout).toContain('The tree is incomplete, so a path may be missing:')
   })
 })

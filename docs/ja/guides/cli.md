@@ -198,7 +198,7 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 | `doctor` | プロジェクトの健全性(環境変数・設定・生成ファイル)のレポートと、次にやるべきこと | `bunx guren doctor --next` |
 | `context [Entity]` | プロジェクトのコンテキストマップ。エンティティ名を渡すと、1 つのモデルに関するものをすべて出力する。対象は、テーブル、リレーション、`fillable`/`hidden`/`visible`/`casts`、スキーマ付きのルート(`<Entity>Controller`、モデルを指す `bind`、モデルを使うアクション本体のどれかで対応付ける)、Props 付きのページ、Resource、Policy、紐付いた docs と Issue。同名のモデルは `--module` で区別し、`"app"` はプロジェクトルートを指す。`--live` を付けると `gh` に Issue の状態を問い合わせ、`--repo owner/name` で origin リモートの代わりのリポジトリを指定できる | `bunx guren context User --json` |
 | `docs:graph` | OKF docs のリレーショングラフ。文書・エンティティ・コードパスがノードで、検証済みのリレーションがエッジになる。`--entity <Model>` / `--path <file>` で周辺だけに絞れるので、リネームの前に「これを規定している docs はどれか」を調べられる | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
-| `deps:why <name>` | `bun.lock` を読み、そのパッケージのインストールされている版をすべて、直接の依存のどれからどの経路で入っているかと、`bun install --production` で入るかどうかと合わせて表示します。アプリにそのパッケージがないときや、lockfile を最後まで読めなかったときは exit 1 です | `bunx guren deps:why hono` |
+| `deps:why <name>` | `bun.lock` から、そのパッケージのインストール済みの版をすべて出力する。版ごとに、どの直接の依存からどの経路で入ったかと、`bun install --production` でも入るかを示す。アプリにそのパッケージがないときや、lockfile を最後まで読めないときは exit 1 | `bunx guren deps:why hono` |
 | `spec:generate` | `docs/spec/` にある導出スペックビュー(ER 図・ドメインモデル・画面一覧・モジュールマップ)を生成し直す。詳しくは[スペックアンカード開発](./spec-anchored.md)を参照 | `bunx guren spec:generate` |
 
 `audit` は、名前付きミドルウェアで保護したルート(例: `router.middleware('auth').group(...)`)を保護済みとして扱い、`/login` や `/register` などのゲスト向けのフローを認証チェックの対象から外します。

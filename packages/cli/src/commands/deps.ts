@@ -8,6 +8,8 @@ function describeInstance(instance: DependencyInstance): string[] {
     instance.direct ? `declared as ${instance.declaredAs.join(', ')}` : `depth ${instance.depth}`,
     instance.installedInProduction ? 'installed in production' : 'not installed by `bun install --production`',
   ]
+  const aliases = instance.installedAs.filter((alias) => alias !== instance.name)
+  if (aliases.length > 0) facts.unshift(`installed as ${aliases.join(', ')}`)
   const lines = [`${instance.id} (${facts.join('; ')})`]
   for (const [direct, path] of Object.entries(instance.paths).sort(([a], [b]) => a.localeCompare(b))) {
     if (path.length > 1) lines.push(`  via ${direct}: ${path.join(' > ')}`)
@@ -43,7 +45,7 @@ export const depsWhyCommand = defineCommand({
   async run({ args }) {
     const name = String(args.name)
     const tree = await loadDependencyTree(args.app ?? process.cwd())
-    const matches = tree.packages.filter((instance) => instance.name === name)
+    const matches = tree.packages.filter((instance) => instance.name === name || instance.installedAs.includes(name))
     if (tree.coverage.status !== 'complete' || matches.length === 0) markCommandFailed()
     console.log(args.json
       ? JSON.stringify({ schemaVersion: 1, lockfile: tree.lockfile, workspace: tree.workspace, coverage: tree.coverage, packages: matches })

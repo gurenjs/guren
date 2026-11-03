@@ -29,7 +29,7 @@ export async function loadDependencyTree(appRoot: string): Promise<LoadedDepende
       if (reading.kind === 'unreadable') {
         return { coverage: { status: 'unavailable', reasons: [{ code: 'unreadable-lockfile', message: reading.reason, file: lockfile }] }, packages: [], lockfile, workspace }
       }
-      return { ...dependencyTree(reading.lock, workspace), lockfile, workspace }
+      return { ...dependencyTree(reading.lock, workspace, lockfile), lockfile, workspace }
     }
     if (await isFile(join(dir, BINARY_LOCKFILE))) {
       const message = `${BINARY_LOCKFILE} is binary; run \`bun install --save-text-lockfile\` to write ${LOCKFILE}.`

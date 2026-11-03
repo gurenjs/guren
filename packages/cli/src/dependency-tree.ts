@@ -1,9 +1,10 @@
 /**
  * An app's installed dependency tree, read from the text `bun.lock` (RFC 0039 §3):
- * one entry per installed instance, since one package can be installed at several
- * versions, with its path from every direct dependency. Pure: the lockfile text in,
- * the tree out. A nested copy is keyed `parent/child` in `packages`, and a
- * dependency resolves to the nearest key up that chain, as Bun installs it.
+ * one entry per installed name@version (several nested copies of one version merge),
+ * with its path from every direct dependency. Pure: the lockfile text in, the tree
+ * out. A nested copy is keyed `parent/child` in `packages`, a workspace app's own
+ * copies sit under its package name, and a dependency resolves to the nearest key
+ * up that chain, as Bun installs it.
  */
 import type { GraphCoverage } from './application-graph'
 
@@ -17,6 +18,8 @@ export interface DependencyInstance {
   id: string
   name: string
   version: string
+  /** The names it is installed under in `node_modules`: an npm alias differs from `name`. */
+  installedAs: string[]
   integrity?: string
   direct: boolean
   /** 0 for a direct dependency. */
@@ -49,7 +52,8 @@ export interface BunLock {
 
 export type LockReading = { kind: 'read'; lock: BunLock } | { kind: 'unreadable'; reason: string }
 
-const SUPPORTED_LOCKFILE_VERSIONS = new Set([0, 1])
+/** 2 is what Bun 1.4 writes for a new install; its tables read as 1's do. */
+const SUPPORTED_LOCKFILE_VERSIONS = new Set([1, 2])
 
 export function readBunLock(text: string): LockReading {
   let parsed: unknown
@@ -99,6 +103,7 @@ function entryAt(lock: BunLock, key: string): Entry | null {
   if (!split) return null
   const [name, version] = split
   const workspace = version.startsWith('workspace:') ? lock.workspaces[version.slice('workspace:'.length)] : undefined
+  if (version.startsWith('workspace:') && !workspace) return null
   const info = raw.find((element): element is Dependencies => typeof element === 'object' && element !== null && !Array.isArray(element))
   const integrity = raw.slice(1).find((element): element is string => typeof element === 'string' && /^sha\d+-/u.test(element))
   return { key, name, version, ...(integrity ? { integrity } : {}), dependencies: workspace ?? info ?? {} }
@@ -125,12 +130,16 @@ function childrenOf(entry: Entry): Array<{ name: string; optional: boolean }> {
   ]
 }
 
-/** `workspace` is the app's key under `workspaces`: `""` for a standalone app, `examples/blog` inside a monorepo. */
-export function dependencyTree(lock: BunLock, workspace = ''): DependencyTree {
+/**
+ * `workspace` is the app's key under `workspaces`: `""` for a standalone app,
+ * `examples/blog` inside a monorepo. `label` names the lockfile in the reasons.
+ */
+export function dependencyTree(lock: BunLock, workspace = '', label = LOCKFILE): DependencyTree {
   const root = lock.workspaces[workspace]
   if (!root) {
-    return { coverage: { status: 'unavailable', reasons: [{ code: 'no-workspace', message: `${LOCKFILE} has no workspace "${workspace}".` }] }, packages: [] }
+    return { coverage: { status: 'unavailable', reasons: [{ code: 'no-workspace', message: `${label} has no workspace "${workspace}".` }] }, packages: [] }
   }
+  const rootKey = workspace === '' ? null : (root.name ?? null)
 
   const declared = new Map<string, DeclaredGroup[]>()
   const declare = (group: DeclaredGroup, names: Record<string, string> | undefined) => {
@@ -146,10 +155,10 @@ export function dependencyTree(lock: BunLock, workspace = ''): DependencyTree {
   const production = new Set<string>()
 
   for (const [direct, groups] of declared) {
-    const directKey = resolveKey(lock, null, direct)
+    const directKey = resolveKey(lock, rootKey, direct)
     if (directKey === null) {
       if (!groups.every((group) => group === 'optional' || group === 'peer')) {
-        reasons.push({ code: 'unresolved', message: `${direct} is declared by the app but has no entry in ${LOCKFILE}.` })
+        reasons.push({ code: 'unresolved', message: `${direct} is declared by the app but has no entry in ${label}.` })
       }
       continue
     }
@@ -162,7 +171,7 @@ export function dependencyTree(lock: BunLock, workspace = ''): DependencyTree {
       seen.add(key)
       const entry = entryAt(lock, key)
       if (!entry) {
-        reasons.push({ code: 'unreadable-entry', message: `${LOCKFILE} entry "${key}" is not a package entry this reader knows.` })
+        reasons.push({ code: 'unreadable-entry', message: `${label} entry "${key}" is not a package entry this reader knows.` })
         continue
       }
       const id = `${entry.name}@${entry.version}`
@@ -170,6 +179,7 @@ export function dependencyTree(lock: BunLock, workspace = ''): DependencyTree {
         id,
         name: entry.name,
         version: entry.version,
+        installedAs: [],
         ...(entry.integrity ? { integrity: entry.integrity } : {}),
         direct: false,
         depth: Number.POSITIVE_INFINITY,
@@ -181,6 +191,8 @@ export function dependencyTree(lock: BunLock, workspace = ''): DependencyTree {
         instance.direct = true
         instance.declaredAs = groups
       }
+      const installedAs = keyChain(key).at(-1)!
+      if (!instance.installedAs.includes(installedAs)) instance.installedAs = [...instance.installedAs, installedAs].sort()
       instance.depth = Math.min(instance.depth, path.length - 1)
       instance.paths[direct] ??= path
       if (inProduction) production.add(id)
@@ -188,7 +200,7 @@ export function dependencyTree(lock: BunLock, workspace = ''): DependencyTree {
       for (const child of childrenOf(entry)) {
         const childKey = resolveKey(lock, key, child.name)
         if (childKey === null) {
-          if (!child.optional) reasons.push({ code: 'unresolved', message: `${entry.name}@${entry.version} depends on ${child.name}, which has no entry in ${LOCKFILE}.` })
+          if (!child.optional) reasons.push({ code: 'unresolved', message: `${entry.name}@${entry.version} depends on ${child.name}, which has no entry in ${label}.` })
           continue
         }
         queue.push({ key: childKey, path: [...path, child.name] })
