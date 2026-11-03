@@ -273,8 +273,16 @@ mcpPlugin({
 `ui://<server>/pages/<page id>?v=<hash>`, where the hash is the content hash of
 its built document, taken from the generated module. Hosts may cache a template
 per URI, and the bridge inside it speaks a contract with this server
-(`dev.guren/*`, §6); a new build is a new URI, so a cached template never
-outlives the server it was built for.
+(`dev.guren/*`, §6); ~~a new build is a new URI, so a cached template never
+outlives the server it was built for.~~ **Amended by the Phase 2 spike:** a
+new URI reaches a host only through a new `tools/list`, and Claude does not ask
+for one when the server restarts. Measured on claude.ai: after a redeploy it
+kept calling tools with the URI from its earlier `tools/list` until the
+connector was reconnected, while it re-read the template on every call. So the
+hash is a cache key and not a guarantee. A read of a page URI the caller's
+listing contains answers the current build whatever its `v` (below), and a
+template from an older build finds out through the contract version in
+`dev.guren/response` (§6), never by running against a server it does not match.
 
 **`tools/list`.** `describeTool()` adds, for a tool with `ui.page`:
 
@@ -324,10 +332,13 @@ listing them is what lets a host prefetch and review templates at connect time.
 }
 ```
 
-Any other URI, including a page URI with a stale `v`, answers the SDK's
+Any other URI~~, including a page URI with a stale `v`,~~ answers the SDK's
 `ResourceNotFoundError`, which the installed SDK sends as `-32602` with the URI
 in its data on every protocol revision (it maps a handler's `-32002` to
-`-32602` at the era seam). Resource reads go through the same authentication
+`-32602` at the era seam). **Amended by the Phase 2 spike:** a page URI whose
+`v` names another build answers the page's current build, since a host holding
+a URI from an earlier `tools/list` would otherwise show text until it
+reconnects; the contract version of §6 covers the mismatch. Resource reads go through the same authentication
 the endpoint already applies before any MCP framing, through the rate limiter,
 ~~and into the audit trail as their own event (`AgentResourceRead`), since a
 template read is not a tool invocation.~~ **Amended in implementation (Phase 1):**
@@ -436,6 +447,55 @@ ext-apps reference host and Claude): initial mount, `router.reload()`, a
 relative `<Link>`, back and forward. If Inertia 3 cannot run without writing
 history in a sandboxed document, the bridge keeps an in-memory history and the
 RFC is amended before anything else is built on it.
+
+**Amended by the Phase 2 spike: the bridge keeps an in-memory history.** The
+spike rendered Inertia 3.11 (React, `@modelcontextprotocol/ext-apps` 2.1.0, one
+inlined document of 663 KB) on claude.ai from a remote connector, four runs.
+
+- The view is a real `https` origin, `https://<hash>.claudemcpcontent.com`,
+  at `/mcp_apps?stable-origin=true&resource-src=…`, two frames below
+  `https://claude.ai`. It is not an opaque origin: `sessionStorage`,
+  `localStorage` and `pushState()` to any path work, and `document.cookie` is
+  empty.
+- History is joint with the host's tab. `history.length` started at 19 and
+  grew with every Inertia visit, so the host page's Back button would walk
+  through the view's visits. A `history.back()` from the view at its first
+  entry left the document and the frame went blank.
+- The host offered `serverTools`, `serverResources`, `openLinks`,
+  `downloadFile`, `logging`, `updateModelContext` (text, image), `message`
+  (text) and `sandbox.csp`, and a host context with `theme`, `styles`,
+  `displayMode` (`inline`, `fullscreen`) and `locale`. The tool result reached
+  the view with its `_meta` intact.
+- Claude Desktop (4.4212) renders nothing for a local stdio server, even a
+  view of a few hundred bytes: its client named `claude-ai` lists tools and
+  resources, while the tool calls arrive from a second client,
+  `local-agent-mode-<server>`, which never reads a resource. A remote
+  connector renders in both the web and the desktop app, so the guide (Phase
+  3) says a view needs one.
+- Inertia renders the initial page before it writes the page's `url` into the
+  location, so a relative `<Link href="13">` on `/posts/12` resolved against
+  `/mcp_apps` and visited `/13`.
+
+So, before mounting, the bridge replaces the location with the page's
+app-relative `url`, and from then on owns the history: `pushState()` becomes a
+`replaceState()` plus an entry in a list the bridge keeps; `back()`,
+`forward()` and `go()` move in that list, replace the location with the
+entry's URL and dispatch the `popstate` Inertia restores pages from. Measured
+with that in place: the mount, a relative and an absolute `<Link>`,
+`router.reload()` (one tool call, page and list unchanged), back twice,
+forward, and a visit after forward (which drops the entries ahead) all held,
+and `history.length` never moved. The view's visits are therefore not entries
+of the host's tab.
+
+**What must never reach `window.location`.** The location is the sandbox's
+document, so any assignment to it navigates the frame to
+`https://<hash>.claudemcpcontent.com/<path>`, which serves nothing. In Inertia
+3.11 three paths assign it: a location visit (409 with `X-Inertia-Location`)
+and a version mismatch (409 with a different `X-Inertia-Version`), both through
+`Response.locationVisit()`, and the `historyQuotaExceeded` handler. The
+bridge's `HttpClient` never answers 409: an external redirect becomes the
+hand-off of step 4, and every page it hands back carries the version of the
+page it replaces, since a tool call negotiates no asset version.
 
 **The bridge catalogue.** To turn a visit into a tool call the bridge needs the
 method, path and input sources of the tools the caller may call. It does not
@@ -559,10 +619,20 @@ built at the adapter boundary, from the pipeline's result:
 
 ```ts
 type GurenToolResponse =
+  // Every member also carries `contract: number` (amended by the Phase 2 spike).
   | { outcome: 'executed'; status: number; url?: string; location?: string; errors?: Record<string, string[]> }
   | { outcome: 'denied'; reason: AgentToolDenialReason; message: string; approval?: { requestId: string; status: AgentApprovalStatus } }
   | { outcome: 'failed'; message: string }
 ```
+
+**Amended by the Phase 2 spike:** every envelope carries `contract`, the
+version of the `dev.guren/*` keys and the bridge catalogue that the plugin
+speaks, and every built document carries the version its bridge was built
+against. A bridge that reads another number does not drive visits: it renders
+the page it was given, and every visit becomes the hand-off of step 5, so a
+host still holding an older template (§3) degrades to links instead of
+misreading results. The number changes only when those shapes do, not with
+every build.
 
 `ToolCallOutcome` gains the HTTP facts `mapToolResponse()` already reads
 (`location`, the 422 `errors` object) as fields, so the adapter never parses
@@ -789,7 +859,7 @@ Phases:
    projection, and the missing-build behaviour (§3, §6). Testable with a
    hand-written HTML string.
 2. **Build and bridge.** First the sandbox spike of §5 (history, reload,
-   relative links). Then the `mcp-app` Vite mode with the app's `mcp-app.tsx`,
+   relative links; done, and §5 records what it measured). Then the `mcp-app` Vite mode with the app's `mcp-app.tsx`,
    the generated module, the `@guren/inertia-client/mcp-app` subpath with the
    Inertia `HttpClient` and `useMcpApp()`, and a deployed build of
    `examples/blog` on each deploy target (§4–§5), proven end to end against a
