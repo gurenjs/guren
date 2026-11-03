@@ -1368,9 +1368,26 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
   test('should write a planned empty fillable as fillable: [], which create(data, { set }) accepts', () => {
     const document = widgetsPlan()
     document.models[3]!.fillable = []
-    const model = emitWidgets(document, 'pg').files.find((file) => file.path === 'app/Models/Widget.ts')!.contents
+    const output = emitWidgets(document, 'pg')
+    const file = (path: string): string => output.files.find((candidate) => candidate.path === path)!.contents
 
-    expect(model).toContain('export class Widget extends defineModel(widgets, {\n  fillable: [],\n}) {')
+    expect(file('app/Models/Widget.ts')).toContain('export class Widget extends defineModel(widgets, {\n  fillable: [],\n}) {')
+    // Every column, not only the foreign keys, since the empty allowlist refuses each key of the data.
+    const controller = file('app/Http/Controllers/WidgetController.ts')
+    expect(controller).toContain(
+      "  // Widget's fillable is empty, so create() refuses every key of its data: name each column it writes in set, as Widget.create({}, { set: { title, body, count, ratio, price, active, releasedOn, publishedAt, meta, token, postId, parentId } }) (RFC 0031)\n  async store(): Promise<Response> {",
+    )
+    expect(controller).not.toContain('are not fillable: write them')
+  })
+
+  test('should name the columns set writes on a POST action with no body, when the planned fillable is empty', () => {
+    const document = widgetsPlan()
+    document.models[3]!.fillable = []
+    delete document.controllers![0]!.actions[1]!.body
+    const controller = emitWidgets(document, 'pg').files.find((file) => file.path === 'app/Http/Controllers/WidgetController.ts')!.contents
+
+    expect(controller).toContain("// Widget's fillable is empty, so create() refuses every key of its data")
+    expect(controller).not.toContain('this.validateBody(')
   })
 
   test('should write a stubbed field whose name holds a line break or a line separator as a valid literal', () => {

@@ -137,6 +137,17 @@ function unfillableForeignKeys(model: PlanModel): string[] {
     .map((column) => column.name)
 }
 
+/**
+ * An added model whose planned `fillable` is empty, where `create()` refuses every key of the data:
+ * the columns a write names in `set`, all but a single-column primary key, which the table generates.
+ */
+function serverSetColumns(model: PlanModel): string[] | undefined {
+  if (model.change.kind !== 'add' || model.fillable.length > 0) return undefined
+  const kept = model.columns.filter((column) => column.change.kind !== 'drop')
+  const generated = kept.filter((column) => column.primaryKey).length === 1
+  return kept.filter((column) => !(generated && column.primaryKey)).map((column) => column.name)
+}
+
 function describeResponse(plan: PlanDraft, response: PlanAction['response']): string {
   const named = (id: string): string => {
     const element = [...plan.views.map((view) => ({ id: view.id, name: view.page })), ...plan.resources].find((candidate) => candidate.id === id)
@@ -229,8 +240,13 @@ export class PlanHttpEmitter {
       }
     }
     lines.push(...this.validation(action, 'body', imports))
-    const serverSet = action.body && routes.some((route) => route.method === 'POST') ? unfillableForeignKeys(model) : []
-    if (serverSet.length > 0) {
+    const posted = routes.some((route) => route.method === 'POST')
+    const everyColumn = posted ? serverSetColumns(model) : undefined
+    const serverSet = action.body && posted && !everyColumn ? unfillableForeignKeys(model) : []
+    if (everyColumn && everyColumn.length > 0) {
+      const keys = everyColumn.join(', ')
+      notes.push(`${model.name}'s fillable is empty, so create() refuses every key of its data: name each column it writes in set, as ${model.name}.create({}, { set: { ${keys} } }) (RFC 0031)`)
+    } else if (serverSet.length > 0) {
       const keys = serverSet.join(', ')
       notes.push(`${keys} ${serverSet.length === 1 ? 'is' : 'are'} not fillable: write ${serverSet.length === 1 ? 'it' : 'them'} with ${model.name}.create(data, { set: { ${keys} } }) (RFC 0031)`)
     }
