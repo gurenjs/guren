@@ -145,6 +145,7 @@ export function applyVerification(
         }
         const reachHeld = unmatched && !(carriers.get(id) ?? []).some((stepId) => standing.has(stepId))
         const byAcceptance = reachHeld && withoutBehaviour.has(id) && accepted?.has(id) === true
+        // A hold added to this chain goes before the `byAcceptance` settle, or an accepted element skips it.
         if (!awaitsVerification(element)) {
           hold('incomplete', `${verifiedBy}, and no longer at the state that completes it.`)
         } else if (reachHeld && !byAcceptance) {

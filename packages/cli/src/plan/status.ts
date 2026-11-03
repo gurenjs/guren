@@ -243,7 +243,8 @@ function unreadableAlterReason(properties: PlanPropertyStatus[], reachable: bool
   if (setAside.length > 0) {
     return `Every planned property that matches already held when the plan was approved, so none shows the change: state the change in a property the application did not hold, or ${lift}.`
   }
-  return 'No planned property of this change has a reader.'
+  // An altered side effect plans no property, so the acceptance path is all there is to name.
+  return reachable ? 'No planned property of this change has a reader.' : `No planned property of this change has a reader: ${lift}.`
 }
 
 function conclude(judgement: Judgement, credit: AlterCredit, reachable: ReadonlySet<string>): PlanElementStatus {

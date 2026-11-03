@@ -100,6 +100,7 @@ export interface PlanElementWithoutBehaviour {
  * The elements an approval accepts as complete on their step's verified run alone (RFC 0030 §4):
  * outside {@link behaviourCanReach}, and of a kind no planned property lifts. A command, an added or
  * altered side effect, and an altered column; an added or renamed column is read by its properties.
+ * Pure over the plan, so an added column none of whose properties reads stays a case for a waiver.
  */
 export function planElementsWithoutBehaviour(plan: PlanDraft | Plan): PlanElementWithoutBehaviour[] {
   const reachable = behaviourCanReach(plan)

@@ -87,7 +87,7 @@ function job(usedIn: string[]): PlanAppSideEffectDetail {
   return { className: 'SendDigest', module: null, file: JOB_FILE, usedIn, unprovenIn: [], mentionedIn: [] }
 }
 
-function state(usedIn: string[] = [DISPATCHER]): PlanAppState {
+function state(usedIn: string[] = [DISPATCHER], sideEffects: Partial<PlanAppDetail['sideEffects']> = {}): PlanAppState {
   return planAppState({
     detail: {
       routes: [],
@@ -104,7 +104,7 @@ function state(usedIn: string[] = [DISPATCHER]): PlanAppState {
       resourcePayloads: [],
       policies: [],
       routeFiles: [],
-      sideEffects: { ...NO_SIDE_EFFECTS, job: [job(usedIn)] },
+      sideEffects: { ...NO_SIDE_EFFECTS, job: [job(usedIn)], ...sideEffects },
     },
   })
 }
@@ -190,6 +190,19 @@ describe('applyVerification with an approval that accepted elements without a be
     expect(waived.elements[0]!.state).toBe('accepted')
     expect(waived.elements[0]!.notes.at(-1)).toBe('Waived t: r. It is accepted, so the waiver is not needed.')
     expect(waived.summary.states.accepted).toBe(1)
+  })
+})
+
+describe('judgePlan on an altered side effect, which plans no property', () => {
+  test('should name the acceptance path in its unjudged reason, as for an altered column', () => {
+    const mail = { id: 'mail.digest', change: { kind: 'alter' }, kind: 'mail', name: 'DigestMail', trigger: 'the job runs', description: 'The digest mail.' }
+    const plan = PlanDraftSchema.parse(document({ models: [], sideEffects: [mail], commands: [] }))
+    const sent: PlanAppSideEffectDetail = { className: 'DigestMail', module: null, file: 'app/Mail/DigestMail.ts', usedIn: [DISPATCHER], unprovenIn: [], mentionedIn: [] }
+
+    const element = judgePlan(plan, state([], { mail: [sent] })).elements.find((entry) => entry.id === 'mail.digest')!
+
+    expect(element.state).toBe('unjudged')
+    expect(element.reason).toBe("No planned property of this change has a reader: let its step's verified run complete it, which approving the plan accepts since no behaviour can reach it, or waive it.")
   })
 })
 
