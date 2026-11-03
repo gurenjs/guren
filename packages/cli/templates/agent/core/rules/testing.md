@@ -80,8 +80,10 @@ Validation failures are 422 with `{ message, errors: Record<string, string[]> }`
   Promise of the raw driver): `await Post.where({ authorId }).get()`,
   `await Post.where({ authorId }).count()`, `await Post.find(id)`. `count()`
   exists on the query builder only; `Post.count()` does not.
-- **Create a user with `password`**, not `passwordHash`: the scaffolded `User`
-  model hashes it (`requireOnCreate: ['password']`).
+- **Create a user with `password`**, not `passwordHash`, when `User` has
+  `base: AuthenticatableModel` (the model `guren add auth` and the blog starter
+  write): it hashes the plain value. A `User` from `make:model` hashes nothing,
+  and the API template ships none.
 - **The response body is `await res.json()`**; `res.response` is private.
 - There is no `asInertia()`: Inertia pages are asserted with `assertInertia()`.
 
@@ -111,10 +113,12 @@ queue.assertPushed<ProcessOrderPayload>(ProcessOrderJob, (payload) => payload.sk
 ```
 
 `sent()` / `sentTo(email)` return `{ message, timestamp }[]`, the built
-message being `{ to, from?, cc?, bcc?, subject, text?, html?, attachments? }`
-(addresses as `{ email, name? }`). Assertions besides `assertSentTo`:
-`assertSent(fn?)`, `assertSentTimes(n)`, `assertNothingSent()`,
-`assertSentWithSubject()`, `assertSentWithBodyContaining()`.
+message being `{ to, from?, cc?, bcc?, replyTo?, subject, text?, html?,
+attachments?, headers? }` (addresses as `{ email, name? }`). The other
+assertions: `assertSent(fn?)`, `assertSentTimes(n)`, `assertNothingSent()`,
+`assertSentFrom(email)`, `assertSentWithSubject(exact)`,
+`assertSentWithBodyContaining(text)`, `assertSentWithCc/Bcc(email)`,
+`assertSentWithAttachment(filename)`.
 
 Events: `const events = fakeEvent()`, then
 `using _events = app.container.fake('events', events.getManager())` and

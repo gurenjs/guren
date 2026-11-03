@@ -17,7 +17,9 @@ subsystem's declarations sit under `node_modules/@guren/*/dist/<area>/` (`queue/
 `node_modules/@guren/orm/dist/index.d.ts`, the test helpers in
 `node_modules/@guren/testing/dist/index.d.ts`, form hooks in
 `node_modules/@guren/inertia-client/dist/forms.d.ts`. Whichever package
-declares a server or ORM name, app code imports it from `@guren/core`.
+declares a server or ORM name, app code imports it from `@guren/core`, or from
+the core subpath that carries it: `@guren/core/redis` for the Redis stores,
+`@guren/core/lambda` for `createLambdaHandler`.
 
 ## Your Role
 
@@ -250,7 +252,9 @@ function PostFields({ form }: { form: RouteForm<RouteBody<ApiRoutes, 'posts.upda
   return <Field form={form} name="title" />
 }
 ```
-`action` covers a submit made before hydration (a PUT form still says `post`).
+`method` and `action` matter only for a submit made before hydration: the server
+still refuses that POST (it carries no CSRF token), but the fields stay out of a
+GET query string (a PUT form still says `post`).
 Options besides `params`: `adoptPageErrors` (seed errors once from the page's
 shared `errors`) and `errorBag`. `form.handleSubmit` takes no visit options;
 the rest of Inertia's form (`data`, `setData`, `errors`, `processing`, `reset`) is there.
@@ -354,8 +358,10 @@ const canEdit = await this.can('update', [Post, post])   // boolean, no 403
 An ability may be `async` and returns a boolean or one of the `Policy`
 helpers: `this.deny(message?)` (403), `this.denyWithStatus(status, message?)`,
 `this.denyAsNotFound(message?)` (404, so a stranger cannot tell the record
-exists; `can()` is `false`). An ability with no record that still needs data
-takes a plain object as the tuple's second element:
+exists; `can()` is `false`). `make:policy` annotates each ability `: boolean`;
+returning a helper needs `boolean | AuthorizationResponse` (from `@guren/core`,
+inside `Promise<…>` when async) or no annotation. An ability with no record
+that still needs data takes a plain object as the tuple's second element:
 
 ```typescript
 import { Policy, type AuthUser } from '@guren/core'
@@ -400,7 +406,8 @@ the message.
 import { Job } from '@guren/core'
 
 export class SendReceiptJob extends Job<{ orderId: number }> {
-  static queue = 'emails'   // default 'default'; also maxAttempts (3) and backoff
+  static override jobName = 'SendReceiptJob'   // queued messages carry this, not the class name a bundler may mangle
+  static override queue = 'emails'   // default 'default'; also maxAttempts (3) and backoff
   async handle({ orderId }: { orderId: number }): Promise<void> {
     // look the order up and send the receipt
   }

@@ -63,27 +63,18 @@ calls `CommentPolicy.create(user, { postLocked })`, so widen the stub's
 `create(user)` to take it. Abilities may be `async`, and may return
 `this.deny(msg?)`, `this.denyWithStatus(status, msg?)` or
 `this.denyAsNotFound()` instead of `false`; after the last, `authorize()`
-throws a 404 and `can()` returns `false`.
+throws a 404 and `can()` returns `false`. The stubs annotate each ability
+`: boolean`, so widen it to `boolean | AuthorizationResponse` (a type from
+`@guren/core`; `Promise<…>` when async) or drop the annotation.
 
-The policy must be registered, or every check is denied. After
-`bunx guren make:policy Post`, register it in the `boot()` of a provider the app
-already has, or of a new one (`bunx guren make:provider Authorization`) listed in
-`createApp({ providers })`. `register()` is abstract on `ServiceProvider`, so a
-boot-only provider still declares it:
-
-```typescript
-// app/Providers/AuthorizationProvider.ts
-import { ServiceProvider } from '@guren/core'
-import { Post } from '../Models/Post.js'
-import { PostPolicy } from '../Policies/PostPolicy.js'
-
-export default class AuthorizationProvider extends ServiceProvider {
-  register(): void {}
-  boot(): void {
-    this.container.make('gate').policy(Post, PostPolicy)
-  }
-}
-```
+The policy must be registered, or every check is denied: after
+`bunx guren make:policy Post`, call
+`this.container.make('gate').policy(Post, PostPolicy)` in the `boot()` of a
+provider the app already has, or of a new one
+(`bunx guren make:provider Authorization`) listed in `createApp({ providers })`.
+`register()` is abstract, so declare `register(): void {}` even when the
+provider only boots. The full provider: `__SKILLS_DIR__/guren-api/SKILL.md`
+(Authorization).
 
 ## Exceptions
 
@@ -91,6 +82,12 @@ Throw from the action; the global handler renders them by `statusCode`:
 `HttpException.badRequest/unauthorized/forbidden/notFound/conflict/unprocessable(msg?)`,
 `AuthorizationException.deny('Comment')` (403, for ownership checks outside policies),
 `ValidationException.withMessages({...})` (422). `Model.findOrFail()` throws a 404 on its own.
+
+## Transactions
+
+Writes that must land together: `await Order.transaction(async (trx, txOrder) => { … })`
+(a throw rolls back), other models through `OrderLine.inTransaction(trx)`.
+The ORM models rule (Transactions) has the rest.
 
 ## Middleware
 
