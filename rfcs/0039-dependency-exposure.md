@@ -388,8 +388,29 @@ The Dockerfile `guren deploy` renders has two stages, `oven/bun:1` for the
 builder and `oven/bun:1-slim` for production. Both move to the exact version of
 the Bun running the command (`oven/bun:1.4.4` and `oven/bun:1.4.4-slim`), so the
 runtime check can match them and a rebuild does not pick up another release.
-A tag is still mutable on the registry; pinning a digest as well is Open
-Question 7. The templates set no `engines.bun` today, so the report usually
+
+A tag can still be re-pushed, so each reference also carries the digest of the
+tag's multi-platform image index, read from Docker Hub when `guren deploy`
+runs:
+
+```dockerfile
+FROM oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS builder
+FROM oven/bun:1.4.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4
+```
+
+Measured on 2026-11-03: an anonymous token from `auth.docker.io` and a
+manifest request to `registry-1.docker.io` with the OCI index media type
+return `application/vnd.oci.image.index.v1+json` and the
+`Docker-Content-Digest` above, listing `linux/amd64` and `linux/arm64`. The
+index digest is the one to pin, never a platform manifest's, or an arm64
+build machine and an amd64 host would disagree. Docker resolves by digest and
+keeps the tag for people to read; the runtime check reads the tag part.
+
+When the registry does not answer, `guren deploy` writes the exact tag alone
+and prints that the digest is missing, rather than failing the command. The
+runtime check reports a tag without a digest as unpinned, as it does a tag
+without an exact version. Moving to a newer Bun means running `guren deploy`
+again, or letting Renovate (`pinDigests`) update the reference. The templates set no `engines.bun` today, so the report usually
 shows only the process version and the image tags.
 
 ### 7. Data exposure
@@ -518,9 +539,6 @@ existing `deps:*` finding keys are unchanged; the new fields are optional.
    annotation be required?
 6. Which Bun release introduced `minimumReleaseAge`, and does an older Bun
    ignore the key or fail on it? Only 1.4.4 was measured.
-7. Should the rendered Dockerfile pin image digests as well as exact tags?
-   A digest survives a re-pushed tag, at the cost of a manual bump per Bun
-   release.
-8. Does `bun install --lockfile-only` apply `minimumReleaseAge` and the
+7. Does `bun install --lockfile-only` apply `minimumReleaseAge` and the
    stability filter exactly as a full install does? §5's fix check relies on
    it; it has not been measured.
