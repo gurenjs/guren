@@ -11,6 +11,7 @@ import {
 } from '@guren/core'
 
 import { mcpPlugin } from './plugin'
+import { MCP_APP_CONTRACT } from './mcp-apps'
 
 class PostController extends Controller {
   async show() {
@@ -125,9 +126,23 @@ describe('mcpPlugin MCP Apps (RFC 0038)', () => {
     })
   })
 
-  test('refuses a page URI naming another build', async () => {
+  test('answers the current build for a page URI naming another build', async () => {
     const client = await connectClient()
-    await expect(client.readResource({ uri: 'ui://guren-app/pages/posts/Show?v=stale' })).rejects.toThrow()
+    const { contents } = await client.readResource({ uri: 'ui://guren-app/pages/posts/Show?v=stale' })
+    expect(contents[0]).toMatchObject({ uri: 'ui://guren-app/pages/posts/Show?v=stale', text: SHOW_HTML })
+  })
+
+  test('refuses a page URI with another query, a fragment, no build, or a page nobody lists', async () => {
+    const client = await connectClient()
+    for (const uri of [
+      'ui://guren-app/pages/posts/Show?v=abc123&x=1',
+      'ui://guren-app/pages/posts/Show?v=abc123#top',
+      'ui://guren-app/pages/posts/Show',
+      'ui://guren-app/pages/drafts/Show?v=abc123',
+      'ui://other-app/pages/posts/Show?v=abc123',
+    ]) {
+      await expect(client.readResource({ uri })).rejects.toThrow()
+    }
   })
 
   test('serves the bridge catalogue for the tools the caller can call', async () => {
@@ -149,7 +164,13 @@ describe('mcpPlugin MCP Apps (RFC 0038)', () => {
     const result = await client.callTool({ name: 'posts.show', arguments: { id: '1' } })
     const meta = result._meta as Record<string, Record<string, unknown>>
 
-    expect(meta['dev.guren/response']).toEqual({ outcome: 'executed', status: 200, url: 'http://localhost/posts/1' })
+    expect(meta['dev.guren/response']).toEqual({
+      contract: MCP_APP_CONTRACT,
+      bridge: 'ui://guren-app/bridge',
+      outcome: 'executed',
+      status: 200,
+      url: 'http://localhost/posts/1',
+    })
     expect(meta['dev.guren/inertia-page']).toMatchObject({
       component: 'posts/Show',
       url: '/posts/1',
@@ -172,6 +193,8 @@ describe('mcpPlugin MCP Apps (RFC 0038)', () => {
     const client = await connectClient()
     const result = await client.callTool({ name: 'posts.update', arguments: { id: '1' } })
     expect((result._meta as Record<string, unknown>)['dev.guren/response']).toEqual({
+      contract: MCP_APP_CONTRACT,
+      bridge: 'ui://guren-app/bridge',
       outcome: 'executed',
       status: 303,
       location: 'http://localhost/posts/1',

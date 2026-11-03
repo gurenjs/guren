@@ -16,6 +16,12 @@ const MCP_APP_MIME_TYPE = 'text/html;profile=mcp-app'
 /** Read by hosts that predate the nested `_meta.ui.resourceUri`; the specification drops it before GA. */
 const LEGACY_RESOURCE_URI_KEY = 'ui/resourceUri'
 const RESPONSE_META_KEY = 'dev.guren/response'
+/**
+ * The version of the `dev.guren/*` keys and the bridge catalogue (RFC 0038 §6).
+ * Kept equal to `MCP_APP_CONTRACT` in `packages/inertia-client/src/mcp-app-bridge.ts`,
+ * which a test there reads this file to check; bump both when either shape changes.
+ */
+export const MCP_APP_CONTRACT = 1
 const INERTIA_PAGE_META_KEY = 'dev.guren/inertia-page'
 
 /** One built page: its whole HTML document and the content hash its URI carries. */
@@ -146,16 +152,26 @@ export function listUiResources(listed: readonly DerivedAgentTool[], ui: AppMcpU
 
 /**
  * `resources/read`, for a URI the caller's listing contains; undefined for any
- * other, including a page URI naming a stale build.
+ * other. A page URI naming another build answers the current one: Claude keeps
+ * the URIs of an earlier `tools/list` across a redeploy, and the view learns of
+ * the mismatch from `contract` in its results (RFC 0038 §3).
  */
 export function readUiResource(uri: string, listed: readonly DerivedAgentTool[], ui: AppMcpUi | undefined) {
   if (!ui || !listed.some((tool) => tool.ui)) return undefined
   if (uri === bridgeUri(ui)) {
     return { uri, mimeType: 'application/json', text: JSON.stringify({ tools: bridgeCatalogue(listed) }) }
   }
-  const page = listedPages(listed, ui).find((candidate) => candidate.uri === uri)
+  const id = requestedPageId(uri, ui)
+  const page = id === undefined ? undefined : listedPages(listed, ui).find((candidate) => candidate.page === id)
   if (!page) return undefined
   return { uri, mimeType: MCP_APP_MIME_TYPE, text: page.built.html, _meta: { ui: resourceUiMeta(ui, page.page) } }
+}
+
+/** The page id of `ui://<authority>/pages/<id>?v=<build>`; any other query or a fragment names no page. */
+function requestedPageId(uri: string, ui: AppMcpUi): string | undefined {
+  const prefix = `ui://${ui.authority}/pages/`
+  if (!uri.startsWith(prefix)) return undefined
+  return /^([^?#]+)\?v=[^&#=]+$/.exec(uri.slice(prefix.length))?.[1]
 }
 
 function bridgeUri(ui: AppMcpUi): string {
@@ -183,7 +199,16 @@ function bridgeCatalogue(listed: readonly DerivedAgentTool[]): BridgeCatalogueEn
   }))
 }
 
-export type GurenToolResponse =
+/** What every envelope carries beside its outcome: the contract, and where the view reads its catalogue. */
+export interface GurenToolResponseContract {
+  contract: number
+  /** The bridge catalogue's URI; absent when the app serves no MCP Apps. */
+  bridge?: string
+}
+
+export type GurenToolResponse = GurenToolResponseContract & GurenToolOutcome
+
+type GurenToolOutcome =
   | { outcome: 'executed'; status: number; url?: string; location?: string; errors?: Record<string, string[]> }
   | {
     outcome: 'denied'
@@ -202,10 +227,16 @@ export function resultMeta(
   tool: DerivedAgentTool,
   result: AgentInvocationResult,
   appOrigin: string,
+  ui?: AppMcpUi,
 ): Record<string, unknown> {
   const page = result.status === 'executed' && tool.ui?.page !== undefined ? result.outcome.inertiaPage : undefined
+  const response: GurenToolResponse = {
+    contract: MCP_APP_CONTRACT,
+    ...(ui ? { bridge: bridgeUri(ui) } : {}),
+    ...toolResponse(result, page, appOrigin),
+  }
   return {
-    [RESPONSE_META_KEY]: toolResponse(result, page, appOrigin),
+    [RESPONSE_META_KEY]: response,
     ...(page ? { [INERTIA_PAGE_META_KEY]: relativePage(page) } : {}),
   }
 }
@@ -214,7 +245,7 @@ function toolResponse(
   result: AgentInvocationResult,
   page: InertiaPagePayload | undefined,
   appOrigin: string,
-): GurenToolResponse {
+): GurenToolOutcome {
   if (result.status === 'failed') return { outcome: 'failed', message: result.message }
   if (result.status === 'denied') {
     const { reason, message, body } = result.denial

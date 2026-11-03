@@ -166,7 +166,7 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
     // `CallToolResult` shape an MCP client reads.
     const result = await options.pipeline.invoke({ tool, args })
     // On every route tool, not only `ui` ones: a view must be able to settle any visit it sends.
-    const _meta = resultMeta(tool, result, options.appOrigin ?? 'http://localhost')
+    const _meta = resultMeta(tool, result, options.appOrigin ?? 'http://localhost', servesUi ? options.ui : undefined)
 
     if (result.status === 'denied') return { ...denial(result.denial), _meta }
     if (result.status === 'failed') return { ...errorResult(result.message), _meta }
