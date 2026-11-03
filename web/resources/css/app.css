@@ -685,7 +685,9 @@ body.docs-theme {
 .docs-content li.doc-feature {
   display: grid;
   grid-template-columns: 2.25rem minmax(0, 1fr);
-  gap: 14px;
+  grid-template-rows: auto 1fr;
+  column-gap: 14px;
+  row-gap: 0.25rem;
   padding: 16px 18px;
   border: 1px solid var(--docs-border-soft);
   border-radius: var(--g-r-card);
@@ -693,6 +695,7 @@ body.docs-theme {
 }
 
 .doc-feature-icon {
+  grid-row: 1 / span 2;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -709,17 +712,32 @@ body.docs-theme {
 }
 
 .doc-feature-title {
-  display: block;
-  margin-bottom: 0.25rem;
   color: var(--docs-heading);
   line-height: 1.5;
 }
 
-.doc-feature-body p {
+.docs-content .doc-feature-text {
   margin: 0;
   font-size: 0.95rem;
   line-height: 1.7;
   color: var(--docs-text-secondary);
+}
+
+/* On a phone the gutter would cost the body a fifth of its width, so the
+   icon moves onto the title's line. */
+@media (max-width: 639px) {
+  .doc-feature-icon {
+    grid-row: 1;
+  }
+
+  .doc-feature-title {
+    align-self: center;
+  }
+
+  .docs-content .doc-feature-text {
+    grid-column: 1 / -1;
+    margin-top: 0.5rem;
+  }
 }
 
 /* ─── Tutorial listings: a fence that names the file it writes carries the

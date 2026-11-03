@@ -24,7 +24,7 @@ function renderItem(icon: string, title: string, body: string): string {
   return (
     `<li class="doc-feature">` +
     `<span class="doc-feature-icon">${SVG_OPEN}${FEATURE_ICONS[icon]}</svg></span>` +
-    `<div class="doc-feature-body"><strong class="doc-feature-title">${title}</strong><p>${body}</p></div>` +
+    `<strong class="doc-feature-title">${title}</strong><p class="doc-feature-text">${body}</p>` +
     `</li>`
   )
 }

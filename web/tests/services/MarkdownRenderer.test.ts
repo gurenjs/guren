@@ -193,7 +193,7 @@ describe('feature lists', () => {
 
     expect(html).toContain('<ul class="doc-features">')
     expect(html.match(/class="doc-feature"/g)).toHaveLength(2)
-    expect(html).toContain('<strong class="doc-feature-title">Fast.</strong><p>Runs on <code>Bun</code>.</p>')
+    expect(html).toContain('<strong class="doc-feature-title">Fast.</strong><p class="doc-feature-text">Runs on <code>Bun</code>.</p>')
     expect(html).toContain('aria-hidden="true"')
     expect(html).not.toContain('<!--')
   })
