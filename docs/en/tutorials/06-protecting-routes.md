@@ -330,7 +330,7 @@ bun run db:migrate
 
 Then `store` records who wrote the post:
 
-```ts file=app/Http/Controllers/PostController.ts
+```ts file=app/Http/Controllers/PostController.ts highlight=4,38,40
 import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
 import { Post } from '../../Models/Post.js'

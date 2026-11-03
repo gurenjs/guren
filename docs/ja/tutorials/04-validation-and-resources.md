@@ -635,7 +635,7 @@ export default class PostController extends Controller {
 }
 ```
 
-```ts file=routes/web.ts fallback
+```ts file=routes/web.ts fallback highlight=18,20-21
 import { Router } from '@guren/core'
 import HomeController from '../app/Http/Controllers/HomeController.js'
 import AboutController from '../app/Http/Controllers/AboutController.js'

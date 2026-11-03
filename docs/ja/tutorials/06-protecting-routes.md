@@ -334,7 +334,7 @@ bun run db:migrate
 
 続いて、`store` で投稿の著者を記録するようにします。
 
-```ts file=app/Http/Controllers/PostController.ts
+```ts file=app/Http/Controllers/PostController.ts highlight=4,38,40
 import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
 import { Post } from '../../Models/Post.js'
