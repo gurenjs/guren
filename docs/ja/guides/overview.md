@@ -90,19 +90,30 @@ await app.actingAs(user).get('/dashboard').assertOk()
 
 ## Guren の特長
 
+<!-- features -->
+
+<!-- feature-icon: bolt -->
 **最初から Bun ネイティブ。** Guren は Bun ランタイム上で動き、HTTP レイヤーには Hono を使います。Node.js 向けの互換シムを挟まないので、Bun の速い起動、TypeScript のネイティブ実行、組み込みのテストランナーをそのまま活かせます。
 
+<!-- feature-icon: code -->
 **Laravel の開発体験を、TypeScript で。** Laravel を使ったことがあれば、リソースルーティング、`this.inertia()` を持つ `Controller` 基底クラス、`Model.where().orderBy().get()` といった書き方にはすぐ馴染めるはずです。Laravel を知らなくても、API は読めば何をするか分かるように作ってあります。
 
+<!-- feature-icon: shield -->
 **エンドツーエンドの型安全。** Drizzle スキーマの型は、モデルからコントローラーを経て React ページの props まで引き継がれます。カラム名を変えると、データベースからブラウザまでの間で直すべき箇所を TypeScript がすべて教えてくれます。
 
+<!-- feature-icon: graph -->
 **コードとつながり続けるプロジェクト知識。** Guren は、アーキテクチャ上の意思決定や生成したスペックを、対象のエンティティやコードパスに結び付けます。この結び付きは検証の対象になり、開発中はドキュメント全体を Docs Graph としてインタラクティブに眺められます。ワークフロー全体は [スペックアンカード開発](./spec-anchored.md) を参照してください。
 
+<!-- feature-icon: battery -->
 **バッテリー同梱、ただし強制はしない。** 認証、バリデーション、キャッシュ、キュー、メール、イベント、ブロードキャスト、スケジューリングまで、必要になる機能はひと通り揃っています。各サブシステムは ServiceProvider で有効にする方式なので、読み込まれるのは実際に使うものだけです。
 
+<!-- feature-icon: folder -->
 **設定より規約。** `bunx guren add auth` や `bunx guren add resource posts` を実行すると、機能一式が生成されます。ファイルをどこにどう置くかは CLI が決めるので、フォルダ構成を議論する時間を機能開発に回せます。
 
+<!-- feature-icon: route -->
 **グローバル状態ではなく registrar 方式のルーター。** 生成されるアプリはルートを登録する registrar を export し、それを `createApp({ routes })` に渡します。ルーティングはアプリケーションのインスタンスごとに閉じています。
+
+<!-- /features -->
 
 Hono・Next.js・Laravel との踏み込んだ比較と、AI コーディングエージェント向けの設計思想については [Why Guren](./why-guren.md) を参照してください。
 

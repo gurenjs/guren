@@ -911,6 +911,79 @@ body.docs-theme {
 
 .guren-markdown-alert--caution .guren-markdown-alert__label { color: var(--g-danger); }
 
+/* ─── Feature lists (`<!-- features -->` in the source, see
+   app/Services/doc-features.ts): one card per bold-led paragraph, the icon
+   in a tinted tile beside the title. ─── */
+.docs-content ul.doc-features {
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+  gap: 12px;
+}
+
+.docs-content li.doc-feature {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  column-gap: 14px;
+  row-gap: 0.25rem;
+  padding: 16px 18px;
+  border: 1px solid var(--docs-border-soft);
+  border-radius: var(--g-r-card);
+  background: var(--docs-surface-raised);
+}
+
+.doc-feature-icon {
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--g-r-ctl);
+  background: var(--docs-accent-tint);
+  color: var(--docs-accent-strong);
+}
+
+.doc-feature-icon svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.docs-content .doc-feature > p {
+  margin: 0;
+}
+
+.docs-content .doc-feature > p:first-of-type {
+  color: var(--docs-heading);
+  line-height: 1.5;
+}
+
+.docs-content .doc-feature > p + p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--docs-text-secondary);
+}
+
+/* On a phone the gutter would cost the body a fifth of its width, so the
+   icon moves onto the title's line. */
+@media (max-width: 639px) {
+  .doc-feature-icon {
+    grid-row: 1;
+  }
+
+  .docs-content .doc-feature > p:first-of-type {
+    align-self: center;
+  }
+
+  .docs-content .doc-feature > p + p {
+    grid-column: 1 / -1;
+    margin-top: 0.5rem;
+  }
+}
+
 /* ─── Tutorial listings: a fence that names the file it writes carries the
    path as a sticky header, and a long one scrolls inside itself rather than
    owning the page. The header is inside the <pre> because the markdown plugin
