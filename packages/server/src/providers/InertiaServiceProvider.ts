@@ -5,6 +5,7 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 import { shareInertiaProps } from '../mvc/inertia/shared'
 import { always } from '../mvc/inertia/props'
 import { getSessionFromContext } from '../http/middleware/session'
+import { sameHostRefererPath } from '../http/middleware/redirect-safety'
 import {
   createValidationErrorsCookieCleanup,
   readValidationErrorsCookie,
@@ -70,8 +71,8 @@ export class InertiaServiceProvider extends ServiceProvider {
         flattened[key] = messages[0] ?? ''
       }
 
-      const referer = ctx.req.header('Referer') ?? '/'
-      const headers: Record<string, string> = { Location: referer }
+      const location = sameHostRefererPath(ctx.req.header('Referer'), ctx.req.url, this.refererHosts(ctx.req.url))
+      const headers: Record<string, string> = { Location: location }
 
       const session = getSessionFromContext(ctx)
       if (session) {
@@ -89,6 +90,26 @@ export class InertiaServiceProvider extends ServiceProvider {
         headers,
       })
     })
+  }
+
+  /**
+   * The request's host, and the one `APP_URL` names (what `config/http.ts`'s host
+   * authorization and the auth scaffold's links key on): a proxy that does not
+   * forward `Host` hands the app its upstream address instead. `X-Forwarded-Host`
+   * is not read, since no app-wide trusted-proxy setting says when it is genuine.
+   */
+  private refererHosts(requestUrl: string): string[] {
+    const hosts = [new URL(requestUrl).host]
+    const env = this.container.makeOptional<Readonly<Record<string, unknown>>>('env')
+    const appUrl = env?.APP_URL ?? (typeof process === 'undefined' ? undefined : process.env.APP_URL)
+    if (typeof appUrl !== 'string' || appUrl.trim() === '') return hosts
+
+    try {
+      hosts.push(new URL(appUrl.trim()).host)
+    } catch {
+      // An unparsable APP_URL names no host; config/env.ts reports it at boot.
+    }
+    return hosts
   }
 
   /**

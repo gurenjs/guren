@@ -561,6 +561,23 @@ describe('ExceptionHandler', () => {
       expect(body.message).toBe('User not found')
     })
 
+    // A message the framework composed from the record would tell a missing one from one a policy hides.
+    it('should replace a forModel() 404 message outside debug', async () => {
+      const response = await handler.handle(NotFoundHttpException.forModel('User', 42), createMockContext() as any)
+
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({ message: 'Not Found' })
+    })
+
+    it('should keep a 404 message in debug mode', async () => {
+      const debugHandler = new ExceptionHandler({ debug: true })
+
+      const response = await debugHandler.handle(NotFoundHttpException.forModel('User', 42), createMockContext() as any)
+
+      expect(response.status).toBe(404)
+      expect((await response.json()).message).toBe('User with ID 42 not found.')
+    })
+
     it('should handle generic Error', async () => {
       const error = new Error('Something went wrong')
       const ctx = createMockContext()

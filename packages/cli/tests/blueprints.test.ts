@@ -935,6 +935,31 @@ export const users = pgTable('users', {
     expect(await readFile('src/app.ts', 'utf8')).not.toMatch(/config: \[/)
   })
 
+  // Without them `git add -A` commits private uploads and the storage:link symlink.
+  it('git-ignores what the storage disks write, once, beside the existing ignores', async () => {
+    await seedAppFile(APP_FIXTURE)
+    await writeFile('.gitignore', 'node_modules\n.env')
+
+    await runBlueprint('storage')
+    await runBlueprint('storage', { force: true })
+
+    expect((await readFile('.gitignore', 'utf8')).split('\n')).toEqual([
+      'node_modules',
+      '.env',
+      'storage/app/',
+      'public/storage',
+      '',
+    ])
+  })
+
+  it('creates the .gitignore when the app has none', async () => {
+    await seedAppFile(APP_FIXTURE)
+
+    await runBlueprint('storage')
+
+    expect(await readFile('.gitignore', 'utf8')).toBe('storage/app/\npublic/storage\n')
+  })
+
   // `addImport`/`addProvider` report an unpatchable app entry by returning a
   // reason; discarding it writes the provider file, registers nothing, and
   // reports success, leaving the app booting without the installed feature.

@@ -1,6 +1,8 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { jsonResponse } from './index'
+import { renderErrorPage } from '../../errors/error-page'
+import { wantsHtmlResponse } from '../../errors/wants-html'
 import { defaultCookieSecure, getSessionFromContext, type Session } from './session'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key'
 import { MessageSigner } from '../../encryption/MessageSigner'
@@ -19,7 +21,7 @@ export interface CsrfOptions {
   /** Exact paths ('/api/webhook') or patterns ('/api/*'). */
   exclude?: string[]
 
-  /** Defaults to a 403 JSON response. */
+  /** Defaults to a 403 JSON response, or a 419 "Page Expired" page for a browser navigation. */
   onError?: (ctx: Context) => Response | Promise<Response>
 
   /** Defaults to ['POST', 'PUT', 'PATCH', 'DELETE']. */
@@ -39,6 +41,11 @@ export interface CsrfOptions {
 }
 
 const DEFAULT_PROTECTED_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
+
+/** Laravel's "Page Expired"; `renderErrorPage()` titles it so, where a 403 page would read "Forbidden". */
+const CSRF_PAGE_EXPIRED_STATUS = 419
+const CSRF_PAGE_EXPIRED_MESSAGE =
+  'This form expired before it was sent. Go back, reload the page and submit the form again.'
 
 const CSRF_CONTEXT_KEY = 'guren:csrf-token'
 const CSRF_PURPOSE = 'csrf'
@@ -387,12 +394,28 @@ export function createCsrfMiddleware(
         return onError(ctx)
       }
 
-      return jsonResponse({ message: 'CSRF token mismatch' }, 403)
+      return csrfMismatchResponse(ctx)
     }
 
     await next()
     settleCookie(ctx)
   }
+}
+
+/**
+ * A form posted before the page hydrated carries no header token, and a browser
+ * would show the JSON as the page. Every other caller keeps the 403 JSON, whose
+ * message `@guren/testing`'s `withCsrf()` hint and the docs quote.
+ */
+function csrfMismatchResponse(ctx: Context): Response {
+  if (!wantsHtmlResponse(ctx)) {
+    return jsonResponse({ message: 'CSRF token mismatch' }, 403)
+  }
+
+  return new Response(renderErrorPage(CSRF_PAGE_EXPIRED_STATUS, CSRF_PAGE_EXPIRED_MESSAGE), {
+    status: CSRF_PAGE_EXPIRED_STATUS,
+    headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+  })
 }
 
 function setXsrfCookie(

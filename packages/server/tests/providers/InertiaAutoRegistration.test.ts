@@ -30,7 +30,7 @@ describe('InertiaServiceProvider auto-registration', () => {
     )
 
     expect(response.status).toBe(303)
-    expect(response.headers.get('Location')).toBe('http://example.com/form')
+    expect(response.headers.get('Location')).toBe('/form')
   })
 
   it('returns 422 JSON for non-Inertia requests', async () => {

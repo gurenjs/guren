@@ -215,11 +215,12 @@ export class ErrorPageServiceProvider extends ServiceProvider {
 
     for (const errorClass of [NotFoundHttpException, ModelNotFoundException]) {
       handler.render<Error>(errorClass, (error, ctx) => {
+        const message = handler.shouldShowDetails() ? error.message : 'Not Found'
         const wantsPage = ctx.req.header('X-Inertia') === 'true'
           || (ctx.req.header('accept') ?? '').includes('text/html')
-        if (!wantsPage) return ctx.json({ message: error.message }, 404)
+        if (!wantsPage) return ctx.json({ message }, 404)
 
-        return inertia('Error', { status: 404, message: error.message }, {
+        return inertia('Error', { status: 404, message }, {
           status: 404,
           request: ctx.req.raw,
           container: this.container,
@@ -229,6 +230,8 @@ export class ErrorPageServiceProvider extends ServiceProvider {
   }
 }
 ```
+
+`error.message` をそのまま渡すのは、デバッグ情報を出しているときだけです。`findOrFail()` のメッセージにはモデル名と id が入っています。また、Policy が `denyAsNotFound()` でレコードを隠したときも `NotFoundHttpException` が投げられるので、メッセージから本文を作ると、隠したレコードと存在しないレコードを見分けられてしまいます。
 
 レンダラーは、特定のクラスに絞って登録してください。`ValidationException`、`AuthenticationException`、`AuthorizationException` はどれも `HttpException` のサブクラスなので、`HttpException` にレンダラーを登録すると、バリデーションのリダイレクトを含め、検証・認証・認可の失敗への応答まで置き換わってしまいます。
 
@@ -315,6 +318,8 @@ throw new AuthorizationException('この投稿を編集する権限がありま�
 
 `ExceptionHandler` は、`HttpException` のサブクラスに限らず、数値の `statusCode` プロパティを持つエラーならどれでも処理できます。たとえば `@guren/core` が export している `ModelNotFoundException` は `statusCode: 404` を持っているので、設定を足さなくても 404 のレスポンスになります。`statusCode >= 500` のエラーは、本番環境ではメッセージを伏せて "Internal Server Error" に置き換えます。
 
+デバッグ情報を出していないときは、フレームワークがレコードから組み立てた 404 のメッセージを `Not Found` に置き換えます。対象は、`findOrFail()` とルートモデルバインディングが投げるメッセージ（`Post not found for id=42`）、`NotFoundHttpException.forModel()` などの `for*()` が作るメッセージ、メッセージなしで投げた 404 です。`denyAsNotFound()` と `abort(404)` の既定のメッセージも同じ `Not Found` です。そのため既定のままなら、Policy が隠したレコードと存在しないレコードは同じ応答になり、どの id が存在するかを外から推測できません。`abort(404, 'That invitation has expired')`、`denyAsNotFound('…')`、`new NotFoundHttpException('…', 'Invitation', id)` のように自分で書いたメッセージはそのまま返すので、レコードの詳細は入れないでください。置き換えの対象になるのはフレームワーク自身が作った例外だけで、自分の例外に `resourceType` や `modelName` のフィールドがあっても置き換えられません。置き換えるのは本文の一番上の `message` だけで、それが例外自身のメッセージである場合に限ります。例外の `toResponse()` が組み立てる本文の形は変わらず、`toResponse()` が自分で書いたメッセージもそのまま残ります。例外そのものは書き換えないので、レポーターやログでは元のメッセージを読めます。
+
 ## 非同期エラーバウンダリ
 
 非同期の処理は、エラーバウンダリで包めます。
@@ -348,6 +353,7 @@ ExceptionHandler は、環境に応じてすでに返すものを変えている
 | | 開発環境(`debug` が有効) | 本番環境 |
 |---|---|---|
 | 5xx のメッセージ | 例外のメッセージそのまま | `Internal Server Error`(`HttpException` は自分のメッセージのまま) |
+| 404 のメッセージ | 例外のメッセージそのまま(`Post not found for id=42`) | フレームワークがレコードから組み立てたものは `Not Found`(自分で書いたメッセージはそのまま) |
 | 例外の名前とスタックトレース | JSON の本文に含める | 含めない |
 | ブラウザへの 5xx | デバッグページ | 汎用のエラーページ |
 
@@ -359,9 +365,9 @@ ExceptionHandler は、環境に応じてすでに返すものを変えている
 
 - ブラウザからのリクエストが 5xx で終わると、デバッグページを表示します。例外の名前とメッセージ、スタックトレース、リクエストのメソッド・URL・ヘッダー、`NODE_ENV`・Bun のバージョン・プラットフォームが載ります。ここでのブラウザからのリクエストは、`text/html` を受け付け、Inertia の遷移でも XHR でもないものを指します。
 - Inertia の遷移、XHR、JSON を求めるリクエストには、例外の名前とスタックトレースを加えた JSON の本文を返します。
-- ブラウザからのリクエストが 4xx で終わったときは、本番環境と同じく、メッセージ入りの通常のエラーページを返します。4xx は呼び出し側の誤りなので、スタックトレースを見ても役に立ちません。
+- ブラウザからのリクエストが 4xx で終わったときは、メッセージ入りの通常のエラーページを返します。4xx は呼び出し側の誤りなので、スタックトレースを見ても役に立ちません。
 
-本番環境ではこれらの詳細を省き、`HttpException` 以外の 5xx のメッセージを `Internal Server Error` に置き換え、ブラウザには汎用のエラーページを返します。`HttpException` は本番環境でも自分のメッセージをそのまま返すので、内部の詳細を入れないでください。
+本番環境ではこれらの詳細を省き、`HttpException` 以外の 5xx のメッセージを `Internal Server Error` に置き換え、ブラウザには汎用のエラーページを返します。フレームワークがレコードから組み立てた 404 のメッセージは `Not Found` になるので、既定のままなら存在しないレコードと Policy が隠したレコードを見分けられません。それ以外の `HttpException` は、自分でメッセージを書いた 404 も含めて本番環境でもメッセージをそのまま返すので、内部の詳細を入れないでください。
 
 詳細を出すかどうかを別の基準で決めたいときは、プロバイダーの `register()` で自分のハンドラーを `exception.handler` に登録します。フレームワークは自分のレンダラーを `boot()` で追加するので、それらも登録したハンドラーに付きます。
 

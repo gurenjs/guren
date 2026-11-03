@@ -886,7 +886,7 @@ bun test
 
 - コントローラーが `this.auth.userOrFail()` を使っている(`this.auth.user()` と手動の null チェックではない)。`guren audit` は前者を認証チェックとして認識するが、後者は認識しない。
 - ページが `UserResource` を受け取り、そのリソースに `passwordHash` が含まれていない。ハッシュはすでに 2 つの層で隠されているので、ここで確かめるのは、エージェントがそれらの層を迂回していないかどうか。
-- 「Log out」は `POST` で、CSRF トークンが一緒に送られるよう Inertia の `Link` から送信している。素の `<form method="post">` では 403 で拒否される。
+- 「Log out」は `POST` で、CSRF トークンが一緒に送られるよう Inertia の `Link` から送信している。素の `<form method="post">` では拒否され、ブラウザに 419 の「Page Expired」ページが表示される。
 - 2 つのテストが通り、それ以前のテストもすべて通ったままになっている。
 
 **チェックポイント:** サインインした状態で [http://localhost:3333/profile](http://localhost:3333/profile) を開き、ログアウトします。そのあと `/profile` を再読み込みすると 401 になります。

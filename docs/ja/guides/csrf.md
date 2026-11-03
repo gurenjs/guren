@@ -21,7 +21,7 @@ sequenceDiagram
     M->>C: 実行
     C-->>B: 200
   else 欠落または不一致
-    M-->>B: 403
+    M-->>B: 403 の JSON（ブラウザーの遷移には 419 のページ）
   end
 ```
 
@@ -47,7 +47,7 @@ app.use('*', createCsrfMiddleware())
 
 ## フォームにトークンを含める
 
-ネイティブの `<form method="post">` では、トークンを `_token` フィールドとして送ってください。トークンがないと Guren は 403 で拒否します。Inertia アプリでは `useForm()` と `<Link method="post">` が自動でトークンを送ります（[Inertia.js との統合](#inertiajs-との統合)を参照）。
+ネイティブの `<form method="post">` では、トークンを `_token` フィールドとして送ってください。トークンがないと Guren はリクエストを拒否し、ブラウザーには 419 の「Page Expired」ページが表示されます。Inertia アプリでは `useForm()` と `<Link method="post">` が自動でトークンを送ります（[Inertia.js との統合](#inertiajs-との統合)を参照）。
 
 hidden の input フィールドは `csrfField()` ヘルパーで生成できます。
 
@@ -130,6 +130,8 @@ createCsrfMiddleware({
 })
 ```
 
+`onError` を渡さないときの応答は 2 通りです。ブラウザーのページ遷移（`text/html` を受け付け、Inertia の遷移でも XHR でも JSON を求めるリクエストでもないもの）には、419 の「Page Expired」ページを返します。このページは、前のページに戻って再読み込みし、フォームを送り直すよう案内します。それ以外の呼び出し元には、403 と JSON の本文 `{ "message": "CSRF token mismatch" }` を返します。`onError` を渡すと、どちらの場合もその関数が応答します。
+
 残りのオプションは、ふつうは変える必要がありません。
 
 | オプション | デフォルト | 用途 |
@@ -208,7 +210,7 @@ Inertia は `XSRF-TOKEN` Cookie を自動で読み取り、リクエストに付
 
 ### ネイティブフォームではなく Inertia 経由で送信する
 
-ただし、自動で処理されるのは Inertia が Axios で送るリクエストに限られます。ネイティブの `<form method="post">` は通常のブラウザー遷移として送信されるので、`X-XSRF-TOKEN` ヘッダーが付きません。フォーム自体に `_token` の hidden フィールドがなければ、Guren は 403 で拒否します。
+ただし、自動で処理されるのは Inertia が Axios で送るリクエストに限られます。ネイティブの `<form method="post">` は通常のブラウザー遷移として送信されるので、`X-XSRF-TOKEN` ヘッダーが付きません。フォーム自体に `_token` の hidden フィールドがなければ、Guren は 419 の「Page Expired」ページを返して拒否します。
 
 Inertia のページでは `useForm()` を使ってください。
 

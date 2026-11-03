@@ -63,3 +63,33 @@ export function isSafeRedirectUrl(
     return false
   }
 }
+
+/**
+ * The path of a `Referer` on one of `acceptedHosts` (as `URL.host` spells them,
+ * port included), for redirecting back, or `fallback`. A relative Referer resolves
+ * against `requestUrl`. The scheme is not compared: behind a TLS-terminating proxy
+ * the request reads `http:` while the browser's Referer reads `https:`. Only the
+ * path and query are kept, so the browser stays on its own origin.
+ */
+export function sameHostRefererPath(
+  referer: string | undefined,
+  requestUrl: string,
+  acceptedHosts: readonly string[],
+  fallback = '/',
+): string {
+  if (!referer) return fallback
+
+  try {
+    const target = new URL(referer, requestUrl)
+    if ((target.protocol !== 'http:' && target.protocol !== 'https:') || !acceptedHosts.includes(target.host)) {
+      return fallback
+    }
+
+    // `http://host//evil.example` has the path `//evil.example`, which a browser
+    // reads as another host. The query is left as sent.
+    const pathname = normalizeRedirectTarget(target.pathname)
+    return isAppRelativePath(pathname) ? `${pathname}${target.search}` : fallback
+  } catch {
+    return fallback
+  }
+}

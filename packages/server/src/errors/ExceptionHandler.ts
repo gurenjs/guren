@@ -10,9 +10,11 @@ import type {
   RendererRegistration,
   ErrorResponse,
 } from './types'
-import { HttpException } from './HttpException'
+import { HttpException, NOT_FOUND_MESSAGE } from './HttpException'
+import { hasComposedMessage } from './exceptions/NotFoundHttpException'
 import { renderErrorPage } from './error-page'
 import { renderDebugPage } from './debug-page'
+import { wantsHtmlResponse } from './wants-html'
 import { redactQueryParams } from './redact-query-params'
 import { ambientBinding, bindAmbient } from '../http/default-application'
 import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
@@ -126,12 +128,17 @@ export class ExceptionHandler {
     // Resolved before the branch so this renders with the same number
     // `reportException` judged it by; `toResponse()` supplies only the body.
     const statusCode = resolveExceptionStatus(error)
+    // `findOrFail()` names the model and key, and a record a policy hides with
+    // `denyAsNotFound()` must not read differently from that miss.
+    const replacement = !debug && statusCode === 404 && hasComposedNotFoundMessage(error) ? NOT_FOUND_MESSAGE : undefined
 
     let body: ErrorResponse
     if (HttpException.isHttpException(error)) {
       body = error.toResponse(debug).body
+      // The error is never written to; a `toResponse()` that writes a message of its own keeps it.
+      if (replacement !== undefined && body.message === error.message) body = { ...body, message: replacement }
     } else {
-      body = { message: statusCode < 500 || debug ? error.message : 'Internal Server Error' }
+      body = { message: replacement ?? (statusCode < 500 || debug ? error.message : 'Internal Server Error') }
       if (debug) {
         body.exception = error.name
         body.stack = error.stack
@@ -141,25 +148,23 @@ export class ExceptionHandler {
     if (this.wantsHtmlResponse(ctx)) {
       // A 4xx is the caller's mistake, so a browser gets the plain page even in
       // debug: a stack trace for every mistyped id would bury the real faults.
+      // The generic 404 message adds nothing to the page's own description.
       const html = debug && statusCode >= 500
         ? renderDebugPage(error, ctx.req.raw)
-        : renderErrorPage(statusCode, body.message)
+        : renderErrorPage(statusCode, statusCode === 404 && body.message === NOT_FOUND_MESSAGE ? undefined : body.message)
       return ctx.html(html, statusCode as ContentfulStatusCode)
     }
 
     return ctx.json(body, statusCode as ContentfulStatusCode)
   }
 
-  /** False for Inertia, XHR and JSON callers, which need a JSON payload. */
+  /**
+   * False for Inertia, XHR and JSON callers, which need a JSON payload. The CSRF
+   * middleware picks its page by `wants-html.ts` directly, so an override here
+   * does not change what a rejected form post answers.
+   */
   protected wantsHtmlResponse(ctx: Context): boolean {
-    if (!ctx?.req?.header) return false
-    const accept = ctx.req.header('accept') ?? ''
-    const isJsonRequest =
-      accept.includes('application/json') ||
-      ctx.req.header('x-requested-with') === 'XMLHttpRequest' ||
-      ctx.req.header('x-inertia') === 'true'
-
-    return !isJsonRequest && accept.includes('text/html')
+    return wantsHtmlResponse(ctx)
   }
 
   middleware(): Middleware {
@@ -177,6 +182,17 @@ export class ExceptionHandler {
       }
     }
   }
+}
+
+/**
+ * A 404 message the framework wrote from the record rather than one a developer
+ * chose: the ORM's `findOrFail()` (by name and `modelName`, since it crosses a
+ * package boundary), a `NotFoundHttpException.for*()`, or none at all.
+ */
+function hasComposedNotFoundMessage(error: Error): boolean {
+  return hasComposedMessage(error)
+    || (error.name === 'ModelNotFoundException' && typeof (error as { modelName?: unknown }).modelName === 'string')
+    || error.message === ''
 }
 
 /**
@@ -230,7 +246,7 @@ export function abort(
   message?: string,
   errors?: Record<string, string[]>
 ): never {
-  throw new HttpException(statusCode, message ?? 'Error', errors)
+  throw new HttpException(statusCode, message ?? (statusCode === 404 ? NOT_FOUND_MESSAGE : 'Error'), errors)
 }
 
 export function abortIf(

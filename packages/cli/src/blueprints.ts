@@ -23,6 +23,7 @@ import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
 import { notificationFile } from './make-notification'
 import { appendTableToSchema, detectSchemaDialect, ensureNamedImports, insertImport } from './patch-helpers'
 import { DIALECT_BARRELS } from './drizzle-specifiers'
+import { ensureGitignoreEntry } from './plugin-scaffold'
 import { wireProviders } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE, findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
 import { scaffoldTemplateFile } from './scaffold-templates'
@@ -58,6 +59,13 @@ const SCHEDULE_KERNEL_PATH = 'app/Console/Kernel.ts'
 const SCHEDULE_KERNEL_EXPORT = 'scheduleTasksKernel'
 /** `export` and the name on one line: the function, `const`, and re-export forms. */
 const SCHEDULE_KERNEL_EXPORT_PATTERN = /\bexport\b[^\n]*\bscheduleTasksKernel\b/
+
+/**
+ * What the scaffolded disks write at run time: `local`'s root (uploads, and the
+ * test suite's `testing/`), and `public/storage`, the `public` disk's root and
+ * the link `storage:link` makes. No trailing slash there: git reads a symlink as a file.
+ */
+const STORAGE_GITIGNORE_ENTRIES = ['storage/app/', 'public/storage'] as const
 
 /** `root` stays behind: blueprints have always scaffolded into the project root. */
 function blueprintWriterOptions(options: RunBlueprintOptions): WriterOptions {
@@ -244,19 +252,23 @@ QUEUE_CONNECTION=sync
   },
   storage: {
     description: 'Install storage infrastructure with local/public disks (switchable via STORAGE_DISK) and a sample storage service.',
-    run: async (options) => installServiceScaffold({
-      key: 'storage',
-      coreProvider: 'StorageServiceProvider',
-      provider: 'StorageProvider',
-      shared: ['app/Services/FileStorage.ts'],
-      env: [{
-        key: 'STORAGE_DISK',
-        entry: `
+    run: async (options) => {
+      const created = await installServiceScaffold({
+        key: 'storage',
+        coreProvider: 'StorageServiceProvider',
+        provider: 'StorageProvider',
+        shared: ['app/Services/FileStorage.ts'],
+        env: [{
+          key: 'STORAGE_DISK',
+          entry: `
 # Which disk the app stores to. Declare it in the storage config before naming it here.
 STORAGE_DISK=local
 `,
-      }],
-    }, blueprintWriterOptions(options)),
+        }],
+      }, blueprintWriterOptions(options))
+      for (const entry of STORAGE_GITIGNORE_ENTRIES) await ensureGitignoreEntry(entry)
+      return created
+    },
   },
   broadcasting: {
     description: 'Install broadcasting infrastructure with a memory driver and sample public/private channels.',

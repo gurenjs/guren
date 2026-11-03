@@ -204,6 +204,57 @@ describe('createCsrfMiddleware', () => {
     expect(body).toEqual({ message: 'CSRF token mismatch' })
   })
 
+  // A form submitted before React hydrates posts natively, with no header token.
+  it('answers a browser form post without a token with the Page Expired page', async () => {
+    const app = createTestApp()
+    app.post('/submit', (c) => c.text('submitted'))
+
+    const res = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'title=Hello',
+    })
+
+    expect(res.status).toBe(419)
+    expect(res.headers.get('Content-Type')).toContain('text/html')
+    const html = await res.text()
+    expect(html).toContain('Page Expired')
+    expect(html).toContain('Go back, reload the page and submit the form again.')
+    expect(html).not.toContain('CSRF token mismatch')
+  })
+
+  it.each([
+    ['an Inertia visit', { 'X-Inertia': 'true' }],
+    ['an XHR', { 'X-Requested-With': 'XMLHttpRequest' }],
+    ['a JSON caller', { Accept: 'application/json' }],
+    ['a caller accepting anything', { Accept: '*/*' }],
+  ])('keeps the 403 JSON for %s, whatever else it accepts', async (_caller, headers) => {
+    const app = createTestApp()
+    app.post('/submit', (c) => c.text('submitted'))
+
+    const res = await app.request('/submit', {
+      method: 'POST',
+      headers: { Accept: 'text/html, */*', ...headers },
+    })
+
+    expect(res.status).toBe(403)
+    expect(res.headers.get('Content-Type')).toContain('application/json')
+    expect(await res.json()).toEqual({ message: 'CSRF token mismatch' })
+  })
+
+  it('lets a custom error handler answer a browser form post too', async () => {
+    const app = createTestApp({ onError: () => new Response('Custom CSRF error', { status: 403 }) })
+    app.post('/submit', (c) => c.text('submitted'))
+
+    const res = await app.request('/submit', { method: 'POST', headers: { Accept: 'text/html' } })
+
+    expect(res.status).toBe(403)
+    expect(await res.text()).toBe('Custom CSRF error')
+  })
+
   it('accepts POST requests with valid token in form field', async () => {
     const app = createTestApp()
     let token: string | undefined

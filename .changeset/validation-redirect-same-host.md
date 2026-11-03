@@ -1,0 +1,5 @@
+---
+'@guren/server': minor
+---
+
+An Inertia validation failure redirects back to the `Referer` only when it names an accepted host, and then to its path and query (`/posts/1/edit`) rather than the URL as sent; any other `Referer` redirects to `/`. The `Referer` was used as the `Location` unchecked, so `https://evil.example/x` sent the browser off the site. The accepted hosts are the request's own and the host of `APP_URL` (read from the validated env, else `process.env`), which keeps users on the form behind a proxy that does not forward `Host`, such as nginx `proxy_pass` without `proxy_set_header Host`, or CloudFront in front of a Lambda function URL. `X-Forwarded-Host` is not read, since the framework has no trusted-proxy setting to say when it is genuine. The scheme is not compared, so an app behind a TLS-terminating proxy, which sees `http:` while the browser sends an `https:` Referer, still returns users to the form. A path that a browser would read as another host (`//evil.example`, backslash and tab variants) also redirects to `/`. A test asserting the absolute `Location` of this redirect now gets the path.

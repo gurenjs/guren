@@ -366,6 +366,8 @@ export default defineStorageConfig((env) => {
 
 `STORAGE_DISK=local` in development, `STORAGE_DISK=s3` in production: no code change, and `storage.disk()` returns whichever one is selected. `guren add storage` declares `STORAGE_DISK`; declare `S3_BUCKET` yourself in `config/env.ts`.
 
+`guren add storage` also adds `storage/app/` and `public/storage` to `.gitignore`. Both hold files the app writes while it runs (the `local` disk's uploads, the `public` disk, and the link `guren storage:link` creates), so `git add -A` would otherwise commit what users uploaded. Running the command again adds nothing twice. A file you commit with the app, such as a logo, goes elsewhere under `public/`.
+
 > **Do not root a disk that receives uploads inside `public/`, or anywhere `guren storage:link` exposes.** Everything under the served tree is fetchable by URL with no signature, no expiry and no authorization check, including files a stranger uploaded. Keep uploads on a disk like `local` above and hand them out through the [attachments delivery route](./attachments.md); `guren check` fails an attachments config whose disk is reachable that way.
 
 Two things to know about this shape:
