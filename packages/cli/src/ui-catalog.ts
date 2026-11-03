@@ -17,6 +17,8 @@ export const UI_CATALOG_STYLESHEET_ID = 'virtual:guren/ui-catalog/stylesheet'
 export const UI_CATALOG_ASSET = 'assets/ui-catalog/catalog.js'
 /** The client imports these, resolved from the app so the catalog shares its React and Inertia. */
 const UI_CATALOG_EXTERNALS = ['react', '@inertiajs/react']
+/** Every package the entry and the client import from the app, which the Vite plugin has pre-bundled before the first preview. */
+export const UI_CATALOG_DEPENDENCIES: readonly string[] = [...UI_CATALOG_EXTERNALS, 'react-dom/client']
 
 export interface UiCatalogComponent {
   name: UiComponentName
