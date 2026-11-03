@@ -3,6 +3,7 @@ import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import {
   APP_FIXTURE,
+  DEFAULT_ROUTES_FIXTURE,
   TSC_TIMEOUT,
   checkTypes,
   createTempWorkspace,
@@ -14,6 +15,7 @@ import {
 } from './helpers'
 import { fileExists } from '../src/discovery'
 import { makeAiAgent } from '../src/make-ai-agent'
+import { loadScaffoldTemplate } from '../src/scaffold-templates'
 
 const cliRoot = resolve(import.meta.dir, '..')
 const repoRoot = resolve(cliRoot, '../..')
@@ -186,6 +188,69 @@ describe('guren make:ai-agent', () => {
 
     expect(await readFile(resolve('tests/Ai/Triager.test.ts'), 'utf8'))
       .toContain("import { describe, expect, it } from 'vitest'")
+  })
+
+  describe('--chat', () => {
+    it('writes the chat controller, routes and page, mounts the routes, and notes what the app lacks', async () => {
+      await writeWorkspaceFiles(process.cwd(), {
+        'package.json': JSON.stringify({ name: 'app', dependencies: { '@guren/plugin-ai': '^0.6.0' } }),
+        'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+        'config/ai.ts': "export default { default: 'anthropic', providers: {} }\n",
+      })
+
+      const { files, notes } = await makeAiAgent('SupportBot', { chat: true })
+
+      expect(files).toEqual([
+        resolve('app/Ai/Agents/SupportBot.ts'),
+        resolve('app/Http/Controllers/SupportBotChatController.ts'),
+        resolve('routes/support-bot-chat.ts'),
+        resolve('resources/js/pages/support-bot/Chat.tsx'),
+        resolve('resources/js/components/ai/AgentChat.tsx'),
+      ])
+      expect(await readFile(resolve('resources/js/components/ai/AgentChat.tsx'), 'utf8'))
+        .toBe(loadScaffoldTemplate('ai-chat/resources/js/components/ai/AgentChat.tsx'))
+      expect(await fileExists(process.cwd(), 'resources/js/components/ui/Textarea.tsx')).toBe(true)
+      const routes = await readFile(resolve('routes/web.ts'), 'utf8')
+      expect(routes).toContain("import { registerSupportBotChatRoutes } from './support-bot-chat.js'")
+      expect(routes).toContain('registerSupportBotChatRoutes(router)')
+      const controller = await readFile(resolve('app/Http/Controllers/SupportBotChatController.ts'), 'utf8')
+      expect(controller).toContain('.as(user).history(conversation)')
+      expect(controller).toContain("this.inertia(pages['support-bot'].Chat, {")
+      expect(await readFile(resolve('routes/support-bot-chat.ts'), 'utf8'))
+        .toContain("{ name: 'support-bot.chat', body: ChatTurnSchema, middlewares: [requireAuthenticated({ redirectTo: '/login' })] }")
+      expect(notes).toEqual([
+        'The chat page uses useChat() from @ai-sdk/react, the 4.x line that pairs with ai 7. Run: bun add @ai-sdk/react@^4',
+        'A chat keeps its history in a conversation store, and config/ai.ts configures none. Set `conversations` there (guren add ai writes one unless --no-conversations).',
+      ])
+    })
+
+    it('keeps an AgentChat the app already has, edited or not', async () => {
+      await writeWorkspaceFiles(process.cwd(), { 'resources/js/components/ai/AgentChat.tsx': '// mine\n' })
+
+      const { files } = await makeAiAgent('SupportBot', { chat: true })
+
+      expect(files).not.toContain(resolve('resources/js/components/ai/AgentChat.tsx'))
+      expect(await readFile(resolve('resources/js/components/ai/AgentChat.tsx'), 'utf8')).toBe('// mine\n')
+    })
+
+    it('refuses over an existing chat page and writes no file, the agent included', async () => {
+      await writeWorkspaceFiles(process.cwd(), { 'resources/js/pages/support-bot/Chat.tsx': '// mine\n' })
+      const before = await snapshotTree(workspace.dir)
+
+      await expect(makeAiAgent('SupportBot', { chat: true }))
+        .rejects.toThrow('  resources/js/pages/support-bot/Chat.tsx (--chat)')
+      expect(await snapshotTree(workspace.dir)).toEqual(before)
+    })
+
+    it.each<{ name: string; options: Parameters<typeof makeAiAgent>[1]; message: string }>([
+      { name: '--output', options: { chat: true, output: true }, message: 'an agent with --output cannot stream' },
+      { name: '--module', options: { chat: true, root: 'support' }, message: 'which a module does not mount' },
+    ])('refuses --chat with $name before writing anything', async ({ options, message }) => {
+      const before = await snapshotTree(workspace.dir)
+
+      await expect(makeAiAgent('SupportBot', options)).rejects.toThrow(message)
+      expect(await snapshotTree(workspace.dir)).toEqual(before)
+    })
   })
 
   it(

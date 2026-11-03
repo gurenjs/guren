@@ -891,6 +891,48 @@ the tool descriptions get the right answer out of the model is §10's job.
   `db/schema.ts` still gets agents, with conversations left unconfigured. A
   `config/ai.ts` not in the scaffold's shape is left alone, with the lines to
   add printed.
+
+  **Addendum (Part 4, Draft): `make:ai-agent Name --chat`.** Part 2e made a
+  chat page restorable, and writing one still meant assembling a controller,
+  two routes, a page and the message rendering by hand. `--chat` writes them
+  beside the agent, so one command ends at a page that streams:
+
+  - `app/Http/Controllers/NameChatController.ts`: `show()` reads
+    `?conversation=` and renders the page with `history(id) ?? []`, and
+    `chat()` validates `ChatTurnSchema` and returns `stream()`, both behind
+    `userOrFail()`.
+  - `routes/name-chat.ts` exporting `registerNameChatRoutes`: `GET /name`
+    (`name.show`) and `POST /name/chat` (`name.chat`, `body: ChatTurnSchema`),
+    each with `requireAuthenticated({ redirectTo: '/login' })`, mounted in
+    `routes/web.ts` through the patch every scaffolder uses.
+  - `resources/js/pages/name/Chat.tsx`, a thin page around
+    `resources/js/components/ai/AgentChat.tsx`, a static template under
+    `templates/scaffold/ai-chat/` (so `typecheck:templates` checks it). It
+    holds the `useChat` state: streaming and a stop button, a masked error,
+    each tool call with its state, input and output, and the restored history.
+    It styles with Guren UI tokens and imports the `Alert`, `Button` and
+    `Textarea` that `guren add ui` ships, which are copied when missing.
+
+  The component is copied, as RFC 0036's are, and is not exported from
+  `@guren/inertia-client`: `@ai-sdk/react` and `ai` move together and often,
+  and a copy lets an app take an AI SDK release without waiting for a Guren
+  one. An existing `AgentChat.tsx` is the app's and is left alone unless
+  `--force`, so it carries no `guren-ui` version header and `guren upgrade`
+  does not track it. After each answer the component calls Inertia's
+  client-side `router.replace()` with `?conversation=` and the turns shown,
+  not `history.replaceState()`, so the history entry Back restores carries
+  the id and the transcript without a request; a mount keeps its key when
+  the props name the conversation it started, so neither a draft nor a turn
+  in flight is torn down. An aborted or failed first turn, which stored
+  nothing while the transport already holds the id the response named,
+  remounts with a fresh transport instead.
+  The command notes a missing `@ai-sdk/react` (4.x, the line that pairs with
+  `ai` 7) and a `config/ai.ts` with no `conversations`, which a chat needs.
+  It refuses `--output` (such an agent cannot stream), `--module` (a module's
+  routes are not mounted from `routes/web.ts`) and an API-only app, before
+  any file is written; an existing per-agent file refuses the whole batch,
+  the agent included. Rendering a tool's result as an Inertia page is out of
+  scope here; RFC 0038 (MCP Apps) takes that question up.
 - **`guren check`** (content-activated, nothing runs for an app with no
   `Agent` subclass): a literal `appTools([...])` name that no `.agent()`
   route derives; a name outside the class's `static scopes`; an `Agent`

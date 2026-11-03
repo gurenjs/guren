@@ -61,6 +61,7 @@ response.output   // typed from `output`; response.text, steps, usage, finishRea
 - Tool results are untrusted model input (a ticket body can carry instructions). The consequential action must be a gated route, never a local tool.
 - Conversations: `prompt(input, { conversation: true })` starts one and returns `conversationId`; `.continue(id)` resumes it. Nothing is stored without asking. The tables hold transcripts as the model saw them: sensitive data.
 - Chat: `.stream(message, { conversation: conversation ?? true, signal: this.request.raw.signal })` after `validateBody(ChatTurnSchema)`, with `createChatTransport()` from `@guren/plugin-ai/client` in the page. An agent with `output` cannot stream.
+- `make:ai-agent <Name> --chat` writes that controller, its routes and an Inertia page around the copied `resources/js/components/ai/AgentChat.tsx`; edit the copy rather than writing a second chat UI.
 - Reload: the page action passes `await agent.history(id) ?? []` and the id as props (`null` covers another user's or another agent's conversation), and the page gives both to `useChat({ id, messages })`.
 - Background: `.queue(input)` needs `aiPlugin({ agents: [TicketDigest] })`, a queue binding and `bunx guren queue:work`; listen for `AgentResponded`. A run is attempted once. `.broadcast(input, channel)` streams the same run to a broadcast channel as `AGENT_CHUNK_EVENT`; make that channel private, since publishing is not authorized.
 
