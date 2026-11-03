@@ -16,7 +16,7 @@ import type {
   PresenceMember,
 } from './types'
 import { broadcastChannelsOf, broadcastNameOf } from './event-target'
-import { isSocketId, markSender, readSender, stripSender } from './sender-envelope'
+import { isSenderUserId, isSocketId, markSender, readSender, stripSender } from './sender-envelope'
 import { Channel, PrivateChannel, PresenceChannel } from './channels'
 import { MemoryDriver } from './drivers'
 import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
@@ -207,7 +207,7 @@ export class BroadcastManager {
     event: string,
     data: unknown
   ): Promise<void> {
-    await this.driver().publish(channelName, event, data)
+    await this.driver().publish(channelName, event, stripSender(data))
   }
 
   /**
@@ -217,11 +217,11 @@ export class BroadcastManager {
    */
   async broadcastEvent(event: BroadcastableEvent, options: BroadcastEventOptions = {}): Promise<void> {
     const name = broadcastNameOf(event)
-    const payload = event.broadcastWith?.() ?? {}
+    const payload = stripSender(event.broadcastWith?.() ?? {})
     const sender = options.except ? await this.resolveSender(options.except) : undefined
     const data = sender ? markSender(payload, sender) : payload
     for (const channel of broadcastChannelsOf(event)) {
-      await this.broadcast(channel, name, data)
+      await this.driver().publish(channel, name, data)
     }
   }
 
@@ -234,21 +234,22 @@ export class BroadcastManager {
     if (!isSocketId(socketId)) return undefined
     const user = fromContext ? await resolveRequestUser(except as Context, undefined) : except.user
     const userId = resolveClientUserId(user)
-    return userId === undefined ? undefined : { socketId, userId }
+    return isSenderUserId(userId) ? { socketId, userId } : undefined
   }
 
   /**
    * What one client receives of a delivered event: nothing when it is the
-   * sender's own socket, else the payload without the sender mark.
+   * sender's own socket, else the payload without the reserved fields. The ids
+   * compare strictly, as `authMiddleware()` compares an owner: `7` is not `'7'`.
    */
   private deliveryFor(client: SSEClient | WebSocketClient, data: unknown): { data: unknown } | undefined {
     const sender = readSender(data)
-    if (!sender) return { data }
     const own =
-      'socketId' in client
+      sender !== undefined
+      && 'socketId' in client
       && client.socketId === sender.socketId
       && client.userId !== undefined
-      && String(client.userId) === String(sender.userId)
+      && client.userId === sender.userId
     return own ? undefined : { data: stripSender(data) }
   }
 

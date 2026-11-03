@@ -502,6 +502,15 @@ Exclusion happens on the server, in the one delivery callback
   server, and no driver changes: they ride inside `data`, which `MemoryDriver`
   and `RedisDriver` already carry opaquely across instances.
 
+**Amended in implementation:** the two fields are reserved. Every publish
+path the manager offers (`broadcast()`, `broadcastEvent()`, a `Channel`'s
+`broadcast()`) removes them from the payload the app hands it before adding its
+own, so a payload an app relays from a user cannot carry a forged mark, and
+delivery removes them, valid or not, from every event. The user ids compare
+strictly, as `authMiddleware()` compares a stream's owner, and a user id JSON
+cannot carry (`NaN`, an infinity) marks nothing. A payload that is not a plain
+object is marked as the JSON a client would receive.
+
 The header is client-supplied, and binding the match to the requester's user is
 what makes a guessed or leaked value harmless: a user can only suppress
 deliveries to their own sockets, which they could do by not subscribing. A

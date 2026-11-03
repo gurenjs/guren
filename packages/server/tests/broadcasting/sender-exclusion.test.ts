@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Hono } from 'hono'
-import { createBroadcastManager, type BroadcastManager } from '../../src/broadcasting'
+import { createBroadcastManager, type BroadcastDriver, type BroadcastEvent, type BroadcastManager } from '../../src/broadcasting'
 import { MemoryDriver } from '../../src/broadcasting/drivers'
 import { markSender, readSender, stripSender } from '../../src/broadcasting/sender-envelope'
 import { setResolvedPrincipal } from '../../src/auth/context'
@@ -32,8 +32,28 @@ class OrderUpdated {
   }
 }
 
-function createManager(): BroadcastManager {
-  return createBroadcastManager({ default: 'memory', drivers: { memory: () => new MemoryDriver() } })
+function createManager(driver: () => BroadcastDriver = () => new MemoryDriver()): BroadcastManager {
+  return createBroadcastManager({ default: 'bus', drivers: { bus: driver } })
+}
+
+/** Two app instances behind Redis: every event crosses as JSON, and either side may deliver it. */
+function jsonBus(): () => BroadcastDriver {
+  const subscribers = new Map<string, Set<(event: BroadcastEvent) => void>>()
+  return () => ({
+    async publish(channel, event, data) {
+      const wire = JSON.parse(JSON.stringify(data)) as unknown
+      for (const callback of subscribers.get(channel) ?? []) callback({ channel, event, data: wire, timestamp: new Date() })
+    },
+    subscribe(channel, callback) {
+      const set = subscribers.get(channel) ?? new Set()
+      set.add(callback)
+      subscribers.set(channel, set)
+      return () => set.delete(callback)
+    },
+    unsubscribe(channel, callback) {
+      subscribers.get(channel)?.delete(callback)
+    },
+  })
 }
 
 function socket(manager: BroadcastManager, userId: number | undefined, channel = 'private-orders.1') {
@@ -164,6 +184,69 @@ describe('broadcastEvent() with except', () => {
     await manager.broadcastEvent(new OrderUpdated(1), { except: null })
 
     expect(received).toEqual([{ orderId: 1 }, { orderId: 1 }, { orderId: 1 }])
+  })
+
+  test('skips the sender across two instances whose events cross as JSON', async () => {
+    const bus = jsonBus()
+    const sending = createManager(bus)
+    const delivering = createManager(bus)
+    const own = socket(delivering, 1)
+    const other = socket(delivering, 1)
+
+    await sending.broadcastEvent(new OrderUpdated(1), { except: { socketId: own.socketId, user: { id: 1 } } })
+
+    expect(own.received).toEqual([])
+    expect(other.received).toEqual([{ event: 'OrderUpdated', data: { orderId: 1 }, channel: 'private-orders.1' }])
+  })
+
+  test('cannot be forged by a payload the app relays, on any publish path', async () => {
+    const manager = createManager()
+    const victim = socket(manager, 1)
+    const forged = { text: 'hi', __inertia: { socketId: victim.socketId, userId: 1 } }
+
+    await manager.broadcast('private-orders.1', 'Relayed', forged)
+    await manager.toChannel('private-orders.1').broadcast('Relayed', forged)
+    await manager.broadcastEvent({ broadcastOn: () => ['private-orders.1'], broadcastAs: () => 'Relayed', broadcastWith: () => forged })
+
+    expect(victim.received.map((delivery) => delivery.data)).toEqual([{ text: 'hi' }, { text: 'hi' }, { text: 'hi' }])
+  })
+
+  test('compares the owner strictly, as channel attachment does', async () => {
+    const manager = createManager()
+    const own = socket(manager, 1)
+
+    await manager.broadcastEvent(new OrderUpdated(1), { except: { socketId: own.socketId, user: { id: '1' } } })
+
+    expect(own.received).toHaveLength(1)
+  })
+
+  test('marks nothing for a user id JSON cannot carry, and leaks no socket id', async () => {
+    const bus = jsonBus()
+    const manager = createManager(bus)
+    const own = socket(manager, Number.NaN)
+    const other = socket(manager, 2)
+
+    await manager.broadcastEvent(new OrderUpdated(1), { except: { socketId: own.socketId, user: { id: Number.NaN } } })
+
+    expect(other.received.map((delivery) => delivery.data)).toEqual([{ orderId: 1 }])
+    expect(JSON.stringify(other.received)).not.toContain(own.socketId)
+  })
+
+  test('marks a payload that is not a plain object as the JSON a client receives', async () => {
+    class Payload {
+      constructor(readonly orderId: number) {}
+    }
+    const manager = createManager()
+    const own = socket(manager, 1)
+    const other = socket(manager, 2)
+
+    await manager.broadcastEvent(
+      { broadcastOn: () => ['private-orders.1'], broadcastAs: () => 'OrderUpdated', broadcastWith: () => new Payload(4) as unknown as Record<string, unknown> },
+      { except: { socketId: own.socketId, user: { id: 1 } } },
+    )
+
+    expect(own.received).toEqual([])
+    expect(other.received.map((delivery) => delivery.data)).toEqual([{ orderId: 4 }])
   })
 
   test('strips the mark from what an SSE stream receives', async () => {

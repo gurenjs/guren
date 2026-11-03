@@ -479,7 +479,9 @@ A user who saves an order already has the new state from the response, so the br
 await broadcast.broadcastEvent(new OrderShipped(order.id, tracking), { except: this.ctx })
 ```
 
-The page sends the `socketId` from its socket's `connected` frame as the `X-Socket-Id` header of the request that makes the change. The manager reads that header and the request's signed-in user from the auth context, and skips only the socket that has both: that `socketId`, opened by that same user. A guest's request, or a socket id another user's socket holds, skips nothing, and every other subscriber receives the payload unchanged. When the socket route resolves its user with a `getUser` of its own, or outside a request, pass the two values yourself: `{ except: { socketId, user } }`.
+The page sends the `socketId` from its socket's `connected` frame as the `X-Socket-Id` header of the request that makes the change. The manager reads that header and the request's signed-in user from the auth context, and skips only the socket that has both: that `socketId`, opened by that same user. A guest's request, or a socket id another user's socket holds, skips nothing, and every other subscriber receives the payload unchanged. When the socket route resolves its user with a `getUser` of its own, or outside a request, pass the two values yourself: `{ except: { socketId, user } }`. The user ids compare strictly, as channel attachment does, so `7` and `'7'` are different users.
+
+The manager carries the sender inside the payload, under `__inertia.socketId` and `__inertia.userId`. Those two fields are reserved: the manager removes them from every payload you publish through it, and from every event before a client receives it. Any other key under `__inertia` stays.
 
 ## Presence Channel Members
 
