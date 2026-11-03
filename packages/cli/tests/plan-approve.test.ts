@@ -13,6 +13,7 @@ import { planApprovalsPath, readPlanApprovals } from '../src/plan/approvals'
 import { writeFileAtomic } from '../src/plan/beside'
 import { stampContextHash } from '../src/plan/freshness'
 import { planHash } from '../src/plan/identity'
+import type { PlanElementWithoutBehaviour } from '../src/plan/reach'
 import { PlanDraftSchema, PlanSchema } from '../src/plan/schema'
 import { runCaptured, type CapturedExec } from '../src/subprocess'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
@@ -148,7 +149,7 @@ describe('guren plan:approve', () => {
       commands: [{ id: 'command.mail', command: 'guren make:mail CommentPostedMail', reason: 'the mail class' }],
     }
     const { app, plan } = await createApp('without-behaviour', withoutBehaviour)
-    const expected = [
+    const expected: PlanElementWithoutBehaviour[] = [
       { id: 'mail.comment-posted', section: 'sideEffects' },
       { id: 'command.mail', section: 'commands' },
     ]
