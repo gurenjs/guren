@@ -18,6 +18,7 @@ import {
 } from './docs-config.js'
 import { expandFeatureLists } from './doc-features.js'
 import { renderInteractiveDiagrams } from './doc-interactive.js'
+import { renderFileTree } from './doc-tree.js'
 
 const DEFAULT_LANGUAGE = 'text'
 
@@ -167,6 +168,9 @@ async function highlightDocsCode(code: string, lang?: string, info?: string): Pr
   // `<pre class="mermaid">` shape the framework's own docs viewer uses.
   if (normalizedLang === 'mermaid') {
     return `<pre class="mermaid">${escapeHtml(code)}</pre>`
+  }
+  if (normalizedLang === 'tree') {
+    return renderFileTree(code)
   }
   const lineCount = codeLineCount(code)
   const highlight = fenceAttribute(info, 'highlight')

@@ -52,7 +52,7 @@ bun run dev
 
 新しいアプリは小さいので、ひと通り読んでもそれほど時間はかかりません。この章で扱うファイルは次のとおりです。
 
-```text
+```tree
 guren-blog/
 ├── app/Http/Controllers/HomeController.ts   # 唯一のコントローラー
 ├── resources/js/pages/Home.tsx              # 唯一のページ

@@ -470,10 +470,10 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     container.querySelectorAll('.docs-copy-btn').forEach((btn) => btn.remove())
 
     const blocks = container.querySelectorAll<HTMLPreElement>('pre')
-    // `pre.mermaid` holds diagram source that becomes an <svg> below — there
-    // is nothing there a reader would want on their clipboard.
+    // `pre.mermaid` holds diagram source that becomes an <svg> below, and
+    // `pre.doc-tree` a drawn directory listing: nothing a reader would paste.
     const topLevelBlocks = Array.from(blocks).filter(
-      (pre) => !pre.closest('pre pre') && !pre.classList.contains('mermaid'),
+      (pre) => !pre.closest('pre pre') && !pre.classList.contains('mermaid') && !pre.classList.contains('doc-tree'),
     )
     const cleanups: Array<() => void> = []
 
