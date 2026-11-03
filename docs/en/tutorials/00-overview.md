@@ -6,6 +6,9 @@ That second half is what makes this a Guren course rather than a generic one. Gu
 
 If a term is unfamiliar along the way, check the [Glossary](../guides/glossary.md).
 
+> [!TIP]
+> To start now, open [Chapter 1: Zero to a Shipped App](./01-zero-to-deployed.md). In about 40 minutes you scaffold an app, change it with a test written first, and build a container image. The rest of this page explains how the chapters work and what you will have built at the end.
+
 ## How every chapter works
 
 From chapter 2 on, every chapter has the same four beats.
