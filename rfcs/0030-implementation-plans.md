@@ -361,12 +361,16 @@ plan and the application's current context (`generateContext()`,
   `alreadyHolds` that does not hold before the plan's work: its route is
   answered by nothing before its `tests` step, or added by an earlier task
   of the plan, or, for an `unauthenticated` behaviour, given authentication
-  by the plan where the registered route applies none now (read from the
-  detail `plan:approve` loads for a plan that alters anything; without it no
-  verdict). All are warnings, the first one for the person to settle while
-  the plan can still change: on a route that exists, mark the behaviour or
-  give it a setup or an expectation only the work meets; on one an earlier
-  task adds, move it to that task.
+  by the plan (on the route, or through an altered action's middleware, which
+  the scaffold writes onto it) where the registered route applies none now.
+  That reading is the middleware each registered route carries, which
+  `loadPlanAppState()` reads without importing the schema; a route not
+  registered once by its current name, or with an inline middleware, gets no
+  verdict. All are warnings, so `plan:render`'s page and JSON and the Dev
+  Center review show them (`plan:approve` prints only failures), the first
+  one for the person to settle while the plan can still change: on a route
+  that exists, mark the behaviour or give it a setup or an expectation only
+  the work meets; on one an earlier task adds, move it to that task.
 
 **Amended in implementation:** a check against the application reads the app root
 the plan element names (`module`, absent meaning the project root), for models,
