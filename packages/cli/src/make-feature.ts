@@ -570,7 +570,7 @@ function generateIndexPage(
   const titleField = displayFields[0]?.name ?? 'id'
   const summaryField = displayFields.length > 1 ? displayFields[1]?.name : null
 
-  return `import { Link } from '@inertiajs/react'
+  return `import { Head, Link } from '@inertiajs/react'
 import type { PaginatedPageProps } from '@guren/core'
 ${resourceImport}
 import { route } from '@/.guren/routes.gen'
@@ -580,6 +580,7 @@ interface Props extends PaginatedPageProps<${singular}ResourceData> {}
 export default function ${collection}Index({ data, pagination }: Props) {
   return (
     <main className="min-h-screen bg-g-page font-sans text-g-text">
+      <Head title="${collection}" />
       <div className="mx-auto max-w-3xl space-y-6 px-6 py-12">
         <div className="flex items-center justify-between">
           <h1 className="flex items-center gap-3 text-3xl font-bold text-g-heading">
@@ -630,7 +631,7 @@ function generateShowPage(
     return `        <p><strong>${f.name}:</strong> {${variableName}.${f.name}${f.nullable ? " ?? ''" : ''}}</p>`
   }).join('\n')
 
-  return `import { Link } from '@inertiajs/react'
+  return `import { Head, Link } from '@inertiajs/react'
 ${resourceImport}
 import { route } from '@/.guren/routes.gen'
 ${uiImports(['Button'], { Button: 'buttonClass' })}
@@ -641,6 +642,7 @@ interface Props {
 export default function ${singular}Show({ ${variableName} }: Props) {
   return (
     <main className="min-h-screen bg-g-page font-sans text-g-text">
+      <Head title="${singular}" />
       <div className="mx-auto max-w-3xl space-y-6 px-6 py-12">
         <Link href={route('${routeName}.index')} className="text-sm text-g-accent-text transition hover:underline">Back</Link>
 ${fieldRenders}
@@ -686,13 +688,15 @@ function generateNewPage(
   const defaults = fields.map((f) => `${f.name}: ${initialFormValue(f)}`).join(', ')
   const state = generateFormState(fields, 'form')
 
-  return `${state.imports}import { useRouteForm } from '@guren/inertia-client/forms'
+  return `import { Head } from '@inertiajs/react'
+${state.imports}import { useRouteForm } from '@guren/inertia-client/forms'
 import { ${contract} } from '@/.guren/forms.gen'
 ${uiImports(formComponents(fields))}
 export default function New${singular}() {
   const form = useRouteForm(${contract}, { ${defaults} })
 ${state.hooks}  return (
     <main className="min-h-screen bg-g-page font-sans text-g-text">
+      <Head title="New ${singular}" />
       <div className="mx-auto max-w-3xl px-6 py-12">
         <form method="post" action={${contract}.path} className="space-y-4" onSubmit={form.handleSubmit}>
 ${fields.map((f) => generateFormField(f, 'form')).join('\n')}
@@ -715,7 +719,8 @@ function generateEditPage(
   const defaults = fields.map((f) => `${f.name}: ${editFormValue(f, variableName)}`).join(', ')
   const state = generateFormState(fields, 'form')
 
-  return `${state.imports}import { resolveRouteUrl, useRouteForm } from '@guren/inertia-client/forms'
+  return `import { Head } from '@inertiajs/react'
+${state.imports}import { resolveRouteUrl, useRouteForm } from '@guren/inertia-client/forms'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import { ${contract} } from '@/.guren/forms.gen'
 import type { RouteBody } from '@guren/inertia-client/typed-forms'
@@ -728,6 +733,7 @@ export default function Edit${singular}({ ${variableName} }: Props) {
   const form = useRouteForm(${contract}, { ${defaults} }, { params: { id: ${variableName}.id } })
 ${state.hooks}  return (
     <main className="min-h-screen bg-g-page font-sans text-g-text">
+      <Head title="Edit ${singular}" />
       <div className="mx-auto max-w-3xl px-6 py-12">
         <form method="post" action={resolveRouteUrl(${contract}.path, { id: ${variableName}.id })} className="space-y-4" onSubmit={form.handleSubmit}>
 ${fields.map((f) => generateFormField(f, 'form')).join('\n')}

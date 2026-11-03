@@ -1,3 +1,4 @@
+import { Head } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
 import { Alert } from '@/resources/js/components/ui/Alert'
 
@@ -8,6 +9,7 @@ interface Props {
 export default function Dashboard({ user }: Props) {
   return (
     <Layout>
+      <Head title="Dashboard" />
       <section className="space-y-6">
         <header>
           <h1 className="flex items-center gap-3 text-3xl font-bold text-g-heading">

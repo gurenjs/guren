@@ -954,6 +954,7 @@ export class Application {
         hostname: boundHostname,
         port: boundPort,
         assetsUrl: resolvedAssetsUrl ?? 'http://localhost:5173',
+        assetServer: startedViteHere || reusableVite ? 'managed' : 'external',
       })
     } else if (typeof process !== 'undefined' && process.env.NODE_ENV === 'production') {
       // The bound address rather than `address.url`: a container operator needs

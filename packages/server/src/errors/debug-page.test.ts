@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { contrastRatio, pageThemes, ruleColorToken } from '../../tests/support/contrast'
 import { renderDebugPage } from './debug-page'
 
 interface RenderedFrame {
@@ -168,5 +169,39 @@ describe('renderDebugPage request headers', () => {
     expect(rows.accept).toBe('text/html')
     expect(rows['user-agent']).toBe('probe/1.0')
     expect(rows['x-request-id']).toBe('req-42')
+  })
+})
+
+describe('renderDebugPage accessibility', () => {
+  const vendorPage = () =>
+    pageFor('    at handler (/app/routes/web.ts:3:18)', '    at dispatch (/app/node_modules/hono/dist/compose.js:22:23)')
+
+  test('should hold every section inside the main landmark and leave the footer outside it', () => {
+    const html = renderDebugPage(new Error('boom'), new Request('http://example.com/posts'))
+    const main = html.slice(html.indexOf('<main>'), html.indexOf('</main>'))
+
+    expect(main).toContain('<header class="error-header">')
+    expect(main.match(/<section class="section/g)).toHaveLength(3)
+    expect(html.indexOf('<footer class="footer">')).toBeGreaterThan(html.indexOf('</main>'))
+  })
+
+  test('should mark a vendor frame', () => {
+    expect(vendorPage()).toContain('<div class="frame vendor">')
+  })
+
+  // axe composites an opacity into the color it measures, so a faded frame fails it.
+  test('should dim a vendor frame without an opacity', () => {
+    expect(vendorPage()).not.toMatch(/opacity\s*:/)
+  })
+
+  const SMALL_TEXT_ON_SURFACES = ['panel', 'raised'] as const
+  test.each(['light', 'dark'] as const)('should give vendor frame text 4.5:1 in the %s theme', (scheme) => {
+    const html = vendorPage()
+    const tokens = pageThemes(html)[scheme]
+    const text = tokens[ruleColorToken(html, '.frame.vendor .frame-method, .frame.vendor .frame-location')]
+    expect(text).toBeDefined()
+    for (const surface of SMALL_TEXT_ON_SURFACES) {
+      expect(contrastRatio(text!, tokens[surface]!)).toBeGreaterThanOrEqual(4.5)
+    }
   })
 })

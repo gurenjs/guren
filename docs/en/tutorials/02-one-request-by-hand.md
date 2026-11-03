@@ -267,7 +267,7 @@ export default function ContactIndex({ title, email }: Props) {
             {title}
           </h1>
           <p className="text-lg text-g-text-2">
-            Write to <a href={`mailto:${email}`} className="text-g-accent-text hover:underline">{email}</a>.
+            Write to <a href={`mailto:${email}`} className="text-g-accent-text underline underline-offset-2 transition hover:no-underline">{email}</a>.
           </p>
           <Link href="/" className="text-sm text-g-accent-text transition hover:underline">
             Back to the front page

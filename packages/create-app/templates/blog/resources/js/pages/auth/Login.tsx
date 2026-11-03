@@ -43,7 +43,7 @@ export default function Login({ email = '', errors = {} }: Props) {
 
         <p className="mt-6 text-center text-sm text-g-text-2">
           Don&apos;t have an account?{' '}
-          <Link href="/register" className="text-g-accent-text transition hover:underline">
+          <Link href="/register" className="text-g-accent-text underline underline-offset-2 transition hover:no-underline">
             Sign up
           </Link>
         </p>

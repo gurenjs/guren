@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'bun:test'
+import { contrastRatio, pageThemes, ruleColorToken } from '../../tests/support/contrast'
 import { renderErrorPage } from './error-page'
 
 describe('renderErrorPage', () => {
@@ -73,5 +74,27 @@ describe('renderErrorPage', () => {
   test('should include viewport meta tag for responsive layout', () => {
     const html = renderErrorPage(404)
     expect(html).toContain('<meta name="viewport"')
+  })
+
+  test('should put the whole page inside the main landmark', () => {
+    const html = renderErrorPage(403)
+    const body = html.slice(html.indexOf('<body>') + '<body>'.length, html.indexOf('</body>')).trim()
+    expect(body).toStartWith('<main class="container">')
+    expect(body).toEndWith('</main>')
+  })
+
+  // The numeral is 6rem bold, large text, so WCAG AA asks 3:1 of it.
+  test.each(['light', 'dark'] as const)('should give the status numeral 3:1 on the %s page', (scheme) => {
+    const html = renderErrorPage(404)
+    const tokens = pageThemes(html)[scheme]
+    const numeral = tokens[ruleColorToken(html, '.status')]
+    expect(numeral).toBeDefined()
+    expect(contrastRatio(numeral!, tokens.page!)).toBeGreaterThanOrEqual(3)
+  })
+
+  test.each(['light', 'dark'] as const)('should give the description 4.5:1 on the %s page', (scheme) => {
+    const html = renderErrorPage(404)
+    const tokens = pageThemes(html)[scheme]
+    expect(contrastRatio(tokens[ruleColorToken(html, '.description')]!, tokens.page!)).toBeGreaterThanOrEqual(4.5)
   })
 })

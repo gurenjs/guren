@@ -20,6 +20,19 @@ describe('makeView', () => {
     }
   })
 
+  // An Inertia visit to a page with no <Head> leaves the document without a title of its own (axe's document-title).
+  it('gives the page a document title', async () => {
+    const workspace = await createTempWorkspace('guren-cli-view-head-')
+    try {
+      const content = await readFile(await makeView('admin/settings/Index'), 'utf8')
+
+      expect(content).toMatch(/^import \{ Head \} from '@inertiajs\/react'$/m)
+      expect(content).toContain('<Head title="Index" />')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('keeps accepting a name with a space, the way pascalCase always has', async () => {
     const workspace = await createTempWorkspace('guren-cli-view-space-')
     try {

@@ -5,7 +5,8 @@ import { pascalCase, safePathSegments, writeRoot, writeScaffoldFile } from './ut
 const VIEW_ROOT = 'resources/js/pages'
 
 function viewTemplate(componentName: string): string {
-  return `import type { FC } from 'react'
+  return `import { Head } from '@inertiajs/react'
+import type { FC } from 'react'
 
 interface ${componentName}Props {
   message?: string
@@ -14,6 +15,7 @@ interface ${componentName}Props {
 const ${componentName}: FC<${componentName}Props> = ({ message }) => {
   return (
     <div className="space-y-4">
+      <Head title="${componentName}" />
       <h1 className="text-2xl font-bold">${componentName}</h1>
       {message ? <p>{message}</p> : null}
     </div>

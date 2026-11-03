@@ -24,11 +24,11 @@ export function renderErrorPage(statusCode: number, message?: string): string {
     /* Guren UI's tokens (github.com/gurenjs/guren-ui); the link home is the screen's one crimson fill. */
     :root {
       color-scheme: light;
-      --g-page: #ffffff; --g-heading: #111827; --g-text-2: #4b5563; --g-line-strong: #d1d5db;
+      --g-page: #ffffff; --g-heading: #111827; --g-text-2: #4b5563; --g-muted: #6b7280;
       --g-accent: #db1b1b; --g-accent-down: #b91c1c; --g-on-accent: #fff5f5;
     }
     @media (prefers-color-scheme: dark) {
-      :root { color-scheme: dark; --g-page: #1a1a2e; --g-heading: #e0def4; --g-text-2: #aeabc9; --g-line-strong: #3d3d5c; }
+      :root { color-scheme: dark; --g-page: #1a1a2e; --g-heading: #e0def4; --g-text-2: #aeabc9; --g-muted: #8d89a7; }
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -42,7 +42,7 @@ export function renderErrorPage(statusCode: number, message?: string): string {
       -webkit-font-smoothing: antialiased;
     }
     .container { text-align: center; padding: 2rem; }
-    .status { font: 700 6rem/1 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; color: var(--g-line-strong); }
+    .status { font: 700 6rem/1 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; color: var(--g-muted); }
     .title { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.01em; margin-top: 1rem; }
     .description { color: var(--g-text-2); margin-top: 0.5rem; max-width: 28rem; }
     .home-link {
@@ -55,12 +55,12 @@ export function renderErrorPage(statusCode: number, message?: string): string {
   </style>
 </head>
 <body>
-  <div class="container">
+  <main class="container">
     <div class="status">${statusCode}</div>
     <h1 class="title">${title}</h1>
     <p class="description">${description}</p>
     <a href="/" class="home-link">Go Home</a>
-  </div>
+  </main>
 </body>
 </html>`
 }
