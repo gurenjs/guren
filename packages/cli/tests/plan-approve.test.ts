@@ -146,7 +146,7 @@ describe('guren plan:approve', () => {
     const withoutBehaviour = {
       ...answeredPlan(),
       sideEffects: [{ id: 'mail.comment-posted', change: { kind: 'add' }, kind: 'mail', name: 'CommentPostedMail', trigger: 'a comment is stored', description: 'Tells the author.' }],
-      commands: [{ id: 'command.mail', command: 'guren make:mail CommentPostedMail', reason: 'the mail class' }],
+      commands: [{ id: 'command.mail', command: 'guren make:mail WeeklyDigestMail', reason: 'a mail the plan does not declare' }],
     }
     const { app, plan } = await createApp('without-behaviour', withoutBehaviour)
     const expected: PlanElementWithoutBehaviour[] = [
@@ -167,7 +167,7 @@ describe('guren plan:approve', () => {
   })
 
   test('should record the acceptance an approval of the same hash lacks, as for its readings, and nothing once it has it', async () => {
-    const { app, plan } = await createApp('accept-later', { ...answeredPlan(), commands: [{ id: 'command.mail', command: 'guren make:mail CommentPostedMail', reason: 'the mail class' }] })
+    const { app, plan } = await createApp('accept-later', { ...answeredPlan(), commands: [{ id: 'command.mail', command: 'guren make:mail WeeklyDigestMail', reason: 'a mail the plan does not declare' }] })
     const first = await planApproveFile(plan, { app: planAppState(), appRoot: app, now: NOW })
     const { acceptedWithoutBehaviour: _accepted, ...before } = first.approval
     await writeFile(planApprovalsPath(plan), `${JSON.stringify({ approvalsVersion: 1, approvals: [before] }, null, 2)}\n`)
