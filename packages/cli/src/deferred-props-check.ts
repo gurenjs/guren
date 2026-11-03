@@ -30,13 +30,14 @@ const INERTIA_MEMBER: ControllerMemberName = 'inertia'
 
 type Bindings = ReturnType<typeof importBindings>
 
-interface PropHelperBindings {
+export interface PropHelperBindings {
   defer: Bindings
   always: Bindings
   live: Bindings
 }
 
-function propHelperBindings(ast: File): PropHelperBindings {
+/** Where a file binds `defer`, `always` and `live`, which `live-props-check.ts` reads too. */
+export function propHelperBindings(ast: File): PropHelperBindings {
   const merged = (exportName: string): Bindings => {
     const locals = new Set<string>()
     const namespaces = new Set<string>()

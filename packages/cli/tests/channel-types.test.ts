@@ -79,6 +79,52 @@ export class Computed {
     }
   })
 
+  it('reads the class an aliased import names, the name broadcastNameOf() sends, and skips a conditional broadcastOn()', async () => {
+    const workspace = await createTempWorkspace('guren-cli-channel-types-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Events'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/ship.ts'),
+        `import { OrderShipped as Shipped, Branching } from './Events/OrderShipped'
+export async function ship(broadcast: any) {
+  await broadcast.broadcastEvent(new Shipped())
+  await broadcast.broadcastEvent(new Branching())
+}
+`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Events/OrderShipped.ts'),
+        `class OrderEvent {
+  get eventName() { return 'order.instance' }
+}
+
+export class OrderShipped extends OrderEvent {
+  static eventName = 'order.static'
+  broadcastOn() { return ['shipments'] }
+}
+
+export class Branching {
+  static eventName = 'branching'
+  constructor(readonly hidden = false) {}
+  broadcastOn() {
+    if (this.hidden) return ['private-branching']
+    return ['branching']
+  }
+}
+`,
+        'utf8',
+      )
+
+      const { outputPath, channels } = await generateChannelTypes({ appRoot: workspace.dir, force: true })
+
+      expect(channels).toEqual(['shipments'])
+      expect(await readFile(outputPath, 'utf8')).toContain("'order.instance': unknown")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('collects channels and events from providers and broadcast calls', async () => {
     const workspace = await createTempWorkspace('guren-cli-channel-types-')
     try {

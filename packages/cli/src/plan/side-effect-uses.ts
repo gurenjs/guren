@@ -8,12 +8,11 @@
  * Read off the AST, so a comment, a string, an import and a type position never count.
  */
 
-import { readdir } from 'node:fs/promises'
-import { dirname, extname, join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import type { File } from '@babel/types'
 
 import { topLevelDeclaration, unwrapTypeAssertion, walk, type BabelNode } from '../ast-walk'
-import { collectFiles, IMPORTABLE_EXTENSIONS, listAppRoots, toPosixRelative } from '../discovery'
+import { applicationSources, toPosixRelative } from '../discovery'
 import { extractClassDeclaration } from '../model-parser'
 import type { ParseCache } from '../parse-cache'
 import { importsByLocal, specifierBase, withoutExtension, type ImportEntry } from '../schema-binding'
@@ -40,10 +39,6 @@ export interface SideEffectUses {
   discoversListeners: string[]
 }
 
-/** Directories of an app root holding server code; tests, pages, migrations and seeders are not the application. */
-const SERVER_DIRS = ['app', 'routes', 'src', 'config']
-/** `.spec` too, unlike discovery's test pattern: a Playwright spec beside the code is no more the application. */
-const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/
 /** `@guren/core`, `@guren/server` and their subpaths (`@guren/server/events`). */
 const FRAMEWORK_PACKAGE = /^@guren\/(core|server)(\/|$)/
 
@@ -141,25 +136,6 @@ function exportedFunctions(ast: File): Set<string> {
     }
   }
   return names
-}
-
-/** Every server source file of every app root: its `app/`, `routes/`, `src/`, `config/` and top-level files. */
-async function applicationSources(root: string): Promise<string[]> {
-  const roots = await listAppRoots(root)
-  const groups = await Promise.all(
-    roots.flatMap((appRoot) => [
-      ...SERVER_DIRS.map((dir) => collectFiles(resolve(appRoot.dir, dir), IMPORTABLE_EXTENSIONS)),
-      topLevelSources(appRoot.dir),
-    ]),
-  )
-  return groups.flat().filter((file) => !TEST_FILE.test(file))
-}
-
-async function topLevelSources(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
-  return entries
-    .filter((entry) => entry.isFile() && !entry.name.startsWith('.') && !entry.name.endsWith('.d.ts') && IMPORTABLE_EXTENSIONS.has(extname(entry.name)))
-    .map((entry) => join(dir, entry.name))
 }
 
 /** A function of any form, methods included: the node that opens a scope of its own. A signature has no body. */

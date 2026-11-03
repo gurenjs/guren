@@ -7,9 +7,13 @@ const CONTROLLER = 'app/Http/Controllers/OrderController.ts'
 const EVENTS = 'app/Events/OrderEvents.ts'
 const ROUTES = 'routes/web.ts'
 
-function controller(props: string, imports = "import { Controller, always, defer, live } from '@guren/core'"): string {
+function controller(
+  props: string,
+  imports = "import { Controller, always, defer, live } from '@guren/core'",
+  events = "import { OrderUpdated, OrderShipped } from '../../Events/OrderEvents'",
+): string {
   return `${imports}
-import { OrderUpdated, OrderShipped } from '../../Events/OrderEvents'
+${events}
 
 export class OrderController extends Controller {
   async show() {
@@ -165,8 +169,11 @@ describe('guren check live props', () => {
       'export class Opaque extends ExternalBase { broadcastOn() { return ["orders"] } }',
     ].join('\n')
     const { results } = await liveResults({
-      [CONTROLLER]: controller('{ order: live(1, { on: [new OrderUpdated(1), new OrderShipped(1), new Getter(), new Opaque()] }) }')
-        .replace("import { OrderUpdated, OrderShipped } from '../../Events/OrderEvents'", "import { OrderUpdated, OrderShipped, Getter, Opaque } from '../../Events/OrderEvents'"),
+      [CONTROLLER]: controller(
+        '{ order: live(1, { on: [new OrderUpdated(1), new OrderShipped(1), new Getter(), new Opaque()] }) }',
+        undefined,
+        "import { OrderUpdated, OrderShipped, Getter, Opaque } from '../../Events/OrderEvents'",
+      ),
       [EVENTS]: events,
       [ROUTES]: SOCKET_ROUTE,
     })
@@ -179,11 +186,54 @@ describe('guren check live props', () => {
 
   it('reports options it cannot read as unverifiable, never as a pass', async () => {
     const { results } = await liveResults({
-      [CONTROLLER]: controller('{ order: live(1, options), other: live(1, { ...options }) }'),
+      [CONTROLLER]: controller('{ order: live(1, options), other: live(1, { ...options }), last: live(1, { on: new OrderShipped(1), ...options }) }'),
       [EVENTS]: EVENT_CLASSES,
       [ROUTES]: SOCKET_ROUTE,
     })
 
-    expect(results.filter((result) => result.key.startsWith('live-props:unverifiable')).map((result) => result.status)).toEqual(['warn', 'warn'])
+    expect(results.filter((result) => result.key.startsWith('live-props:unverifiable')).map((result) => result.status)).toEqual(['warn', 'warn', 'warn'])
+  })
+
+  it('reads the name as broadcastNameOf() does: inherited instance names pin, an empty field does not', async () => {
+    const events = [
+      'export class OrderEvent { eventName = "order"; broadcastOn() { return ["orders"] } }',
+      'export class OrderUpdated extends OrderEvent {}',
+      'export class OrderShipped { eventName!: string; static eventName: string; broadcastOn() { return ["orders"] } }',
+      'export class Cleared { static eventName = undefined; broadcastAs() { return undefined } broadcastOn() { return ["orders"] } }',
+    ].join('\n')
+    const { results } = await liveResults({
+      [CONTROLLER]: controller(
+        '{ order: live(1, { on: [new OrderUpdated(1), new OrderShipped(1), new Cleared()] }) }',
+        undefined,
+        "import { OrderUpdated, OrderShipped, Cleared } from '../../Events/OrderEvents'",
+      ),
+      [EVENTS]: events,
+      [ROUTES]: SOCKET_ROUTE,
+    })
+
+    expect(results.filter((result) => result.key.startsWith('live-props:event-name')).map((result) => result.key)).toEqual([
+      'live-props:event-name:OrderController.show:OrderShipped',
+      'live-props:event-name:OrderController.show:Cleared',
+    ])
+  })
+
+  it('never judges an app class for an event the controller imports from a package', async () => {
+    const { results } = await liveResults({
+      [CONTROLLER]: controller('{ order: live(1, { on: new OrderShipped(1) }) }', undefined, "import { OrderShipped } from '@acme/events'"),
+      [EVENTS]: EVENT_CLASSES,
+      [ROUTES]: SOCKET_ROUTE,
+    })
+
+    expect(results.find((result) => result.key.startsWith('live-props:unverifiable'))?.message).toContain('imported from @acme/events')
+  })
+
+  it('finds the socket route in a module routes.ts, mounted with a bare call', async () => {
+    const { results } = await liveResults({
+      [CONTROLLER]: controller('{ order: live(1, { on: new OrderShipped(1) }) }'),
+      [EVENTS]: EVENT_CLASSES,
+      'modules/orders/routes.ts': 'export function routes(router: any, broadcast: any) {\n  const { webSocketMiddleware } = broadcast\n  router.get("/broadcasting/socket", webSocketMiddleware())\n}\n',
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([['live-props:socket-route', 'pass']])
   })
 })

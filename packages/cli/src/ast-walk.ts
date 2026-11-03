@@ -219,3 +219,20 @@ export function literalString(value: unknown): string | null {
 
   return null
 }
+
+/**
+ * What a function body hands back: an arrow's expression, else the argument of
+ * its one `return` anywhere in the block (a conditional branch included).
+ * Undefined for two returns or none; nested functions carry their own.
+ */
+export function soleReturnedValue(body: Node): Node | undefined {
+  if (body.type !== 'BlockStatement') return unwrapTypeAssertion(body)
+  const returns: Array<Node | null | undefined> = []
+  walk(body.body, (node) => {
+    if (Array.isArray(node.params) && node.body != null) return false
+    if (node.type === 'ReturnStatement') returns.push(node.argument as Node | null | undefined)
+    return undefined
+  })
+  const [only] = returns
+  return returns.length === 1 && only ? unwrapTypeAssertion(only) : undefined
+}

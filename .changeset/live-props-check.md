@@ -9,6 +9,6 @@
 - `live-props:outermost:…`: `live()` is inside `always()` or a deferred callback.
 - `live-props:unverifiable:…`: the events cannot be read (options that are not literal, an event not written as `new SomeEvent(…)` of a class under `app/`, or a base class the check cannot read), reported rather than passed.
 
-Event classes are read as `broadcastNameOf()` reads them at runtime: base classes the app declares are followed, a `static get eventName` or an own instance `eventName` counts as pinned, and when two files declare one name the controller's import decides which.
+Event classes are read as `broadcastNameOf()` reads them at runtime: `broadcastAs()`, then an instance `eventName` (inherited from a base class the app declares too), then an own static `eventName`. A field with no value, `undefined` or `null` pins nothing. A class is found through the import of the file that constructs or extends it, and one imported from a package is never matched to an app class of the same name. A member that returns from more than one place is not read.
 
-`.guren/channels.gen.ts` now lists the events an app sends through `broadcastEvent(new SomeEvent(…))`, read from the event class in whichever file declares it: the channels `broadcastOn()` returns (a template's `${this.id}` as `{id}`), the name `broadcastAs()` or a `static eventName` gives, and the payload type of the object `broadcastWith()` returns.
+`.guren/channels.gen.ts` now lists the events an app sends through `broadcastEvent(new SomeEvent(…))`, read from the class the call's import names (an aliased import included): the channels `broadcastOn()` returns (a template's `${this.id}` as `{id}`), the name `broadcastAs()` or a `static eventName` gives, and the payload type of the object `broadcastWith()` returns.

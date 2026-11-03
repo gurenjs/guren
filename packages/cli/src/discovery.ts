@@ -690,6 +690,30 @@ export async function discoverAppConfigFiles(appRoot: string): Promise<string[]>
   return groups.flat().filter((file) => !/\.test\.[jt]sx?$/.test(file))
 }
 
+
+/** Directories of an app root holding server code; tests, pages, migrations and seeders are not the application. */
+const SERVER_DIRS = ['app', 'routes', 'src', 'config']
+/** `.spec` too, unlike the test pattern above: a Playwright spec beside the code is no more the application. */
+const SERVER_TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/
+
+/** Every server source file of every app root: its `app/`, `routes/`, `src/`, `config/` and top-level files (a module's `routes.ts`). */
+export async function applicationSources(root: string): Promise<string[]> {
+  const roots = await listAppRoots(root)
+  const groups = await Promise.all(
+    roots.flatMap((appRoot) => [
+      ...SERVER_DIRS.map((dir) => collectFiles(resolve(appRoot.dir, dir), IMPORTABLE_EXTENSIONS)),
+      topLevelSources(appRoot.dir),
+    ]),
+  )
+  return groups.flat().filter((file) => !SERVER_TEST_FILE.test(file))
+}
+
+async function topLevelSources(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
+  return entries
+    .filter((entry) => entry.isFile() && !entry.name.startsWith('.') && !entry.name.endsWith('.d.ts') && IMPORTABLE_EXTENSIONS.has(extname(entry.name)))
+    .map((entry) => join(dir, entry.name))
+}
 /**
  * Source files sitting directly in the project root, where deploy entrypoints
  * conventionally live. Its own non-recursive pass because pointing collectFiles

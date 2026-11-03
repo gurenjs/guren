@@ -5,9 +5,11 @@
  * check`'s live-props rule and `channels.gen.ts` both read it, so the two agree.
  */
 import type { ClassDeclaration, Node, Statement } from '@babel/types'
-import { literalString, memberKeyName, unwrapTypeAssertion } from './ast-walk'
+import { literalString, memberKeyName, soleReturnedValue, unwrapTypeAssertion } from './ast-walk'
 import { classActionMembers, type ClassActionMember } from './controller-methods'
+import { cachedFileProbe, resolveImportPath } from './import-resolution'
 import { extractClassDeclaration } from './model-parser'
+import { importsByLocal, specifierBase, type ImportEntry } from './schema-binding'
 
 type MemberBody = ClassActionMember['body']
 
@@ -16,9 +18,9 @@ export interface BroadcastEventClass {
   /** Absolute path of the file declaring it. */
   filePath: string
   /**
-   * `broadcastAs()` (own or inherited), an own static `eventName`, or an own
-   * instance `eventName`, so a bundle renaming the class cannot change the wire
-   * name. Undefined when a base class the reader cannot see might pin it.
+   * Whether a bundle renaming the class leaves the wire name alone: `broadcastAs()`
+   * or an instance `eventName` (own or inherited), or an own static `eventName`.
+   * Undefined when a base class the reader cannot see might pin it.
    */
   pinned: boolean | undefined
   /** The literal name it is sent as; undefined when computed or unknown. */
@@ -29,101 +31,141 @@ export interface BroadcastEventClass {
   payload: Node | undefined
 }
 
+export type BroadcastEventLookup = { kind: 'class'; reading: BroadcastEventClass } | { kind: 'unread'; reason: string }
+
+/**
+ * One step of `broadcastNameOf()` that answers, so the runtime goes no further:
+ * its literal, or undefined for a value the reader cannot name (a computed one,
+ * `''` or a function, the last two of which throw at runtime).
+ */
+type NameStep = { literal: string | undefined }
+
+type Base = { kind: 'none' } | { kind: 'framework' } | { kind: 'opaque' } | { kind: 'local'; name: string }
+
 /** One class as declared, before its base classes are followed. */
 interface DeclaredClass {
   name: string
   filePath: string
-  /** The base class's name; `null` for a base the reader cannot name (`extends mixin(X)`). */
-  base: string | null | undefined
+  exportedAsDefault: boolean
+  base: Base
   broadcastOn?: MemberBody
   broadcastAs?: MemberBody
   broadcastWith?: MemberBody
-  /** An own static or instance `eventName`, which `resolveEventName()` and `event.eventName` read. */
-  ownEventName?: { literal: string | undefined }
+  /** `event.eventName`, which instances inherit. The framework `Event`'s own getter defers to the static. */
+  instanceName?: NameStep
+  /** An own static `eventName`, the only one `resolveEventName()` reads. */
+  staticName?: NameStep
 }
 
-/** The framework base: its `eventName` getter answers the class name, so it pins nothing. */
-const FRAMEWORK_EVENT = 'Event'
+/** `@guren/core`, `@guren/server` and their subpaths, where the framework `Event` comes from. */
+const FRAMEWORK_PACKAGE = /^@guren\/(core|server)(\/|$)/
 
-/** Every class in a set of parsed files, by name; two files may declare one name. */
+/** Every class in a set of parsed files, each resolved through the imports of the file naming it. */
 export class BroadcastEventIndex {
-  private readonly declared = new Map<string, DeclaredClass[]>()
+  private readonly files = new Map<string, { imports: Map<string, ImportEntry>; classes: DeclaredClass[] }>()
+  private readonly byName = new Map<string, DeclaredClass[]>()
+  private readonly readings = new Map<DeclaredClass, Promise<BroadcastEventClass | undefined>>()
+  private readonly probe = cachedFileProbe()
+
+  constructor(private readonly cwd: string) {}
 
   add(statements: readonly Statement[], filePath: string): void {
+    if (this.files.has(filePath)) return
+    const imports = importsByLocal([...statements])
+    const classes: DeclaredClass[] = []
     for (const statement of statements) {
       const declaration = extractClassDeclaration(statement)
       if (!declaration?.id) continue
-      const reading = declareClass(declaration, filePath)
-      this.declared.set(reading.name, [...(this.declared.get(reading.name) ?? []), reading])
+      const declared = declareClass(declaration, filePath, imports, statement.type === 'ExportDefaultDeclaration')
+      classes.push(declared)
+      this.byName.set(declared.name, [...(this.byName.get(declared.name) ?? []), declared])
     }
+    this.files.set(filePath, { imports, classes })
   }
 
-  /** The event classes declared under `name`, each with its base classes followed. */
-  lookup(name: string): BroadcastEventClass[] {
-    return (this.declared.get(name) ?? [])
-      .map((declared) => this.resolve(declared))
-      .filter((reading): reading is BroadcastEventClass => reading !== undefined)
+  /** The event class `new <local>(…)` constructs in `filePath`, through that file's import of the name. */
+  async constructed(local: string, filePath: string): Promise<BroadcastEventLookup> {
+    const declared = await this.declarationOf(local, filePath)
+    if (typeof declared === 'string') return { kind: 'unread', reason: declared }
+    const reading = await this.read(declared)
+    return reading ? { kind: 'class', reading } : { kind: 'unread', reason: `${local}, whose class has no broadcastOn()` }
   }
 
-  /** The one event class of a name, or undefined when none or several are. */
-  unique(name: string): BroadcastEventClass | undefined {
-    const readings = this.lookup(name)
-    return readings.length === 1 ? readings[0] : undefined
+  /** The class a name binds in a file, or why the reader cannot say which. */
+  private async declarationOf(local: string, filePath: string): Promise<DeclaredClass | string> {
+    const file = this.files.get(filePath)
+    const entry = file?.imports.get(local)
+    if (!entry) return file?.classes.find((declared) => declared.name === local) ?? this.onlyNamed(local)
+    const base = specifierBase(this.cwd, filePath, entry.source)
+    if (base === null) return `${local}, imported from ${entry.source}, which the check does not read`
+    const target = await resolveImportPath(base, { probe: this.probe })
+    const classes = target ? this.files.get(target)?.classes : undefined
+    const found = classes?.find((declared) => (entry.kind === 'default' ? declared.exportedAsDefault : declared.name === entry.imported))
+    // A barrel's `export *` is not followed; its one class of that name is the import's.
+    return found ?? (entry.kind === 'named' ? this.onlyNamed(entry.imported) : `${local}, whose class the check cannot find in ${entry.source}`)
   }
 
-  private resolve(declared: DeclaredClass): BroadcastEventClass | undefined {
-    let { broadcastOn, broadcastAs, broadcastWith } = declared
-    let baseUnseen = false
+  private onlyNamed(name: string): DeclaredClass | string {
+    const named = this.byName.get(name) ?? []
+    if (named.length === 1) return named[0]!
+    return named.length > 1 ? `${name}, which more than one file under app/ declares` : `${name}, whose class the check cannot find under app/`
+  }
+
+  private read(declared: DeclaredClass): Promise<BroadcastEventClass | undefined> {
+    let reading = this.readings.get(declared)
+    if (!reading) this.readings.set(declared, (reading = this.resolve(declared)))
+    return reading
+  }
+
+  /** `broadcastNameOf()`'s order: `broadcastAs()`, then `event.eventName`, then the own static, then the class name. */
+  private async resolve(declared: DeclaredClass): Promise<BroadcastEventClass | undefined> {
+    let { broadcastOn, broadcastAs, broadcastWith, instanceName } = declared
+    let unseen = false
     const seen = new Set<DeclaredClass>([declared])
     let current = declared
-    while (current.base !== undefined && (!broadcastOn || !broadcastAs || !broadcastWith)) {
-      if (current.base === FRAMEWORK_EVENT && !this.declared.has(FRAMEWORK_EVENT)) break
-      const parents = current.base === null ? [] : (this.declared.get(current.base) ?? [])
-      const parent = parents.length === 1 ? parents[0] : undefined
-      if (!parent || seen.has(parent)) {
-        baseUnseen = true
+    while (current.base.kind === 'local' || current.base.kind === 'opaque') {
+      if (broadcastOn && broadcastAs && broadcastWith && instanceName) break
+      const parent = current.base.kind === 'local' ? await this.declarationOf(current.base.name, current.filePath) : undefined
+      if (!parent || typeof parent === 'string' || seen.has(parent)) {
+        unseen = true
         break
       }
       seen.add(parent)
       broadcastOn ??= parent.broadcastOn
       broadcastAs ??= parent.broadcastAs
       broadcastWith ??= parent.broadcastWith
+      instanceName ??= parent.instanceName
       current = parent
     }
-    if (!broadcastOn) return undefined
+    if (!broadcastOn && !unseen) return undefined
 
-    const pinned = broadcastAs !== undefined || declared.ownEventName !== undefined ? true : baseUnseen ? undefined : false
-    const eventName = broadcastAs
-      ? (literalString(returnedValue(broadcastAs)) ?? undefined)
-      : declared.ownEventName
-        ? declared.ownEventName.literal
-        : pinned === false
-          ? declared.name
-          : undefined
+    const named = broadcastAs ? bodyStep(broadcastAs) : undefined
+    const later = instanceName ?? declared.staticName
+    // An unseen base may hold a broadcastAs() or an instance name that answers first.
+    const pinned = named || later ? true : unseen ? undefined : false
+    const eventName = named ? named.literal : unseen ? undefined : later ? later.literal : declared.name
+    const payload = broadcastWith ? soleReturnedValue(broadcastWith) : undefined
     return {
       name: declared.name,
       filePath: declared.filePath,
       pinned,
       eventName,
-      channels: channelPatterns(returnedValue(broadcastOn)),
-      payload: broadcastWith ? objectReturned(broadcastWith) : undefined,
+      channels: broadcastOn ? channelPatterns(soleReturnedValue(broadcastOn)) : undefined,
+      payload: payload?.type === 'ObjectExpression' ? payload : undefined,
     }
   }
 }
 
-function declareClass(declaration: ClassDeclaration, filePath: string): DeclaredClass {
-  const superClass = declaration.superClass ? unwrapTypeAssertion(declaration.superClass) : undefined
-  const reading: DeclaredClass = {
-    name: declaration.id!.name,
-    filePath,
-    base: superClass === undefined ? undefined : superClass.type === 'Identifier' ? superClass.name : null,
-  }
+function declareClass(declaration: ClassDeclaration, filePath: string, imports: Map<string, ImportEntry>, exportedAsDefault: boolean): DeclaredClass {
+  const reading: DeclaredClass = { name: declaration.id!.name, filePath, exportedAsDefault, base: baseOf(declaration, imports) }
 
   // Both member forms, as at runtime: `broadcastOn() {}` and `broadcastOn = () => […]`.
   for (const { member, name, body } of classActionMembers(declaration)) {
     if (name === 'eventName') {
-      // A `static get eventName()` is an own static `resolveEventName()` reads; an instance one is `event.eventName`.
-      reading.ownEventName = { literal: literalString(returnedValue(body)) ?? undefined }
+      // A getter answers with what it returns; a method or an arrow field is a function, which the runtime rejects.
+      const step = 'kind' in member && member.kind === 'get' ? bodyStep(body) : { literal: undefined }
+      if (member.static) reading.staticName = step
+      else reading.instanceName = step
     } else if (member.static) {
       continue
     } else if (name === 'broadcastOn') reading.broadcastOn = body
@@ -131,25 +173,39 @@ function declareClass(declaration: ClassDeclaration, filePath: string): Declared
     else if (name === 'broadcastWith') reading.broadcastWith = body
   }
   for (const member of declaration.body.body) {
-    if (member.type !== 'ClassProperty' || memberKeyName(member) !== 'eventName') continue
+    if (member.type !== 'ClassProperty' || member.declare || memberKeyName(member) !== 'eventName') continue
     if (member.value?.type === 'ArrowFunctionExpression' || member.value?.type === 'FunctionExpression') continue
-    reading.ownEventName = { literal: member.value ? (literalString(member.value) ?? undefined) : undefined }
+    const step = valueStep(member.value)
+    if (!step) continue
+    if (member.static) reading.staticName = step
+    else reading.instanceName = step
   }
   return reading
 }
 
-/** The expression a member's single `return` hands back, or an arrow's expression body. */
-function returnedValue(body: MemberBody): Node | undefined {
-  if (body.type !== 'BlockStatement') return unwrapTypeAssertion(body)
-  const returns = body.body.filter((statement) => statement.type === 'ReturnStatement')
-  if (returns.length !== 1) return undefined
-  const argument = (returns[0] as { argument?: Node | null }).argument
-  return argument ? unwrapTypeAssertion(argument) : undefined
+function baseOf(declaration: ClassDeclaration, imports: Map<string, ImportEntry>): Base {
+  if (!declaration.superClass) return { kind: 'none' }
+  const superClass = unwrapTypeAssertion(declaration.superClass)
+  if (superClass.type !== 'Identifier') return { kind: 'opaque' }
+  const entry = imports.get(superClass.name)
+  if (entry && FRAMEWORK_PACKAGE.test(entry.source)) return entry.imported === 'Event' ? { kind: 'framework' } : { kind: 'opaque' }
+  return { kind: 'local', name: superClass.name }
 }
 
-function objectReturned(body: MemberBody): Node | undefined {
-  const value = returnedValue(body)
-  return value?.type === 'ObjectExpression' ? value : undefined
+/** A value the runtime reads as a name: none for an absent, `undefined` or `null` one, which it passes over. */
+function valueStep(value: Node | null | undefined): NameStep | undefined {
+  if (!value) return undefined
+  const node = unwrapTypeAssertion(value)
+  if (node.type === 'NullLiteral' || (node.type === 'Identifier' && node.name === 'undefined') || (node.type === 'UnaryExpression' && node.operator === 'void')) {
+    return undefined
+  }
+  return { literal: literalString(node) || undefined }
+}
+
+/** A method's answer: what its one `return` hands back, unknown when it returns from more places or none. */
+function bodyStep(body: MemberBody): NameStep | undefined {
+  const value = soleReturnedValue(body)
+  return value ? valueStep(value) : { literal: undefined }
 }
 
 function channelPatterns(value: Node | undefined): string[] | undefined {
