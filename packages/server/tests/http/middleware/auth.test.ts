@@ -11,6 +11,7 @@ import { AGENT_SURFACE_HEADER } from '../../../src/internal/agent-request'
 import { createMockAuthContext } from '@guren/testing'
 
 const toolCall = { headers: { [AGENT_SURFACE_HEADER]: 'mcp' } }
+const navigation = { headers: { Accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } }
 
 describe('attachAuthContext', () => {
   it('attaches auth context to the request', async () => {
@@ -109,6 +110,48 @@ describe('requireAuthenticated', () => {
     expect(res.status).toBe(401)
     const body = await res.json()
     expect(body).toEqual({ message: 'Unauthorized' })
+  })
+
+  it('answers a browser navigation with a 401 page instead of JSON', async () => {
+    const app = new Hono()
+    app.use(attachAuthContext(() => createMockAuthContext({ isAuthenticated: false })))
+    app.use('/protected/*', requireAuthenticated())
+    app.get('/protected/resource', (c) => c.text('secret data'))
+
+    const res = await app.request('/protected/resource', navigation)
+
+    expect(res.status).toBe(401)
+    expect(res.headers.get('content-type')).toContain('text/html')
+    expect(await res.text()).toContain('You need to sign in to access this page.')
+  })
+
+  it('keeps a responseFactory ahead of the page for a browser navigation', async () => {
+    const app = new Hono()
+    app.use(attachAuthContext(() => createMockAuthContext({ isAuthenticated: false })))
+    app.use('/protected/*', requireAuthenticated({ responseFactory: () => new Response('custom', { status: 418 }) }))
+    app.get('/protected/resource', (c) => c.text('secret data'))
+
+    const res = await app.request('/protected/resource', navigation)
+
+    expect(res.status).toBe(418)
+    expect(await res.text()).toBe('custom')
+  })
+
+  it('keeps the JSON for an Inertia visit and for an agent tool call that accept HTML', async () => {
+    const app = new Hono()
+    app.use(attachAuthContext(() => createMockAuthContext({ isAuthenticated: false })))
+    app.use('/protected/*', requireAuthenticated())
+    app.get('/protected/resource', (c) => c.text('secret data'))
+
+    const inertia = await app.request('/protected/resource', {
+      headers: { ...navigation.headers, 'X-Inertia': 'true' },
+    })
+    const tool = await app.request('/protected/resource', {
+      headers: { ...navigation.headers, ...toolCall.headers },
+    })
+
+    expect(await inertia.json()).toEqual({ message: 'Unauthorized' })
+    expect(await tool.json()).toEqual({ message: 'Unauthorized' })
   })
 
   it('redirects unauthenticated users when redirectTo is set', async () => {
@@ -257,6 +300,19 @@ describe('requireGuest', () => {
     expect(res.status).toBe(403)
     const body = await res.json()
     expect(body).toEqual({ message: 'Already authenticated' })
+  })
+
+  it('answers a browser navigation with a 403 page instead of JSON', async () => {
+    const app = new Hono()
+    app.use(attachAuthContext(() => createMockAuthContext({ isAuthenticated: true })))
+    app.use('/login', requireGuest())
+    app.get('/login', (c) => c.text('login form'))
+
+    const res = await app.request('/login', navigation)
+
+    expect(res.status).toBe(403)
+    expect(res.headers.get('content-type')).toContain('text/html')
+    expect(await res.text()).toContain('You are already signed in.')
   })
 
   it('redirects authenticated users when redirectTo is set', async () => {
