@@ -64,8 +64,8 @@ export function renderDebugPage(thrown: Error, request?: Request): string {
   .stack-frames { display: flex; flex-direction: column; gap: 2px; }
   .frame { padding: 0.6rem 0.75rem; border-radius: 8px; cursor: default; transition: background 0.15s; }
   .frame:hover { background: var(--g-raised); }
-  .frame.vendor { opacity: 0.5; }
-  .frame.vendor:hover { opacity: 0.75; }
+  /* Dimmed by color: an opacity fades this text under the 4.5:1 that small text needs. */
+  .frame.vendor .frame-method, .frame.vendor .frame-location { color: var(--g-muted); }
   .frame-header { display: flex; align-items: center; gap: 0.75rem; font-size: 0.875rem; }
   .frame-index { color: var(--g-muted); font: 500 0.75rem var(--g-font-mono); min-width: 2rem; flex-shrink: 0; }
   .frame-method { color: var(--g-heading); font-family: var(--g-font-mono); font-weight: 500; }
@@ -91,17 +91,19 @@ export function renderDebugPage(thrown: Error, request?: Request): string {
 </head>
 <body>
 <div class="container">
-  <header class="error-header">
-    <div class="status-badge">${statusCode}</div>
-    <div class="error-info">
-      <h1 class="error-class">${escapeHtml(errorName)}</h1>
-      <p class="error-message">${errorMessage}</p>
-    </div>
-  </header>
+  <main>
+    <header class="error-header">
+      <div class="status-badge">${statusCode}</div>
+      <div class="error-info">
+        <h1 class="error-class">${escapeHtml(errorName)}</h1>
+        <p class="error-message">${errorMessage}</p>
+      </div>
+    </header>
 
-  ${stackSection}
-  ${requestSection}
-  ${environmentSection}
+    ${stackSection}
+    ${requestSection}
+    ${environmentSection}
+  </main>
 
   <footer class="footer">
     <p>Guren Framework &mdash; Debug Error Page</p>
