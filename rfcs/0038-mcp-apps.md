@@ -627,8 +627,9 @@ type GurenToolResponse =
 
 **Amended by the Phase 2 spike:** every envelope carries `contract`, the
 version of the `dev.guren/*` keys and the bridge catalogue that the plugin
-speaks, and every built document carries the version its bridge was built
-against. A bridge that reads another number does not drive visits: it renders
+speaks, and `bridge`, the catalogue's URI (absent when the app serves no
+views), so the view never derives the server's `ui://` authority. Every built
+document carries the version its bridge was built against. A bridge that reads another number does not drive visits: it renders
 the page it was given, and every visit becomes the hand-off of step 5, so a
 host still holding an older template (§3) degrades to links instead of
 misreading results. The number changes only when those shapes do, not with
