@@ -3,7 +3,7 @@
  * Each one needs a loader in `resources/js/components/diagrams/registry.ts`,
  * which its type enforces.
  */
-export const INTERACTIVE_DIAGRAMS = ['plan-lifecycle'] as const
+export const INTERACTIVE_DIAGRAMS = ['plan-lifecycle', 'middleware-order'] as const
 
 export type InteractiveDiagramName = (typeof INTERACTIVE_DIAGRAMS)[number]
 

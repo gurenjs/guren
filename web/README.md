@@ -61,7 +61,7 @@ GitHub hides the comment and keeps rendering the mermaid, which is also what the
 2. Write the component under `resources/js/components/diagrams/` and register its loader in `registry.ts`. The type requires one for every name.
 3. Keep the mermaid fence showing the same flow, so the fallback stays true.
 
-A diagram earns interactivity when the reader needs to follow a sequence or a loop, or to look at one part at a time (who acts at each stage, what each step writes). A diagram that reads in one glance stays plain mermaid. Components take `locale`, use the `--g-*` / `--docs-*` tokens so dark mode follows, work at 375px, keep motion behind `prefers-reduced-motion: no-preference`, and link to the guide's sections rather than repeating them. `plan-lifecycle` (the implementation plans guide) is the reference.
+A diagram earns interactivity when the reader needs to follow a sequence or a loop, or to look at one part at a time (who acts at each stage, what each step writes). A diagram that reads in one glance stays plain mermaid. Components take `locale`, use the `--g-*` / `--docs-*` tokens so dark mode follows, work at 375px, keep motion behind `prefers-reduced-motion: no-preference`, and link to the guide's sections rather than repeating them. `plan-lifecycle` (the implementation plans guide) is the reference for a sequence, and `middleware-order` (the middleware guide) for an order that differs from how the code reads.
 
 ### Production Builds
 

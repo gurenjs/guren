@@ -120,6 +120,8 @@ A route's middleware runs in this order:
 
 Names run before functions across groups as well as within one `.middleware()` call. So an inline handler on an outer group runs *after* a name on an inner group, the reverse of how the code reads:
 
+<!-- interactive: middleware-order -->
+
 ```mermaid
 flowchart LR
   subgraph Written["As written"]
