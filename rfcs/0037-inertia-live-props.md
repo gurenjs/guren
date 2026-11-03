@@ -484,7 +484,10 @@ stream is unowned (opened before sign-in, or by a user object with no `id`,
 held on the `WebSocketClient` record and accepted nowhere as an input. SSE
 clients get none, since the transport does not use them.
 
-`broadcastEvent(event, { except })` takes the request (or the header value),
+`broadcastEvent(event, { except })` takes ~~the request (or the header value)~~
+**the request's context (`this.ctx` in a controller), or `{ socketId, user }`
+given by hand (amended in implementation: a `Request` or a bare header value
+carries no signed-in user to bind the match to)**,
 reads `X-Socket-Id`, and publishes the payload as
 `{ ...payload, __inertia: { socketId, userId } }`, where `userId` is the
 requester's id read the way `resolveClientUserId()` reads a socket's owner.

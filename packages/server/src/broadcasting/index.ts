@@ -14,6 +14,8 @@ export type {
   WebSocketMiddlewareOptions,
   AuthMiddlewareOptions,
   BroadcastableEvent,
+  BroadcastEventOptions,
+  BroadcastSender,
 } from './types'
 
 export {

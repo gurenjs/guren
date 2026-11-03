@@ -48,16 +48,39 @@ export interface SSEClient {
   id: string
   userId?: string | number
   channels: Set<string>
-  send(event: string, data: unknown): void
+  /** `channel` is the one an event arrived on; absent on control events (`connected`, `ping`). */
+  send(event: string, data: unknown, channel?: string): void
   close(): void
 }
 
 export interface WebSocketClient {
   id: string
   userId?: string | number
+  /**
+   * Issued by `registerWebSocketClient()` and sent in `connected`: the value a
+   * request names as `X-Socket-Id` to skip its own broadcast (RFC 0037 §4).
+   */
+  socketId?: string
   channels: Set<string>
-  send(event: string, data: unknown): void | Promise<void>
+  /** `channel` is the one an event arrived on; absent on control events (`connected`, `subscription`). */
+  send(event: string, data: unknown, channel?: string): void | Promise<void>
   close(): void
+}
+
+/** Who sent a broadcast, so their own sockets can be skipped. */
+export interface BroadcastSender {
+  /** The `X-Socket-Id` the request carried. */
+  readonly socketId?: string | null
+  readonly user?: unknown
+}
+
+export interface BroadcastEventOptions {
+  /**
+   * Skip the sender's own socket: the request's context (its `X-Socket-Id`
+   * header and signed-in user), or the two given by hand. Only a socket owned
+   * by that same user is skipped.
+   */
+  readonly except?: BroadcastSender | { readonly req: { header(name: string): string | undefined } } | null
 }
 
 export interface BroadcastManagerOptions {
