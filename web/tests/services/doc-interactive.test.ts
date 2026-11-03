@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { htmlToText } from '../../app/Services/search-sections.js'
 import { INTERACTIVE_DIAGRAMS } from '../../config/interactive-diagrams.js'
+import { ORDERS } from '../../resources/js/components/diagrams/middleware-order-steps.js'
 import { PLAN_LIFECYCLE_STAGES } from '../../resources/js/components/diagrams/plan-lifecycle-stages.js'
 import { INTERACTIVE_DIAGRAM_LOADERS } from '../../resources/js/components/diagrams/registry.js'
 
@@ -61,5 +62,17 @@ describe('interactive diagrams', () => {
     for (const stage of PLAN_LIFECYCLE_STAGES) {
       expect(html).toContain(`id="${stage.anchor[locale]}"`)
     }
+  })
+
+  it.each(['en', 'ja'] as const)('upgrades the %s middleware guide over the flowchart it animates', async (locale) => {
+    const path = fileURLToPath(new URL(`../../../docs/${locale}/guides/middleware.md`, import.meta.url))
+    const html = await renderMarkdownToHtml(readFileSync(path, 'utf8'), { locale, category: 'guides' })
+    const block = /<div class="doc-interactive" data-interactive="middleware-order">([\s\S]*?)<\/div>/u.exec(html)
+    expect(block).not.toBeNull()
+    // The flowchart is the no-JS fallback, so it must name the same middleware in the same run order.
+    const fallback = block![1]
+    const positions = ORDERS.run.slice(0, 3).map((id) => fallback.lastIndexOf(id))
+    expect(positions.every((at) => at >= 0)).toBe(true)
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions)
   })
 })

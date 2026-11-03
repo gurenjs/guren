@@ -120,6 +120,8 @@ router.middleware('api', 'auth').group((group) => {
 
 名前で指定したものが関数より先に動く規則は、1 回の `.middleware()` の中でも、グループをまたいでも同じです。そのため、外側のグループに書いたインラインハンドラーは、内側のグループの名前付きミドルウェアより**後**に実行され、コードの見た目とは逆の順になります。
 
+<!-- interactive: middleware-order -->
+
 ```mermaid
 flowchart LR
   subgraph Written["書いた順"]
