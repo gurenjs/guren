@@ -176,10 +176,10 @@ function parseAdvisories(body: unknown): BunAdvisory[] | null {
   return advisories
 }
 
-/** `oven-sh/bun`'s published advisories, every page; the token goes to `api.github.com` only. */
+/** `oven-sh/bun`'s published advisories, every page; the token goes to `api.github.com` only, and `token: ''` sends none. */
 export async function fetchBunAdvisories(options: { fetch?: HttpFetch; token?: string } = {}): Promise<AdvisoryRead> {
   const fetchImpl = options.fetch ?? fetch
-  const token = options.token ?? (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || undefined)
+  const token = (options.token ?? (process.env.GITHUB_TOKEN || process.env.GH_TOKEN)) || undefined
   const advisories: BunAdvisory[] = []
   let url: string | null = ADVISORIES_URL
   for (let page = 0; url !== null; page += 1) {
