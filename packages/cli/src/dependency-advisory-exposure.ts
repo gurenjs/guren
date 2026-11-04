@@ -12,16 +12,12 @@ export type DependencyExposureSummary =
   | { snapshot: DependencyExposure['snapshot']; coverage: DependencyExposure['coverage'] }
   | { error: { code: 'collection-failed'; message: string } }
 
-function versionOf(instance: DependencyExposure['packages'][number]): string {
-  return instance.id.slice(instance.name.length + 1)
-}
-
 /**
  * Bun places no prerelease inside a plain range (`1.2.0-beta.1` does not satisfy
  * `<1.2.0`, measured on 1.4.4), so a prerelease counts as in range, and so does a
  * range Bun cannot read, which `satisfies` reads as holding every version.
  */
-function inRange(version: string, ranges: readonly string[]): boolean {
+export function inRange(version: string, ranges: readonly string[]): boolean {
   if (version.includes('-')) return true
   return ranges.some((range) => {
     try {
@@ -37,7 +33,7 @@ export function attachExposures(findings: AuditFinding[], exposure: DependencyEx
   for (const finding of findings) {
     if (!finding.advisory) continue
     const { package: name, ranges } = finding.advisory
-    finding.exposures = exposure.packages.filter((instance) => instance.name === name && inRange(versionOf(instance), ranges))
+    finding.exposures = exposure.packages.filter((instance) => instance.name === name && inRange(instance.version, ranges))
     if (finding.exposures.length > 0) continue
     const lockfile = exposure.lockfile ?? 'the lockfile'
     finding.exposureReason = tree.status !== 'complete'

@@ -7,7 +7,10 @@ import type { DependencyExposure } from '../src/dependency-exposure-load'
 const instance = (id: string, attribution: ExposedPackage['attribution'] = 'routes'): ExposedPackage => ({
   id,
   name: id.slice(0, id.lastIndexOf('@')),
+  version: id.slice(id.lastIndexOf('@') + 1),
   installedAs: [id.slice(0, id.lastIndexOf('@'))],
+  direct: true,
+  paths: { [id.slice(0, id.lastIndexOf('@'))]: [id.slice(0, id.lastIndexOf('@'))] },
   placement: [{ at: 'server', evidence: 'import' }],
   attribution,
   viaFramework: false,
