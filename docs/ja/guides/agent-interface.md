@@ -522,6 +522,7 @@ Guren には以前から MCP エンドポイントがありますが、ここま
 - [ルーティング: エージェントツール](./route-contracts.md#エージェントツール): ほかのルートコントラクトと `.agent()` の関係
 - [エージェントツールの権限と監査](./agent-tool-governance.md): トークンのスコープ、承認ゲート、監査ログ
 - [API トークン](./api-tokens.md): MCP エンドポイントが bearer を検証するときに使うストア
+- [MCP Apps](./mcp-apps.md): ツールの結果をホストの中で Inertia のページとして表示する
 - [認可](./authorization.md): 呼び出し主体に何を許可するかを決めるポリシー
 - [CLI](./cli.md): `tool:list` と `tool:inspect`
 - [チェックと監査の詳細](./cli-checks.md#エージェントに公開したルート): エージェント向けルートについての check・audit の指摘のキー
