@@ -112,7 +112,7 @@ interface Binding {
   /** A declared local's initializer, which a sink follows to what it holds. */
   value?: { node: BabelNode; scope: Scope }
   /**
-   * Reassigned or written through since, so the initializer no longer says all it holds; `passed` when it
+   * Reassigned or written through since, so the initializer may not say all it holds; `passed` when it
    * was only handed to a call, which can add to an object or array literal but not to a record or primitive.
    */
   mutated?: 'written' | 'passed'
