@@ -12,7 +12,7 @@
     "lint": "bunx oxlint",
     "lint:fix": "bunx oxlint --fix",
     "test": "bun test",
-    "build": "bun run codegen && bunx vite build",
+    "build": "bun run codegen && bunx vite build && bunx vite build --mode mcp-app",
     "preview": "NODE_ENV=production bun bin/serve.ts",
     "start": "NODE_ENV=production bun bin/serve.ts",
     "db:make": "bunx guren make:migration",
