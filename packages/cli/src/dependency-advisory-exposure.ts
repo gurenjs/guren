@@ -12,12 +12,17 @@ export type DependencyExposureSummary =
   | { snapshot: DependencyExposure['snapshot']; coverage: DependencyExposure['coverage'] }
   | { error: { code: 'collection-failed'; message: string } }
 
+/**
+ * Bun places no prerelease inside a plain range (`1.2.0-beta.1` does not satisfy
+ * `<1.2.0`, measured on 1.4.4), so a prerelease counts as in range, and so does a
+ * range Bun cannot read, which `satisfies` reads as holding every version.
+ */
 export function inRange(version: string, ranges: readonly string[]): boolean {
+  if (version.includes('-')) return true
   return ranges.some((range) => {
     try {
       return Bun.semver.satisfies(version, range)
     } catch {
-      // A range Bun cannot read could still hold the version.
       return true
     }
   })

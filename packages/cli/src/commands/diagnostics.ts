@@ -215,7 +215,7 @@ export const auditCommand = defineCommand({
     },
     'deps-baseline': {
       type: 'string',
-      description: 'Exit 1 on an advisory this previous `guren audit --json` report (or array of keys) does not name, or on a scan that did not complete.',
+      description: 'Exit 1 on an advisory this previous `guren audit --json` report (or array of keys), relative to the app, does not name, or on a scan that did not complete.',
     },
     // Same shape as check's `introspect` flag above.
     introspect: {
@@ -242,7 +242,7 @@ export const auditCommand = defineCommand({
     })
     const baseline = baselineFile === undefined
       ? undefined
-      : judgeDepsBaseline(report, baselineFile, await readFile(resolve(baselineFile), 'utf8').catch(() => null))
+      : judgeDepsBaseline(report, baselineFile, await readFile(resolve(args.app ?? '.', baselineFile), 'utf8').catch(() => null))
 
     if (args.json) {
       console.log(JSON.stringify(baseline ? { ...report, depsBaseline: baseline } : report, null, 2))

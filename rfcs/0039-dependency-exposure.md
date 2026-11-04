@@ -448,7 +448,10 @@ than at the next deploy.
   treated as exposed. When the document cannot be collected, `dependencyExposure`
   is `{ error: { code: 'collection-failed', message } }` and every advisory names
   the failure, rather than the audit failing.
-- A range `Bun.semver` cannot read holds every version.
+- A range `Bun.semver` cannot read holds every version, and a prerelease is
+  always in range, since Bun places none inside a plain range (`1.2.0-beta.1`
+  does not satisfy `<1.2.0`).
+- The baseline path is read relative to the app, like `--audit-config`.
 - `--deps-baseline` reads a previous `guren audit --json` report or a JSON array
   of keys; anything else, an unreadable file, and a scan that did not complete
   each exit 1 with their own message, and the flag is refused with `--no-deps`.
