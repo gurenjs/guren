@@ -30,6 +30,7 @@ const NOT_IN_PRODUCTION_IMAGE: Record<string, string> = {
   types: 'type declarations only',
   tests: 'test only',
   'vite.config.ts': 'build only',
+  'guren.arch.ts': 'guren check only',
   'drizzle.config.ts': 'drizzle-kit only; the app applies db/migrations itself',
 }
 
