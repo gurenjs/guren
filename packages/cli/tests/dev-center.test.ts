@@ -157,3 +157,23 @@ test('the catalog page is the shell, framing only the Vite origin', async () => 
   expect((await noVite.fetch(new Request('http://localhost/_guren/ui'))).headers.get('content-security-policy')).not.toContain('frame-src')
   expect((await handler.fetch(new Request('http://localhost/_guren/ui/extra'))).status).toBe(404)
 })
+
+test('the MCP Apps page frames the sandbox on 127.0.0.1 only when it is opened on localhost', async () => {
+  const handler = createDevCenterHandler({ cwd: '/fixture' })
+  const page = await handler.fetch(new Request('http://localhost:3000/_guren/mcp-apps'))
+  expect(page.status).toBe(200)
+  expect(await page.text()).toContain('id="mcp-view"')
+  expect(page.headers.get('content-security-policy')).toContain('frame-src http://127.0.0.1:3000;')
+  expect(page.headers.get('content-security-policy')).toContain("connect-src 'self'")
+  // On 127.0.0.1 the sandbox would share the page's origin, so nothing is framed.
+  const loopback = await handler.fetch(new Request('http://127.0.0.1:3000/_guren/mcp-apps'))
+  expect(loopback.headers.get('content-security-policy')).not.toContain('frame-src')
+})
+
+test('the MCP Apps sandbox is answered on 127.0.0.1, never on the page origin', async () => {
+  const handler = createDevCenterHandler({ cwd: '/fixture' })
+  expect((await handler.fetch(new Request('http://localhost:3000/_guren/mcp-apps/sandbox'))).status).toBe(404)
+  const sandbox = await handler.fetch(new Request('http://127.0.0.1:3000/_guren/mcp-apps/sandbox'))
+  expect(sandbox.status).toBe(200)
+  expect(sandbox.headers.get('content-security-policy')).toContain('frame-ancestors http://localhost:3000')
+})
