@@ -50,6 +50,23 @@ describe('judgeDepsBaseline', () => {
     expect(depsBaselineFails(result)).toBe(true)
   })
 
+  it('counts a Bun runtime advisory as new, and fails when the runtime check is unavailable', () => {
+    const runtime: AuditFinding = {
+      key: 'deps:runtime:GHSA-9',
+      title: 'Bun runtime',
+      status: 'fail',
+      message: 'advisory',
+      runtime: { ghsa: 'GHSA-9', ranges: ['< 1.4.4'], patched: ['1.4.4'], versions: [] },
+    }
+    expect(judgeDepsBaseline(report([runtime]), 'baseline.json', '[]').newKeys).toEqual(['deps:runtime:GHSA-9'])
+
+    const unavailable = {
+      ...report([]),
+      runtimeCheck: { coverage: { status: 'unavailable', reasons: [{ code: 'advisories-unavailable', message: 'api.github.com answered 500.' }] }, versions: [] },
+    } as AuditReport
+    expect(judgeDepsBaseline(unavailable, 'baseline.json', '[]').failure).toBe('The Bun runtime check is unavailable, so the baseline cannot tell what is new: api.github.com answered 500.')
+  })
+
   it('fails on a baseline it could not read', () => {
     expect(judgeDepsBaseline(report([]), 'missing.json', null).failure).toBe('The baseline missing.json could not be read.')
     expect(judgeDepsBaseline(report([]), 'bad.json', '{').failure).toBe('The baseline bad.json could not be used: it is not JSON.')

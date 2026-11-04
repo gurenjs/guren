@@ -285,7 +285,7 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
               ...[...unowned.values()].sort((a, b) => a.message.localeCompare(b.message)),
             ],
           },
-      runtime: { status: 'unavailable', reasons: [{ code: 'not-implemented', message: 'The runtime advisory check (RFC 0039 §6) is not implemented yet.' }] },
+      runtime: { status: 'unavailable', reasons: [{ code: 'not-checked', message: 'The Bun runtime is checked by loadDependencyExposure, not by the join.' }] },
     },
     packages,
   }

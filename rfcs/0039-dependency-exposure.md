@@ -539,6 +539,37 @@ without an exact version. Moving to a newer Bun means running `guren deploy`
 again, or letting Renovate (`pinDigests`) update the reference. The templates set no `engines.bun` today, so the report usually
 shows only the process version and the image tags.
 
+**Amended in implementation:**
+
+- A range is read by Guren's own grammar (comparators joined by `,` or
+  spaces, alternatives by `||`) and compared by full semver precedence through
+  `Bun.semver.order`, never `satisfies`. `satisfies` reads the comma form on
+  1.4.4, but it also returns `true` for a range it cannot parse, and it places
+  no prerelease inside a plain range, so a canary would never match. A canary
+  counts as the release it precedes (`1.4.4-canary.1` is inside `< 1.4.4`,
+  `1.4.5-canary.1` is not). A range the grammar does not read holds every
+  version and makes the coverage partial.
+- The check runs wherever `bun audit` does (`guren audit` unless `--no-deps`,
+  and `guren gate --deps`), not only when an npm advisory starts the exposure
+  join. Runtime findings carry a `runtime` field (GHSA, ranges, patched
+  releases, the versions inside), never `advisory`, so neither the exposure
+  join nor the fix search reads them. `deps:runtime:none` is the pass;
+  `deps:runtime-scan` the warning for a request that failed.
+- An entry that names no single release (an `engines.bun` range, a floating
+  image tag, a build argument with no default) is listed with `exact: false`,
+  is not matched, and makes `coverage.runtime` partial. Every Dockerfile at the
+  app root is read (`Dockerfile`, `Dockerfile.*`, `*.dockerfile`,
+  `Containerfile`), with the `ARG` defaults declared before the first `FROM`.
+  Each entry in `runtime` carries the GHSA ids it is inside (`advisories`).
+- `deps:exposure`'s exit code leaves `coverage.runtime` out: it says whether
+  the attribution is complete, and the runtime check depends on the network.
+  The text output prints the runtime under its own heading.
+- `--deps-baseline` counts a runtime advisory's key as new, and fails when the
+  runtime check is `unavailable`.
+- `GITHUB_TOKEN`, else `GH_TOKEN`, is sent to `api.github.com` only, including
+  on a `Link` page that names another host. `guren_get_dependency_exposure`
+  spawns `deps:exposure`, so each call reads the advisories once.
+
 ### 7. Data exposure
 
 `guren audit` gains a column section. It starts from response sinks, not from
