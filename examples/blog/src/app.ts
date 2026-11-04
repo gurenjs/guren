@@ -9,9 +9,11 @@ import {
   ErrorServiceProvider,
   InertiaServiceProvider,
   AuthServiceProvider as CoreAuthServiceProvider,
+  DatabaseApiTokenStore,
   NotificationServiceProvider as CoreNotificationServiceProvider,
   BroadcastServiceProvider as CoreBroadcastServiceProvider,
 } from '@guren/core'
+import { mcpPlugin } from '@guren/plugin-mcp'
 import requestLogger from '../app/Http/middleware/requestLogger.js'
 import EventServiceProvider from '../app/Providers/EventServiceProvider.js'
 import SchedulingProvider from '../app/Providers/SchedulingProvider.js'
@@ -26,6 +28,7 @@ import mail from '../config/mail.js'
 import queue from '../config/queue.js'
 import session from '../config/session.js'
 import storage from '../config/storage.js'
+import { apiTokens } from '../db/schema.js'
 import { authModule } from '../modules/auth/index.js'
 import { registerWebRoutes } from '../routes/web.js'
 import '../config/inertia.js'
@@ -56,6 +59,18 @@ const app = createApp({
     BroadcastProvider,
     EventServiceProvider,
     SchedulingProvider,
+    // The App MCP endpoint at /mcp; posts.index and posts.show render in MCP Apps
+    // hosts with the pages `vite build --mode mcp-app` builds (RFC 0038).
+    mcpPlugin({
+      serverInfo: { name: 'blog', version: '1.0.0' },
+      ui: {
+        pages: () => import('../.guren/mcp-app/index.gen.js'),
+        presentation: { 'posts/Show': { prefersBorder: true } },
+        // The layout's labels come from the translation catalogue, a shared prop
+        // a tool call carries only when it is named here.
+        sharedProps: ['_i18n'],
+      },
+    }),
   ],
   i18n: {
     supported: ['en', 'ja'],
@@ -78,5 +93,6 @@ const app = createApp({
 })
 
 app.use('*', requestLogger)
+app.auth.useTokens(new DatabaseApiTokenStore(apiTokens))
 
 export default app

@@ -1,7 +1,7 @@
 /**
  * Stage the mermaid bundle into `web/public/`, shared by the docs pages and
  * the docs-viewer snapshot, whose shell requests a fixed framework path.
- * Copying it twice would ship ~3.4 MB of identical bytes to Workers Static
+ * Copying it twice would ship ~5.5 MB of identical bytes to Workers Static
  * Assets and leave two places to bump.
  *
  * Deliberately not `public/assets/`: `scripts/smoke/build-budget.ts` caps any

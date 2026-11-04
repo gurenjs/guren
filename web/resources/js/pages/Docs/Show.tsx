@@ -358,6 +358,9 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
         startOnLoad: false,
         securityLevel: 'strict',
         theme: isDark ? 'dark' : 'default',
+        // Mermaid 12 defaults to the ELK layout and the `neo` look; these keep 11's.
+        layout: 'dagre',
+        look: 'classic',
         // Must agree with `.docs-content pre.mermaid` in app.css: mermaid
         // sizes each node box by measuring its label in this font.
         fontFamily: DIAGRAM_FONT_FAMILY,
