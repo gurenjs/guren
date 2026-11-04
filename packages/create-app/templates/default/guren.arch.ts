@@ -6,7 +6,7 @@ export default defineArchRules({
   rules: [
     {
       from: 'resources/js/**',
-      disallowPackages: ['drizzle-orm', 'postgres', 'mysql2', '@guren/orm', '@guren/core', '@guren/server'],
+      disallowPackages: ['drizzle-orm', 'postgres', 'mysql2', '@guren/orm', '@guren/core'],
       message: 'Pages run in the browser; load data in the controller and pass it as props.',
     },
     {

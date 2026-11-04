@@ -638,6 +638,8 @@ API-only template only the controller rule, since it has no `resources/js/`.
 Every `@guren/core` import a template or generator page makes is `import type`,
 which the arch check skips, so the first rule fires on none of them.
 `make:agent` adds its rule to the file's literal `rules` array as before.
+The page rule leaves `@guren/server` out: a new app does not depend on it,
+and `audit:core-first` keeps the name out of every template and doc.
 
 ### 9. Trust boundary
 
