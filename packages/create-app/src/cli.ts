@@ -36,7 +36,7 @@ async function updateSsrPackageJson(destination: string): Promise<void> {
   const pkg = JSON.parse(raw) as { scripts?: Record<string, string> }
 
   pkg.scripts ??= {}
-  pkg.scripts.build = 'bun run codegen && bunx vite build && bunx vite build --ssr'
+  pkg.scripts.build = 'bun run codegen && bunx vite build && bunx vite build --ssr && bunx vite build --mode mcp-app'
 
   await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
 }

@@ -81,7 +81,7 @@ describe('create-guren-app CLI', () => {
       const env = await readFile(join(appRoot, '.env'), 'utf8')
 
       expect(packageJson.name).toBe('my-app')
-      expect(packageJson.scripts?.build).toBe('bun run codegen && bunx vite build')
+      expect(packageJson.scripts?.build).toBe('bun run codegen && bunx vite build && bunx vite build --mode mcp-app')
       expect(packageJson.scripts?.typecheck).toBe('tsc --noEmit')
       expect(envExample).toContain('APP_KEY=')
       expect(env).toContain('APP_KEY=base64:')
@@ -248,6 +248,7 @@ describe('create-guren-app CLI', () => {
       const packageJson = JSON.parse(rawPackage) as { scripts?: Record<string, string> }
 
       expect(packageJson.scripts?.build).toContain('--ssr')
+      expect(packageJson.scripts?.build).toContain('--mode mcp-app')
 
       await access(join(appRoot, 'resources/js/ssr.tsx'))
 

@@ -4,6 +4,7 @@ dist
 data/
 public/assets/
 .guren/ssr/
+.guren/mcp-app/
 .DS_Store
 docs/plans/**/*.html
 *.plan.html

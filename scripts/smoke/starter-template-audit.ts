@@ -75,7 +75,7 @@ export async function auditStarterTemplate(root: string): Promise<void> {
   assert(!packageJson.includes('"@guren/server"'), 'Starter template must not depend directly on @guren/server.')
   assert(packageJson.includes('"dev": "bun run codegen && GUREN_MCP=1 GUREN_DOCS=1 bun run dev:server"'), 'Starter template must run codegen before dev, with the dev-only MCP endpoint and docs viewer enabled.')
   assert(packageJson.includes('"dev:server": "NODE_ENV=development bun --hot bin/serve.ts"'), 'Starter template must run the dev server with --hot so backend edits reload, under NODE_ENV=development, the value config/database.ts seeds on boot for.')
-  assert(packageJson.includes('"build": "bun run codegen && bunx vite build"'), 'Starter template must run codegen before build.')
+  assert(packageJson.includes('"build": "bun run codegen && bunx vite build && bunx vite build --mode mcp-app"'), 'Starter template must run codegen before build, then build the MCP App views.')
 
   const appBootstrap = await read(root, 'src/app.ts')
   assert(appBootstrap.includes("import { createApp } from '@guren/core'"), 'Starter template must bootstrap with createApp from @guren/core.')
