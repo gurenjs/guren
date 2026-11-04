@@ -43,8 +43,8 @@ remember token and `hidden`. A column is sensitive when the model lists it in
 or `otp` as a whole camelCase or snake_case segment. The warning names the
 action, the routes that reach it, and whether their chains authorize. A value
 the audit cannot follow (a helper's result, a value passed through a library)
-is listed after the findings as not read, and `--json` carries the list under
-`dataExposure`. `auth.user()` is judged only when introspection reports one
+is listed as not read in the section that ends the report, and `--json` carries
+the list under `dataExposure`. `auth.user()` is judged only when introspection reports one
 model provider, so `--no-introspect` and a custom provider leave it unread.
 Put `// guren-audit-ignore` on the line that sends the value, or the line
 above it, to accept one.

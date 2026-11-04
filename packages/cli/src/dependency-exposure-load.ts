@@ -10,6 +10,7 @@ import { collectProjectFiles, IMPORTABLE_EXTENSIONS } from './discovery'
 import { cachedFileProbe } from './import-resolution'
 import { scanImports } from './import-scan'
 import { ParseCache } from './parse-cache'
+import { exposureBoundary, orderTrustBoundary, runtimeBoundary, type ExposureBoundaryInput, type TrustBoundaryEntry } from './trust-boundary'
 
 const JSON_EXTENSION = new Set(['.json'])
 
@@ -19,6 +20,19 @@ export interface DependencyExposure extends ExposureJoin {
   lockfile: string | null
   workspace: string
   runtime: RuntimeVersion[]
+  /** What the results rest on without checking (RFC 0039 §9). */
+  trustBoundary: TrustBoundaryEntry[]
+}
+
+function exposureBoundaryInput(exposure: Pick<DependencyExposure, 'coverage' | 'snapshot' | 'lockfile' | 'packages'>, unhashed: number): ExposureBoundaryInput {
+  return {
+    coverage: exposure.coverage,
+    consistency: exposure.snapshot.consistency,
+    lockfile: exposure.lockfile,
+    framework: exposure.packages.filter((entry) => entry.attribution === 'framework').length,
+    unknown: exposure.packages.filter((entry) => entry.attribution === 'unknown').length,
+    unhashed,
+  }
 }
 
 async function fingerprint(paths: readonly string[]): Promise<string> {
@@ -74,18 +88,24 @@ export async function loadDependencyExposure(options: { cwd: string; introspect?
     runtime: runtime.versions.map((version) => [version.source, version.value, version.advisories ?? []]),
   })
 
+  const snapshot: DependencyExposure['snapshot'] = {
+    id: createHash('sha256').update(content).digest('hex'),
+    graph: graph?.snapshot.id ?? null,
+    capturedAt: new Date().toISOString(),
+    consistency: unchanged && graph?.snapshot.consistency !== 'changed' ? 'stable' : 'changed',
+  }
+  const unhashed = tree.packages.filter((instance) => !instance.integrity).length
   return {
     schemaVersion: 1,
-    snapshot: {
-      id: createHash('sha256').update(content).digest('hex'),
-      graph: graph?.snapshot.id ?? null,
-      capturedAt: new Date().toISOString(),
-      consistency: unchanged && graph?.snapshot.consistency !== 'changed' ? 'stable' : 'changed',
-    },
+    snapshot,
     lockfile: tree.lockfile,
     workspace: tree.workspace,
     ...joined,
     runtime: runtime.versions,
+    trustBoundary: orderTrustBoundary([
+      ...runtimeBoundary(runtime),
+      ...exposureBoundary(exposureBoundaryInput({ ...joined, snapshot, lockfile: tree.lockfile }, unhashed)),
+    ]),
   }
 }
 

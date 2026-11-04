@@ -9,7 +9,12 @@ import type { DependencyExposure } from './dependency-exposure-load'
 import type { GraphCoverage } from './application-graph'
 
 export type DependencyExposureSummary =
-  | { snapshot: DependencyExposure['snapshot']; coverage: DependencyExposure['coverage'] }
+  | {
+    snapshot: DependencyExposure['snapshot']
+    coverage: DependencyExposure['coverage']
+    /** The document's §9 entries but the runtime's, which the audit builds from its own check. */
+    trustBoundary: DependencyExposure['trustBoundary']
+  }
   | { error: { code: 'collection-failed'; message: string } }
 
 /**
@@ -42,7 +47,7 @@ export function attachExposures(findings: AuditFinding[], exposure: DependencyEx
         ? `No instance of ${name} this app installs is inside ${ranges.join(' || ')}. bun audit reads every workspace of ${lockfile}, so another workspace may hold it; if none does, treat it as exposed.`
         : `bun audit reports ${name}, but no instance in ${lockfile} is inside ${ranges.join(' || ')}; the two readers disagree, so treat it as exposed.`
   }
-  return { snapshot: exposure.snapshot, coverage: exposure.coverage }
+  return { snapshot: exposure.snapshot, coverage: exposure.coverage, trustBoundary: exposure.trustBoundary.filter((entry) => entry.from !== 'runtime') }
 }
 
 export function exposureUnavailable(findings: AuditFinding[], error: unknown): DependencyExposureSummary {
