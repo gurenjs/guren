@@ -49,6 +49,11 @@ describe('serveMcpAppsSandbox', () => {
     expect(csp).toContain('connect-src https://api.example.com')
   })
 
+  test('keeps a declared WebSocket origin', () => {
+    const csp = mcpAppsSandboxCsp({ connectDomains: ['wss://live.example.com', 'ws://dev.example.com:8080'] }, 'http://localhost:3000')
+    expect(csp).toContain('connect-src wss://live.example.com ws://dev.example.com:8080;')
+  })
+
   test('drops a domain that would add a keyword or a directive', () => {
     const csp = mcpAppsSandboxCsp({
       resourceDomains: ["'unsafe-eval'", 'https://a.example.com; script-src *', 'https://b.example.com other'],
@@ -62,7 +67,7 @@ describe('serveMcpAppsSandbox', () => {
 
   test('drops the dev server\'s own hosts, which a view in a real host could never reach', () => {
     const csp = mcpAppsSandboxCsp({
-      connectDomains: ['127.0.0.1:3000', 'http://127.0.0.1:3000', '127.0.0.1:*', 'localhost:3000', 'http://0.0.0.0:3000', 'https://api.example.com'],
+      connectDomains: ['127.0.0.1:3000', 'http://127.0.0.1:3000', '127.0.0.1:*', 'localhost:3000', 'http://0.0.0.0:3000', 'ws://localhost:3000', 'https://api.example.com'],
     }, 'http://localhost:3000')
     expect(csp).toContain('connect-src https://api.example.com;')
   })

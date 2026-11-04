@@ -18,10 +18,10 @@ export interface McpAppsSandboxCsp {
 const MAX_CSP_QUERY = 8192
 
 /** A source expression is an origin or a host pattern; a quote, space or `;` would add a keyword or a directive. */
-const SOURCE = /^(?:https?:\/\/)?(?:\*\.)?[a-z0-9.-]+(?::(?:\d{1,5}|\*))?$/i
+const SOURCE = /^(?:(?:https?|wss?):\/\/)?(?:\*\.)?[a-z0-9.-]+(?::(?:\d{1,5}|\*))?$/i
 
 /** The dev server's own hosts: a view a real host serves could never reach them, so the preview does not either. */
-const LOOPBACK = /^(?:https?:\/\/)?(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)(?::|$)/i
+const LOOPBACK = /^(?:(?:https?|wss?):\/\/)?(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)(?::|$)/i
 
 function sources(domains: unknown): string[] {
   if (!Array.isArray(domains)) return []
