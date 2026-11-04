@@ -48,6 +48,14 @@ function resourceClassNames(shape: ResourceResponseShape): string[] {
   return Object.values(shape).flatMap(resourceClassNames)
 }
 
+/** `posts/Show`, `posts/Show (app only)` or `app only`: what an MCP Apps host renders, and whether the model sees the tool. */
+function describeUi(tool: DerivedAgentTool): string {
+  if (!tool.ui) return '-'
+  const appOnly = !tool.ui.visibility.includes('model')
+  if (tool.ui.page === undefined) return appOnly ? 'app only' : '-'
+  return appOnly ? `${tool.ui.page} (app only)` : tool.ui.page
+}
+
 function describeAuthorization(tool: DerivedAgentTool): string {
   // A dash, not "none": absence means the ability is not statically
   // derivable, which is a different claim from "this route is unguarded".
@@ -83,6 +91,7 @@ function printToolTable(tools: DerivedAgentTool[]): void {
     ['WebMCP', (tool) => (tool.expose.webMcp ? 'yes' : 'no')],
     ['Auth', describeAuthorization],
     ['Annotations', describeAnnotations],
+    ['UI', describeUi],
   ]
 
   const rows = tools.map((tool) => columns.map(([, value]) => value(tool)))
@@ -136,6 +145,12 @@ export async function displayToolInspection(
   console.log(field('Authorization', tool.authorization ? tool.authorization.ability : '(not statically derivable)'))
   if (tool.approval) console.log(field('Approval', tool.approval))
   if (tool.redact) console.log(field('Redacted', tool.redact.join(', ')))
+  if (tool.ui) {
+    const page = tool.ui.page === undefined ? 'no page' : `page ${tool.ui.page}`
+    // An app-only tool is absent from the model's tools/list; only a view can call it.
+    const audience = tool.ui.visibility.includes('model') ? `visible to ${tool.ui.visibility.join(', ')}` : 'app only, hidden from the model'
+    console.log(field('UI', `${page}; ${audience}`))
+  }
 
   console.log('')
   console.log('\x1b[1mInput\x1b[0m')
@@ -154,7 +169,9 @@ export async function displayToolInspection(
 
   console.log('')
   console.log('\x1b[1mOutput\x1b[0m')
-  if (tool.outputSchema) {
+  if (tool.ui?.page !== undefined) {
+    console.log(`  (no output schema; MCP Apps hosts render the result as the page ${tool.ui.page})`)
+  } else if (tool.outputSchema) {
     console.log(JSON.stringify(tool.outputSchema, null, 2))
   } else if (tool.resource) {
     // The hint's payload *type* lives in the CLI's AST extraction over app/Http/Resources,

@@ -296,6 +296,36 @@ export default registerWebRoutes
       expect(text).not.toContain('agents.gen.ts')
     })
 
+    it('shows the page an MCP Apps host renders and an app-only tool', async () => {
+      await writeFile(
+        join(tempDir, 'routes/web.ts'),
+        `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts/:id', () => 'post').name('posts.show').agent({ ui: 'posts/Show' })
+  router.put('/posts/:id', () => 'ok').name('posts.update').agent({ ui: { visibility: ['app'] } })
+}
+
+export default registerWebRoutes
+`,
+      )
+      const spy = captureStdout()
+      try {
+        await displayToolInspection('posts.show', { appRoot: tempDir })
+        await displayToolInspection('posts.update', { appRoot: tempDir })
+        await displayTools({ appRoot: tempDir })
+      } finally {
+        spy.mockRestore()
+      }
+
+      const text = output.join('\n')
+      expect(text).toContain(`${'UI:'.padEnd(15)}page posts/Show; visible to model, app`)
+      expect(text).toContain('MCP Apps hosts render the result as the page posts/Show')
+      expect(text).toContain(`${'UI:'.padEnd(15)}no page; app only, hidden from the model`)
+      const updateRow = output.find((line) => line.startsWith('posts.update '))
+      expect(updateRow?.trimEnd().endsWith('| app only')).toBe(true)
+    })
+
     it('lists the available tools when the name is unknown', async () => {
       await expect(displayToolInspection('nope', { appRoot: tempDir })).rejects.toThrow(
         /No agent tool named "nope"\..*posts\.index, posts\.publish/su,
