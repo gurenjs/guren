@@ -37,8 +37,13 @@ export const runLockfileOnly: LockfileResolver = async (dir) => {
 
 type Manifest = Record<string, unknown> & Partial<Record<(typeof MANIFEST_GROUPS)[number], Record<string, string>>> & { overrides?: Record<string, string> }
 
-/** The spec `update` writes: the old one's `^` or `~` kept, anything else pinned. */
-function nextSpec(previous: string, to: string): string {
+/** A spec naming a registry version range; an alias, a path, a git or URL source names another source. */
+const REGISTRY_RANGE = /^[\s\d<>=^~*xX|.-]*[\w.+-]*$/u
+const OTHER_SOURCE = /^(?:npm|workspace|link|file|git|github|gitlab|bitbucket|https?):|^(?:\.|~\/)|\//u
+
+/** The spec `update` writes: the old one's `^` or `~` kept, anything else pinned; null for a spec that is not a range. */
+function nextSpec(previous: string, to: string): string | null {
+  if (OTHER_SOURCE.test(previous) || !REGISTRY_RANGE.test(previous)) return null
   return previous.startsWith('^') ? `^${to}` : previous.startsWith('~') ? `~${to}` : to
 }
 
@@ -47,7 +52,12 @@ function applyManifestSteps(manifest: Manifest, steps: readonly FixStep[]): stri
     if (step.kind === 'update') {
       const groups = MANIFEST_GROUPS.filter((group) => manifest[group]?.[step.package] !== undefined)
       if (groups.length === 0) return `${step.package} is not declared in package.json, so it cannot be updated there.`
-      for (const group of groups) manifest[group]![step.package] = nextSpec(manifest[group]![step.package]!, step.to)
+      for (const group of groups) {
+        const previous = manifest[group]![step.package]!
+        const spec = nextSpec(previous, step.to)
+        if (spec === null) return `${step.package} is declared as ${previous}, not a registry range, so the check does not rewrite it.`
+        manifest[group]![step.package] = spec
+      }
     } else if (step.kind === 'override') {
       manifest.overrides = { ...manifest.overrides, [step.package]: step.to }
     }
@@ -89,6 +99,8 @@ export interface VerifyInput {
   read: PackumentReader
   resolve?: LockfileResolver
   now?: number
+  /** Epoch ms after which no further resolution round starts. */
+  deadline?: number
 }
 
 export async function verifyFix(input: VerifyInput): Promise<DependencyFix> {
@@ -110,10 +122,13 @@ export async function verifyFix(input: VerifyInput): Promise<DependencyFix> {
 
   const dir = await mkdtemp(join(tmpdir(), 'guren-deps-fix-'))
   try {
-    await copyFile(join(cwd, 'bun.lock'), join(dir, 'bun.lock')).catch(() => undefined)
+    // Without the lockfile Bun resolves every package afresh, a tree the app's own install would not produce.
+    const copied = await copyFile(join(cwd, 'bun.lock'), join(dir, 'bun.lock')).then(() => true, () => false)
+    if (!copied) return candidate('bun.lock could not be copied, so the fix was not resolved against the installed tree.')
     await copyFile(join(cwd, '.npmrc'), join(dir, '.npmrc')).catch(() => undefined)
     let steps = [...fix.steps]
     for (let round = 0; round < MAX_ROUNDS; round += 1) {
+      if (input.deadline !== undefined && Date.now() > input.deadline) return candidate('The fix search ran out of its time budget before the resolution finished.', steps)
       const next = structuredClone(manifest)
       const refused = applyManifestSteps(next, steps)
       if (refused) return candidate(refused, steps)
@@ -126,7 +141,11 @@ export async function verifyFix(input: VerifyInput): Promise<DependencyFix> {
       if (result.exitCode === 0) {
         const reading = readBunLock(await readFile(join(dir, 'bun.lock'), 'utf8').catch(() => ''))
         if (reading.kind !== 'read') return candidate(`The resolved bun.lock could not be read (${reading.reason}).`, steps)
-        const still = dependencyTree(reading.lock).packages.filter((instance) => instance.name === advisory.package && inRange(instance.version, advisory.ranges))
+        const tree = dependencyTree(reading.lock)
+        const still = tree.packages.filter((instance) => instance.name === advisory.package && inRange(instance.version, advisory.ranges))
+        if (still.length === 0 && tree.coverage.status !== 'complete') {
+          return candidate(`The resolved bun.lock reads ${tree.coverage.status} (${tree.coverage.reasons.map((reason) => reason.message).join(' ')}), so an instance in range may be missing from it.`, steps)
+        }
         return still.length === 0
           ? { status: 'verified', steps }
           : candidate(`bun install --lockfile-only still resolves ${still.map((instance) => instance.id).join(', ')}.`, steps)

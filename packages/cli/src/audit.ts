@@ -459,8 +459,8 @@ async function attachFixes(cwd: string, findings: AuditFinding[], exposure: Depe
       continue
     }
     try {
-      const proposed = await proposeFix({ advisory: finding.advisory, exposures: finding.exposures, installed: exposure.packages, read })
-      finding.fix = await verifyFix({ cwd, workspace: exposure.workspace, advisory: finding.advisory, fix: proposed, read })
+      const proposed = await proposeFix({ advisory: finding.advisory, exposures: finding.exposures, installed: exposure.packages, read, deadline })
+      finding.fix = await verifyFix({ cwd, workspace: exposure.workspace, advisory: finding.advisory, fix: proposed, read, deadline })
     } catch (error) {
       finding.fix = { status: 'unavailable', reason: `The fix search failed (${error instanceof Error ? error.message : String(error)}).`, steps: [] }
     }

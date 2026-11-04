@@ -471,8 +471,14 @@ than at the next deploy.
   copies `.npmrc` too. A version the gate blocks is read from Bun's
   `blocked by minimum-release-age` line as the newest version of the specifier
   younger than the gate, at most four rounds. The search shares a 120-second
-  budget per run, `--no-fix` skips it, and the registry is
-  `BUN_CONFIG_REGISTRY` or `NPM_CONFIG_REGISTRY` when set.
+  budget per run: no advisory, release trial or resolution round starts after
+  it, so one running resolution (60 s at most) can end past it. `--no-fix`
+  skips the search, and the registry is `BUN_CONFIG_REGISTRY` or
+  `NPM_CONFIG_REGISTRY` when set.
+- The check refuses, as a `candidate`, an update to a dependency declared as
+  anything but a registry range (an `npm:` alias, `workspace:`, a path, a git or
+  URL source), an app whose `bun.lock` cannot be copied, and a resolved lockfile
+  the tree reader reads only partly.
 
 ### 6. Runtime version
 

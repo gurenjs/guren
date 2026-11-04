@@ -42,16 +42,27 @@ function major(version: string): string {
   return version.split('.')[0] ?? ''
 }
 
-function ascending(versions: string[]): string[] {
-  return [...versions].sort((a, b) => Bun.semver.order(a, b))
+/** `Bun.semver.order` throws on a version that is not semver, such as a `file:` dependency's. */
+function isSemver(version: string): boolean {
+  try {
+    Bun.semver.order(version, '0.0.0')
+    return true
+  } catch {
+    return false
+  }
 }
 
-/** Releases newer than `from`, stable unless `from` is a prerelease, not deprecated, oldest first. */
+function ascending(versions: string[]): string[] {
+  return versions.filter(isSemver).sort((a, b) => Bun.semver.order(a, b))
+}
+
+/** Releases newer than `from`, stable unless `from` is a prerelease, not deprecated, oldest first; none for a `from` that is not semver. */
 function newerReleases(packument: Packument, from: string): string[] {
-  return ascending(Object.keys(packument.versions).filter((version) =>
+  if (!isSemver(from)) return []
+  return ascending(Object.keys(packument.versions)).filter((version) =>
     Bun.semver.order(version, from) > 0
     && (isStable(version) || !isStable(from))
-    && packument.versions[version]?.deprecated === undefined))
+    && packument.versions[version]?.deprecated === undefined)
 }
 
 /** The lowest release past `from` outside every range, in `from`'s major when one exists. */
@@ -99,9 +110,11 @@ export interface ProposeInput {
   /** Every instance the exposure document holds, for the installed version of a path's direct dependency. */
   installed: readonly ExposedPackage[]
   read: PackumentReader
+  /** Epoch ms after which no further release of a path's direct dependency is tried. */
+  deadline?: number
 }
 
-export async function proposeFix({ advisory, exposures, installed, read }: ProposeInput): Promise<DependencyFix> {
+export async function proposeFix({ advisory, exposures, installed, read, deadline }: ProposeInput): Promise<DependencyFix> {
   const { package: name, ranges } = advisory
   if (exposures.length === 0) return { status: 'unavailable', reason: `No installed instance of ${name} is inside the advisory's ranges.`, steps: [] }
   const packument = await read(name)
@@ -132,6 +145,10 @@ export async function proposeFix({ advisory, exposures, installed, read }: Propo
       }
       let to: string | null = null
       for (const version of newerReleases(headPackument, current.version).slice(0, MAX_HEAD_CANDIDATES)) {
+        if (deadline !== undefined && Date.now() > deadline) {
+          reasons.push(`The fix search ran out of its time budget while trying releases of ${head}.`)
+          break
+        }
         if (await chainOutcome([current.name, ...chain.slice(1)], version, ranges, read) === 'fixed') {
           to = version
           break

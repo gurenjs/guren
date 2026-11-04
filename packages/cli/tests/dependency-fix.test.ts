@@ -93,6 +93,32 @@ describe('proposeFix', () => {
     expect(fix).toEqual({ status: 'candidate', steps: [{ kind: 'override', package: 'leaf', to: '1.2.0', note: OVERRIDE_NOTE }] })
   })
 
+  it('falls back to an override for a path whose direct dependency is not a semver version', async () => {
+    const local = { ...instance('top', 'file:../top', { top: ['top'] }) }
+
+    const fix = await proposeFix({
+      advisory,
+      exposures: [instance('leaf', '1.1.0', { top: ['top', 'leaf'] })],
+      installed: [local],
+      read: reader({ top: packument({ '1.0.0': { leaf: '^1.0.0' } }), leaf: packument({ '1.1.0': {}, '1.2.0': {} }) }),
+    })
+
+    expect(fix.steps).toEqual([{ kind: 'override', package: 'leaf', to: '1.2.0', note: OVERRIDE_NOTE }])
+  })
+
+  it('stops trying releases of a direct dependency after the deadline, and says so', async () => {
+    const fix = await proposeFix({
+      advisory,
+      exposures: [instance('leaf', '1.1.0', { top: ['top', 'leaf'] })],
+      installed: [instance('top', '1.0.0', { top: ['top'] })],
+      read: reader({ top: packument({ '1.0.0': { leaf: '^1.0.0' }, '2.0.0': {} }), leaf: packument({ '1.1.0': {}, '1.2.0': {} }) }),
+      deadline: Date.now() - 1,
+    })
+
+    expect(fix.reason).toBe('The fix search ran out of its time budget while trying releases of top.')
+    expect(fix.steps).toEqual([{ kind: 'override', package: 'leaf', to: '1.2.0', note: OVERRIDE_NOTE }])
+  })
+
   it('is unavailable, with the reason, when the registry does not answer or no release is fixed', async () => {
     const exposures = [instance('leaf', '1.1.0', { leaf: ['leaf'] })]
 

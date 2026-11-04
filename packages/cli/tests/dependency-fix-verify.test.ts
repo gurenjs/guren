@@ -84,6 +84,61 @@ describe('verifyFix', () => {
       .toBe('The app shares a workspace lockfile, so the fix is checked only from the workspace root.')
   })
 
+  it('stays a candidate when the resolved lockfile is only partly readable, even with no instance in range', async () => {
+    const resolve: LockfileResolver = async (dir) => {
+      await writeFile(join(dir, 'bun.lock'), JSON.stringify({
+        lockfileVersion: 1,
+        workspaces: { '': { name: 'app', dependencies: { top: '^1.0.0' } } },
+        packages: { top: ['top@1.0.0', '', { dependencies: { leaf: '^1.0.0' } }, 'sha512-a=='] },
+      }))
+      return { exitCode: 0, stderr: '' }
+    }
+
+    const fix = await verifyFix({ cwd: app, workspace: '', advisory, fix: proposal, read: reader({}), resolve, now: NOW })
+
+    expect(fix.status).toBe('candidate')
+    expect(fix.reason).toContain('The resolved bun.lock reads partial')
+  })
+
+  it('refuses to rewrite a spec that is not a registry range, and to resolve without the lockfile', async () => {
+    const resolve: LockfileResolver = async () => {
+      throw new Error('must not resolve')
+    }
+    await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'app', dependencies: { leaf: 'npm:real-leaf@^1.0.0' } }))
+
+    expect((await verifyFix({ cwd: app, workspace: '', advisory, fix: proposal, read: reader({}), resolve, now: NOW })).reason)
+      .toBe('leaf is declared as npm:real-leaf@^1.0.0, not a registry range, so the check does not rewrite it.')
+
+    await rm(join(app, 'bun.lock'))
+    expect((await verifyFix({ cwd: app, workspace: '', advisory, fix: proposal, read: reader({}), resolve, now: NOW })).reason)
+      .toBe('bun.lock could not be copied, so the fix was not resolved against the installed tree.')
+  })
+
+  it('starts no resolution round after the deadline', async () => {
+    const resolve: LockfileResolver = async () => {
+      throw new Error('must not resolve')
+    }
+
+    const fix = await verifyFix({ cwd: app, workspace: '', advisory, fix: proposal, read: reader({}), resolve, now: NOW, deadline: Date.now() - 1 })
+
+    expect(fix).toEqual({ status: 'candidate', reason: 'The fix search ran out of its time budget before the resolution finished.', steps: proposal.steps })
+  })
+
+  it('keeps the caret or tilde of the declared range', async () => {
+    const specs: string[] = []
+    const resolve: LockfileResolver = async (dir) => {
+      specs.push(JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')).dependencies.leaf)
+      await writeFile(join(dir, 'bun.lock'), lock('1.2.0'))
+      return { exitCode: 0, stderr: '' }
+    }
+    for (const declared of ['~1.1.0', '1.1.0']) {
+      await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'app', dependencies: { leaf: declared } }))
+      await verifyFix({ cwd: app, workspace: '', advisory, fix: proposal, read: reader({}), resolve, now: NOW })
+    }
+
+    expect(specs).toEqual(['~1.2.0', '1.2.0'])
+  })
+
   it('writes an override into the copied manifest', async () => {
     let overrides: unknown
     const resolve: LockfileResolver = async (dir) => {
