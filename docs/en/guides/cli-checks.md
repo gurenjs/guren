@@ -207,7 +207,7 @@ rules: [
 
 `includeTypeImports` covers the rules you declare in `guren.arch.ts`. The zero-config module boundary rules that activate for a `modules/` directory take no options and always analyse runtime imports only.
 
-A new app starts with a `guren.arch.ts` holding two conventions. Files under `resources/js/` may not import `drizzle-orm`, `postgres`, `mysql2`, `@guren/orm` or `@guren/core`, since pages run in the browser and get their data as props. Controllers get a warning for importing `drizzle-orm`, since a raw query is sometimes the right call. Both look at a file's own imports only: a page that reaches database code through a local module, or a dynamic `import()`, is not caught. The API-only starter has no pages, so its file holds the controller rule alone.
+A new app starts with a `guren.arch.ts` holding two conventions. Files under `resources/js/` may not import `drizzle-orm`, `postgres`, `mysql2`, `@guren/orm` or `@guren/core`, since pages run in the browser and get their data as props. Controllers get a warning for importing `drizzle-orm`. `guren check` passes with it, but `guren check --ci` and `guren gate` count warnings, so keep a raw query you need out of the controller, or change the rule in the file. Both look at a file's own imports only: a page that reaches database code through a local module, or a dynamic `import()`, is not caught. The API-only starter has no pages, so its file holds the controller rule alone.
 
 Two flags make this practical for AI coding agents and large apps:
 
