@@ -28,6 +28,7 @@ import {
 import { dependencyFindingsFromOutput, startDependencyScan, type DependencyAdvisory, type DependencyScan } from './audit-deps'
 import { attachExposures, exposureUnavailable, type DependencyExposureSummary } from './dependency-advisory-exposure'
 import type { ExposedPackage } from './dependency-exposure'
+import { checkRuntime, runtimeFindings, type RuntimeCheck, type RuntimeVersion } from './bun-runtime'
 import type { DependencyFix } from './dependency-fix'
 import type { DependencyExposure } from './dependency-exposure-load'
 import {
@@ -114,6 +115,8 @@ export interface AuditFinding {
   exposureReason?: string
   /** The proposed fix, `verified` once Bun resolved it in a copy of the app (RFC 0039 §5). */
   fix?: DependencyFix
+  /** A `deps:runtime:*` advisory against Bun itself and the versions inside it (RFC 0039 §6). */
+  runtime?: { ghsa: string; ranges: string[]; patched: string[]; versions: RuntimeVersion[] }
 }
 
 export interface AuditReport {
@@ -133,6 +136,8 @@ export interface AuditReport {
   dependencyScan?: DependencyScan
   /** The exposure document's snapshot and coverage, read once for every advisory (RFC 0039 §5). */
   dependencyExposure?: DependencyExposureSummary
+  /** The Bun runtime check, present when the dependency scan ran (RFC 0039 §6). */
+  runtimeCheck?: Pick<RuntimeCheck, 'coverage' | 'versions'>
   /** Coverage of the installed-package scan for CSRF exemptions. */
   csrfExemptionScan: CsrfExemptionScan
   /**
@@ -343,6 +348,7 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
 
   // Kicked off first so the registry round-trip overlaps the local parsing.
   const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
+  const runtimeCheckOutput = options.deps ? checkRuntime(cwd) : null
 
   // The source scans read neither the routes nor the controllers, so they run while the
   // introspection child does; their findings are appended after the route-level ones.
@@ -412,6 +418,8 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
   const dependencyScan: DependencyScan = dependencyScanOutput
     ? dependencyFindingsFromOutput(await dependencyScanOutput, findings)
     : { status: 'skipped', tool: 'bun audit' }
+  const runtimeCheck = runtimeCheckOutput ? await runtimeCheckOutput : undefined
+  if (runtimeCheck) findings.push(...runtimeFindings(runtimeCheck))
 
   for (const entry of findings) {
     entry.classifications ??= classifyFindingKey(entry.key)
@@ -421,7 +429,7 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
 
   const dependencyExposure = options.exposure && findings.some((entry) => entry.advisory && entry.status !== 'ignored')
     ? await import('./dependency-exposure-load')
-      .then(({ loadDependencyExposure }) => loadDependencyExposure({ cwd, introspect: options.introspect !== undefined && options.introspect !== false }))
+      .then(({ loadDependencyExposure }) => loadDependencyExposure({ cwd, introspect: options.introspect !== undefined && options.introspect !== false, ...(runtimeCheck ? { runtime: runtimeCheck } : {}) }))
       .then(async (exposure) => {
         const summary = attachExposures(findings, exposure)
         if (options.fix) await attachFixes(cwd, findings, exposure)
@@ -440,6 +448,7 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
     routeSource: manifest ? { from: 'manifest' } : { from: 'routes-file', ...(routes.staticReason ? { reason: routes.staticReason } : {}) },
     dependencyScan,
     ...(dependencyExposure ? { dependencyExposure } : {}),
+    ...(runtimeCheck ? { runtimeCheck: { coverage: runtimeCheck.coverage, versions: runtimeCheck.versions } } : {}),
     csrfExemptionScan,
     ...(aiLocalTools ? { aiLocalTools } : {}),
   }
@@ -1495,6 +1504,9 @@ export function renderAuditReport(report: AuditReport): void {
   }
   if (report.dependencyScan?.status === 'skipped') {
     consola.info('Dependency scan skipped (--no-deps).')
+  }
+  if (report.runtimeCheck?.coverage.status === 'partial') {
+    consola.info(`Bun runtime check is partial: ${report.runtimeCheck.coverage.reasons.map((reason) => reason.message).join(' ')}`)
   }
   // Only the first-party case needs this: the finding list hides passes, and a
   // third-party declarer is already named by its own warn two lines down.

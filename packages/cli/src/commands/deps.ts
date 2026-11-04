@@ -3,6 +3,7 @@ import { markCommandFailed } from '../command-status'
 import { loadDependencyTree, type LoadedDependencyTree } from '../dependency-tree-load'
 import type { DependencyInstance } from '../dependency-tree'
 import type { ExposedPackage } from '../dependency-exposure'
+import { describeRuntimeVersion } from '../bun-runtime'
 import { isCompleteExposure, loadDependencyExposure, type DependencyExposure } from '../dependency-exposure-load'
 
 function describeInstance(instance: DependencyInstance): string[] {
@@ -69,6 +70,17 @@ function describeExposure(entry: ExposedPackage): string[] {
   return lines
 }
 
+function describeRuntime(exposure: DependencyExposure): string[] {
+  const coverage = exposure.coverage.runtime
+  const lines = [`Bun runtime (${coverage.status}):`]
+  for (const version of exposure.runtime) {
+    const inside = version.advisories?.length ? `, inside ${version.advisories.join(', ')}` : ''
+    lines.push(`  ${describeRuntimeVersion(version)}${version.exact ? inside : ' (not matched)'}`)
+  }
+  for (const reason of coverage.reasons) lines.push(`  ${reason.message}`)
+  return lines
+}
+
 export function renderDepsExposure(exposure: DependencyExposure, filter: string | undefined): string {
   const lines: string[] = []
   const shown = filter === undefined
@@ -81,6 +93,7 @@ export function renderDepsExposure(exposure: DependencyExposure, filter: string 
     lines.push(`${filter} is not installed in this app.`)
   }
   for (const entry of shown) lines.push('', ...describeExposure(entry))
+  if (filter === undefined) lines.push('', ...describeRuntime(exposure))
   const incomplete = Object.entries(exposure.coverage).filter(([key, coverage]) => key !== 'runtime' && coverage.status !== 'complete')
   if (incomplete.length > 0 || exposure.snapshot.consistency === 'changed') {
     lines.push('', 'Incomplete, so a route or an import may be missing:')

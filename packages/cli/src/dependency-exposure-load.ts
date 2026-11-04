@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import type { GurenApplicationGraph } from './application-graph'
+import { checkRuntime, type RuntimeCheck, type RuntimeVersion } from './bun-runtime'
 import { loadApplicationGraph } from './application-graph-load'
 import { joinExposure, type ExposureJoin } from './dependency-exposure'
 import { loadDependencyTree } from './dependency-tree-load'
@@ -17,7 +18,7 @@ export interface DependencyExposure extends ExposureJoin {
   snapshot: { id: string; graph: string | null; capturedAt: string; consistency: 'stable' | 'changed' }
   lockfile: string | null
   workspace: string
-  runtime: []
+  runtime: RuntimeVersion[]
 }
 
 async function fingerprint(paths: readonly string[]): Promise<string> {
@@ -35,8 +36,9 @@ async function fingerprint(paths: readonly string[]): Promise<string> {
  * list are read again at the end, and any difference, or one the graph saw, is
  * `changed`.
  */
-export async function loadDependencyExposure(options: { cwd: string; introspect?: boolean }): Promise<DependencyExposure> {
+export async function loadDependencyExposure(options: { cwd: string; introspect?: boolean; runtime?: RuntimeCheck }): Promise<DependencyExposure> {
   const cwd = resolve(options.cwd)
+  const runtimeCheck = options.runtime ? Promise.resolve(options.runtime) : checkRuntime(cwd)
   const tree = await loadDependencyTree(cwd)
   const files = await collectProjectFiles(cwd, IMPORTABLE_EXTENSIONS)
   // A directory's package.json picks the file an import of it lands on.
@@ -63,10 +65,13 @@ export async function loadDependencyExposure(options: { cwd: string; introspect?
     && filesAfter.join('\n') === files.join('\n')
     && manifestsAfter.join('\n') === directoryManifests.join('\n')
   const joined = joinExposure({ tree, imports, graph })
+  const runtime = await runtimeCheck
+  joined.coverage.runtime = runtime.coverage
   const content = JSON.stringify({
     graph: graph?.snapshot.id ?? null,
     tree: tree.packages.map((instance) => [instance.id, instance.integrity ?? null]),
     imports: [...imports.files].sort(([a], [b]) => a.localeCompare(b)),
+    runtime: runtime.versions.map((version) => [version.source, version.value, version.advisories ?? []]),
   })
 
   return {
@@ -80,7 +85,7 @@ export async function loadDependencyExposure(options: { cwd: string; introspect?
     lockfile: tree.lockfile,
     workspace: tree.workspace,
     ...joined,
-    runtime: [],
+    runtime: runtime.versions,
   }
 }
 

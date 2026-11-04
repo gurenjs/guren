@@ -1,8 +1,8 @@
 /**
  * `guren audit --deps-baseline <file>` (RFC 0039 §5): a scheduled run fails on an
- * advisory the baseline does not name, and on a dependency scan that did not
- * complete, so a registry outage never reads as "nothing new". An advisory the
- * app ignores in config/audit.ts is accepted already and never new.
+ * advisory the baseline does not name, a Bun runtime one included, and on a dependency
+ * scan or runtime check that did not complete, so an outage never reads as "nothing
+ * new". An advisory the app ignores in config/audit.ts is accepted already and never new.
  */
 import { consola } from 'consola'
 import type { AuditReport } from './audit'
@@ -41,8 +41,11 @@ export function judgeDepsBaseline(report: AuditReport, file: string, text: strin
   if (report.dependencyScan?.status !== 'complete') {
     return { file, newKeys: [], failure: `The dependency scan is ${report.dependencyScan?.status ?? 'missing'}, so the baseline cannot tell what is new.` }
   }
+  if (report.runtimeCheck?.coverage.status === 'unavailable') {
+    return { file, newKeys: [], failure: `The Bun runtime check is unavailable, so the baseline cannot tell what is new: ${report.runtimeCheck.coverage.reasons[0]?.message ?? ''}`.trimEnd() }
+  }
   const newKeys = report.findings
-    .filter((finding) => finding.advisory !== undefined && finding.status !== 'ignored' && !baseline.has(finding.key))
+    .filter((finding) => (finding.advisory !== undefined || finding.runtime !== undefined) && finding.status !== 'ignored' && !baseline.has(finding.key))
     .map((finding) => finding.key)
   return { file, newKeys }
 }
