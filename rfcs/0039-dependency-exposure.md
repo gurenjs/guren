@@ -706,7 +706,7 @@ Question 4.
   run produced: the runtime check (`undefined` reads "not checked", so
   `--no-deps` never names `oven-sh/bun`), the joined exposure (framework and
   `unknown` counts, every non-complete `tree`, `imports`, `placement` and
-  `graph` reason, a `changed` snapshot, and the lockfile, with the count of
+  `graph` reason, each entry of the graph's `unresolved` list with its relation and target, a `changed` snapshot, and the lockfile, with the count of
   entries carrying no hash), the column rule's unread values, and each
   `candidate` fix with its reason. An entry is `{ from, message, file?, line? }`,
   ordered by `from`.

@@ -24,12 +24,14 @@ export interface ExposureBoundaryInput {
   coverage: Pick<Record<ExposureCoverageKey, GraphCoverage>, 'tree' | 'imports' | 'placement' | 'graph'>
   consistency: 'stable' | 'changed'
   lockfile: string | null
-  /** Installed instances attributed to no route because only @guren packages bring them in. */
+  /** Installed instances no app import reaches except through @guren packages. */
   framework: number
   /** Installed instances whose routes a reader lost track of. */
   unknown: number
   /** Lockfile entries carrying no integrity hash (workspace, `file:` and `link:` packages). */
   unhashed: number
+  /** The graph's entries whose endpoint no reader resolved. */
+  unresolved: ReadonlyArray<{ from?: string; relation?: string; target: string; reason: string }>
 }
 
 const ORDER: readonly TrustBoundarySource[] = ['runtime', 'exposure', 'framework', 'tree', 'imports', 'placement', 'graph', 'snapshot', 'response', 'fix', 'lockfile']
@@ -56,10 +58,13 @@ export function runtimeBoundary(check: Pick<RuntimeCheck, 'coverage'> | undefine
 export function exposureBoundary(input: ExposureBoundaryInput): TrustBoundaryEntry[] {
   const entries: TrustBoundaryEntry[] = []
   if (input.framework > 0) {
-    entries.push({ from: 'framework', message: `${plural(input.framework, 'installed package is', 'installed packages are')} brought in only by @guren packages and attributed to no route; every route runs through the framework.` })
+    entries.push({ from: 'framework', message: `${plural(input.framework, 'installed package is', 'installed packages are')} reached by no app import except through @guren packages, so no route is attributed to them; every route runs through the framework.` })
   }
   if (input.unknown > 0) {
     entries.push({ from: 'graph', message: `${plural(input.unknown, 'installed package is', 'installed packages are')} attributed to no route because a reader below lost track of the path.` })
+  }
+  for (const entry of input.unresolved) {
+    entries.push({ from: 'graph', message: `${entry.relation ?? 'An edge'} from ${entry.from ?? 'an unresolved node'} to ${entry.target} is unresolved: ${entry.reason}` })
   }
   for (const key of ['tree', 'imports', 'placement', 'graph'] as const) {
     const coverage = input.coverage[key]
@@ -89,7 +94,7 @@ export function fixBoundary(advisories: ReadonlyArray<{ package: string; ghsa: s
   if (advisories.length === 0) return []
   if (!proposed) return [{ from: 'fix', message: 'No fix was proposed for the advisories (--no-fix).' }]
   return advisories.flatMap(({ package: name, ghsa, fix }) => fix?.status === 'candidate'
-    ? [{ from: 'fix' as const, message: `${name} (${ghsa}): the fix is a candidate, not resolved by Bun: ${fix.reason ?? 'the resolution check did not run'}` }]
+    ? [{ from: 'fix' as const, message: `${name} (${ghsa}): the fix is a candidate, not verified: ${fix.reason ?? 'the resolution check did not run'}` }]
     : [])
 }
 

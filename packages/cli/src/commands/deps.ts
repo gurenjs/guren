@@ -88,7 +88,7 @@ export function renderDepsExposure(exposure: DependencyExposure, filter: string 
     : exposure.packages.filter((entry) => (entry.name === filter || entry.installedAs.includes(filter)))
   if (filter === undefined) {
     const framework = exposure.packages.filter((entry) => entry.attribution === 'framework').length
-    lines.push(`${exposure.packages.length} installed packages (${exposure.lockfile ?? 'no lockfile'}); ${shown.length} imported by the app, ${framework} brought in only by @guren packages.`)
+    lines.push(`${exposure.packages.length} installed packages (${exposure.lockfile ?? 'no lockfile'}); ${shown.length} imported by the app, ${framework} reached only through @guren packages.`)
   } else if (shown.length === 0) {
     lines.push(`${filter} is not installed in this app.`)
   }

@@ -20,6 +20,7 @@ function exposure(overrides: Partial<ExposureBoundaryInput> = {}): ExposureBound
     framework: 0,
     unknown: 0,
     unhashed: 0,
+    unresolved: [],
     ...overrides,
   }
 }
@@ -45,6 +46,7 @@ describe('exposureBoundary', () => {
       framework: 3,
       unknown: 1,
       unhashed: 2,
+      unresolved: [{ from: 'controller:OAuthController', relation: 'validates', target: 'CallbackQuerySchema', reason: 'unresolved-validator' }],
       consistency: 'changed',
       coverage: {
         tree: complete,
@@ -53,8 +55,9 @@ describe('exposureBoundary', () => {
         graph: complete,
       },
     }))
-    expect(entries.map((entry) => entry.from)).toEqual(['framework', 'graph', 'imports', 'snapshot', 'lockfile'])
-    expect(entries[0]!.message).toStartWith('3 installed packages are brought in only by @guren packages')
+    expect(entries.map((entry) => entry.from)).toEqual(['framework', 'graph', 'graph', 'imports', 'snapshot', 'lockfile'])
+    expect(entries[0]!.message).toStartWith('3 installed packages are reached by no app import except through @guren packages')
+    expect(entries[2]!.message).toBe('validates from controller:OAuthController to CallbackQuerySchema is unresolved: unresolved-validator')
     expect(entries[1]!.message).toStartWith('1 installed package is attributed to no route')
     expect(entries.at(-1)!.message).toBe('Bun checks the integrity hashes in bun.lock at install; Guren reads the lockfile as written. 2 entries carry no hash (workspace, file: or link: packages).')
   })
@@ -77,7 +80,7 @@ describe('responseBoundary and fixBoundary', () => {
     expect(fixBoundary([advisory], false)).toEqual([{ from: 'fix', message: 'No fix was proposed for the advisories (--no-fix).' }])
     expect(fixBoundary([{ ...advisory, fix: { status: 'verified', steps: [] } }], true)).toEqual([])
     expect(fixBoundary([{ ...advisory, fix: { status: 'candidate', reason: 'bun.lock could not be copied.', steps: [] } }], true))
-      .toEqual([{ from: 'fix', message: 'js-yaml (GHSA-AAAA-BBBB-CCCC): the fix is a candidate, not resolved by Bun: bun.lock could not be copied.' }])
+      .toEqual([{ from: 'fix', message: 'js-yaml (GHSA-AAAA-BBBB-CCCC): the fix is a candidate, not verified: bun.lock could not be copied.' }])
   })
 })
 

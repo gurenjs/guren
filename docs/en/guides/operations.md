@@ -90,8 +90,8 @@ Each advisory with an installed version in range also comes with a fix. For a pa
 `guren audit` and `guren deps:exposure` both end with "What these results rest on without checking". The section is built from what the run read, so it never lists a check the run skipped; under `--no-deps` it says the runtime was not checked. It names:
 
 - the source of Bun's own advisories (`oven-sh/bun`'s repository only) and any version or image tag that names no exact release;
-- how many packages only `@guren` packages bring in, which no route is attributed to;
-- each reader that stopped short in this run, such as an import that resolves to no file, a graph entry left unresolved, or a response value the column rule could not follow;
+- how many packages no app import reaches except through `@guren` packages, which no route is attributed to;
+- each reader that stopped short in this run, such as an import that resolves to no file, each graph entry left unresolved (with its relation and target), or a response value the column rule could not follow;
 - each fix left as `candidate`, with its reason;
 - the lockfile's integrity hashes, which Bun checks at install and Guren does not.
 

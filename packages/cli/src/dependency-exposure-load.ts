@@ -24,7 +24,7 @@ export interface DependencyExposure extends ExposureJoin {
   trustBoundary: TrustBoundaryEntry[]
 }
 
-function exposureBoundaryInput(exposure: Pick<DependencyExposure, 'coverage' | 'snapshot' | 'lockfile' | 'packages'>, unhashed: number): ExposureBoundaryInput {
+function exposureBoundaryInput(exposure: Pick<DependencyExposure, 'coverage' | 'snapshot' | 'lockfile' | 'packages'>, unhashed: number, unresolved: ExposureBoundaryInput['unresolved']): ExposureBoundaryInput {
   return {
     coverage: exposure.coverage,
     consistency: exposure.snapshot.consistency,
@@ -32,6 +32,7 @@ function exposureBoundaryInput(exposure: Pick<DependencyExposure, 'coverage' | '
     framework: exposure.packages.filter((entry) => entry.attribution === 'framework').length,
     unknown: exposure.packages.filter((entry) => entry.attribution === 'unknown').length,
     unhashed,
+    unresolved,
   }
 }
 
@@ -104,7 +105,7 @@ export async function loadDependencyExposure(options: { cwd: string; introspect?
     runtime: runtime.versions,
     trustBoundary: orderTrustBoundary([
       ...runtimeBoundary(runtime),
-      ...exposureBoundary(exposureBoundaryInput({ ...joined, snapshot, lockfile: tree.lockfile }, unhashed)),
+      ...exposureBoundary(exposureBoundaryInput({ ...joined, snapshot, lockfile: tree.lockfile }, unhashed, graph?.unresolved ?? [])),
     ]),
   }
 }
