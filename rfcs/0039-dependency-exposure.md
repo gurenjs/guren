@@ -607,6 +607,34 @@ graph edges. Against `examples/blog`, `DashboardController` passes
 `auth.useModel()` in its `AuthProvider.register()`, so the rule reports nothing
 there.
 
+**Amended in implementation:**
+
+- Records reach a sink as plain objects (the ORM defines no `toJSON`), so a
+  whole record carries `hidden` columns too, as written above.
+- `column-consumers.ts` collects sinks only when asked (`sinks: true`); its
+  `reads` and `opaque` are unchanged, which a dump of `examples/blog` and
+  `examples/agents` before and after confirmed. A sink follows a local to its
+  initializer, a destructured key to a member of it, `always()`, `live()` and
+  `defer(() => …)` to the value they wrap, `this.whenLoaded()` and
+  `this.when()` in a resource to theirs, and `list.map((x) => …)` with an
+  expression body. `this.validateBody/Query/Params()`, `this.request.*` and
+  literals carry nothing. `new XResource(v)`, `XResource.collection(v)` and
+  `.toJSON()` on either are the resource's own sink, whose finding names the
+  routes of the actions sending it.
+- `auth.user()` is judged only when every provider the manifest lists is a
+  `model` provider of one model, since `AuthEntry` maps no guard to its
+  provider. It strips that model's `passwordHashField` and
+  `rememberTokenField` (as written, else the defaults), `password`, and
+  `hidden`.
+- Each finding carries the sink's line, so `// guren-audit-ignore` on that
+  line or the one above drops it; `config/audit.ts` refuses line findings.
+  Unread values go to `dataExposure.unread` and the text report, not to
+  findings. `examples/blog` reads 16 sinks, 0 findings and 5 unread values
+  (two paginator calls, a zod `parse`, and two members of a cast relation).
+- The sensitive-name rule here is segment-based and separate from
+  `hidden-columns:*`, whose substring pattern (`passwd`, `salt` too) judges a
+  model's own configuration rather than what reaches a response.
+
 ### 8. Direct-import conventions
 
 No template ships a `guren.arch.ts` today. The templates gain one with two

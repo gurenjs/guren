@@ -28,6 +28,7 @@ import {
 import { dependencyFindingsFromOutput, startDependencyScan, type DependencyAdvisory, type DependencyScan } from './audit-deps'
 import { attachExposures, exposureUnavailable, type DependencyExposureSummary } from './dependency-advisory-exposure'
 import type { ExposedPackage } from './dependency-exposure'
+import { auditDataExposure, type DataExposureReport } from './data-exposure-audit'
 import { checkRuntime, runtimeFindings, type RuntimeCheck, type RuntimeVersion } from './bun-runtime'
 import type { DependencyFix } from './dependency-fix'
 import type { DependencyExposure } from './dependency-exposure-load'
@@ -136,6 +137,8 @@ export interface AuditReport {
   dependencyScan?: DependencyScan
   /** The exposure document's snapshot and coverage, read once for every advisory (RFC 0039 §5). */
   dependencyExposure?: DependencyExposureSummary
+  /** Response sinks read by the column exposure rule, and the values it could not follow (RFC 0039 §7). */
+  dataExposure?: DataExposureReport
   /** The Bun runtime check, present when the dependency scan ran (RFC 0039 §6). */
   runtimeCheck?: Pick<RuntimeCheck, 'coverage' | 'versions'>
   /** Coverage of the installed-package scan for CSRF exemptions. */
@@ -411,6 +414,7 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
     await auditAuthorization(cwd, routes.audited, scan, manifest !== undefined, cache, findings)
   }
   auditForceWrites(scan, manifest !== undefined, findings)
+  const dataExposure = await auditDataExposure({ cwd, routes: routes.analyzed ? routes.audited : [], ...(manifest ? { manifest } : {}), cache, findings })
   const csrfExemptionScan = await sourceScans
   findings.push(...sourceFindings)
   const aiLocalTools = await auditAiLocalTools(cwd, routes.agentActions, scan, findings, cache)
@@ -448,6 +452,7 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
     routeSource: manifest ? { from: 'manifest' } : { from: 'routes-file', ...(routes.staticReason ? { reason: routes.staticReason } : {}) },
     dependencyScan,
     ...(dependencyExposure ? { dependencyExposure } : {}),
+    ...(dataExposure ? { dataExposure } : {}),
     ...(runtimeCheck ? { runtimeCheck: { coverage: runtimeCheck.coverage, versions: runtimeCheck.versions } } : {}),
     csrfExemptionScan,
     ...(aiLocalTools ? { aiLocalTools } : {}),
@@ -1492,6 +1497,8 @@ function describeExposureCoverage(summary: DependencyExposureSummary | undefined
   return `Dependency exposure coverage: ${parts.join(', ')}${changed} (guren deps:exposure lists the reasons).`
 }
 
+const SHOWN_UNREAD = 10
+
 export function renderAuditReport(report: AuditReport): void {
   consola.box(`Guren security audit for ${report.cwd}`)
 
@@ -1504,6 +1511,14 @@ export function renderAuditReport(report: AuditReport): void {
   }
   if (report.dependencyScan?.status === 'skipped') {
     consola.info('Dependency scan skipped (--no-deps).')
+  }
+  if (report.dataExposure && report.dataExposure.unread.length > 0) {
+    const { unread } = report.dataExposure
+    consola.info(`Response values the column exposure rule could not read (${unread.length}), not judged safe:`)
+    for (const entry of unread.slice(0, SHOWN_UNREAD)) {
+      consola.info(`       ${entry.file}:${entry.line} ${entry.where}${entry.expression ? ` ${entry.expression}` : ''} (${entry.reason})`)
+    }
+    if (unread.length > SHOWN_UNREAD) consola.info(`       and ${unread.length - SHOWN_UNREAD} more (--json lists them under dataExposure)`)
   }
   if (report.runtimeCheck?.coverage.status === 'partial') {
     consola.info(`Bun runtime check is partial: ${report.runtimeCheck.coverage.reasons.map((reason) => reason.message).join(' ')}`)

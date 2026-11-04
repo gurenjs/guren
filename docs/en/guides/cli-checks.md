@@ -32,6 +32,23 @@ the server with `create(data, { set: { authorId: user.id } })`. A column
 the user picks on purpose (an assignee) is a deliberate exception: record it
 in `config/audit.ts`.
 
+`exposure-sensitive-column:<Model>.<column>:<where>` follows what an action
+sends: the props of `this.inertia()`, the value of `this.json()`, and what a
+Resource's `toArray()` returns. A whole record carries every column, its
+`hidden` ones included, since a record is a plain object. `Model.serialize()`
+carries the columns that survive `visible` and `hidden`, and `auth.user()`
+those the model provider leaves after stripping the password hash, the
+remember token and `hidden`. A column is sensitive when the model lists it in
+`hidden`, or when its name has `password`, `token`, `secret`, `hash`, `apiKey`
+or `otp` as a whole camelCase or snake_case segment. The warning names the
+action, the routes that reach it, and whether their chains authorize. A value
+the audit cannot follow (a helper's result, a value passed through a library)
+is listed after the findings as not read, and `--json` carries the list under
+`dataExposure`. `auth.user()` is judged only when introspection reports one
+model provider, so `--no-introspect` and a custom provider leave it unread.
+Put `// guren-audit-ignore` on the line that sends the value, or the line
+above it, to accept one.
+
 ## Suppressing audit findings
 
 When an `audit` finding is a false positive, suppress it with one of two mechanisms. Which one applies depends on whether the finding has a source line (`policy:*` accepts both).

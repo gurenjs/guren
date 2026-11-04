@@ -71,6 +71,10 @@ const RULE_CLASSIFICATIONS: Record<string, AuditClassification[]> = {
     owaspApi('API3', 'Broken Object Property Level Authorization'),
     cwe('CWE-915', 'Improperly Controlled Modification of Dynamically-Determined Object Attributes'),
   ],
+  'exposure-sensitive-column': [
+    owaspApi('API3', 'Broken Object Property Level Authorization'),
+    cwe('CWE-200', 'Exposure of Sensitive Information to an Unauthorized Actor'),
+  ],
   'hidden-columns': [
     owaspApi('API3', 'Broken Object Property Level Authorization'),
     cwe('CWE-200', 'Exposure of Sensitive Information to an Unauthorized Actor'),
