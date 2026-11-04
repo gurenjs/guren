@@ -6,6 +6,31 @@ export const UI_CATALOG_JSON_PATH = '/_guren/ui.json'
 /** The preview posts its height under this type, so the Dev Center can size the frame to it. */
 export const UI_CATALOG_HEIGHT_MESSAGE = 'guren:ui-catalog:height'
 
+/** The MCP Apps preview (RFC 0038 §8) and its sandbox proxy; `McpServiceProvider` mounts both. */
+export const MCP_APPS_PAGE_PATH = '/_guren/mcp-apps'
+export const MCP_APPS_SANDBOX_PATH = '/_guren/mcp-apps/sandbox'
+
+/**
+ * The sandbox proxy's origin for a preview page on `pageOrigin`: the same port on `127.0.0.1`
+ * when the page is on `localhost`, and none otherwise. The specification requires the proxy on
+ * another origin than the host page, and swapping the hostname is the one second origin the
+ * dev server answers on without binding another port.
+ */
+export function mcpAppsSandboxOrigin(pageOrigin: string): string | undefined {
+  let url: URL
+  try { url = new URL(pageOrigin) } catch { return undefined }
+  if (url.protocol !== 'http:' || url.hostname !== 'localhost') return undefined
+  return `http://127.0.0.1${url.port ? `:${url.port}` : ''}`
+}
+
+/** The page origin a sandbox proxy on `sandboxOrigin` serves, the inverse of {@link mcpAppsSandboxOrigin}. */
+export function mcpAppsPageOrigin(sandboxOrigin: string): string | undefined {
+  let url: URL
+  try { url = new URL(sandboxOrigin) } catch { return undefined }
+  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1') return undefined
+  return `http://localhost${url.port ? `:${url.port}` : ''}`
+}
+
 const PLAN_PAGE = /^\/_guren\/plans\/([^/]+)$/
 // `endpoint.ts` in @guren/server spells the feedback path for its CSRF rule, and `plan/page/served.ts` the review's.
 const REVIEW_PATH = /^\/_guren\/plans\/([^/]+)\/(review|feedback)$/

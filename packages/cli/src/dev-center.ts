@@ -2,11 +2,12 @@ import { createHash } from 'node:crypto'
 import { freshApplicationGraph } from './application-graph-fresh'
 import type { GraphResult } from './application-graph'
 import { handleEvidenceRequest, serveBrowserScreenshot } from './dev-center-evidence'
-import { browserScreenshotRoute, planEvidenceSlug, planReadinessRoute, planSlugFromPath, reviewRoute, UI_CATALOG_JSON_PATH, UI_CATALOG_PAGE_PATH } from './dev-center-links'
+import { browserScreenshotRoute, MCP_APPS_PAGE_PATH, MCP_APPS_SANDBOX_PATH, mcpAppsSandboxOrigin, planEvidenceSlug, planReadinessRoute, planSlugFromPath, reviewRoute, UI_CATALOG_JSON_PATH, UI_CATALOG_PAGE_PATH } from './dev-center-links'
 import { handleReadinessRequest, type ReadinessRunner } from './dev-center-readiness'
 import { handleReviewRequest } from './dev-center-review'
 import { devCenterShell } from './dev-center-shell'
 import { readPlanOverview, type PlanOverview } from './docs-viewer-plans'
+import { serveMcpAppsSandbox } from './mcp-apps-sandbox'
 import { readUiCatalog, uiCatalogPreviewOrigin, type UiCatalog } from './ui-catalog'
 
 /** The mounting server owns activation and peer/origin checks, as for dev MCP. */
@@ -53,6 +54,7 @@ export function createDevCenterHandler(options: {
       const readiness = planReadinessRoute(path)
       if (readiness) return handleReadinessRequest(options.cwd, request, readiness, options.readiness)
       if (request.method !== 'GET') return new Response('Method not allowed', { status: 405, headers: { ...headers, Allow: 'GET' } })
+      if (path === MCP_APPS_SANDBOX_PATH) return serveMcpAppsSandbox(request)
       if (path === '/_guren/graph.json') {
         try { return Response.json(await scanAfterArrival(), { headers }) }
         catch { return Response.json({ schemaVersion: 1, error: { code: 'collection-failed', message: 'Graph collection failed.' } }, { headers, status: 503 }) }
@@ -70,13 +72,14 @@ export function createDevCenterHandler(options: {
         catch { return Response.json({ schemaVersion: 1, error: { code: 'read-failed', message: 'The copied components could not be read.' } }, { headers, status: 503 }) }
       }
       // A plan page is the same shell; the page looks its slug up in plans.json and never reads a path from it.
-      const page = path === '/_guren' || path === '/_guren/' || path === UI_CATALOG_PAGE_PATH || planSlugFromPath(path) !== undefined
+      const page = path === '/_guren' || path === '/_guren/' || path === UI_CATALOG_PAGE_PATH || path === MCP_APPS_PAGE_PATH || planSlugFromPath(path) !== undefined
       if (!page) return new Response('Not found', { status: 404, headers })
       const html = devCenterShell()
       const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)]
         .map((match) => `'sha256-${createHash('sha256').update(match[1]!).digest('base64')}'`).join(' ')
-      // The catalog frames its preview from the Vite dev server, the one origin it may frame.
-      const preview = path === UI_CATALOG_PAGE_PATH ? uiCatalogPreviewOrigin(viteUrl()) : undefined
+      // The catalog frames its preview from the Vite dev server, and the MCP Apps preview its sandbox proxy.
+      const preview = path === UI_CATALOG_PAGE_PATH ? uiCatalogPreviewOrigin(viteUrl())
+        : path === MCP_APPS_PAGE_PATH ? mcpAppsSandboxOrigin(new URL(request.url).origin) : undefined
       return new Response(html, { headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8',
         'Content-Security-Policy': `default-src 'none'; script-src ${scripts}; style-src 'unsafe-inline'; img-src 'self'; connect-src 'self';${preview ? ` frame-src ${preview};` : ''} base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,
       } })
