@@ -80,7 +80,7 @@ Guren の例外処理を通らない独自ハンドラー、報告対象外の�
 
 ## コーディングエージェントから読む
 
-エージェントからは、`/_guren/mcp` の `guren_get_application_graph` と `guren_get_runtime_errors` を使います。後者が返すエラーは、`/_guren/runtime/errors` や CLI と同じです。MCP には `sessionId`、`after`、`limit` を直接渡します。取得件数は通常 20 件、最大 100 件です。
+エージェントからは、`/_guren/mcp` の `guren_get_application_graph`、`guren_get_dependency_exposure`、`guren_get_runtime_errors` を使います。`guren_get_dependency_exposure` は `guren deps:exposure` と同じ文書を返し、`package` を渡すと 1 つのパッケージに絞れます。後者が返すエラーは、`/_guren/runtime/errors` や CLI と同じです。MCP には `sessionId`、`after`、`limit` を直接渡します。取得件数は通常 20 件、最大 100 件です。
 
 同じエンドポイントの `guren_get_plans` は、`/_guren/docs` のドキュメントビューアーに並ぶ[実装計画](./implementation-plans.md)を返します。対象は現在のハッシュで閉じていない計画で、まだ承認していない下書きも含みます。
 

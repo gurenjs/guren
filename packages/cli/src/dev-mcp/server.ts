@@ -2,6 +2,7 @@ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { freshApplicationGraph } from '../application-graph-fresh'
+import { freshDependencyExposure } from '../dependency-exposure-fresh'
 import { runtimeErrorQuerySchema, runtimeErrorResultSchema, unavailableRuntimeErrors, type RuntimeErrorReader } from '../runtime-errors'
 import { type CheckReport } from '../check'
 import { type ContextRoute } from '../context-route'
@@ -152,6 +153,14 @@ export function createDevMcpServer(options: CreateDevMcpServerOptions): McpServe
     inputSchema: z.object({}),
     annotations: { readOnlyHint: true },
   }, async () => ({ content: [json(await freshApplicationGraph(cwd))] }))
+
+  server.registerTool('guren_get_dependency_exposure', {
+    description: 'Read which routes, files and placements reach each installed package (lockfile tree, imports and the application graph), with coverage and snapshot freshness. Pass `package` to read one package; the whole document can run to megabytes.',
+    inputSchema: z.object({
+      package: z.string().min(1).optional().describe('Only this package, e.g. "hono"'),
+    }),
+    annotations: { readOnlyHint: true },
+  }, async ({ package: packageName }) => ({ content: [json(await freshDependencyExposure(cwd, packageName))] }))
 
   server.registerTool(
     'guren_get_context',

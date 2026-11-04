@@ -52,6 +52,8 @@ describe('dependencyFindingsFromScan', () => {
     expect(findings[0]!.status).toBe('fail') // high
     expect(findings[1]!.status).toBe('warn') // moderate
     expect(findings[0]!.message).toContain('quadratic CPU')
+    expect(findings[0]!.advisory).toEqual({ package: 'js-yaml', ghsa: 'GHSA-52CP-R559-CP3M', ranges: ['>=4.0.0 <4.3.0', '>=3.0.0 <3.15.0'] })
+    expect(findings[0]!.message).toContain('>=4.0.0 <4.3.0 || >=3.0.0 <3.15.0')
     expect(findings[1]!.suggestion).toContain('config/audit.ts')
   })
 

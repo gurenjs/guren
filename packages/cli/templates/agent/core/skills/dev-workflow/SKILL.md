@@ -61,6 +61,7 @@ are rejected with 403.
 | `guren_docs_graph` | OKF docs relation graph (narrow with entity/path) — impact query before renames |
 | `guren_agent_surface` | Routes an autonomous agent can already call (`.agent()` tools) — check before editing one |
 | `guren_get_application_graph` | Routes, controllers, models and pages with their relationships, coverage and evidence |
+| `guren_get_dependency_exposure` | Which routes and files reach each installed package (narrow with `package`) — read it when an advisory names one |
 | `guren_get_runtime_errors` | Server errors the running dev app retained: status, route, project stack frames |
 | `guren_get_plans` | Implementation plans not closed yet, drafts included: approval, step outcomes, the active step, the next command |
 | `guren_list_models` | List models (relations, soft deletes, auth trait) |

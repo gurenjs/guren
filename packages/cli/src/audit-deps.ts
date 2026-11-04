@@ -1,5 +1,12 @@
 import type { AuditFinding } from './audit'
 
+/** One GHSA for one package: every affected range `bun audit` listed, in its order (RFC 0039 §5). */
+export interface DependencyAdvisory {
+  package: string
+  ghsa: string
+  ranges: string[]
+}
+
 /**
  * Dependency vulnerability scan for `guren audit` (RFC 0007): runs
  * `bun audit --json` in the app and converts advisories into findings. Exit 0
@@ -64,8 +71,7 @@ export function dependencyFindingsFromScan(
 
   // Committed only on success: a shape failure halfway through must not leave a
   // half-parsed advisory list next to an "unavailable" status.
-  const parsed: AuditFinding[] = []
-  const seen = new Set<string>()
+  const grouped = new Map<string, { advisory: DependencyAdvisory; first: BunAuditAdvisory }>()
 
   for (const [pkg, advisories] of Object.entries(report as Record<string, unknown>)) {
     if (!Array.isArray(advisories)) {
@@ -79,19 +85,24 @@ export function dependencyFindingsFromScan(
       // The same advisory appears once per affected version range.
       const ghsa = advisory.url.match(GHSA_PATTERN)?.[0].toUpperCase() ?? advisory.url
       const key = `deps:${pkg}:${ghsa}`
-      if (seen.has(key)) continue
-      seen.add(key)
-
-      const severity = advisory.severity.toLowerCase()
-      parsed.push({
-        key,
-        title: `${pkg} dependency`,
-        status: severity === 'critical' || severity === 'high' ? 'fail' : 'warn',
-        message: `${severity} advisory (${advisory.vulnerable_versions}): ${advisory.title}`,
-        suggestion: `Update ${pkg} to a patched release (see ${advisory.url}), or record an ignore with a reason in config/audit.ts.`,
-      })
+      const range = typeof advisory.vulnerable_versions === 'string' ? advisory.vulnerable_versions : '*'
+      const known = grouped.get(key)
+      if (!known) grouped.set(key, { advisory: { package: pkg, ghsa, ranges: [range] }, first: advisory })
+      else if (!known.advisory.ranges.includes(range)) known.advisory.ranges.push(range)
     }
   }
+
+  const parsed: AuditFinding[] = [...grouped].map(([key, { advisory, first }]) => {
+    const severity = first.severity.toLowerCase()
+    return {
+      key,
+      title: `${advisory.package} dependency`,
+      status: severity === 'critical' || severity === 'high' ? 'fail' : 'warn',
+      message: `${severity} advisory (${advisory.ranges.join(' || ')}): ${first.title}`,
+      suggestion: `Update ${advisory.package} to a patched release (see ${first.url}), or record an ignore with a reason in config/audit.ts.`,
+      advisory,
+    }
+  })
 
   // Exit 1 is bun audit's "vulnerabilities found" contract: an exit-1 run
   // reporting none is contradicting itself and must not read as a clean pass.

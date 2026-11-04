@@ -437,6 +437,30 @@ a registry outage is never read as "nothing new". The docs add a scheduled
 workflow around it, so a disclosure is noticed the day it is published rather
 than at the next deploy.
 
+**Amended in implementation (the fix path ships separately):**
+
+- `exposures` and the report's `dependencyExposure` are read only by `guren audit`
+  (`runAudit({ exposure: true })`), and only when an advisory finding is not ignored.
+  `guren gate --deps` runs the scan without them, so a gate run never collects the
+  graph a second time.
+- An advisory with no installed instance in range carries `exposureReason`: the
+  lockfile tree was partial, or the two readers disagree and the advisory is to be
+  treated as exposed. When the document cannot be collected, `dependencyExposure`
+  is `{ error: { code: 'collection-failed', message } }` and every advisory names
+  the failure, rather than the audit failing.
+- A range `Bun.semver` cannot read holds every version, and a prerelease is
+  always in range, since Bun places none inside a plain range (`1.2.0-beta.1`
+  does not satisfy `<1.2.0`).
+- The baseline path is read relative to the app, like `--audit-config`.
+- `--deps-baseline` reads a previous `guren audit --json` report or a JSON array
+  of keys; anything else, an unreadable file, and a scan that did not complete
+  each exit 1 with their own message, and the flag is refused with `--no-deps`.
+  An advisory ignored in `config/audit.ts` is not new. The flag only adds exit
+  conditions to the existing one on a `fail` finding.
+- `guren_get_dependency_exposure` runs `deps:exposure --json` in a child under the
+  graph tool's time and output bounds and takes an optional `package`, since the
+  whole document of `examples/blog` is 1.6 MB.
+
 ### 6. Runtime version
 
 `guren deps:exposure` and `guren audit` check the runtime they can see: the

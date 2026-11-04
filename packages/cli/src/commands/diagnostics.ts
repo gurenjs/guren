@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { consola } from 'consola'
 import { markCommandFailed } from '../command-status'
 import { defineCommand } from '../define-command'
@@ -5,6 +7,7 @@ import { CHECK_SUITES, ciSuiteConflict, runCheck, renderCheckReport } from '../c
 import { gatingResults } from '../check-result'
 import { recheckInChild, runCheckFixes, settleFixRuns } from '../check-fix'
 import { runAudit, renderAuditReport } from '../audit'
+import { depsBaselineFails, judgeDepsBaseline, renderDepsBaseline } from '../audit-deps-baseline'
 import { runGate, renderGateReport } from '../gate'
 
 export const checkCommand = defineCommand({
@@ -205,6 +208,10 @@ export const auditCommand = defineCommand({
       default: true,
       description: 'Scan dependencies via bun audit (requires registry access). Disable with --no-deps.',
     },
+    'deps-baseline': {
+      type: 'string',
+      description: 'Exit 1 on an advisory this previous `guren audit --json` report (or array of keys), relative to the app, does not name, or on a scan that did not complete.',
+    },
     // Same shape as check's `introspect` flag above.
     introspect: {
       type: 'boolean',
@@ -213,21 +220,32 @@ export const auditCommand = defineCommand({
     },
   },
   async run({ args }) {
+    const baselineFile = args['deps-baseline'] === undefined ? undefined : String(args['deps-baseline'])
+    if (baselineFile !== undefined && args.deps === false) {
+      consola.error('--deps-baseline compares dependency advisories, which --no-deps skips.')
+      markCommandFailed()
+      return
+    }
     const report = await runAudit({
       cwd: args.app,
       routesFile: args.routes,
       auditConfigFile: args['audit-config'],
       deps: args.deps,
+      exposure: args.deps !== false,
       introspect: args.introspect !== false,
     })
+    const baseline = baselineFile === undefined
+      ? undefined
+      : judgeDepsBaseline(report, baselineFile, await readFile(resolve(args.app ?? '.', baselineFile), 'utf8').catch(() => null))
 
     if (args.json) {
-      console.log(JSON.stringify(report, null, 2))
+      console.log(JSON.stringify(baseline ? { ...report, depsBaseline: baseline } : report, null, 2))
     } else {
       renderAuditReport(report)
+      if (baseline) renderDepsBaseline(baseline)
     }
 
-    if (report.failCount > 0) {
+    if (report.failCount > 0 || (baseline && depsBaselineFails(baseline))) {
       markCommandFailed()
     }
   },

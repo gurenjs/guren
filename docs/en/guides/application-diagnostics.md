@@ -124,8 +124,9 @@ errors, logs, background jobs and failed tests are outside this feed.
 
 ## Reading from a coding agent
 
-Coding agents can use `guren_get_application_graph` and
-`guren_get_runtime_errors` through `/_guren/mcp`. The latter reads the same data
+Coding agents can use `guren_get_application_graph`,
+`guren_get_dependency_exposure` (the `guren deps:exposure` document, narrowed by an
+optional `package`) and `guren_get_runtime_errors` through `/_guren/mcp`. The latter reads the same data
 as `/_guren/runtime/errors` and the CLI. MCP takes `sessionId`, `after` and
 `limit` directly. The default limit is 20, with a maximum of 100.
 

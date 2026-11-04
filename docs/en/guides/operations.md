@@ -80,3 +80,34 @@ minimumReleaseAgeExcludes = [
 `guren doctor` reports `supply-chain-cooldown` when `bunfig.toml` sets no `minimumReleaseAge`, or when the list leaves out a `@guren` package the app has. `guren upgrade` writes the block, or adds the missing names, unless the file has an `[install]` table or a list it did not write; doctor then prints the line to add.
 
 Run `guren audit` to see the advisories `bun audit` finds for the installed packages. To see which direct dependency brings a flagged package in, and whether production installs it, run `guren deps:why <package>`. `guren deps:exposure --package <package>` adds which routes reach it and whether it runs on the server or in the browser.
+
+Under each advisory, `guren audit` lists the installed versions inside its affected ranges and the routes that reach each one, read from the same document as `deps:exposure`. A version reached only through `@guren` packages reads "reaches every route through @guren packages". One whose routes the readers could not settle reads "routes unknown", and the line after the findings names which reader was partial. An advisory with no installed version in range says why instead of showing nothing. With `--json`, each `deps:*` finding carries `advisory` (the GHSA and every affected range), `exposures` and, when that list is empty, `exposureReason`.
+
+### Watching for new advisories
+
+An advisory published after your last deploy goes unnoticed until someone runs the audit again. A scheduled workflow closes that gap. Commit the current report as a baseline:
+
+```bash
+bunx guren audit --json > audit-baseline.json
+```
+
+then run the audit against it every day:
+
+```yaml
+name: Dependency advisories
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bunx guren audit --deps-baseline audit-baseline.json
+```
+
+`--deps-baseline` exits 1 when an advisory finding's key is missing from the baseline, and when the dependency scan did not complete, so a registry outage fails the run instead of passing it. It reads a previous `guren audit --json` report or a JSON array of finding keys, at a path relative to the app. An advisory you ignore in `config/audit.ts` is never counted as new. The flag only adds exit conditions: a high or critical advisory still fails `guren audit` whether or not the baseline names it, so record one you have decided to live with in `config/audit.ts`, with the reason, and regenerate the baseline after each fix.
