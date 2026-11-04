@@ -633,6 +633,16 @@ template or blog page imports `@guren/core` or `@guren/server` at runtime, so
 neither rule fires on scaffold output. The second rule is a warn because a raw
 query is sometimes the right call.
 
+**Amended in implementation:** the default template carries both rules, and the
+API-only template only the controller rule, since it has no `resources/js/`.
+Every `@guren/core` import a template or generator page makes is `import type`,
+which the arch check skips, so the first rule fires on none of them.
+`make:agent` adds its rule to the file's literal `rules` array as before.
+The controller rule's `warn` keeps plain `guren check` passing, but `check --ci` and
+`guren gate` count arch warnings like any other, so a raw query there still stops
+the gate. The page rule leaves `@guren/server` out: a new app does not depend on it,
+and `audit:core-first` keeps the name out of every template and doc.
+
 ### 9. Trust boundary
 
 Every `deps:exposure` and audit report ends with a section listing what its
