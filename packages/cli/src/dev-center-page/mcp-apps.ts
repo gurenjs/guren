@@ -4,49 +4,12 @@ import { MCP_APPS_SANDBOX_PATH, mcpAppsSandboxOrigin } from '../dev-center-links
 import { commandRow, el } from '../docs-viewer-page/dom'
 import { gurenCommandLine } from '../shell-quote'
 import { card } from './dom'
+import { SandboxTransport } from './sandbox-transport'
 
 type Tool = Awaited<ReturnType<Client['listTools']>>['tools'][number]
-type JsonRpcMessage = Parameters<NonNullable<StreamableHTTPClientTransport['onmessage']>>[0]
 
 const RESERVED = 'ui/notifications/sandbox-'
 const TOKEN_COMMAND = gurenCommandLine(['token:issue', '--name', 'dev-center', '--user', '<user id>', '--tools', 'tools:read', '--expires', '12h'])
-
-/**
- * The host's end of the postMessage channel. `PostMessageTransport` posts to `'*'` and checks
- * only the source window, so this one names the proxy's origin both ways.
- */
-class SandboxTransport {
-  onmessage?: (message: JsonRpcMessage) => void
-  onclose?: () => void
-  onerror?: (error: Error) => void
-  private readonly listener = (event: MessageEvent<unknown>) => {
-    if (event.source !== this.frame.contentWindow || event.origin !== this.origin) return
-    const data = event.data as { jsonrpc?: unknown } | null
-    if (data === null || typeof data !== 'object' || data.jsonrpc !== '2.0') return
-    this.log('view', data)
-    this.onmessage?.(data as JsonRpcMessage)
-  }
-
-  constructor(
-    private readonly frame: HTMLIFrameElement,
-    private readonly origin: string,
-    private readonly log: (from: 'view' | 'host', message: unknown) => void,
-  ) {}
-
-  async start(): Promise<void> {
-    window.addEventListener('message', this.listener)
-  }
-
-  async send(message: JsonRpcMessage): Promise<void> {
-    this.log('host', message)
-    this.frame.contentWindow?.postMessage(message, this.origin)
-  }
-
-  async close(): Promise<void> {
-    window.removeEventListener('message', this.listener)
-    this.onclose?.()
-  }
-}
 
 function describeMessage(message: unknown): string {
   const data = message as { method?: unknown; id?: unknown; error?: { message?: unknown } } | null
@@ -87,6 +50,7 @@ function failure(error: unknown): string {
 }
 
 interface PreviewState {
+  client?: Client
   bridge?: AppBridge
   frame?: HTMLIFrameElement
 }
@@ -142,7 +106,7 @@ async function renderView(client: Client, tool: Tool, args: Record<string, unkno
     return {}
   }
   bridge.onupdatemodelcontext = async () => ({})
-  // Listening before the frame exists: a cached proxy can announce itself before connect() settles.
+  // connect() registers the listener, and the proxy announces itself as soon as it loads: append after.
   await bridge.connect(new SandboxTransport(frame, sandboxOrigin, (from, message) => {
     const method = (message as { method?: unknown } | null)?.method
     if (typeof method === 'string' && method.startsWith(RESERVED)) return
@@ -210,7 +174,9 @@ export function startMcpAppsPreview(root: HTMLElement): void {
   const tools = el('div')
   const view = el('div')
   const intro = el('p', 'meta', 'Issue a token for the user the tools should run as, then paste it here. It stays in this page\'s memory and is sent only to the App MCP endpoint on this origin.')
-  root.replaceChildren(card('Connect', intro, commandRow(TOKEN_COMMAND), endpoint, token, connect, status), tools, view)
+  const fields = el('div', 'toolbar')
+  fields.append(endpoint, token, connect)
+  root.replaceChildren(card('Connect', intro, commandRow(TOKEN_COMMAND), fields, status), tools, view)
 
   const state: PreviewState = {}
   connect.onclick = async () => {
@@ -218,7 +184,10 @@ export function startMcpAppsPreview(root: HTMLElement): void {
     status.textContent = 'Listing tools…'
     status.className = 'meta'
     try {
+      await state.bridge?.close().catch(() => undefined)
+      await state.client?.close().catch(() => undefined)
       const client = new Client({ name: 'guren-dev-center', version: '1' })
+      state.client = client
       await client.connect(new StreamableHTTPClientTransport(new URL(endpoint.value, location.origin), {
         requestInit: { headers: { Authorization: `Bearer ${token.value.trim()}` } },
       }))
@@ -226,8 +195,14 @@ export function startMcpAppsPreview(root: HTMLElement): void {
       status.textContent = listed.length === 0
         ? 'Connected, but no tool this token can see declares a view. Add .agent({ ui }) to a route and build the views.'
         : `${listed.length} tool${listed.length === 1 ? '' : 's'} with a view.`
-      tools.replaceChildren(...(listed.length === 0 ? [] : [card('Tools with a view', ...listed.map((tool) => toolRow(tool, (chosen, args) =>
-        renderView(client, chosen, args, sandboxOrigin, view, state))))]))
+      // One render at a time: each closes the bridge before it, which a render still connecting has not set yet.
+      const preview = async (chosen: Tool, args: Record<string, unknown>) => {
+        const buttons = [...tools.querySelectorAll('button')]
+        for (const button of buttons) button.disabled = true
+        try { await renderView(client, chosen, args, sandboxOrigin, view, state) }
+        finally { for (const button of buttons) button.disabled = false }
+      }
+      tools.replaceChildren(...(listed.length === 0 ? [] : [card('Tools with a view', ...listed.map((tool) => toolRow(tool, preview)))]))
     } catch (error) {
       status.textContent = `Could not reach ${endpoint.value}: ${failure(error)}. Check that mcpPlugin() is registered at this path and that the token is valid.`
       status.className = 'error'

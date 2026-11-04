@@ -20,9 +20,12 @@ const MAX_CSP_QUERY = 8192
 /** A source expression is an origin or a host pattern; a quote, space or `;` would add a keyword or a directive. */
 const SOURCE = /^(?:https?:\/\/)?(?:\*\.)?[a-z0-9.-]+(?::(?:\d{1,5}|\*))?$/i
 
+/** The dev server's own hosts: a view a real host serves could never reach them, so the preview does not either. */
+const LOOPBACK = /^(?:https?:\/\/)?(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)(?::|$)/i
+
 function sources(domains: unknown): string[] {
   if (!Array.isArray(domains)) return []
-  return domains.filter((domain): domain is string => typeof domain === 'string' && SOURCE.test(domain))
+  return domains.filter((domain): domain is string => typeof domain === 'string' && SOURCE.test(domain) && !LOOPBACK.test(domain))
 }
 
 /**
@@ -64,11 +67,13 @@ function readCsp(raw: string | null): McpAppsSandboxCsp | undefined | 'invalid' 
 }
 
 /**
- * The relay the specification describes: the first `sandbox-resource-ready` from the host page
- * loads the view, every other message is forwarded unchanged, and a `ui/notifications/sandbox-*`
- * message is never forwarded. The host's origin is the server's, written in, not the referrer's.
+ * The specification's relay: the first `sandbox-resource-ready` loads the view, `sandbox-*` is never
+ * forwarded, and the host origin is the server's, not the referrer's. The view keeps the proxy's
+ * origin and URL, as in a real host: Inertia needs `sessionStorage` (opaque origins refuse it) and a
+ * `location.href` to resolve visits against (`srcdoc` gives `about:srcdoc`). That origin is the app
+ * on 127.0.0.1, so the frame isolates the view from the Dev Center page and token, not from the app.
  */
-function sandboxScript(pageOrigin: string): string {
+export function sandboxScript(pageOrigin: string): string {
   const host = JSON.stringify(pageOrigin).replaceAll('<', '\\u003c')
   return `(() => {
   const HOST = ${host};

@@ -137,7 +137,7 @@ With the dev server running under `GUREN_MCP=1` (the scaffolded `dev` script set
 
 The **Messages** list beside the view shows everything the host and the view exchange: the tool input and result, each visit's tool call, size changes. A link the view asks to open and a message it drafts for the conversation are listed there rather than opened or sent.
 
-The sandbox is served on `127.0.0.1` for a Dev Center opened on `localhost`, so the two never share an origin. Opened on any other host, the page asks you to switch to `localhost`.
+The sandbox is served on `127.0.0.1` for a Dev Center opened on `localhost`, so it never shares an origin with the page holding your token. Opened on any other host, the page asks you to switch to `localhost`. That second origin is still your app's own, so the preview drops `localhost` and `127.0.0.1` from a view's declared CSP: a view that only works by calling the dev server directly would fail in a real host, and the preview fails it too.
 
 ## Trying a real host
 
