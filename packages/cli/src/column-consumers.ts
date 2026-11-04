@@ -111,6 +111,11 @@ interface Binding {
   members?: Map<string, Tie>
   /** A declared local's initializer, which a sink follows to what it holds. */
   value?: { node: BabelNode; scope: Scope }
+  /**
+   * Reassigned or written through since, so the initializer no longer says all it holds; `passed` when it
+   * was only handed to a call, which can add to an object or array literal but not to a record or primitive.
+   */
+  mutated?: 'written' | 'passed'
 }
 
 type Scope = Map<string, Binding>
@@ -417,6 +422,8 @@ function methodName(callee: BabelNode): string | undefined {
 
 /** Inertia prop wrappers whose first argument is the value sent; `defer`'s is a function returning it. */
 const PROP_WRAPPERS = new Set(['always', 'live', 'defer'])
+/** `JsonResource` helpers and the argument positions whose value they may return. */
+const RESOURCE_VALUE_ARGUMENTS = new Map([['when', [1]], ['whenOr', [1, 2]], ['whenLoaded', [1, 2]], ['whenNotNull', [0]], ['merge', [0]]])
 /** `this.<method>()` results that are the request's own input, which carry no column. */
 const REQUEST_INPUT_METHODS = new Set(['validateBody', 'validateQuery', 'validateParams', 'validated'])
 const SINK_DEPTH = 12
@@ -591,7 +598,10 @@ class RecordWalker {
     })
     const body = node.body as BabelNode
     if (body.type === 'BlockStatement') this.statements(body.body as BabelNode[], inner)
-    else this.visit(body, inner)
+    else {
+      if (this.toArrayBody !== undefined && body === this.toArrayBody) this.recordSink('toArray', body, body, inner)
+      this.visit(body, inner)
+    }
   }
 
   /** The keys of an object literal naming columns; anything else there names them opaquely. */
@@ -652,6 +662,7 @@ class RecordWalker {
     if (!node || typeof node !== 'object' || typeof node.type !== 'string') return
     const type = node.type
     if ((type.startsWith('TS') && !TRANSPARENT_TS.has(type)) || type === 'ImportDeclaration') return
+    if (this.context.sinks) this.noteWrites(node, scope)
 
     if (type === 'ClassDeclaration' || type === 'ClassExpression') return this.klass(node, scope)
     if (isFunctionLike(node)) return this.fn(node, scope)
@@ -768,8 +779,28 @@ class RecordWalker {
       const key = property.type === 'ObjectProperty' ? keyOf(property) : undefined
       const target = property.type === 'ObjectProperty' ? unwrapAssignment(property.value as BabelNode) : undefined
       if (key === undefined || target?.type !== 'Identifier') continue
-      const member = { type: 'MemberExpression', object: init, property: { type: 'Identifier', name: key }, computed: false, loc: property.loc, start: property.start, end: property.end } as BabelNode
-      scope.set(target.name as string, { ...scope.get(target.name as string), value: { node: member, scope } })
+      const span = { loc: property.loc, start: property.start, end: property.end }
+      const member = { type: 'MemberExpression', object: init, property: { type: 'Identifier', name: key }, computed: false, ...span } as BabelNode
+      // `{ x = fallback }` holds the member, or the fallback when the member is undefined.
+      const fallback = (property.value as BabelNode).type === 'AssignmentPattern' ? ((property.value as BabelNode).right as BabelNode) : undefined
+      const value = fallback ? ({ type: 'LogicalExpression', operator: '??', left: member, right: fallback, ...span } as BabelNode) : member
+      scope.set(target.name as string, { ...scope.get(target.name as string), value: { node: value, scope } })
+    }
+  }
+
+  /** Marks a local whose initializer a sink follows once something else may have changed it. */
+  private noteWrites(node: BabelNode, scope: Scope): void {
+    const mark = (target: BabelNode | undefined, how: 'written' | 'passed'): void => {
+      let root = target ? unwrapTypeAssertion(target) : undefined
+      while (root && (root.type === 'MemberExpression' || root.type === 'OptionalMemberExpression')) root = unwrapTypeAssertion(root.object as BabelNode)
+      const binding = root?.type === 'Identifier' ? scope.get(root.name as string) : undefined
+      if (binding?.value && binding.mutated !== 'written') binding.mutated = how
+    }
+    if (node.type === 'AssignmentExpression') mark(node.left as BabelNode, 'written')
+    if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression' || node.type === 'NewExpression') {
+      const callee = unwrapTypeAssertion(node.callee as BabelNode)
+      if (callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression') mark(callee.object as BabelNode, 'passed')
+      for (const argument of node.arguments as BabelNode[]) mark(argument.type === 'SpreadElement' ? (argument.argument as BabelNode) : argument, 'passed')
     }
   }
 
@@ -797,12 +828,15 @@ class RecordWalker {
     if (depth > SINK_DEPTH) return [this.unknownValue(node)]
     const next = (child: BabelNode | null | undefined, inScope: Scope = scope): SinkCarry[] => this.carried(child, inScope, depth + 1)
     const type = node.type
-    if (LITERALS.has(type) || isFunctionLike(node) || type === 'UnaryExpression' || type === 'BinaryExpression') return []
+    if (LITERALS.has(type) || type === 'UnaryExpression') return []
+    // Inertia calls a function prop and sends what it returns.
+    if (isFunctionLike(node)) return (node.body as BabelNode).type === 'BlockStatement' ? [this.unknownValue(node)] : next(node.body as BabelNode)
+    if (type === 'BinaryExpression') return node.operator === '+' ? [...next(node.left as BabelNode), ...next(node.right as BabelNode)] : []
     if (type === 'TemplateLiteral') return (node.expressions as BabelNode[]).flatMap((part) => next(part))
     if (type === 'ObjectExpression') {
       return (node.properties as BabelNode[]).flatMap((property) => {
         if (property.type === 'SpreadElement') return next(property.argument as BabelNode)
-        return property.type === 'ObjectProperty' ? next(property.value as BabelNode) : []
+        return property.type === 'ObjectProperty' ? next(property.value as BabelNode) : [this.unknownValue(property)]
       })
     }
     if (type === 'ArrayExpression') {
@@ -814,27 +848,17 @@ class RecordWalker {
     if (type === 'Identifier') {
       if (node.name === 'undefined') return []
       const binding = scope.get(node.name as string)
+      // The initializer first: a type annotation's tie is no provenance (RFC 0039 §7).
+      if (binding?.value) {
+        const held = this.carried(binding.value.node, binding.value.scope, depth + 1)
+        const initializer = unwrapTypeAssertion(binding.value.node).type
+        const container = initializer === 'ObjectExpression' || initializer === 'ArrayExpression'
+        return binding.mutated === 'written' || (binding.mutated === 'passed' && container) ? [...held, this.unknownValue(node)] : held
+      }
       const records = this.recordCarry(binding?.tie, binding?.members)
-      if (records.length > 0) return records
-      if (binding?.value) return this.carried(binding.value.node, binding.value.scope, depth + 1)
-      return [this.unknownValue(node)]
+      return records.length > 0 ? records : [this.unknownValue(node)]
     }
-    if (type === 'MemberExpression' || type === 'OptionalMemberExpression') {
-      const owner = this.bindingOf(node.object as BabelNode, scope)?.tie
-      const property = propertyName(node)
-      if (owner && !owner.many && property !== undefined) return [{ kind: 'column', model: owner.model, column: property }]
-      const held = this.bindingOf(node, scope)
-      const records = this.recordCarry(held?.tie, held?.members)
-      if (records.length > 0) return records
-      if (isRequestRead(node)) return []
-      // One member of what the object holds: request input holds no column, a record or the user one.
-      const inner = property === undefined ? [this.unknownValue(node)] : next(node.object as BabelNode)
-      if (inner.length === 0) return []
-      const only = inner.length === 1 ? inner[0]! : undefined
-      if (only?.kind === 'record' || only?.kind === 'serialized') return [{ kind: 'column', model: only.model, column: property! }]
-      if (only?.kind === 'auth-user' && only.column === undefined) return [{ kind: 'auth-user', column: property! }]
-      return [this.unknownValue(node)]
-    }
+    if (type === 'MemberExpression' || type === 'OptionalMemberExpression') return this.memberCarried(node, scope, depth)
     if (type === 'NewExpression') {
       const callee = unwrapTypeAssertion(node.callee as BabelNode)
       return callee.type === 'Identifier' && this.context.sinks?.resourceClasses.has(callee.name as string)
@@ -845,29 +869,27 @@ class RecordWalker {
 
     const callee = unwrapTypeAssertion(node.callee as BabelNode)
     const args = node.arguments as BabelNode[]
-    if (callee.type === 'Identifier' && PROP_WRAPPERS.has(callee.name as string) && !scope.has(callee.name as string)) {
-      const wrapped = args[0]
-      if (callee.name !== 'defer') return next(wrapped)
-      if (wrapped && isFunctionLike(wrapped) && (wrapped.body as BabelNode).type !== 'BlockStatement') return next(wrapped.body as BabelNode)
-      return wrapped ? [this.unknownValue(wrapped)] : []
-    }
+    if (callee.type === 'Identifier' && PROP_WRAPPERS.has(callee.name as string) && !scope.has(callee.name as string)) return next(args[0])
     const method = methodName(callee)
     if (method === undefined) return [this.unknownValue(node)]
     const receiver = unwrapTypeAssertion(callee.object as BabelNode)
     if (receiver.type === 'ThisExpression' && REQUEST_INPUT_METHODS.has(method)) return []
     if (isRequestRead(receiver)) return []
-    if (receiver.type === 'ThisExpression' && (method === 'whenLoaded' || method === 'when')) {
-      const value = args[1]
-      if (value && isFunctionLike(value)) return (value.body as BabelNode).type === 'BlockStatement' ? [this.unknownValue(value)] : next(value.body as BabelNode)
-      return next(value)
+    // JsonResource's conditional helpers return the value, or the fallback a third argument names.
+    if (receiver.type === 'ThisExpression' && RESOURCE_VALUE_ARGUMENTS.has(method)) {
+      return RESOURCE_VALUE_ARGUMENTS.get(method)!.flatMap((index) => next(args[index]))
     }
     if (receiver.type === 'MemberExpression' && unwrapTypeAssertion(receiver.object as BabelNode).type === 'ThisExpression'
       && propertyName(receiver) === 'auth' && (method === 'user' || method === 'userOrFail')) {
       return [{ kind: 'auth-user' }]
     }
-    const resourceClass = receiver.type === 'NewExpression' ? unwrapTypeAssertion(receiver.callee as BabelNode) : receiver
-    if (resourceClass.type === 'Identifier' && this.context.sinks?.resourceClasses.has(resourceClass.name as string)) {
-      return [{ kind: 'resource', className: resourceClass.name as string }]
+    if (receiver.type === 'Identifier' && !scope.has(receiver.name as string) && this.context.sinks?.resourceClasses.has(receiver.name as string)
+      && (method === 'collection' || method === 'make')) {
+      return [{ kind: 'resource', className: receiver.name as string }]
+    }
+    if (method === 'toJSON' || method === 'toArray' || method === 'additional') {
+      const base = next(receiver)
+      if (base.length > 0 && base.every((carry) => carry.kind === 'resource')) return method === 'additional' ? [...base, ...next(args[0])] : base
     }
     if ((method === 'serialize' || method === 'serializeMany') && receiver.type === 'Identifier' && !scope.has(receiver.name as string)) {
       const model = this.context.ties.models.get(receiver.name as string)
@@ -886,6 +908,45 @@ class RecordWalker {
     const held = this.bindingOf(node, scope)
     const records = this.recordCarry(held?.tie, held?.members)
     return records.length > 0 ? records : [this.unknownValue(node)]
+  }
+
+  /** An object literal a local holds, unchanged since its declaration; `undefined` when it is anything else. */
+  private literalObject(node: BabelNode, scope: Scope, depth: number): { node: BabelNode; scope: Scope } | undefined {
+    const value = unwrapTypeAssertion(node)
+    if (value.type === 'ObjectExpression') return { node: value, scope }
+    if (value.type !== 'Identifier' || depth > SINK_DEPTH) return undefined
+    const binding = scope.get(value.name as string)
+    if (!binding?.value || binding.mutated) return undefined
+    return this.literalObject(binding.value.node, binding.value.scope, depth + 1)
+  }
+
+  private memberCarried(node: BabelNode, scope: Scope, depth: number): SinkCarry[] {
+    const next = (child: BabelNode | null | undefined, inScope: Scope = scope): SinkCarry[] => this.carried(child, inScope, depth + 1)
+    const object = unwrapTypeAssertion(node.object as BabelNode)
+    const property = propertyName(node)
+    if (isRequestRead(node)) return []
+    const literal = this.literalObject(object, scope, depth)
+    if (literal) {
+      const properties = literal.node.properties as BabelNode[]
+      const match = properties.find((entry) => entry.type === 'ObjectProperty' && keyOf(entry) === property)
+      if (property !== undefined && match && !properties.some((entry) => entry.type !== 'ObjectProperty')) return next(match.value as BabelNode, literal.scope)
+      return [this.unknownValue(node)]
+    }
+    const followsValue = object.type === 'Identifier' && scope.get(object.name as string)?.value !== undefined
+    const owner = followsValue ? undefined : this.bindingOf(object, scope)?.tie
+    if (owner && !owner.many && property !== undefined) return [{ kind: 'column', model: owner.model, column: property }]
+    if (!followsValue) {
+      const held = this.bindingOf(node, scope)
+      const records = this.recordCarry(held?.tie, held?.members)
+      if (records.length > 0) return records
+    }
+    // One member of what the object holds: request input holds no column, a record or the user one.
+    const inner = property === undefined ? [this.unknownValue(node)] : next(object)
+    if (inner.length === 0) return []
+    const only = inner.length === 1 ? inner[0]! : undefined
+    if (only?.kind === 'record' || only?.kind === 'serialized') return [{ ...only, kind: 'column', column: property! }]
+    if (only?.kind === 'auth-user' && only.column === undefined) return [{ kind: 'auth-user', column: property! }]
+    return [this.unknownValue(node)]
   }
 }
 

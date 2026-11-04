@@ -41,8 +41,8 @@ interface ModelFacts {
   hidden: string[] | 'unreadable'
   visible: string[] | 'unreadable'
   appends: string[] | 'unreadable'
-  /** The columns `ModelUserProvider.sanitize()` strips beside `hidden`. */
-  credentials: string[]
+  /** The columns `ModelUserProvider.sanitize()` strips beside `hidden`; `unreadable` when a field is not a string literal. */
+  credentials: string[] | 'unreadable'
 }
 
 type How = 'record' | 'column' | 'serialized' | 'auth-user'
@@ -62,9 +62,15 @@ export function isSensitiveColumn(name: string): boolean {
   return segments.some((segment, index) => SENSITIVE_SEGMENTS.has(segment) || (segment === 'api' && segments[index + 1] === 'key'))
 }
 
-function staticString(classDecl: NonNullable<ReturnType<typeof firstClassDeclaration>>, name: string): string | undefined {
-  const value = findStaticClassProperty(classDecl, name)?.value
-  return value?.type === 'StringLiteral' ? value.value : undefined
+/** `AuthenticatableModel`'s credential field: the default when undeclared, `null` when declared as anything but a string. */
+function credentialField(classDecl: NonNullable<ReturnType<typeof firstClassDeclaration>>, name: string, fallback: string): string | null {
+  const property = findStaticClassProperty(classDecl, name)
+  if (!property) return fallback
+  return property.value?.type === 'StringLiteral' ? property.value.value : null
+}
+
+function credentialList(...fields: Array<string | null>): string[] | 'unreadable' {
+  return fields.every((field): field is string => field !== null) ? fields : 'unreadable'
 }
 
 async function readModels(cwd: string): Promise<ModelFacts[]> {
@@ -87,7 +93,7 @@ async function readModels(cwd: string): Promise<ModelFacts[]> {
       hidden: readModelStringArrayConfig(classDecl, 'hidden') ?? [],
       visible: readModelStringArrayConfig(classDecl, 'visible') ?? [],
       appends: readModelStringArrayConfig(classDecl, 'appends') ?? [],
-      credentials: [staticString(classDecl, 'passwordHashField') ?? 'passwordHash', staticString(classDecl, 'rememberTokenField') ?? 'rememberToken', 'password'],
+      credentials: credentialList(credentialField(classDecl, 'passwordHashField', 'passwordHash'), credentialField(classDecl, 'rememberTokenField', 'rememberToken')),
     })
   }
   return models
@@ -104,8 +110,9 @@ function authUserModel(manifest: AppManifest | undefined, models: readonly Model
   const names = new Set(providers.map((provider) => provider.model))
   if (names.size !== 1) return 'more than one user model is registered'
   const [name] = names
-  const model = inAppRoot(models.filter((entry) => entry.model.className === name), (entry) => entry.module, null)
-  return model ?? `the user model ${name} was not found among the app's models`
+  const named = models.filter((entry) => entry.model.className === name)
+  if (named.length > 1) return `more than one app root declares a model named ${name}`
+  return named[0] ?? `the user model ${name} was not found among the app's models`
 }
 
 function list(value: string[] | 'unreadable'): string[] {
@@ -122,8 +129,9 @@ function judgeCarry(carry: SinkCarry, models: ReadonlyMap<string, ModelFacts>, a
   if (carry.kind === 'unknown') return { exposed: [], unread: 'the reader could not follow this value' }
   if (carry.kind === 'auth-user') {
     if (typeof authUser === 'string') return { exposed: [], unread: `auth.user() is not judged: ${authUser}` }
-    const stripped = new Set([...authUser.credentials, ...list(authUser.hidden)])
     if (authUser.hidden === 'unreadable') return { exposed: [], unread: `${authUser.model.className}'s hidden list could not be read` }
+    if (authUser.credentials === 'unreadable') return { exposed: [], unread: `${authUser.model.className}'s passwordHashField or rememberTokenField is not a string literal` }
+    const stripped = new Set([...authUser.credentials, ...authUser.hidden])
     if (carry.column !== undefined) {
       return { exposed: !stripped.has(carry.column) && isSensitiveColumn(carry.column) ? [{ model: authUser, column: carry.column, how: 'auth-user' }] : [] }
     }
@@ -133,9 +141,15 @@ function judgeCarry(carry: SinkCarry, models: ReadonlyMap<string, ModelFacts>, a
   }
   const model = models.get(carry.model.file)
   if (!model) return { exposed: [], unread: `${carry.model.className} could not be read` }
-  if (carry.kind === 'column') return { exposed: sensitiveIn(model, carry.column) ? [{ model, column: carry.column, how: 'column' }] : [] }
+  // An unreadable `hidden` may name any column, so a column it does not show as sensitive stays unjudged.
+  const hiddenUnread = model.hidden === 'unreadable' ? `${model.model.className}'s hidden list could not be read` : undefined
+  if (carry.kind === 'column') {
+    if (sensitiveIn(model, carry.column)) return { exposed: [{ model, column: carry.column, how: 'column' }] }
+    return hiddenUnread ? { exposed: [], unread: hiddenUnread } : { exposed: [] }
+  }
   if (model.columns === null) return { exposed: [], unread: `the table of ${model.model.className} could not be read` }
-  const partial = model.opaqueColumns ? { unread: `${model.model.className}'s columns could not all be read` } : {}
+  const partialReason = [model.opaqueColumns ? `${model.model.className}'s columns could not all be read` : undefined, carry.kind === 'record' ? hiddenUnread : undefined].filter(Boolean).join('; ')
+  const partial = partialReason ? { unread: partialReason } : {}
   if (carry.kind === 'record') {
     const columns = [...model.columns, ...list(model.appends)].filter((column) => sensitiveIn(model, column))
     return { exposed: columns.map((column) => ({ model, column, how: 'record' })), ...partial }
@@ -223,8 +237,15 @@ export async function auditDataExposure(input: {
   }
 
   const unread: DataExposureUnread[] = scan.unreadable.map((file) => ({ file, line: 0, where: file, reason: 'the file could not be read or parsed' }))
+  // `this.resource` and a resource's routes are tied by class name, which two app roots may share.
+  const resourceNames = scan.resources.map((resource) => resource.className)
+  const sharedResourceNames = new Set(resourceNames.filter((name, index) => resourceNames.indexOf(name) !== index))
   const seen = new Set<string>()
   for (const sink of sinks) {
+    if (sink.kind === 'resource' && sharedResourceNames.has(sink.where)) {
+      unread.push({ file: sink.file, line: sink.line, where: sink.where, reason: `more than one resource is named ${sink.where}, so its model and routes are not judged` })
+      continue
+    }
     const served = sink.kind === 'resource' ? [...new Set(resourceRoutes.get(sink.where) ?? [])] : routesFor(sink, routes)
     for (const carry of sink.carries) {
       const judged = judgeCarry(carry, byFile, authUser)
@@ -232,11 +253,10 @@ export async function auditDataExposure(input: {
         unread.push({ file: sink.file, line: carry.kind === 'unknown' ? carry.line : sink.line, where: sink.where, ...(carry.kind === 'unknown' ? { expression: carry.expression } : {}), reason: judged.unread })
       }
       for (const exposed of judged.exposed) {
-        const key = `exposure-sensitive-column:${exposed.model.model.className}.${exposed.column}:${sink.where}`
-        if (seen.has(key)) continue
+        const key = `exposure-sensitive-column:${exposed.model.model.className}.${exposed.column}:${sink.file}:${sink.where}`
+        // The finding carries a line, which `config/audit.ts` refuses, so the inline comment is its one suppression, per sink.
+        if (seen.has(key) || (await inlineAuditIgnore(input.cache, resolve(cwd, sink.file), sink.line)) !== undefined) continue
         seen.add(key)
-        // The finding carries a line, which `config/audit.ts` refuses, so the inline comment is its one suppression.
-        if ((await inlineAuditIgnore(input.cache, resolve(cwd, sink.file), sink.line)) !== undefined) continue
         findings.push({
           key,
           title: `${exposed.model.model.className}.${exposed.column} in a response`,

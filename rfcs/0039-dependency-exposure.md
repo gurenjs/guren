@@ -615,19 +615,30 @@ there.
   `reads` and `opaque` are unchanged, which a dump of `examples/blog` and
   `examples/agents` before and after confirmed. A sink follows a local to its
   initializer, a destructured key to a member of it, `always()`, `live()` and
-  `defer(() => …)` to the value they wrap, `this.whenLoaded()` and
-  `this.when()` in a resource to theirs, and `list.map((x) => …)` with an
-  expression body. `this.validateBody/Query/Params()`, `this.request.*` and
+  `defer(() => …)` to the value they wrap, a function prop to what its
+  expression body returns (Inertia calls it), `+` to both sides, a member of
+  an object literal to that key, a destructuring default to the default too,
+  `this.when()`, `whenOr()`, `whenLoaded()` (its fallback included) and
+  `whenNotNull()` in a resource to theirs, and `list.map((x) => …)` with an
+  expression body. A local reassigned or written through since its
+  declaration, or an object or array literal handed to a call, adds an unread
+  value beside what its initializer holds. The initializer wins over a type
+  annotation's tie, which is no provenance. `this.validateBody/Query/Params()`, `this.request.*` and
   literals carry nothing. `new XResource(v)`, `XResource.collection(v)` and
   `.toJSON()` on either are the resource's own sink, whose finding names the
   routes of the actions sending it.
 - `auth.user()` is judged only when every provider the manifest lists is a
   `model` provider of one model, since `AuthEntry` maps no guard to its
   provider. It strips that model's `passwordHashField` and
-  `rememberTokenField` (as written, else the defaults), `password`, and
-  `hidden`.
+  `rememberTokenField` (as written, else the defaults) and `hidden`; a field
+  declared as anything but a string literal, an unreadable `hidden`, or a
+  model name two app roots share leaves `auth.user()` unread.
 - Each finding carries the sink's line, so `// guren-audit-ignore` on that
-  line or the one above drops it; `config/audit.ts` refuses line findings.
+  line or the one above drops it, per sink; `config/audit.ts` refuses line
+  findings. The key carries the sink's file, since two app roots may share a
+  class name, and a resource whose class name another resource shares is
+  unread. An unreadable `hidden` leaves a whole record and a picked column
+  that is not sensitive by name unread.
   Unread values go to `dataExposure.unread` and the text report, not to
   findings. `examples/blog` reads 16 sinks, 0 findings and 5 unread values
   (two paginator calls, a zod `parse`, and two members of a cast relation).

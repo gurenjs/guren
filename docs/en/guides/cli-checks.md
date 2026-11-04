@@ -32,7 +32,7 @@ the server with `create(data, { set: { authorId: user.id } })`. A column
 the user picks on purpose (an assignee) is a deliberate exception: record it
 in `config/audit.ts`.
 
-`exposure-sensitive-column:<Model>.<column>:<where>` follows what an action
+`exposure-sensitive-column:<Model>.<column>:<file>:<where>` follows what an action
 sends: the props of `this.inertia()`, the value of `this.json()`, and what a
 Resource's `toArray()` returns. A whole record carries every column, its
 `hidden` ones included, since a record is a plain object. `Model.serialize()`
