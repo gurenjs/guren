@@ -447,8 +447,8 @@ class RecordWalker {
   private where: string
   private resourceTie: Tie | undefined
   private currentFn: BabelNode | undefined
-  /** The `toArray` member of the resource being walked, whose return statements are sinks. */
-  private toArrayFn: BabelNode | undefined
+  /** The body of the resource's `toArray` member being walked, whose return statements are sinks. */
+  private toArrayBody: BabelNode | undefined
   /** Calls that are the receiver of another call: `Post.published()` in `Post.published().first()` ends no chain. */
   private readonly receivers = new WeakSet<BabelNode>()
 
@@ -662,7 +662,7 @@ class RecordWalker {
       if (this.context.sinks && node.init) this.bindValues(node.id as BabelNode, node.init as BabelNode, scope)
       return
     }
-    if (type === 'ReturnStatement' && this.toArrayFn !== undefined && this.currentFn === this.toArrayFn && node.argument) {
+    if (type === 'ReturnStatement' && this.toArrayBody !== undefined && this.currentFn?.body === this.toArrayBody && node.argument) {
       this.recordSink('toArray', node, node.argument as BabelNode, scope)
     }
     if (type === 'ForOfStatement') {
@@ -738,19 +738,21 @@ class RecordWalker {
     // members (a `#private()` helper, a static initializer) are walked too, attributed to the class.
     const actions = [...classActionMembers(node as unknown as ClassDeclaration)]
     const named = new Map<unknown, string>(actions.map((action) => [action.member, action.name]))
-    const previousToArray = this.toArrayFn
+    const toArrayBody = this.context.sinks && this.context.kind === 'resource'
+      ? (actions.find((action) => action.name === 'toArray' && !action.member.static)?.body as BabelNode | undefined)
+      : undefined
+    const previousToArray = this.toArrayBody
+    this.toArrayBody = toArrayBody
     for (const pass of passes) {
       this.resourceTie = pass
       for (const member of (node.body as { body: BabelNode[] }).body) {
         const name = named.get(member)
-        const toArray = this.context.sinks && this.context.kind === 'resource' && !member.static && keyOf(member) === 'toArray'
-        this.toArrayFn = toArray ? (member.type === 'ClassMethod' ? member : (member.value as BabelNode | undefined)) : undefined
         if (this.context.kind === 'controller') this.where = name === undefined ? className : `${className}.${name}`
         else if (this.context.kind === 'resource') this.where = className
         this.visit(member, scope)
       }
     }
-    this.toArrayFn = previousToArray
+    this.toArrayBody = previousToArray
     this.where = previous.where
     this.resourceTie = previous.resourceTie
   }
