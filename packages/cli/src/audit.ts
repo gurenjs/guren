@@ -28,6 +28,8 @@ import {
 import { dependencyFindingsFromOutput, startDependencyScan, type DependencyAdvisory, type DependencyScan } from './audit-deps'
 import { attachExposures, exposureUnavailable, type DependencyExposureSummary } from './dependency-advisory-exposure'
 import type { ExposedPackage } from './dependency-exposure'
+import type { DependencyFix } from './dependency-fix'
+import type { DependencyExposure } from './dependency-exposure-load'
 import {
   classUsesAuthenticatableBase,
   extractClassDeclaration,
@@ -110,6 +112,8 @@ export interface AuditFinding {
   exposures?: ExposedPackage[]
   /** Why `exposures` is empty or could not be read; an empty list alone never means "not exposed". */
   exposureReason?: string
+  /** The proposed fix, `verified` once Bun resolved it in a copy of the app (RFC 0039 §5). */
+  fix?: DependencyFix
 }
 
 export interface AuditReport {
@@ -154,6 +158,11 @@ export interface RunAuditOptions {
    * the Application Graph. Only `guren audit` asks for it, and only an advisory finding triggers it.
    */
   exposure?: boolean
+  /**
+   * Propose a fix per advisory from the npm registry and resolve it with `bun install --lockfile-only`
+   * in a temporary copy of the app. Needs `exposure`; only `guren audit` sets it, unless `--no-fix`.
+   */
+  fix?: boolean
   /**
    * Judge the route-level rules against the introspected app (RFC 0026 §5). `guren audit` sets it
    * unless `--no-introspect`, and the gate passes the run its check stage shares.
@@ -413,7 +422,11 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
   const dependencyExposure = options.exposure && findings.some((entry) => entry.advisory && entry.status !== 'ignored')
     ? await import('./dependency-exposure-load')
       .then(({ loadDependencyExposure }) => loadDependencyExposure({ cwd, introspect: options.introspect !== undefined && options.introspect !== false }))
-      .then((exposure) => attachExposures(findings, exposure), (error: unknown) => exposureUnavailable(findings, error))
+      .then(async (exposure) => {
+        const summary = attachExposures(findings, exposure)
+        if (options.fix) await attachFixes(cwd, findings, exposure)
+        return summary
+      }, (error: unknown) => exposureUnavailable(findings, error))
     : undefined
 
   return {
@@ -429,6 +442,28 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
     ...(dependencyExposure ? { dependencyExposure } : {}),
     csrfExemptionScan,
     ...(aiLocalTools ? { aiLocalTools } : {}),
+  }
+}
+
+/** The whole fix search; an advisory reached after it runs out says so rather than guessing. */
+const FIX_BUDGET_MS = 120_000
+
+async function attachFixes(cwd: string, findings: AuditFinding[], exposure: DependencyExposure): Promise<void> {
+  const [{ proposeFix, registryPackuments }, { verifyFix }] = await Promise.all([import('./dependency-fix'), import('./dependency-fix-verify')])
+  const read = registryPackuments()
+  const deadline = Date.now() + FIX_BUDGET_MS
+  for (const finding of findings) {
+    if (!finding.advisory || finding.status === 'ignored' || !finding.exposures || finding.exposures.length === 0) continue
+    if (Date.now() > deadline) {
+      finding.fix = { status: 'unavailable', reason: 'The fix search ran out of its time budget before this advisory.', steps: [] }
+      continue
+    }
+    try {
+      const proposed = await proposeFix({ advisory: finding.advisory, exposures: finding.exposures, installed: exposure.packages, read })
+      finding.fix = await verifyFix({ cwd, workspace: exposure.workspace, advisory: finding.advisory, fix: proposed, read })
+    } catch (error) {
+      finding.fix = { status: 'unavailable', reason: `The fix search failed (${error instanceof Error ? error.message : String(error)}).`, steps: [] }
+    }
   }
 }
 
@@ -1426,7 +1461,18 @@ function describeExposures(finding: AuditFinding): string[] {
     const more = instance.routes.length > SHOWN_ROUTES ? ` and ${instance.routes.length - SHOWN_ROUTES} more` : ''
     lines.push(`${instance.id} (${where}): ${ATTRIBUTION_TEXT.routes} ${shown}${more}`)
   }
+  if (finding.fix) {
+    const steps = finding.fix.steps.map(describeFixStep).join('; ')
+    lines.push(`fix (${finding.fix.status})${steps ? `: ${steps}` : ''}`)
+    if (finding.fix.reason) lines.push(`  ${finding.fix.reason}`)
+  }
   return lines
+}
+
+function describeFixStep(step: DependencyFix['steps'][number]): string {
+  if (step.kind === 'update') return `update ${step.package} to ${step.to}`
+  if (step.kind === 'override') return `override ${step.package} to ${step.to} (${step.note})`
+  return `add "${step.entry}" to minimumReleaseAgeExcludes (published ${step.publishedAt})`
 }
 
 function describeExposureCoverage(summary: DependencyExposureSummary | undefined): string | null {

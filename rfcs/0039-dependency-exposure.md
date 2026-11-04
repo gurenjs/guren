@@ -437,7 +437,7 @@ a registry outage is never read as "nothing new". The docs add a scheduled
 workflow around it, so a disclosure is noticed the day it is published rather
 than at the next deploy.
 
-**Amended in implementation (the fix path ships separately):**
+**Amended in implementation:**
 
 - `exposures` and the report's `dependencyExposure` are read only by `guren audit`
   (`runAudit({ exposure: true })`), and only when an advisory finding is not ignored.
@@ -457,6 +457,19 @@ than at the next deploy.
 - `guren_get_dependency_exposure` runs `deps:exposure --json` in a child under the
   graph tool's time and output bounds and takes an optional `package`, since the
   whole document of `examples/blog` is 1.6 MB.
+- A proposal takes the lowest fixed release, in the installed major when one
+  exists, rather than the newest: it moves the app least and is the most likely
+  to be past the gate. A path's direct dependency is tried release by release
+  (at most 40), resolving each hop to its newest match; only a direct
+  dependency is updated, since a transitive one moves only through its parent
+  or an override.
+- The check runs only for an app with its own lockfile and no `workspaces` or
+  `patchedDependencies`; anything else stays `candidate` with the reason. It
+  copies `.npmrc` too. A version the gate blocks is read from Bun's
+  `blocked by minimum-release-age` line as the newest version of the specifier
+  younger than the gate, at most four rounds. The search shares a 120-second
+  budget per run, `--no-fix` skips it, and the registry is
+  `BUN_CONFIG_REGISTRY` or `NPM_CONFIG_REGISTRY` when set.
 
 ### 6. Runtime version
 
@@ -651,5 +664,7 @@ existing `deps:*` finding keys are unchanged; the new fields are optional.
 6. Which Bun release introduced `minimumReleaseAge`, and does an older Bun
    ignore the key or fail on it? Only 1.4.4 was measured.
 7. Does `bun install --lockfile-only` apply `minimumReleaseAge` and the
-   stability filter exactly as a full install does? §5's fix check relies on
-   it; it has not been measured.
+   stability filter exactly as a full install does? On Bun 1.4.4 it applies the
+   gate to direct and transitive packages alike, names the blocked specifier on
+   stderr, and writes no `node_modules`; the stability filter has not been
+   measured on its own.

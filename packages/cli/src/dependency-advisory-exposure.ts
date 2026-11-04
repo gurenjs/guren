@@ -12,11 +12,7 @@ export type DependencyExposureSummary =
   | { snapshot: DependencyExposure['snapshot']; coverage: DependencyExposure['coverage'] }
   | { error: { code: 'collection-failed'; message: string } }
 
-function versionOf(instance: DependencyExposure['packages'][number]): string {
-  return instance.id.slice(instance.name.length + 1)
-}
-
-function inRange(version: string, ranges: readonly string[]): boolean {
+export function inRange(version: string, ranges: readonly string[]): boolean {
   return ranges.some((range) => {
     try {
       return Bun.semver.satisfies(version, range)
@@ -32,7 +28,7 @@ export function attachExposures(findings: AuditFinding[], exposure: DependencyEx
   for (const finding of findings) {
     if (!finding.advisory) continue
     const { package: name, ranges } = finding.advisory
-    finding.exposures = exposure.packages.filter((instance) => instance.name === name && inRange(versionOf(instance), ranges))
+    finding.exposures = exposure.packages.filter((instance) => instance.name === name && inRange(instance.version, ranges))
     if (finding.exposures.length > 0) continue
     const lockfile = exposure.lockfile ?? 'the lockfile'
     finding.exposureReason = tree.status !== 'complete'

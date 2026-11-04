@@ -208,6 +208,11 @@ export const auditCommand = defineCommand({
       default: true,
       description: 'Scan dependencies via bun audit (requires registry access). Disable with --no-deps.',
     },
+    fix: {
+      type: 'boolean',
+      default: true,
+      description: 'Propose a fix per advisory and check it with bun install --lockfile-only in a temporary copy. Disable with --no-fix.',
+    },
     'deps-baseline': {
       type: 'string',
       description: 'Exit 1 on an advisory this previous `guren audit --json` report (or array of keys) does not name, or on a scan that did not complete.',
@@ -232,6 +237,7 @@ export const auditCommand = defineCommand({
       auditConfigFile: args['audit-config'],
       deps: args.deps,
       exposure: args.deps !== false,
+      fix: args.deps !== false && args.fix !== false,
       introspect: args.introspect !== false,
     })
     const baseline = baselineFile === undefined

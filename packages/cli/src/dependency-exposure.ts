@@ -25,7 +25,11 @@ export interface ExposedRoute {
 export interface ExposedPackage {
   id: string
   name: string
+  version: string
   installedAs: string[]
+  direct: boolean
+  /** Per direct dependency: one shortest path from it to this instance, as in `deps:why`. */
+  paths: Record<string, string[]>
   placement: Array<{ at: Placement; evidence: 'import' }>
   attribution: Attribution
   /** An @guren package also brings it in, and every route runs through those. */
@@ -254,7 +258,10 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
     return {
       id: instance.id,
       name: instance.name,
+      version: instance.version,
       installedAs: instance.installedAs,
+      direct: instance.direct,
+      paths: instance.paths,
       placement,
       attribution,
       viaFramework,
