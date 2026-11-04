@@ -73,6 +73,14 @@ describe('attachExposures', () => {
     expect(findings[0]!.exposureReason).toBe('No instance of minimatch this app installs is inside <11.0.1. bun audit reads every workspace of ../../bun.lock, so another workspace may hold it; if none does, treat it as exposed.')
   })
 
+  it('counts a prerelease as in range, since Bun places none inside a plain range', () => {
+    const findings = [advisoryFinding('js-yaml', ['<4.3.0'])]
+
+    attachExposures(findings, exposure([instance('js-yaml@4.3.0-beta.1'), instance('js-yaml@4.3.0')]))
+
+    expect(findings[0]!.exposures?.map((entry) => entry.id)).toEqual(['js-yaml@4.3.0-beta.1'])
+  })
+
   it('reads a range Bun cannot parse as holding the version', () => {
     const findings = [advisoryFinding('js-yaml', ['not a range'])]
 
