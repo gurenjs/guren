@@ -46,7 +46,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.0",
     "drizzle-kit": "1.0.0-rc.4",
-    "mermaid": "^11.16.1",
+    "mermaid": "^12.2.0",
     "miniflare": "5.20260801.1-alpha",
     "shiki": "^4.4.3",
     "tailwindcss": "^4.2.2",

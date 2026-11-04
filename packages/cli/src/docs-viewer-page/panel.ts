@@ -11,7 +11,7 @@ import { state } from './state'
 const VERDICT_GLYPH: Record<Verdict, string> = { pass: '●', warn: '▲', fail: '✕' }
 
 interface MermaidApi {
-  initialize(config: { startOnLoad: boolean; theme: string; securityLevel: string }): void
+  initialize(config: { startOnLoad: boolean; theme: string; securityLevel: string; layout: string; look: string }): void
   run(options: { nodes: ArrayLike<HTMLElement> }): Promise<void>
 }
 
@@ -219,8 +219,15 @@ function isDarkTheme(): boolean {
   return override === 'dark' || (override !== 'light' && prefersDark.matches)
 }
 
+// `layout` and `look` pin mermaid 11's defaults, which 12 moved to ELK and `neo`; 11 reads both keys too.
 function initMermaid(): void {
-  window.mermaid?.initialize({ startOnLoad: false, theme: isDarkTheme() ? 'dark' : 'neutral', securityLevel: 'strict' })
+  window.mermaid?.initialize({
+    startOnLoad: false,
+    theme: isDarkTheme() ? 'dark' : 'neutral',
+    securityLevel: 'strict',
+    layout: 'dagre',
+    look: 'classic',
+  })
 }
 
 function runMermaid(): void {
