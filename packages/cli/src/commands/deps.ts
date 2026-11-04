@@ -5,6 +5,7 @@ import type { DependencyInstance } from '../dependency-tree'
 import type { ExposedPackage } from '../dependency-exposure'
 import { describeRuntimeVersion } from '../bun-runtime'
 import { isCompleteExposure, loadDependencyExposure, type DependencyExposure } from '../dependency-exposure-load'
+import { renderTrustBoundary } from '../trust-boundary'
 
 function describeInstance(instance: DependencyInstance): string[] {
   const facts = [
@@ -77,7 +78,6 @@ function describeRuntime(exposure: DependencyExposure): string[] {
     const inside = version.advisories?.length ? `, inside ${version.advisories.join(', ')}` : ''
     lines.push(`  ${describeRuntimeVersion(version)}${version.exact ? inside : ' (not matched)'}`)
   }
-  for (const reason of coverage.reasons) lines.push(`  ${reason.message}`)
   return lines
 }
 
@@ -88,20 +88,13 @@ export function renderDepsExposure(exposure: DependencyExposure, filter: string 
     : exposure.packages.filter((entry) => (entry.name === filter || entry.installedAs.includes(filter)))
   if (filter === undefined) {
     const framework = exposure.packages.filter((entry) => entry.attribution === 'framework').length
-    lines.push(`${exposure.packages.length} installed packages (${exposure.lockfile ?? 'no lockfile'}); ${shown.length} imported by the app, ${framework} brought in only by @guren packages.`)
+    lines.push(`${exposure.packages.length} installed packages (${exposure.lockfile ?? 'no lockfile'}); ${shown.length} imported by the app, ${framework} reached only through @guren packages.`)
   } else if (shown.length === 0) {
     lines.push(`${filter} is not installed in this app.`)
   }
   for (const entry of shown) lines.push('', ...describeExposure(entry))
   if (filter === undefined) lines.push('', ...describeRuntime(exposure))
-  const incomplete = Object.entries(exposure.coverage).filter(([key, coverage]) => key !== 'runtime' && coverage.status !== 'complete')
-  if (incomplete.length > 0 || exposure.snapshot.consistency === 'changed') {
-    lines.push('', 'Incomplete, so a route or an import may be missing:')
-    if (exposure.snapshot.consistency === 'changed') lines.push('  files changed while they were read')
-    for (const [key, coverage] of incomplete) {
-      for (const reason of coverage.reasons) lines.push(`  ${key}: ${reason.message}`)
-    }
-  }
+  lines.push('', ...renderTrustBoundary(exposure.trustBoundary))
   return lines.join('\n')
 }
 

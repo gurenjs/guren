@@ -34,6 +34,7 @@ function exposure(packages: ExposedPackage[], tree: 'complete' | 'partial' = 'co
     },
     packages,
     runtime: [],
+    trustBoundary: [],
   }
 }
 

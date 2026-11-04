@@ -700,6 +700,25 @@ The list is generated from the run's `coverage` entries, so it cannot claim a
 check the run did not make. Whether apps also commit it as a document is Open
 Question 4.
 
+**Amended in implementation:**
+
+- `trust-boundary.ts` builds the section from parts, each from an input the
+  run produced: the runtime check (`undefined` reads "not checked", so
+  `--no-deps` never names `oven-sh/bun`), the joined exposure (framework and
+  `unknown` counts, every non-complete `tree`, `imports`, `placement` and
+  `graph` reason, each entry of the graph's `unresolved` list with its relation and target, a `changed` snapshot, and the lockfile, with the count of
+  entries carrying no hash), the column rule's unread values, and each
+  `candidate` fix with its reason. An entry is `{ from, message, file?, line? }`,
+  ordered by `from`.
+- The exposure document carries it as `trustBoundary`, so the MCP tool returns
+  it too. The audit builds its own from the same parts: the summary keeps the
+  document's entries but the runtime's, and an audit with advisories that did
+  not join them says so. The text section replaces the earlier "Incomplete",
+  partial-runtime and unread-values blocks, so no reason prints twice; the
+  audit shows ten entries per source and `--json` holds the rest.
+- No exit code moves. Open Question 4 stays open: nothing is written to
+  `docs/spec/`.
+
 ## Decision
 
 The maintainer accepted the proposal on 2026-11-03 and explicitly shortened

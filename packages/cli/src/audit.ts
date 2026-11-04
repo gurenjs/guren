@@ -30,6 +30,7 @@ import { attachExposures, exposureUnavailable, type DependencyExposureSummary } 
 import type { ExposedPackage } from './dependency-exposure'
 import { auditDataExposure, type DataExposureReport } from './data-exposure-audit'
 import { checkRuntime, runtimeFindings, type RuntimeCheck, type RuntimeVersion } from './bun-runtime'
+import { fixBoundary, orderTrustBoundary, renderTrustBoundary, responseBoundary, runtimeBoundary, type TrustBoundaryEntry } from './trust-boundary'
 import type { DependencyFix } from './dependency-fix'
 import type { DependencyExposure } from './dependency-exposure-load'
 import {
@@ -143,6 +144,8 @@ export interface AuditReport {
   runtimeCheck?: Pick<RuntimeCheck, 'coverage' | 'versions'>
   /** Coverage of the installed-package scan for CSRF exemptions. */
   csrfExemptionScan: CsrfExemptionScan
+  /** What the dependency, runtime and response results rest on without checking (RFC 0039 §9). */
+  trustBoundary?: TrustBoundaryEntry[]
   /**
    * In-process agents' local tools (RFC 0029 §2.4), which no pipeline gate
    * covers. Absent for an app with no `Agent` subclass.
@@ -440,6 +443,17 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
         return summary
       }, (error: unknown) => exposureUnavailable(findings, error))
     : undefined
+  const advisories = findings.flatMap((entry) => entry.advisory && entry.status !== 'ignored' ? [{ ...entry.advisory, ...(entry.fix ? { fix: entry.fix } : {}) }] : [])
+  const trustBoundary = orderTrustBoundary([
+    ...runtimeBoundary(runtimeCheck),
+    ...(dependencyExposure
+      ? 'error' in dependencyExposure
+        ? [{ from: 'exposure' as const, message: `${dependencyExposure.error.message} No advisory is joined to a route.` }]
+        : dependencyExposure.trustBoundary
+      : advisories.length > 0 ? [{ from: 'exposure' as const, message: 'The advisories were not joined to routes in this run (guren deps:exposure does).' }] : []),
+    ...responseBoundary(dataExposure?.unread ?? []),
+    ...(dependencyExposure && !('error' in dependencyExposure) ? fixBoundary(advisories, options.fix === true) : []),
+  ])
 
   return {
     cwd,
@@ -456,6 +470,7 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
     ...(runtimeCheck ? { runtimeCheck: { coverage: runtimeCheck.coverage, versions: runtimeCheck.versions } } : {}),
     csrfExemptionScan,
     ...(aiLocalTools ? { aiLocalTools } : {}),
+    trustBoundary,
   }
 }
 
@@ -1489,15 +1504,7 @@ function describeFixStep(step: DependencyFix['steps'][number]): string {
   return `add "${step.entry}" to minimumReleaseAgeExcludes (published ${step.publishedAt})`
 }
 
-function describeExposureCoverage(summary: DependencyExposureSummary | undefined): string | null {
-  if (!summary) return null
-  if ('error' in summary) return summary.error.message
-  const parts = Object.entries(summary.coverage).map(([key, coverage]) => `${key} ${coverage.status}`)
-  const changed = summary.snapshot.consistency === 'changed' ? ', files changed while it was read' : ''
-  return `Dependency exposure coverage: ${parts.join(', ')}${changed} (guren deps:exposure lists the reasons).`
-}
-
-const SHOWN_UNREAD = 10
+const SHOWN_PER_SOURCE = 10
 
 export function renderAuditReport(report: AuditReport): void {
   consola.box(`Guren security audit for ${report.cwd}`)
@@ -1511,17 +1518,6 @@ export function renderAuditReport(report: AuditReport): void {
   }
   if (report.dependencyScan?.status === 'skipped') {
     consola.info('Dependency scan skipped (--no-deps).')
-  }
-  if (report.dataExposure && report.dataExposure.unread.length > 0) {
-    const { unread } = report.dataExposure
-    consola.info(`Response values the column exposure rule could not read (${unread.length}), not judged safe:`)
-    for (const entry of unread.slice(0, SHOWN_UNREAD)) {
-      consola.info(`       ${entry.file}:${entry.line} ${entry.where}${entry.expression ? ` ${entry.expression}` : ''} (${entry.reason})`)
-    }
-    if (unread.length > SHOWN_UNREAD) consola.info(`       and ${unread.length - SHOWN_UNREAD} more (--json lists them under dataExposure)`)
-  }
-  if (report.runtimeCheck?.coverage.status === 'partial') {
-    consola.info(`Bun runtime check is partial: ${report.runtimeCheck.coverage.reasons.map((reason) => reason.message).join(' ')}`)
   }
   // Only the first-party case needs this: the finding list hides passes, and a
   // third-party declarer is already named by its own warn two lines down.
@@ -1556,8 +1552,11 @@ export function renderAuditReport(report: AuditReport): void {
     }
     for (const line of describeExposures(f)) consola.info(`       ${line}`)
   }
-  const exposureLine = describeExposureCoverage(report.dependencyExposure)
-  if (exposureLine) consola.info(exposureLine)
+  const boundary = renderTrustBoundary(report.trustBoundary ?? [], SHOWN_PER_SOURCE)
+  if (boundary.length > 0) {
+    console.log('')
+    for (const line of boundary) console.log(line)
+  }
 
   console.log('')
   console.log(
