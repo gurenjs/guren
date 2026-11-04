@@ -177,7 +177,7 @@ export function registryPackuments(registry = process.env.BUN_CONFIG_REGISTRY ||
   return (name) => {
     let hit = cache.get(name)
     if (!hit) {
-      hit = fetch(`${base}/${name.replace('/', '%2f')}`, { signal: AbortSignal.timeout(PACKUMENT_TIMEOUT_MS) })
+      hit = fetch(`${base}/${name.replaceAll('/', '%2f')}`, { signal: AbortSignal.timeout(PACKUMENT_TIMEOUT_MS) })
         .then(async (response) => {
           if (!response.ok) return null
           const body = (await response.json()) as Packument
