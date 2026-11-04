@@ -37,6 +37,8 @@ export interface ColumnConsumerInput {
   controllers: readonly string[]
   resources: readonly string[]
   pages: readonly ColumnConsumerPage[]
+  /** Also collect what each response sink carries (RFC 0039 §7); `reads` and `opaque` do not change. */
+  sinks?: boolean
 }
 
 export interface ColumnRead {
@@ -65,12 +67,35 @@ export interface ResourceModelTie {
   models: ColumnConsumerModel[]
 }
 
+/** What one value passed to a response carries; `unknown` is a value the reader could not follow. */
+export type SinkCarry =
+  | { kind: 'record'; model: ColumnConsumerModel }
+  | { kind: 'column'; model: ColumnConsumerModel; column: string }
+  | { kind: 'serialized'; model: ColumnConsumerModel }
+  /** `auth.user()`, or one of its columns. */
+  | { kind: 'auth-user'; column?: string }
+  | { kind: 'resource'; className: string }
+  | { kind: 'unknown'; expression: string; line: number }
+
+/** A props argument of `this.inertia()`, the value of `this.json()`, or what a Resource's `toArray()` returns. */
+export interface ResponseSink {
+  kind: 'controller' | 'resource'
+  sink: 'inertia' | 'json' | 'toArray'
+  file: string
+  line: number
+  /** `Class.member` in a controller, the class in a resource. */
+  where: string
+  carries: SinkCarry[]
+}
+
 export interface ColumnConsumerScan {
   reads: ColumnRead[]
   opaque: OpaqueRead[]
   resources: ResourceModelTie[]
   /** App-relative files that would not read or parse: their reads are missing, not absent. */
   unreadable: string[]
+  /** Present when the input asked for sinks. */
+  sinks?: ResponseSink[]
 }
 
 interface Tie {
@@ -84,6 +109,13 @@ interface Tie {
 interface Binding {
   tie?: Tie
   members?: Map<string, Tie>
+  /** A declared local's initializer, which a sink follows to what it holds. */
+  value?: { node: BabelNode; scope: Scope }
+  /**
+   * Reassigned or written through since, so the initializer may not say all it holds; `passed` when it
+   * was only handed to a call, which can add to an object or array literal but not to a record or primitive.
+   */
+  mutated?: 'written' | 'passed'
 }
 
 type Scope = Map<string, Binding>
@@ -209,6 +241,8 @@ interface ScanContext {
   resourceTies: Map<string, ColumnConsumerModel[]>
   pageId?: string
   scan: ColumnConsumerScan
+  /** Set when sinks are collected: the file's source, for an unknown value's text, and every resource class. */
+  sinks?: { source: string; resourceClasses: ReadonlySet<string> }
 }
 
 interface ModelIndex {
@@ -386,9 +420,42 @@ function methodName(callee: BabelNode): string | undefined {
   return callee.computed ? undefined : (callee.property as { name?: string }).name
 }
 
+/** Inertia prop wrappers whose first argument is the value sent; `defer`'s is a function returning it. */
+const PROP_WRAPPERS = new Set(['always', 'live', 'defer'])
+/** `JsonResource` helpers and the argument positions whose value they may return. */
+const RESOURCE_VALUE_ARGUMENTS = new Map([['when', [1]], ['whenOr', [1, 2]], ['whenLoaded', [1, 2]], ['whenNotNull', [0]], ['merge', [0]]])
+/** `this.<method>()` results that are the request's own input, which carry no column. */
+const REQUEST_INPUT_METHODS = new Set(['validateBody', 'validateQuery', 'validateParams', 'validated'])
+const SINK_DEPTH = 12
+const LITERALS = new Set(['StringLiteral', 'NumericLiteral', 'BooleanLiteral', 'NullLiteral', 'BigIntLiteral', 'RegExpLiteral'])
+
+function unwrapAssignment(node: BabelNode): BabelNode {
+  return node.type === 'AssignmentPattern' ? (node.left as BabelNode) : node
+}
+
+/** `this.request` and what is read off it: the request's own input. */
+function isRequestRead(node: BabelNode): boolean {
+  let current = unwrapTypeAssertion(node)
+  while (current.type === 'MemberExpression' || current.type === 'OptionalMemberExpression') {
+    const object = unwrapTypeAssertion(current.object as BabelNode)
+    if (object.type === 'ThisExpression') return propertyName(current) === 'request'
+    current = object
+  }
+  return false
+}
+
+function propertyName(node: BabelNode): string | undefined {
+  const property = node.property as BabelNode
+  if (!node.computed) return (property as { name?: string }).name
+  return property.type === 'StringLiteral' ? (property.value as string) : undefined
+}
+
 class RecordWalker {
   private where: string
   private resourceTie: Tie | undefined
+  private currentFn: BabelNode | undefined
+  /** The body of the resource's `toArray` member being walked, whose return statements are sinks. */
+  private toArrayBody: BabelNode | undefined
   /** Calls that are the receiver of another call: `Post.published()` in `Post.published().first()` ends no chain. */
   private readonly receivers = new WeakSet<BabelNode>()
 
@@ -517,6 +584,13 @@ class RecordWalker {
   }
 
   private fn(node: BabelNode, scope: Scope, element?: Tie): void {
+    const previousFn = this.currentFn
+    this.currentFn = node
+    this.fnBody(node, scope, element)
+    this.currentFn = previousFn
+  }
+
+  private fnBody(node: BabelNode, scope: Scope, element?: Tie): void {
     const inner: Scope = new Map(scope)
     ;((node.params ?? []) as BabelNode[]).forEach((param, index) => {
       const target = param.type === 'TSParameterProperty' ? (param.parameter as BabelNode) : param
@@ -524,7 +598,10 @@ class RecordWalker {
     })
     const body = node.body as BabelNode
     if (body.type === 'BlockStatement') this.statements(body.body as BabelNode[], inner)
-    else this.visit(body, inner)
+    else {
+      if (this.toArrayBody !== undefined && body === this.toArrayBody) this.recordSink('toArray', body, body, inner)
+      this.visit(body, inner)
+    }
   }
 
   /** The keys of an object literal naming columns; anything else there names them opaquely. */
@@ -585,6 +662,7 @@ class RecordWalker {
     if (!node || typeof node !== 'object' || typeof node.type !== 'string') return
     const type = node.type
     if ((type.startsWith('TS') && !TRANSPARENT_TS.has(type)) || type === 'ImportDeclaration') return
+    if (this.context.sinks) this.noteWrites(node, scope)
 
     if (type === 'ClassDeclaration' || type === 'ClassExpression') return this.klass(node, scope)
     if (isFunctionLike(node)) return this.fn(node, scope)
@@ -592,7 +670,11 @@ class RecordWalker {
     if (type === 'VariableDeclarator') {
       this.visit(node.init as BabelNode, scope)
       this.bindPattern(node.id as BabelNode, this.bindingOf(node.init as BabelNode, scope), scope)
+      if (this.context.sinks && node.init) this.bindValues(node.id as BabelNode, node.init as BabelNode, scope)
       return
+    }
+    if (type === 'ReturnStatement' && this.toArrayBody !== undefined && this.currentFn?.body === this.toArrayBody && node.argument) {
+      this.recordSink('toArray', node, node.argument as BabelNode, scope)
     }
     if (type === 'ForOfStatement') {
       this.visit(node.right as BabelNode, scope)
@@ -613,6 +695,11 @@ class RecordWalker {
     if (type === 'CallExpression' || type === 'OptionalCallExpression') {
       const callee = unwrapTypeAssertion(node.callee as BabelNode)
       const method = methodName(callee)
+      if (this.context.sinks && this.context.kind === 'controller' && (method === 'inertia' || method === 'json')
+        && unwrapTypeAssertion(callee.object as BabelNode).type === 'ThisExpression') {
+        const value = (node.arguments as BabelNode[])[method === 'inertia' ? 1 : 0]
+        if (value) this.recordSink(method, node, value, scope)
+      }
       // A method called on a record (`post.save()`, `posts.map()`) is not a column read.
       if (callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression') {
         // Marked before the receiver is visited, which is where `queryColumns` asks whether it ends a chain.
@@ -662,6 +749,11 @@ class RecordWalker {
     // members (a `#private()` helper, a static initializer) are walked too, attributed to the class.
     const actions = [...classActionMembers(node as unknown as ClassDeclaration)]
     const named = new Map<unknown, string>(actions.map((action) => [action.member, action.name]))
+    const toArrayBody = this.context.sinks && this.context.kind === 'resource'
+      ? (actions.find((action) => action.name === 'toArray' && !action.member.static)?.body as BabelNode | undefined)
+      : undefined
+    const previousToArray = this.toArrayBody
+    this.toArrayBody = toArrayBody
     for (const pass of passes) {
       this.resourceTie = pass
       for (const member of (node.body as { body: BabelNode[] }).body) {
@@ -671,8 +763,190 @@ class RecordWalker {
         this.visit(member, scope)
       }
     }
+    this.toArrayBody = previousToArray
     this.where = previous.where
     this.resourceTie = previous.resourceTie
+  }
+
+  /** Each name a declaration binds, with the expression it holds: a destructured key reads as a member of the initializer. */
+  private bindValues(pattern: BabelNode, init: BabelNode, scope: Scope): void {
+    if (pattern.type === 'Identifier') {
+      scope.set(pattern.name as string, { ...scope.get(pattern.name as string), value: { node: init, scope } })
+      return
+    }
+    if (pattern.type !== 'ObjectPattern') return
+    for (const property of pattern.properties as BabelNode[]) {
+      const key = property.type === 'ObjectProperty' ? keyOf(property) : undefined
+      const target = property.type === 'ObjectProperty' ? unwrapAssignment(property.value as BabelNode) : undefined
+      if (key === undefined || target?.type !== 'Identifier') continue
+      const span = { loc: property.loc, start: property.start, end: property.end }
+      const member = { type: 'MemberExpression', object: init, property: { type: 'Identifier', name: key }, computed: false, ...span } as BabelNode
+      // `{ x = fallback }` holds the member, or the fallback when the member is undefined.
+      const fallback = (property.value as BabelNode).type === 'AssignmentPattern' ? ((property.value as BabelNode).right as BabelNode) : undefined
+      const value = fallback ? ({ type: 'LogicalExpression', operator: '??', left: member, right: fallback, ...span } as BabelNode) : member
+      scope.set(target.name as string, { ...scope.get(target.name as string), value: { node: value, scope } })
+    }
+  }
+
+  /** Marks a local whose initializer a sink follows once something else may have changed it. */
+  private noteWrites(node: BabelNode, scope: Scope): void {
+    const mark = (target: BabelNode | undefined, how: 'written' | 'passed'): void => {
+      let root = target ? unwrapTypeAssertion(target) : undefined
+      while (root && (root.type === 'MemberExpression' || root.type === 'OptionalMemberExpression')) root = unwrapTypeAssertion(root.object as BabelNode)
+      const binding = root?.type === 'Identifier' ? scope.get(root.name as string) : undefined
+      if (binding?.value && binding.mutated !== 'written') binding.mutated = how
+    }
+    if (node.type === 'AssignmentExpression') mark(node.left as BabelNode, 'written')
+    if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression' || node.type === 'NewExpression') {
+      const callee = unwrapTypeAssertion(node.callee as BabelNode)
+      if (callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression') mark(callee.object as BabelNode, 'passed')
+      for (const argument of node.arguments as BabelNode[]) mark(argument.type === 'SpreadElement' ? (argument.argument as BabelNode) : argument, 'passed')
+    }
+  }
+
+  private recordSink(sink: ResponseSink['sink'], at: BabelNode, value: BabelNode, scope: Scope): void {
+    const { kind, file, scan } = this.context
+    ;(scan.sinks ??= []).push({ kind: kind === 'resource' ? 'resource' : 'controller', sink, file, line: lineOf(at), where: this.where, carries: this.carried(value, scope, 0) })
+  }
+
+  private unknownValue(node: BabelNode): SinkCarry {
+    const source = this.context.sinks?.source ?? ''
+    const text = typeof node.start === 'number' && typeof node.end === 'number' ? source.slice(node.start, node.end).replace(/\s+/gu, ' ').trim() : node.type
+    return { kind: 'unknown', expression: text.length > 80 ? `${text.slice(0, 77)}...` : text, line: lineOf(node) }
+  }
+
+  private recordCarry(tie: Tie | undefined, members: Map<string, Tie> | undefined): SinkCarry[] {
+    const ties = [...(tie ? [tie] : []), ...(members?.values() ?? [])]
+    return ties.map((entry) => ({ kind: 'record', model: entry.model }))
+  }
+
+  /** What a value sent in a response carries, followed through locals, literals, wrappers and the ORM's serializers. */
+  private carried(expression: BabelNode | null | undefined, scope: Scope, depth: number): SinkCarry[] {
+    if (!expression) return []
+    let node = unwrapTypeAssertion(expression)
+    if (node.type === 'AwaitExpression') node = unwrapTypeAssertion(node.argument as BabelNode)
+    if (depth > SINK_DEPTH) return [this.unknownValue(node)]
+    const next = (child: BabelNode | null | undefined, inScope: Scope = scope): SinkCarry[] => this.carried(child, inScope, depth + 1)
+    const type = node.type
+    if (LITERALS.has(type) || type === 'UnaryExpression') return []
+    // Inertia calls a function prop and sends what it returns.
+    if (isFunctionLike(node)) return (node.body as BabelNode).type === 'BlockStatement' ? [this.unknownValue(node)] : next(node.body as BabelNode)
+    if (type === 'BinaryExpression') return node.operator === '+' ? [...next(node.left as BabelNode), ...next(node.right as BabelNode)] : []
+    if (type === 'TemplateLiteral') return (node.expressions as BabelNode[]).flatMap((part) => next(part))
+    if (type === 'ObjectExpression') {
+      return (node.properties as BabelNode[]).flatMap((property) => {
+        if (property.type === 'SpreadElement') return next(property.argument as BabelNode)
+        return property.type === 'ObjectProperty' ? next(property.value as BabelNode) : [this.unknownValue(property)]
+      })
+    }
+    if (type === 'ArrayExpression') {
+      return (node.elements as Array<BabelNode | null>).flatMap((element) => (element?.type === 'SpreadElement' ? next(element.argument as BabelNode) : next(element)))
+    }
+    if (type === 'ConditionalExpression') return [...next(node.consequent as BabelNode), ...next(node.alternate as BabelNode)]
+    if (type === 'LogicalExpression') return [...next(node.left as BabelNode), ...next(node.right as BabelNode)]
+    if (type === 'SequenceExpression') return next((node.expressions as BabelNode[]).at(-1))
+    if (type === 'Identifier') {
+      if (node.name === 'undefined') return []
+      const binding = scope.get(node.name as string)
+      // The initializer first: a type annotation's tie is no provenance (RFC 0039 §7).
+      if (binding?.value) {
+        const held = this.carried(binding.value.node, binding.value.scope, depth + 1)
+        const initializer = unwrapTypeAssertion(binding.value.node).type
+        const container = initializer === 'ObjectExpression' || initializer === 'ArrayExpression'
+        return binding.mutated === 'written' || (binding.mutated === 'passed' && container) ? [...held, this.unknownValue(node)] : held
+      }
+      const records = this.recordCarry(binding?.tie, binding?.members)
+      return records.length > 0 ? records : [this.unknownValue(node)]
+    }
+    if (type === 'MemberExpression' || type === 'OptionalMemberExpression') return this.memberCarried(node, scope, depth)
+    if (type === 'NewExpression') {
+      const callee = unwrapTypeAssertion(node.callee as BabelNode)
+      return callee.type === 'Identifier' && this.context.sinks?.resourceClasses.has(callee.name as string)
+        ? [{ kind: 'resource', className: callee.name as string }]
+        : [this.unknownValue(node)]
+    }
+    if (type !== 'CallExpression' && type !== 'OptionalCallExpression') return [this.unknownValue(node)]
+
+    const callee = unwrapTypeAssertion(node.callee as BabelNode)
+    const args = node.arguments as BabelNode[]
+    if (callee.type === 'Identifier' && PROP_WRAPPERS.has(callee.name as string) && !scope.has(callee.name as string)) return next(args[0])
+    const method = methodName(callee)
+    if (method === undefined) return [this.unknownValue(node)]
+    const receiver = unwrapTypeAssertion(callee.object as BabelNode)
+    if (receiver.type === 'ThisExpression' && REQUEST_INPUT_METHODS.has(method)) return []
+    if (isRequestRead(receiver)) return []
+    // JsonResource's conditional helpers return the value, or the fallback a third argument names.
+    if (receiver.type === 'ThisExpression' && RESOURCE_VALUE_ARGUMENTS.has(method)) {
+      return RESOURCE_VALUE_ARGUMENTS.get(method)!.flatMap((index) => next(args[index]))
+    }
+    if (receiver.type === 'MemberExpression' && unwrapTypeAssertion(receiver.object as BabelNode).type === 'ThisExpression'
+      && propertyName(receiver) === 'auth' && (method === 'user' || method === 'userOrFail')) {
+      return [{ kind: 'auth-user' }]
+    }
+    if (receiver.type === 'Identifier' && !scope.has(receiver.name as string) && this.context.sinks?.resourceClasses.has(receiver.name as string)
+      && (method === 'collection' || method === 'make')) {
+      return [{ kind: 'resource', className: receiver.name as string }]
+    }
+    if (method === 'toJSON' || method === 'toArray' || method === 'additional') {
+      const base = next(receiver)
+      if (base.length > 0 && base.every((carry) => carry.kind === 'resource')) return method === 'additional' ? [...base, ...next(args[0])] : base
+    }
+    if ((method === 'serialize' || method === 'serializeMany') && receiver.type === 'Identifier' && !scope.has(receiver.name as string)) {
+      const model = this.context.ties.models.get(receiver.name as string)
+      if (model) return [{ kind: 'serialized', model }]
+    }
+    const list = this.bindingOf(receiver, scope)?.tie
+    const callback = args[0]
+    if (method === 'map' && list?.many && callback && isFunctionLike(callback)) {
+      const param = ((callback.params ?? []) as BabelNode[])[0]
+      const body = callback.body as BabelNode
+      if (body.type === 'BlockStatement' || (param !== undefined && param.type !== 'Identifier')) return [this.unknownValue(node)]
+      const inner: Scope = new Map(scope)
+      if (param) inner.set(param.name as string, { tie: { ...list, many: false } })
+      return next(body, inner)
+    }
+    const held = this.bindingOf(node, scope)
+    const records = this.recordCarry(held?.tie, held?.members)
+    return records.length > 0 ? records : [this.unknownValue(node)]
+  }
+
+  /** An object literal a local holds, unchanged since its declaration; `undefined` when it is anything else. */
+  private literalObject(node: BabelNode, scope: Scope, depth: number): { node: BabelNode; scope: Scope } | undefined {
+    const value = unwrapTypeAssertion(node)
+    if (value.type === 'ObjectExpression') return { node: value, scope }
+    if (value.type !== 'Identifier' || depth > SINK_DEPTH) return undefined
+    const binding = scope.get(value.name as string)
+    if (!binding?.value || binding.mutated) return undefined
+    return this.literalObject(binding.value.node, binding.value.scope, depth + 1)
+  }
+
+  private memberCarried(node: BabelNode, scope: Scope, depth: number): SinkCarry[] {
+    const next = (child: BabelNode | null | undefined, inScope: Scope = scope): SinkCarry[] => this.carried(child, inScope, depth + 1)
+    const object = unwrapTypeAssertion(node.object as BabelNode)
+    const property = propertyName(node)
+    if (isRequestRead(node)) return []
+    const literal = this.literalObject(object, scope, depth)
+    if (literal) {
+      const properties = literal.node.properties as BabelNode[]
+      const match = properties.find((entry) => entry.type === 'ObjectProperty' && keyOf(entry) === property)
+      if (property !== undefined && match && !properties.some((entry) => entry.type !== 'ObjectProperty')) return next(match.value as BabelNode, literal.scope)
+      return [this.unknownValue(node)]
+    }
+    const followsValue = object.type === 'Identifier' && scope.get(object.name as string)?.value !== undefined
+    const owner = followsValue ? undefined : this.bindingOf(object, scope)?.tie
+    if (owner && !owner.many && property !== undefined) return [{ kind: 'column', model: owner.model, column: property }]
+    if (!followsValue) {
+      const held = this.bindingOf(node, scope)
+      const records = this.recordCarry(held?.tie, held?.members)
+      if (records.length > 0) return records
+    }
+    // One member of what the object holds: request input holds no column, a record or the user one.
+    const inner = property === undefined ? [this.unknownValue(node)] : next(object)
+    if (inner.length === 0) return []
+    const only = inner.length === 1 ? inner[0]! : undefined
+    if (only?.kind === 'record' || only?.kind === 'serialized') return [{ ...only, kind: 'column', column: property! }]
+    if (only?.kind === 'auth-user' && only.column === undefined) return [{ kind: 'auth-user', column: property! }]
+    return [this.unknownValue(node)]
   }
 }
 
@@ -698,9 +972,13 @@ export async function scanColumnConsumers(root: string, input: ColumnConsumerInp
   const models = indexModels(input.models)
   const scan: ColumnConsumerScan = { reads: [], opaque: [], resources: [], unreadable: [] }
 
+  const sources = new Map<string, string>()
   const parse = async (file: string): Promise<Statement[] | undefined> => {
     const outcome = await cache.read(resolve(root, file))
-    if (outcome.status === 'parsed') return outcome.ast.program.body
+    if (outcome.status === 'parsed') {
+      sources.set(file, outcome.source)
+      return outcome.ast.program.body
+    }
     scan.unreadable.push(file)
     return undefined
   }
@@ -715,12 +993,15 @@ export async function scanColumnConsumers(root: string, input: ColumnConsumerInp
   }
   const resourcesByFile = new Map(scan.resources.map((resource) => [withoutExtension(resource.file), resource]))
   const resourceTies = new Map(scan.resources.map((resource) => [resource.className, resource.models]))
+  const resourceClasses = new Set([...resourceBodies.values()].flatMap((body) => firstClassDeclaration(body)?.id?.name ?? []))
+  if (input.sinks) scan.sinks = []
 
   const run = (file: string, body: Statement[], kind: ColumnConsumerKind, pageId?: string): void => {
     const ties = importTies(root, file, body, models, resourcesByFile, pageId)
     const nodes = body as unknown as BabelNode[]
     localTypeTies(nodes, ties)
-    new RecordWalker({ file, kind, ties, resourceTies, scan, ...(pageId ? { pageId } : {}) }).run(nodes)
+    const sinks = input.sinks && kind !== 'page' ? { sinks: { source: sources.get(file) ?? '', resourceClasses } } : {}
+    new RecordWalker({ file, kind, ties, resourceTies, scan, ...sinks, ...(pageId ? { pageId } : {}) }).run(nodes)
   }
 
   for (const file of input.controllers) {

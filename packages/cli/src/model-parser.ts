@@ -147,7 +147,7 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
   }
 }
 
-function readModelStringArrayConfig(classDecl: ClassDeclaration, name: string): string[] | 'unreadable' | null {
+export function readModelStringArrayConfig(classDecl: ClassDeclaration, name: string): string[] | 'unreadable' | null {
   if (!hasModelConfig(classDecl, name)) return null
   return resolveModelStringArrayConfig(classDecl, name) ?? 'unreadable'
 }
