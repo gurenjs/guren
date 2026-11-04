@@ -21,6 +21,7 @@ import {
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 import { OLDEST_TESTED_BUN } from './bun-support'
+import { describeRuntimeVersion, readRuntimeVersions, type RuntimeVersion } from './bun-runtime'
 import {
   BUNFIG_FILE,
   RELEASE_AGE_SECONDS,
@@ -1176,6 +1177,13 @@ async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorC
 const RELEASE_AGE_KEY = 'supply-chain-cooldown'
 const RELEASE_AGE_TITLE = 'Release-Age Gate'
 const RELEASE_AGE_GUIDE = 'See "Dependency Updates" in the operations guide.'
+/** Measured on oven/bun images: 1.2.23 and older install past the key with no warning, 1.3.0 refuses. */
+export const RELEASE_AGE_FIRST_BUN = '1.3.0'
+
+/** The exact Bun versions the app names that ignore minimumReleaseAge; a range is not judged. */
+export function bunsIgnoringReleaseAge(versions: readonly RuntimeVersion[]): RuntimeVersion[] {
+  return versions.filter((version) => version.exact && version.version !== undefined && compareVersions(version.version, RELEASE_AGE_FIRST_BUN) < 0)
+}
 
 async function detectSupplyChainCooldown(context: DoctorRuleContext): Promise<DoctorCheck> {
   const text = (await readIfExists(context.cwd, BUNFIG_FILE)) ?? undefined
@@ -1205,12 +1213,18 @@ async function detectSupplyChainCooldown(context: DoctorRuleContext): Promise<Do
       return check('pass', `minimumReleaseAge is 0 in ${BUNFIG_FILE}: the release-age gate is off.`)
     case 'on': {
       const missing = missingExclusions(reading.excludes, await appGurenPackages(context.cwd))
+      const ignoring = bunsIgnoringReleaseAge(await readRuntimeVersions(context.cwd, process.versions.bun))
+      const upgradeBun = `Move ${ignoring.map(describeRuntimeVersion).join(', ')} to Bun ${RELEASE_AGE_FIRST_BUN} or later.`
+      const ignored = ignoring.length > 0
+        ? `Bun reads minimumReleaseAge from ${RELEASE_AGE_FIRST_BUN}, so ${ignoring.map(describeRuntimeVersion).join(', ')} installs without the gate and says nothing.`
+        : ''
       if (missing.length === 0) {
+        if (ignoring.length > 0) return check('warn', ignored, { fix: upgradeBun, manualFix: upgradeBun })
         return check('pass', `Bun holds back versions younger than ${reading.seconds} seconds, and every @guren package is excluded by name.`)
       }
       const patchable = text !== undefined && addExclusions(text, missing) !== null
-      const manual = `Add ${missing.map((name) => JSON.stringify(name)).join(', ')} to minimumReleaseAgeExcludes in ${BUNFIG_FILE}.`
-      return check('warn', `minimumReleaseAgeExcludes leaves out ${missing.join(', ')}, so installing a release of it younger than the gate fails.`, {
+      const manual = `Add ${missing.map((name) => JSON.stringify(name)).join(', ')} to minimumReleaseAgeExcludes in ${BUNFIG_FILE}.${ignoring.length > 0 ? ` ${upgradeBun}` : ''}`
+      return check('warn', `minimumReleaseAgeExcludes leaves out ${missing.join(', ')}, so installing a release of it younger than the gate fails.${ignored ? ` ${ignored}` : ''}`, {
         fix: patchable ? `Run \`guren upgrade\`, or: ${manual}` : manual,
         canAutofix: patchable,
         manualFix: manual,

@@ -42,15 +42,21 @@ export interface RuntimeMatch {
   versions: RuntimeVersion[]
 }
 
+/** Where Bun's advisories were read from: `oven-sh/bun`'s repository advisories, and GitHub's global database. */
+export type AdvisorySource = 'repository' | 'database'
+
 export interface RuntimeCheck {
   coverage: GraphCoverage
   versions: RuntimeVersion[]
   matches: RuntimeMatch[]
+  /** The sources this check read; one missing is a coverage reason. */
+  sources: AdvisorySource[]
 }
 
 export type HttpFetch = (url: string, init?: RequestInit) => Promise<Response>
 
 const ADVISORIES_URL = 'https://api.github.com/repos/oven-sh/bun/security-advisories?per_page=100'
+const DATABASE_URL = 'https://api.github.com/advisories?ecosystem=npm&affects=bun&per_page=100'
 const GITHUB_API_HOST = 'api.github.com'
 const MAX_PAGES = 10
 const REQUEST_TIMEOUT_MS = 10_000
@@ -153,23 +159,31 @@ function nextPage(link: string | null): string | null {
   return link?.split(',').map((part) => /<([^>]+)>;\s*rel="next"/u.exec(part)?.[1]).find(Boolean) ?? null
 }
 
-function parseAdvisories(body: unknown): BunAdvisory[] | null {
+/** The global database's patched version is a string, or `{ identifier }` in older responses. */
+function patchedVersion(entry: Record<string, unknown>): string | null {
+  const value = entry.patched_versions ?? entry.first_patched_version
+  const text = typeof value === 'string' ? value : (value as { identifier?: unknown } | null)?.identifier
+  return typeof text === 'string' && text !== '' ? text : null
+}
+
+/** Both endpoints share the GHSA shape; only the repository's carries `state`, the database's only `type`. */
+function parseAdvisories(body: unknown, source: AdvisorySource): BunAdvisory[] | null {
   if (!Array.isArray(body)) return null
   const advisories: BunAdvisory[] = []
   for (const item of body as Array<Record<string, unknown>>) {
     if (typeof item?.ghsa_id !== 'string' || !Array.isArray(item.vulnerabilities)) return null
-    if (item.state !== 'published' || item.withdrawn_at) continue
+    if ((source === 'repository' && item.state !== 'published') || item.withdrawn_at) continue
     const vulnerabilities = (item.vulnerabilities as Array<Record<string, unknown>>).flatMap((entry) => {
       const pkg = entry?.package as { ecosystem?: unknown; name?: unknown } | undefined
       if (pkg?.ecosystem !== 'npm' || pkg.name !== 'bun' || typeof entry.vulnerable_version_range !== 'string') return []
-      return [{ range: entry.vulnerable_version_range, patched: typeof entry.patched_versions === 'string' && entry.patched_versions !== '' ? entry.patched_versions : null }]
+      return [{ range: entry.vulnerable_version_range, patched: patchedVersion(entry) }]
     })
     if (vulnerabilities.length === 0) continue
     advisories.push({
       ghsa: item.ghsa_id,
       severity: typeof item.severity === 'string' ? item.severity.toLowerCase() : 'unknown',
       summary: typeof item.summary === 'string' ? item.summary : item.ghsa_id,
-      url: typeof item.html_url === 'string' ? item.html_url : `https://github.com/oven-sh/bun/security/advisories/${item.ghsa_id}`,
+      url: typeof item.html_url === 'string' ? item.html_url : `https://github.com/advisories/${item.ghsa_id}`,
       vulnerabilities,
     })
   }
@@ -177,11 +191,20 @@ function parseAdvisories(body: unknown): BunAdvisory[] | null {
 }
 
 /** `oven-sh/bun`'s published advisories, every page; the token goes to `api.github.com` only, and `token: ''` sends none. */
-export async function fetchBunAdvisories(options: { fetch?: HttpFetch; token?: string } = {}): Promise<AdvisoryRead> {
+export function fetchBunAdvisories(options: { fetch?: HttpFetch; token?: string } = {}): Promise<AdvisoryRead> {
+  return fetchAdvisoryPages(ADVISORIES_URL, 'repository', options)
+}
+
+/** GitHub's global advisory database for the npm package `bun`, which has held an advisory the repository does not. */
+export function fetchDatabaseAdvisories(options: { fetch?: HttpFetch; token?: string } = {}): Promise<AdvisoryRead> {
+  return fetchAdvisoryPages(DATABASE_URL, 'database', options)
+}
+
+async function fetchAdvisoryPages(first: string, source: AdvisorySource, options: { fetch?: HttpFetch; token?: string }): Promise<AdvisoryRead> {
   const fetchImpl = options.fetch ?? fetch
   const token = (options.token ?? (process.env.GITHUB_TOKEN || process.env.GH_TOKEN)) || undefined
   const advisories: BunAdvisory[] = []
-  let url: string | null = ADVISORIES_URL
+  let url: string | null = first
   for (let page = 0; url !== null; page += 1) {
     if (page === MAX_PAGES) return { ok: false, reason: `the advisories ran past ${MAX_PAGES} pages` }
     const sendToken = token !== undefined && new URL(url).host === GITHUB_API_HOST
@@ -198,7 +221,7 @@ export async function fetchBunAdvisories(options: { fetch?: HttpFetch; token?: s
       return { ok: false, reason: sendToken ? 'GitHub\'s rate limit for this token is used up' : 'GitHub\'s rate limit for unauthenticated requests (60 an hour) is used up; set GITHUB_TOKEN' }
     }
     if (!response.ok) return { ok: false, reason: `api.github.com answered ${response.status}` }
-    const parsed = parseAdvisories(await response.json().catch(() => null))
+    const parsed = parseAdvisories(await response.json().catch(() => null), source)
     if (parsed === null) return { ok: false, reason: 'api.github.com returned an unrecognised advisory list' }
     advisories.push(...parsed)
     url = nextPage(response.headers.get('link'))
@@ -213,23 +236,30 @@ export function describeRuntimeVersion(version: RuntimeVersion): string {
   return `${version.file}:${version.line} ${version.value}`
 }
 
-export function judgeRuntime(versions: readonly RuntimeVersion[], read: AdvisoryRead): RuntimeCheck {
+/** `database` absent is a check that did not ask the global database, which then reads as one source only. */
+export function judgeRuntime(versions: readonly RuntimeVersion[], read: AdvisoryRead, database?: AdvisoryRead): RuntimeCheck {
   const reasons: GraphCoverage['reasons'] = versions.filter((version) => !version.exact).map((version) => ({
     code: 'inexact-version',
     message: `${describeRuntimeVersion(version)} names no single Bun release, so it is not matched.`,
     ...(version.file ? { file: version.file } : {}),
   }))
   if (!versions.some((version) => version.exact)) reasons.push({ code: 'no-version', message: 'No exact Bun version was found to check.' })
-  if (!read.ok) {
-    return {
-      coverage: { status: 'unavailable', reasons: [{ code: 'advisories-unavailable', message: `oven-sh/bun's advisories could not be read (${read.reason}).` }, ...reasons] },
-      versions: [...versions],
-      matches: [],
-    }
+  if (!read.ok && database?.ok !== true) {
+    const unread = [{ code: 'advisories-unavailable', message: `oven-sh/bun's advisories could not be read (${read.reason}).` }]
+    if (database && !database.ok) unread.push({ code: 'database-unavailable', message: `GitHub's advisory database could not be read for bun (${database.reason}).` })
+    return { coverage: { status: 'unavailable', reasons: [...unread, ...reasons] }, versions: [...versions], matches: [], sources: [] }
+  }
+  if (!read.ok) reasons.unshift({ code: 'advisories-unavailable', message: `oven-sh/bun's advisories could not be read (${read.reason}), so only GitHub's advisory database was checked.` })
+  if (database && !database.ok) reasons.unshift({ code: 'database-unavailable', message: `GitHub's advisory database could not be read for bun (${database.reason}), so only oven-sh/bun's advisories were checked.` })
+  const sources: AdvisorySource[] = [...(read.ok ? ['repository' as const] : []), ...(database?.ok ? ['database' as const] : [])]
+  // The same GHSA in both reads as the repository's record, which carries the maintainers' own ranges.
+  const byGhsa = new Map<string, BunAdvisory>()
+  for (const advisory of [...(read.ok ? read.advisories : []), ...(database?.ok ? database.advisories : [])]) {
+    if (!byGhsa.has(advisory.ghsa)) byGhsa.set(advisory.ghsa, advisory)
   }
   const annotated = versions.map((version) => ({ ...version }))
   const matches: RuntimeMatch[] = []
-  for (const advisory of read.advisories) {
+  for (const advisory of byGhsa.values()) {
     const inside = annotated.filter((version) => version.version !== undefined && advisory.vulnerabilities.some(({ range }) => {
       const holds = inAdvisoryRange(version.version!, range)
       if (holds === null && !reasons.some((reason) => reason.code === 'unreadable-range' && reason.message.includes(advisory.ghsa))) {
@@ -241,27 +271,41 @@ export function judgeRuntime(versions: readonly RuntimeVersion[], read: Advisory
     for (const version of inside) version.advisories = [...(version.advisories ?? []), advisory.ghsa]
     matches.push({ advisory, versions: inside })
   }
-  return { coverage: { status: reasons.length === 0 ? 'complete' : 'partial', reasons }, versions: annotated, matches }
+  return { coverage: { status: reasons.length === 0 ? 'complete' : 'partial', reasons }, versions: annotated, matches, sources }
 }
 
 export async function checkRuntime(cwd: string, options: { fetch?: HttpFetch; token?: string; processVersion?: string | null } = {}): Promise<RuntimeCheck> {
   const processVersion = options.processVersion === null ? undefined : options.processVersion ?? process.versions.bun
-  const [versions, read] = await Promise.all([
+  const failed = (error: unknown): AdvisoryRead => ({ ok: false, reason: error instanceof Error ? error.message : String(error) })
+  const [versions, read, database] = await Promise.all([
     readRuntimeVersions(cwd, processVersion),
-    fetchBunAdvisories(options).catch((error: unknown): AdvisoryRead => ({ ok: false, reason: error instanceof Error ? error.message : String(error) })),
+    fetchBunAdvisories(options).catch(failed),
+    fetchDatabaseAdvisories(options).catch(failed),
   ])
-  return judgeRuntime(versions, read)
+  return judgeRuntime(versions, read, database)
+}
+
+/** The coverage codes of an advisory source the check could not read. */
+export const UNREAD_SOURCE_CODES: ReadonlySet<string> = new Set(['advisories-unavailable', 'database-unavailable'])
+
+const SOURCE_NAMES: Record<AdvisorySource, string> = { repository: "oven-sh/bun's repository advisories", database: "GitHub's advisory database" }
+
+export function describeAdvisorySources(sources: readonly AdvisorySource[]): string {
+  return sources.map((source) => SOURCE_NAMES[source]).join(' and ')
 }
 
 /** The audit findings of a check: one per matched advisory, one per Dockerfile image short of `oven/bun:<version>@sha256:…`. */
 export function runtimeFindings(check: RuntimeCheck): AuditFinding[] {
   const findings: AuditFinding[] = []
-  if (check.coverage.status === 'unavailable') {
+  const unreadSource = check.coverage.reasons.find((reason) => UNREAD_SOURCE_CODES.has(reason.code))
+  if (check.coverage.status === 'unavailable' || unreadSource) {
     findings.push({
       key: 'deps:runtime-scan',
       title: 'Bun runtime',
       status: 'warn',
-      message: `The Bun runtime could not be checked: ${check.coverage.reasons[0]?.message ?? 'no reason was given.'}`,
+      message: check.coverage.status === 'unavailable'
+        ? `The Bun runtime could not be checked: ${check.coverage.reasons[0]?.message ?? 'no reason was given.'}`
+        : `The Bun runtime was checked against one advisory source only: ${unreadSource!.message}`,
       suggestion: 'Re-run with access to api.github.com (in CI, pass GITHUB_TOKEN), or pass --no-deps to skip the dependency checks on purpose.',
     })
   }
@@ -295,7 +339,7 @@ export function runtimeFindings(check: RuntimeCheck): AuditFinding[] {
       key: 'deps:runtime:none',
       title: 'Bun runtime',
       status: 'pass',
-      message: `No oven-sh/bun advisory holds ${check.versions.filter((version) => version.exact).map(describeRuntimeVersion).join(', ') || 'any version found'}.`,
+      message: `No advisory in ${describeAdvisorySources(check.sources)} holds ${check.versions.filter((version) => version.exact).map(describeRuntimeVersion).join(', ') || 'any version found'}.`,
     })
   }
   return findings

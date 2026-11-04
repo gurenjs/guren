@@ -77,7 +77,7 @@ minimumReleaseAgeExcludes = [
 ]
 ```
 
-`bunfig.toml` に `minimumReleaseAge` がないときや、アプリが入れている `@guren` のパッケージが一覧から漏れているときは、`guren doctor` が `supply-chain-cooldown` として知らせます。`guren upgrade` を実行すると、この設定を書き足すか、漏れている名前を一覧に加えます。ただし、自分で書いた `[install]` の表や、1 行に 1 つずつではない形の一覧があるファイルには手を加えず、doctor が足すべき行を表示します。
+`bunfig.toml` に `minimumReleaseAge` がないときや、アプリが入れている `@guren` のパッケージが一覧から漏れているときは、`guren doctor` が `supply-chain-cooldown` として知らせます。`guren upgrade` を実行すると、この設定を書き足すか、漏れている名前を一覧に加えます。ただし、自分で書いた `[install]` の表や、1 行に 1 つずつではない形の一覧があるファイルには手を加えず、doctor が足すべき行を表示します。Bun が `minimumReleaseAge` を読むのは 1.3.0 からで、それより古い版は何も言わずにこの設定を素通りします。そのため、コマンドを実行している Bun、`engines.bun`、`packageManager`、`oven/bun` のイメージのどれかが古い版を指しているときも、doctor が警告します。
 
 インストール済みのパッケージに脆弱性情報があるかどうかは、`guren audit` を実行すると `bun audit` の結果として表示されます。指摘されたパッケージがどの直接の依存から入っていて、本番の install でも入るかどうかは、`guren deps:why <パッケージ名>` で確かめられます。どのルートから届くのか、サーバーとブラウザのどちらで動くのかは、`guren deps:exposure --package <パッケージ名>` で分かります。
 
@@ -85,11 +85,11 @@ minimumReleaseAgeExcludes = [
 
 範囲に入るインストール済みの版がある脆弱性情報には、直し方も表示されます。アプリが直接依存しているパッケージなら、影響する範囲の外にある最も低い版が候補です。インストール済みの版と同じメジャーに候補があれば、それを選びます。別の依存から入っているパッケージなら、その直接の依存について、依存ツリーが範囲の外に出る最も低い版を探します。どの版でも出られない場合は、パッケージそのものの override を提案します。audit はそのあと、`package.json`、`bun.lock`、`bunfig.toml` を一時ディレクトリにコピーし、手順を当てて `bun install --lockfile-only` を実行します。解決後の lockfile に範囲内の版が残っていないときだけ、`verified` と表示します。コピーには公開からの経過日数の制限もそのまま入るので、公開から 3 日たっていない修正版はそこでも止まります。そのときは、`minimumReleaseAgeExcludes` に足す項目を公開日つきで手順に加えて、もう一度解決します。確かめられなかった直し方は、理由を添えて `candidate` と表示します。workspace の lockfile を共有しているアプリが、その一例です。`--no-fix` を付けると、npm レジストリを読むこの探索を省きます。
 
-`bun audit` が見るのは npm のパッケージで、Bun 本体は対象外です。そこで `guren audit` は、アプリが動く Bun の版も確かめます。対象は、コマンドを実行している Bun、`package.json` の `engines.bun` と `packageManager`、アプリのルートにある Dockerfile の `oven/bun` のイメージです。それぞれを `oven-sh/bun` のリポジトリにある脆弱性情報と突き合わせます。`bun audit` が読むデータベースには、このリポジトリの情報が載っていないことがあるためです。範囲に入る版があれば、修正済みの版を添えた `deps:runtime:<GHSA>` の指摘になります。canary は、その次に出るリリースより前の版として扱います。版を 1 つに決めないイメージの指定（`oven/bun:1`）や、digest の付いていない指定は、作り直すたびに別の Bun になりうるので、`deps:runtime-unpinned` の警告になります。`guren deploy` が書くのは `oven/bun:<version>@sha256:…` の形です。脆弱性情報は `api.github.com` から読み、トークンなしでは 1 時間に 60 回までしか読めないので、CI では `GITHUB_TOKEN` を渡してください。読めなかったときは、問題なしとはせず `deps:runtime-scan` を報告します。`guren deps:exposure` も、同じ版を「Bun runtime」の下に表示します。
+`bun audit` が見るのは npm のパッケージで、Bun 本体は対象外です。そこで `guren audit` は、アプリが動く Bun の版も確かめます。対象は、コマンドを実行している Bun、`package.json` の `engines.bun` と `packageManager`、アプリのルートにある Dockerfile の `oven/bun` のイメージです。それぞれを `oven-sh/bun` のリポジトリにある脆弱性情報と突き合わせます。`bun audit` が読むデータベースには、このリポジトリの情報が載っていないことがあるためです。あわせて、GitHub の脆弱性データベースで npm の `bun` に付いている情報とも突き合わせます。こちらには、リポジトリに無い情報が載っていたこともあります。範囲に入る版があれば、修正済みの版を添えた `deps:runtime:<GHSA>` の指摘になります。canary は、その次に出るリリースより前の版として扱います。版を 1 つに決めないイメージの指定（`oven/bun:1`）や、digest の付いていない指定は、作り直すたびに別の Bun になりうるので、`deps:runtime-unpinned` の警告になります。`guren deploy` が書くのは `oven/bun:<version>@sha256:…` の形です。脆弱性情報は `api.github.com` から読み、トークンなしでは 1 時間に 60 回までしか読めないので、CI では `GITHUB_TOKEN` を渡してください。どちらかが読めなかったときは、問題なしとはせず `deps:runtime-scan` を報告します。`guren deps:exposure` も、同じ版を「Bun runtime」の下に表示します。
 
 `guren audit` と `guren deps:exposure` は、どちらも最後に「What these results rest on without checking」という節を出します。結果が確かめないまま頼っているものの一覧で、その実行で実際に読んだものから組み立てるので、実行しなかった確認を済んだことにはしません。`--no-deps` で実行したときは、Bun 本体を確かめていないと書かれます。並ぶのは次のものです。
 
-- Bun 本体の脆弱性情報の出どころ（`oven-sh/bun` のリポジトリだけ）と、版を 1 つに決めない版の指定やイメージのタグ
+- Bun 本体の脆弱性情報の出どころ（`oven-sh/bun` のリポジトリと GitHub の脆弱性データベース。片方しか読めなかったときはその片方）と、版を 1 つに決めない版の指定やイメージのタグ
 - アプリの import からは `@guren` のパッケージを通してしか届かず、どのルートにも結び付けていないパッケージの数
 - その実行で途中までしか読めなかった読み取り（どのファイルにも解決しない import、解決できなかったグラフの項目（関係と行き先つき）、列のルールが追えなかったレスポンスの値など）
 - `candidate` のままの直し方と、その理由

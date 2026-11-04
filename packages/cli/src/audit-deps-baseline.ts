@@ -6,6 +6,7 @@
  */
 import { consola } from 'consola'
 import type { AuditReport } from './audit'
+import { UNREAD_SOURCE_CODES } from './bun-runtime'
 
 export interface DepsBaselineResult {
   file: string
@@ -43,6 +44,10 @@ export function judgeDepsBaseline(report: AuditReport, file: string, text: strin
   }
   if (report.runtimeCheck?.coverage.status === 'unavailable') {
     return { file, newKeys: [], failure: `The Bun runtime check is unavailable, so the baseline cannot tell what is new: ${report.runtimeCheck.coverage.reasons[0]?.message ?? ''}`.trimEnd() }
+  }
+  const unreadSource = report.runtimeCheck?.coverage.reasons.find((reason) => UNREAD_SOURCE_CODES.has(reason.code))
+  if (unreadSource) {
+    return { file, newKeys: [], failure: `An advisory source of the Bun runtime check could not be read, so the baseline cannot tell what is new: ${unreadSource.message}` }
   }
   const newKeys = report.findings
     .filter((finding) => (finding.advisory !== undefined || finding.runtime !== undefined) && finding.status !== 'ignored' && !baseline.has(finding.key))

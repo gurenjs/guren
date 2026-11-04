@@ -6,7 +6,7 @@
  * build their section here.
  */
 import type { GraphCoverage } from './application-graph'
-import type { RuntimeCheck } from './bun-runtime'
+import { describeAdvisorySources, type RuntimeCheck } from './bun-runtime'
 import type { ExposureCoverageKey } from './dependency-exposure'
 import type { DependencyFix } from './dependency-fix'
 
@@ -43,14 +43,14 @@ function fromReason(from: TrustBoundarySource, reason: GraphCoverage['reasons'][
 }
 
 /** `undefined` is a run that did not check the runtime: the section says so rather than naming a source it never read. */
-export function runtimeBoundary(check: Pick<RuntimeCheck, 'coverage'> | undefined): TrustBoundaryEntry[] {
+export function runtimeBoundary(check: Pick<RuntimeCheck, 'coverage' | 'sources'> | undefined): TrustBoundaryEntry[] {
   if (!check) return [{ from: 'runtime', message: 'The Bun runtime was not checked against its advisories in this run.' }]
   const { coverage } = check
   if (coverage.status === 'unavailable') {
     return [{ from: 'runtime', message: `The Bun runtime was not checked: ${coverage.reasons.map((reason) => reason.message).join(' ')}` }]
   }
   return [
-    { from: 'runtime', message: "Bun's own advisories are read from oven-sh/bun's repository advisories only; one published only in another database is not seen." },
+    { from: 'runtime', message: `Bun's own advisories are read from ${describeAdvisorySources(check.sources)} only; one published only elsewhere (OSV, the NVD) is not seen.` },
     ...coverage.reasons.map((reason) => fromReason('runtime', reason)),
   ]
 }
