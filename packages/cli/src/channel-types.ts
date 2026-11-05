@@ -89,7 +89,7 @@ export type ChannelName =
 
 /**
  * Generated channel -> event contract map.
- * Payloads are read from each event's broadcastWith() or the literal a broadcast passes; a value the reader cannot type is unknown.
+ * Event payloads default to unknown until event metadata codegen is introduced.
  */
 export type ChannelEvents =
 ${channelEventsType}
