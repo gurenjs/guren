@@ -111,6 +111,8 @@ export async function checkLiveProps(options: LivePropsCheckOptions): Promise<Ch
       for (const { name: action, body } of classActionMembers(declaration)) {
         const label = `${className}.${action}()`
         const liveCalls: CallExpression[] = []
+        // Two props of one action listening for the same event share one finding key.
+        const unpinnedReported = new Set<string>()
         walk(body, (node: BabelNode) => {
           const call = node as unknown as Node
           if (call.type !== 'CallExpression') return
@@ -148,7 +150,8 @@ export async function checkLiveProps(options: LivePropsCheckOptions): Promise<Ch
               unread.push(`${reading.name}, whose base class the check cannot read`)
               continue
             }
-            if (reading.pinned) continue
+            if (reading.pinned || unpinnedReported.has(reading.name)) continue
+            unpinnedReported.add(reading.name)
             results.push(advisory(
               `live-props:event-name:${className}.${action}:${reading.name}`,
               `${label} live() on ${reading.name}`,

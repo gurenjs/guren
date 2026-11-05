@@ -102,6 +102,18 @@ describe('guren check live props', () => {
     expect(unpinned[0]?.suggestion).toContain('app/Events/OrderEvents.ts')
   })
 
+  it('reports an unpinned event once per action when two props listen for it', async () => {
+    const { results } = await liveResults({
+      [CONTROLLER]: controller('{ order: live(1, { on: new OrderUpdated(1) }), total: live(defer(() => 2), { on: new OrderUpdated(1) }) }'),
+      [EVENTS]: EVENT_CLASSES,
+      [ROUTES]: SOCKET_ROUTE,
+    })
+
+    expect(results.filter((result) => result.key.startsWith('live-props:event-name')).map((result) => result.key)).toEqual([
+      'live-props:event-name:OrderController.show:OrderUpdated',
+    ])
+  })
+
   it('reads broadcastOn() written as a class field, as the runtime calls it', async () => {
     const { results } = await liveResults({
       [CONTROLLER]: controller('{ order: live(1, { on: new OrderUpdated(1) }) }'),
