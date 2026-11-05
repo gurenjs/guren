@@ -458,6 +458,7 @@ Guide: https://guren.dev/docs/guides/broadcasting
 
 `BroadcastManager`; channels `Channel`, `PrivateChannel`, `PresenceChannel`;
 drivers `MemoryBroadcastDriver`, `RedisBroadcastDriver`.
+A page prop that reloads itself on a broadcast event is `live()`: the `live-updates` skill.
 
 ### Notifications
 Guide: https://guren.dev/docs/guides/notifications

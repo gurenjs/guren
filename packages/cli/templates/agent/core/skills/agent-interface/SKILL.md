@@ -1,6 +1,6 @@
 ---
 name: agent-interface
-description: Expose an existing route to AI agents as an MCP tool with `.agent()` metadata, or list the routes agents can already reach ("make an MCP tool", "expose this to agents").
+description: Expose an existing route to AI agents as an MCP tool with `.agent()` metadata, render its result as a page inside Claude or another MCP Apps host with `.agent({ ui })`, or list the routes agents can already reach ("make an MCP tool", "expose this to agents", "MCP App", "show this page in Claude").
 ---
 
 # Agent Interface Skill
@@ -66,6 +66,7 @@ Serving is a separate, app-level step: the endpoint mounts only when the app ins
 | `destructiveHint` | `false` is the strong claim "additive updates only" — `guren audit` checks it against the action. Unset keeps the spec default (destructive for a non-read-only tool). |
 | `idempotentHint` | Repeat calls with the same arguments add no effect. The derivation defaults it to true for PUT and DELETE; declaring it records your own claim. |
 | `approval` | `'required'` marks the tool as needing server-side approval before it executes. There is no approval queue yet, so the MCP endpoint **fails closed** on it: the tool is neither listed nor callable. |
+| `ui` | The Inertia page an MCP Apps host renders the result with (`ui: pages.posts.Show`), or `{ visibility: ['app'] }` for a tool only a view calls. See below. |
 | `redact` | Argument field names to mask in the `AgentToolInvoked` / `AgentToolDenied` events the endpoint emits. Unioned with a built-in fragment list (`password`, `secret`, `token`, `apikey`, …), so it *adds* to a default rather than being the whole mask. Matching is lowercased, separator-stripped containment — `redact: ['id']` also masks `userId`. |
 
 Annotations are untrusted hints for client UX. **They enforce nothing** — enforcement lives in your policies (evaluated inside the dispatched request, exactly as for a browser) and in the calling token's tool scopes (evaluated before the request is synthesized); the approval queue is still to come. That is exactly why the two hints that *weaken* a check are held against the controller body.
@@ -97,6 +98,41 @@ A tool's input schema comes from the route's `params`, `query`, and `body`; its 
 - No `output` schema and no `resource` hint → the result reaches the agent as untyped text. This applies to write tools as much as read tools.
 - An action that returns `this.inertia(...)` → the tool returns whatever the page passes its component, a shape nothing checks and any UI change can move. Prefer `output` + `this.json(...)` for agent-facing routes.
 
+## Showing the result as a page (MCP Apps)
+
+`ui` makes a host that supports MCP Apps (Claude on the web) show the page the
+route already renders instead of printing its result as text:
+
+```typescript
+router.get('/posts/:id', [PostController, 'show']).name('posts.show')
+  .agent({ description: 'Show one post.', ui: pages.posts.Show })
+router.put('/posts/:id', [PostController, 'update']).name('posts.update')
+  .agent({ description: 'Update a post.', ui: { visibility: ['app'] } })   // the edit form inside the view calls it; the model never sees it
+```
+
+The page gets exactly the props the action passes to `this.inertia()`; the
+controller does not change. Each link or form inside the view becomes a call to
+the tool matching its method and path, and a visit no tool answers opens in the
+browser.
+
+- A `ui` route declares no `output` schema (`guren check` fails on both).
+- A view never resolves deferred props: keep what the page needs on the first
+  response.
+- Build: `bun add @modelcontextprotocol/ext-apps` once, then
+  `bunx guren codegen && bunx vite build --mode mcp-app` (a scaffolded app's
+  `build` script ends with it). The first build writes `resources/js/mcp-app.tsx`,
+  which is the app's from then on; keep its providers in step with `app.tsx`.
+- Serve: `mcpPlugin({ ui: { pages: () => import('@/.guren/mcp-app/index.gen') } })`.
+  Shared Inertia props reach a tool call only when listed in
+  `ui.sharedProps` (none by default). Views run under an empty CSP; add an
+  origin to `ui.csp.resourceDomains` only for something the view must load.
+- `bunx guren tool:list` shows the page in its `UI` column, and
+  `tool:inspect <name>` on a `UI:` line.
+- Preview with the dev server running: issue a token
+  (`bunx guren token:issue --name dev-center --user 1 --tools tools:read --expires 12h`),
+  open `http://localhost:3333/_guren/mcp-apps`, paste it, and call the tool.
+  The page renders the view in a sandbox the way a web host does.
+
 ## Check the wiring
 
 ```bash
@@ -105,6 +141,8 @@ bunx guren audit    # validation rules are stricter for agent-exposed routes
 ```
 
 `guren check` **fails** on: a nameless agent route, a tool name outside `^[A-Za-z0-9._-]{1,128}$`, two routes resolving to one tool name, and a non-read-only tool whose controller action shows no authorization. It **warns** on: a missing output or body schema, an Inertia response, a read-only tool whose action mutates (declared or GET/QUERY-default), a controller file it could not read, and any verdict it could not reach because the handler body was one it does not read (an inline handler, or a controller outside `app/Http/Controllers/`).
+
+For `ui` it **fails** on a page `.guren/pages.gen.ts` lacks (`agent-route-ui-page`), a malformed `ui` (`agent-route-ui-shape`) and `ui` beside `output` (`agent-route-ui-output`), and **warns** when the action never renders the page, passes a deferred prop, or `mcpPlugin()` has no `ui` option.
 
 `guren audit` warns when `destructiveHint: false` sits on an action that deletes, updates, or force-writes records, and treats an unverifiable body validation on an agent route as a failure rather than a warning. Suppress an audit finding you have judged safe by its exact key in `config/audit.ts`.
 

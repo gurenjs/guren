@@ -47,6 +47,14 @@ share `auth` a second time.
 - `this.json(data, init?)` (`{ status: 201 }` for a created resource) · `this.text(body, init?)`
 - `await this.files('avatar')` → `File[]`
 
+Never send a whole user record: `this.inertia()` props, `this.json()` and a
+Resource's `toArray()` that carry a `hidden` column or one named like
+`password`, `token`, `secret`, `hash`, `apiKey` or `otp` are a `guren audit`
+finding (`exposure-sensitive-column`). Send a Resource or `User.serialize(user)`,
+which drops the model's `hidden` columns.
+Query through a Model: a controller importing `drizzle-orm` is a
+`guren check` warning under the default `guren.arch.ts`, which `guren gate` counts.
+
 ## Auth and authorization
 
 `this.auth` methods are all async: `check()` · `guest()` · `user<T>()` ·
