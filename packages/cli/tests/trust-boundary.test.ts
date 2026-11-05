@@ -33,7 +33,7 @@ describe('runtimeBoundary', () => {
     expect(unavailable.map((entry) => entry.message)).toEqual(["The Bun runtime was not checked: oven-sh/bun's advisories could not be read (offline)."])
 
     const checked = runtimeBoundary({ sources: ['repository', 'database'], coverage: { status: 'partial', reasons: [{ code: 'inexact-version', message: 'Dockerfile:1 oven/bun:1 names no single Bun release, so it is not matched.', file: 'Dockerfile' }] } })
-    expect(checked[0]!.message).toBe("Bun's own advisories are read from oven-sh/bun's repository advisories and GitHub's advisory database only; one published only elsewhere (OSV, the NVD) is not seen.")
+    expect(checked[0]!.message).toBe("Bun's own advisories are read from oven-sh/bun's repository advisories and GitHub's advisory database only; one published only elsewhere (OSV, the NVD, or GitHub's database while still unreviewed) is not seen.")
     expect(checked[1]).toEqual({ from: 'runtime', message: 'Dockerfile:1 oven/bun:1 names no single Bun release, so it is not matched.', file: 'Dockerfile' })
   })
 })

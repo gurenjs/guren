@@ -1,8 +1,9 @@
 /**
  * The Bun runtime check (RFC 0039 §6): each version the app runs on (the process,
  * `engines.bun`, `packageManager`, the `oven/bun` images of its Dockerfiles) against
- * `oven-sh/bun`'s repository advisories, which `bun audit` and OSV do not carry. A
- * read that fails is `unavailable`, and a value naming no one release is not matched.
+ * `oven-sh/bun`'s repository advisories, which `bun audit` and OSV do not carry, and the
+ * reviewed advisories GitHub's database holds for npm `bun`, joined by GHSA. One source
+ * unread is `partial`, both `unavailable`; a value naming no one release is not matched.
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -159,7 +160,7 @@ function nextPage(link: string | null): string | null {
   return link?.split(',').map((part) => /<([^>]+)>;\s*rel="next"/u.exec(part)?.[1]).find(Boolean) ?? null
 }
 
-/** The global database's patched version is a string, or `{ identifier }` in older responses. */
+/** The REST endpoint sends a string; `{ identifier }` is the GraphQL shape, read too so either parses. */
 function patchedVersion(entry: Record<string, unknown>): string | null {
   const value = entry.patched_versions ?? entry.first_patched_version
   const text = typeof value === 'string' ? value : (value as { identifier?: unknown } | null)?.identifier

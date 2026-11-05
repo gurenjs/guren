@@ -50,7 +50,7 @@ export function runtimeBoundary(check: Pick<RuntimeCheck, 'coverage' | 'sources'
     return [{ from: 'runtime', message: `The Bun runtime was not checked: ${coverage.reasons.map((reason) => reason.message).join(' ')}` }]
   }
   return [
-    { from: 'runtime', message: `Bun's own advisories are read from ${describeAdvisorySources(check.sources)} only; one published only elsewhere (OSV, the NVD) is not seen.` },
+    { from: 'runtime', message: `Bun's own advisories are read from ${describeAdvisorySources(check.sources)} only; one published only elsewhere (OSV, the NVD, or GitHub's database while still unreviewed) is not seen.` },
     ...coverage.reasons.map((reason) => fromReason('runtime', reason)),
   ]
 }

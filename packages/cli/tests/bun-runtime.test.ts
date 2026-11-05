@@ -129,7 +129,7 @@ describe('fetchBunAdvisories', () => {
   })
 })
 
-/** What GitHub's global database returned for `affects=bun` on 2026-11-05: GHSA-v9mx is in no repository advisory. */
+/** The first two are what GitHub's database returned for `affects=bun` on 2026-11-05 (GHSA-v9mx is in no repository advisory); the third is invented to exercise the join and the GraphQL patched form. */
 const DATABASE = [
   { ghsa_id: 'GHSA-4j66-8f4r-3pjx', type: 'reviewed', severity: 'high', withdrawn_at: '2025-08-11T21:15:20Z', summary: 'Withdrawn', html_url: 'https://github.com/advisories/GHSA-4j66-8f4r-3pjx', vulnerabilities: [{ package: { ecosystem: 'npm', name: 'bun' }, vulnerable_version_range: '> 0.0.12, <= 1.1.39', first_patched_version: null }] },
   { ghsa_id: 'GHSA-v9mx-4pqq-h232', type: 'reviewed', severity: 'medium', withdrawn_at: null, summary: 'Older install', html_url: 'https://github.com/advisories/GHSA-v9mx-4pqq-h232', vulnerabilities: [{ package: { ecosystem: 'npm', name: 'bun' }, vulnerable_version_range: '> 0.0.12, < 1.1.30', first_patched_version: '1.1.30' }] },
