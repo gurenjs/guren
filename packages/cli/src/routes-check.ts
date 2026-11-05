@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve } from 'node:path'
 import type { Statement } from '@babel/types'
-import { memberKeyName, walk } from './ast-walk'
+import { blankCommentsAndStrings, memberKeyName, walk } from './ast-walk'
 import { hidesKeys, readModuleDescriptor } from './app-entry'
 import {
   discoverModuleRoutesFiles,
@@ -78,7 +78,7 @@ interface RoutesFileFacts {
   reexports: ReexportEdge[]
   /** Files reached by `await import('./x.js')`, which binds no static name. */
   dynamicImports: string[]
-  /** Top-level statements minus imports and `... from` re-exports. */
+  /** Top-level statements minus imports and `... from` re-exports, comments and string contents blanked. */
   body: string
 }
 
@@ -214,7 +214,9 @@ async function readFacts(
     facts.registrarExports.push(...declaredRegistrarExports(node))
   }
 
-  facts.body = bodyNodes.map((node) => parsed.source.slice(node.start ?? 0, node.end ?? 0)).join('\n')
+  // A commented-out call (`// registerAdminRoutes(router)`) mounts nothing.
+  const live = blankCommentsAndStrings(parsed.source, parsed.ast)
+  facts.body = bodyNodes.map((node) => live.slice(node.start ?? 0, node.end ?? 0)).join('\n')
   facts.dynamicImports = await dynamicImportTargets(parsed.ast.program, resolveEdge)
 
   return facts
