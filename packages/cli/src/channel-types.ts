@@ -36,7 +36,7 @@ export async function generateChannelTypes(
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
 
   const definitions = await collectChannelDefinitions(appRoot, sourceDir)
-  const channels = Array.from(definitions.keys()).sort((a, b) => a.localeCompare(b))
+  const channels = Array.from(definitions.values(), (definition) => definition.channel).sort((a, b) => a.localeCompare(b))
   const module = buildChannelModuleContent(definitions, {
     source: relative(appRoot, sourceDir) || DEFAULT_SOURCE_DIR,
   })
@@ -89,7 +89,7 @@ export type ChannelName =
 
 /**
  * Generated channel -> event contract map.
- * Event payloads default to unknown until event metadata codegen is introduced.
+ * Payloads are read from each event's broadcastWith() or the literal a broadcast passes; a value the reader cannot type is unknown.
  */
 export type ChannelEvents =
 ${channelEventsType}
@@ -233,11 +233,14 @@ function resolveChannelFromBroadcastChain(value: BabelNode): string | null {
   return null
 }
 
+// `counters.{id}` (an authorizer) and `counters.{counterId}` (an event's broadcastOn()) name
+// one channel; keyed by shape, the first spelling read is the one written.
 function ensureChannel(definitions: ChannelDefinitionMap, channel: string): ChannelDefinition {
-  const existing = definitions.get(channel)
+  const shape = channel.replace(/\{[^}]+\}/gu, '{}')
+  const existing = definitions.get(shape)
   if (existing) return existing
   const created: ChannelDefinition = { channel, events: new Map() }
-  definitions.set(channel, created)
+  definitions.set(shape, created)
   return created
 }
 
