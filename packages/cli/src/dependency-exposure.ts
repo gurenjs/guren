@@ -42,7 +42,7 @@ export interface ExposedPackage {
     imports: string
     /** Per graph node reaching the file: the app files from the node's file to the importing one. */
     nodes: Array<{ node: string; kind: GraphNode['kind']; chain: string[] }>
-    /** The client or SSR entries reaching the file, which run on every route that renders a page. */
+    /** The entries reaching the file: a client or SSR entry runs on every route that renders a page, a server entry on every route. */
     entries: string[]
   }>
   routes: ExposedRoute[]
@@ -64,15 +64,20 @@ export interface ExposureJoin {
 const SSR_ENTRIES = ['resources/js/ssr.tsx', 'resources/js/ssr.ts', 'resources/js/ssr.jsx', 'resources/js/ssr.js']
 /** Bare names that resolve to no installed package by design: Node builtins and Vite's virtual modules. */
 const NOT_A_PACKAGE = new Set([...builtinModules, 'bun', '@vite/client', '@vite/env'])
-const PAGE_ENTRY = /^resources\/js\/(?:app|ssr)\.[cm]?[jt]sx?$/u
+/** `mcp-app` is the setup every MCP App view bundles (RFC 0038), counted on every page route as an upper bound. */
+const PAGE_ENTRY = /^resources\/js\/(?:app|ssr|mcp-app)\.[cm]?[jt]sx?$/u
+/** `runtime.ts`'s `MAIN_ENTRY_CANDIDATES` under `src/`, and the scaffold's `bin/serve.ts`. */
+const SERVER_ENTRY = /^(?:src\/main|bin\/serve)\.[cm]?[jt]s$/u
 const BUILD_FILE = /^(?:(?:vite|drizzle|playwright[\w.-]*|vitest)\.config|guren\.arch)\.[cm]?[jt]sx?$/u
+/** Run by the guren CLI (`db:seed`, console commands) or only by the Vite dev server, as `scripts/` is, never by a route. */
+const UNSERVED_FILE = /^(?:src\/console\.[cm]?[jt]s$|app\/Console\/|db\/seeders\/|resources\/js\/dev-entry\.[cm]?[jt]sx?$)/u
 const TEST_DIRECTORY = /(?:^|\/)(?:tests?|e2e)\//u
 const TEST_SUFFIX = /\.(?:test|spec|setup)\.[cm]?[jt]sx?$/u
 
 /** Where a file runs, by where it sits; `ssrReach` is every file the SSR entry imports. */
 export function placementOf(file: string, ssrReach: ReadonlySet<string>): Placement[] {
   if (TEST_DIRECTORY.test(file) || TEST_SUFFIX.test(file)) return ['test']
-  if (BUILD_FILE.test(file) || file.startsWith('scripts/')) return ['build']
+  if (BUILD_FILE.test(file) || file.startsWith('scripts/') || UNSERVED_FILE.test(file)) return ['build']
   if (file.startsWith('resources/js/')) return ssrReach.has(file) ? ['client', 'ssr'] : ['client']
   return ['server']
 }
@@ -92,19 +97,20 @@ function reach(imports: ImportScan, start: string, stop: ReadonlySet<string> = n
   return chains
 }
 
+function exposedRoute(node: GraphNode | undefined): ExposedRoute | null {
+  if (!node?.route) return null
+  return {
+    node: node.id,
+    method: node.route.method,
+    path: node.route.path,
+    ...(node.route.name ? { name: node.route.name } : {}),
+    ...(node.route.authentication ? { authentication: node.route.authentication } : {}),
+  }
+}
+
 function routesByNode(graph: GurenApplicationGraph): Map<string, ExposedRoute[]> {
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]))
-  const asRoute = (id: string): ExposedRoute | null => {
-    const node = nodes.get(id)
-    if (!node?.route) return null
-    return {
-      node: id,
-      method: node.route.method,
-      path: node.route.path,
-      ...(node.route.name ? { name: node.route.name } : {}),
-      ...(node.route.authentication ? { authentication: node.route.authentication } : {}),
-    }
-  }
+  const asRoute = (id: string): ExposedRoute | null => exposedRoute(nodes.get(id))
   const out = new Map<string, Map<string, ExposedRoute>>()
   const add = (node: string, routeId: string) => {
     const route = asRoute(routeId)
@@ -188,11 +194,24 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
   const nodeFiles = (graph?.nodes ?? []).filter((node) => node.file !== undefined)
   const reachByNode = new Map(nodeFiles.map((node) => [node.id, reach(imports, node.file!)]))
   const routes = graph ? routesByNode(graph) : new Map<string, ExposedRoute[]>()
+  const allRoutes = (graph?.nodes ?? []).flatMap((node) => {
+    const route = exposedRoute(node)
+    return route ? [[node.id, route] as const] : []
+  })
   const nodeKind = new Map((graph?.nodes ?? []).map((node) => [node.id, node.kind]))
   const entries = [...imports.files.keys()].filter((file) => PAGE_ENTRY.test(file))
   // The entry loads a page only on the routes rendering it, which the page's own node attributes.
   const pageFiles = new Set((graph?.nodes ?? []).flatMap((node) => node.kind === 'page' && node.file !== undefined ? [node.file] : []))
-  const reachByEntry = new Map(entries.map((entry) => [entry, reach(imports, entry, pageFiles)]))
+  // What the server entry reaches at boot (src/app.ts, routes, config, providers, middleware files) runs
+  // on every route; its reach stops at a graph node's file, which attributes its own routes.
+  const serverEntries = graph === null ? [] : [...imports.files.keys()].filter((file) => SERVER_ENTRY.test(file))
+  const nodeFileSet = new Set(nodeFiles.map((node) => node.file!))
+  entries.push(...serverEntries)
+  const reachByEntry = new Map(entries.map((entry) => [entry, SERVER_ENTRY.test(entry) ? reach(imports, entry, nodeFileSet) : reach(imports, entry, pageFiles)]))
+  // An inline middleware is defined in a package or an app file the routes file reaches, which the server
+  // entry attributes to every route; one exported from a graph node's file is the limit this accepts.
+  const middlewareGapCovered = (key: string, coverage: GraphCoverage): boolean =>
+    key === 'usesMiddleware' && serverEntries.length > 0 && coverage.reasons.every((reason) => reason.code === 'inline-middleware')
   const pageRoutes = new Map((graph?.nodes ?? [])
     .filter((node) => node.kind === 'page')
     .flatMap((node) => (routes.get(node.id) ?? []).map((route) => [route.node, route] as const)))
@@ -211,7 +230,7 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
 
   // Whether an import exists rests on the tree and the scan; which route it reaches rests on the graph too.
   const importsComplete = tree.coverage.status === 'complete' && importReasons.length === 0
-  const graphComplete = graph !== null && Object.values(graph.coverage).every((coverage) => coverage.status === 'complete')
+  const graphComplete = graph !== null && Object.entries(graph.coverage).every(([key, coverage]) => coverage.status === 'complete' || middlewareGapCovered(key, coverage))
 
   const byId = new Map(tree.packages.map((instance) => [instance.id, instance]))
   const packages = tree.packages.map((instance): ExposedPackage => {
@@ -236,7 +255,9 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
       for (const { node } of site.nodes) {
         for (const route of routes.get(node) ?? []) reached.set(route.node, route)
       }
-      if (site.entries.length > 0) for (const [id, route] of pageRoutes) reached.set(id, route)
+      for (const entry of site.entries) {
+        for (const [id, route] of SERVER_ENTRY.test(entry) ? allRoutes : pageRoutes) reached.set(id, route)
+      }
     }
     const placements = new Set(importedBy.flatMap((site) => placementOf(site.file, ssrReach)))
     // A test or build file is never served, so no route can reach a package only those import.
@@ -281,7 +302,7 @@ export function joinExposure(input: ExposureInput): ExposureJoin {
         : {
             status: graphComplete && unowned.size === 0 ? 'complete' : 'partial',
             reasons: [
-              ...Object.entries(graph.coverage).flatMap(([key, coverage]) => coverage.status === 'complete' ? [] : coverage.reasons.map((reason) => ({ ...reason, message: `${key}: ${reason.message}` }))),
+              ...Object.entries(graph.coverage).flatMap(([key, coverage]) => coverage.status === 'complete' || middlewareGapCovered(key, coverage) ? [] : coverage.reasons.map((reason) => ({ ...reason, message: `${key}: ${reason.message}` }))),
               ...[...unowned.values()].sort((a, b) => a.message.localeCompare(b.message)),
             ],
           },

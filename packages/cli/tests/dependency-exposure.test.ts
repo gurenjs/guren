@@ -85,6 +85,10 @@ describe('placementOf', () => {
     ['guren.arch.ts', ['build']],
     ['resources/js/lib/storage.browser.ts', ['client']],
     ['app/contests/Entry.ts', ['server']],
+    ['src/console.ts', ['build']],
+    ['app/Console/Commands/SendDigestCommand.ts', ['build']],
+    ['db/seeders/UsersSeeder.ts', ['build']],
+    ['resources/js/dev-entry.ts', ['build']],
   ] as const)('places %p', (file, expected) => {
     expect(placementOf(file, new Set())).toEqual([...expected])
   })
@@ -234,6 +238,55 @@ describe('joinExposure', () => {
       status: 'partial',
       reasons: [{ code: 'unowned-file', message: 'src/app.ts is served but no graph node or entry reaches it, so the routes running it are unknown.', file: 'src/app.ts' }],
     })
+  })
+
+  it('attributes what the server entry reaches at boot to every route, stopping at a graph node file', () => {
+    const base = graph()
+    const withHealth = { ...base, nodes: [...base.nodes, route('health', 'GET', '/health', 'inline')] } as GurenApplicationGraph
+
+    const exposure = joinExposure({
+      tree: tree(),
+      imports: scan({
+        'src/main.ts': { files: ['src/app.ts'] },
+        'src/app.ts': { files: ['config/markdown.ts', 'app/Http/Controllers/PostController.ts'] },
+        'config/markdown.ts': { packages: [{ name: 'marked', specifier: 'marked', line: 1 }] },
+        'app/Http/Controllers/PostController.ts': { packages: [{ name: 'react-dom', specifier: 'react-dom/server', line: 1 }] },
+      }),
+      graph: withHealth,
+    })
+
+    const marked = entry(exposure, 'marked@16.4.2')
+    expect(marked.attribution).toBe('routes')
+    expect(marked.routes.map((reached) => reached.path).sort()).toEqual(['/health', '/posts', '/posts/:id'])
+    expect(marked.importedBy[0]?.entries).toEqual(['src/main.ts'])
+    expect(entry(exposure, 'react-dom@19.2.8').routes.map((reached) => reached.path).sort()).toEqual(['/posts', '/posts/:id'])
+    expect(exposure.coverage.graph).toEqual({ status: 'complete', reasons: [] })
+  })
+
+  it('counts the MCP App setup as a page entry', () => {
+    const exposure = joinExposure({
+      tree: tree(),
+      imports: scan({ 'resources/js/mcp-app.tsx': { packages: [{ name: 'react-dom', specifier: 'react-dom/client', line: 1 }] } }),
+      graph: graph(),
+    })
+
+    expect(entry(exposure, 'react-dom@19.2.8').importedBy[0]?.entries).toEqual(['resources/js/mcp-app.tsx'])
+    expect(exposure.coverage.graph.status).toBe('complete')
+  })
+
+  it('reads an inline-middleware gap as covered only when a server entry owns what the routes file reaches', () => {
+    const withGap = (codes: string[]): GurenApplicationGraph => ({
+      ...graph(),
+      coverage: {
+        handles: { status: 'complete', reasons: [] },
+        usesMiddleware: { status: 'partial', reasons: codes.map((code) => ({ code, message: `usesMiddleware: ${code}` })) },
+      },
+    })
+    const served = scan({ 'src/main.ts': { files: ['routes/web.ts'] }, 'routes/web.ts': {} })
+
+    expect(joinExposure({ tree: tree(), imports: served, graph: withGap(['inline-middleware']) }).coverage.graph).toEqual({ status: 'complete', reasons: [] })
+    expect(joinExposure({ tree: tree(), imports: scan({}), graph: withGap(['inline-middleware']) }).coverage.graph.status).toBe('partial')
+    expect(joinExposure({ tree: tree(), imports: served, graph: withGap(['inline-middleware', 'unregistered-middleware']) }).coverage.graph.status).toBe('partial')
   })
 
   it('finds no route for an unimported package when every reader is complete', () => {

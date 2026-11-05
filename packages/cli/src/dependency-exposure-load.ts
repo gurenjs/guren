@@ -6,13 +6,19 @@ import { checkRuntime, type RuntimeCheck, type RuntimeVersion } from './bun-runt
 import { loadApplicationGraph } from './application-graph-load'
 import { joinExposure, type ExposureJoin } from './dependency-exposure'
 import { loadDependencyTree } from './dependency-tree-load'
-import { collectProjectFiles, IMPORTABLE_EXTENSIONS } from './discovery'
+import { collectProjectFiles, IMPORTABLE_EXTENSIONS, toPosixRelative } from './discovery'
 import { cachedFileProbe } from './import-resolution'
 import { scanImports } from './import-scan'
 import { ParseCache } from './parse-cache'
 import { exposureBoundary, orderTrustBoundary, runtimeBoundary, type ExposureBoundaryInput, type TrustBoundaryEntry } from './trust-boundary'
 
 const JSON_EXTENSION = new Set(['.json'])
+/** Vite's output, which inlines the packages the sources import; scanned, it reads as unfollowed imports. */
+const BUILD_OUTPUT = /^public\/assets\//u
+
+async function sourceFiles(cwd: string): Promise<string[]> {
+  return (await collectProjectFiles(cwd, IMPORTABLE_EXTENSIONS)).filter((file) => !BUILD_OUTPUT.test(toPosixRelative(cwd, file)))
+}
 
 export interface DependencyExposure extends ExposureJoin {
   schemaVersion: 1
@@ -55,7 +61,7 @@ export async function loadDependencyExposure(options: { cwd: string; introspect?
   const cwd = resolve(options.cwd)
   const runtimeCheck = options.runtime ? Promise.resolve(options.runtime) : checkRuntime(cwd)
   const tree = await loadDependencyTree(cwd)
-  const files = await collectProjectFiles(cwd, IMPORTABLE_EXTENSIONS)
+  const files = await sourceFiles(cwd)
   // A directory's package.json picks the file an import of it lands on.
   const manifests = async () => (await collectProjectFiles(cwd, JSON_EXTENSION)).filter((file) => basename(file) === 'package.json')
   const directoryManifests = await manifests()
@@ -72,7 +78,7 @@ export async function loadDependencyExposure(options: { cwd: string; introspect?
 
   const after = await fingerprint(watched)
   const treeAfter = await loadDependencyTree(cwd)
-  const filesAfter = await collectProjectFiles(cwd, IMPORTABLE_EXTENSIONS)
+  const filesAfter = await sourceFiles(cwd)
   const treeKey = (loaded: typeof tree) => JSON.stringify([loaded.lockfile, loaded.coverage.status, loaded.packages.map((instance) => [instance.id, instance.integrity ?? null])])
   const manifestsAfter = await manifests()
   const unchanged = before === after
