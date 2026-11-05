@@ -90,3 +90,11 @@ A control that sets `outline-none` needs `focus:outline-solid` beside its
 `none`, `outline-2` only sets the width, and the focused control shows no ring.
 Buttons, checkboxes and links keep the browser's own focus ring, so never give
 them `outline-none`.
+
+## Imports
+
+Pages run in the browser. A file under `resources/js/` never imports a value
+from `drizzle-orm`, a database driver, `@guren/orm` or `@guren/core` (an
+`import type` is fine): load the data in the controller and pass it as props.
+That is a `guren check` failure in an app whose `guren.arch.ts` has the
+default rules.
