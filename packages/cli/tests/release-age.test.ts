@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { getDoctorRuleEvaluations } from '../src/doctor'
+import { bunsIgnoringReleaseAge, getDoctorRuleEvaluations } from '../src/doctor'
 import {
   RELEASE_AGE_SECONDS,
   addExclusions,
@@ -69,6 +69,13 @@ describe('addExclusions', () => {
     const twice = `${renderReleaseAgeBunfig(['@guren/core'])}\n[other]\n${renderReleaseAgeBunfig(['@guren/core']).split('[install]\n')[1]}`
 
     expect(addExclusions(twice, ['@guren/orm'])).toBeNull()
+  })
+})
+
+describe('bunsIgnoringReleaseAge', () => {
+  it('keeps the exact versions older than 1.3.0 and judges no range', () => {
+    const version = (value: string, exact = true) => ({ source: 'engines' as const, value, exact, ...(exact ? { version: value } : {}) })
+    expect(bunsIgnoringReleaseAge([version('1.2.23'), version('1.3.0'), version('1.4.4'), version('>=1.1', false)]).map((entry) => entry.value)).toEqual(['1.2.23'])
   })
 })
 
@@ -149,6 +156,17 @@ describe('supply-chain-cooldown', () => {
     await writeFile(join(workspace.dir, 'bunfig.toml'), '[install]\nminimumReleaseAge = 0\n', 'utf8')
 
     expect((await evaluate()).check.status).toBe('pass')
+  })
+
+  it('warns when a Dockerfile runs a Bun that ignores the gate', async () => {
+    await writeFile(join(workspace.dir, 'bunfig.toml'), renderReleaseAgeBunfig(['@guren/core', '@guren/server', '@guren/testing']), 'utf8')
+    await writeFile(join(workspace.dir, 'Dockerfile'), 'FROM oven/bun:1.2.23\n', 'utf8')
+
+    const evaluation = await evaluate()
+
+    expect(evaluation.check.status).toBe('warn')
+    expect(evaluation.check.message).toBe('Bun reads minimumReleaseAge from 1.3.0, so Dockerfile:1 oven/bun:1.2.23 installs without the gate and says nothing.')
+    expect(evaluation.autofix).toBeFalsy()
   })
 
   it('does not judge a bunfig.toml it cannot parse', async () => {

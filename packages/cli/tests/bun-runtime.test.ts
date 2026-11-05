@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   fetchBunAdvisories,
+  fetchDatabaseAdvisories,
   inAdvisoryRange,
   judgeRuntime,
   readDockerfileImages,
@@ -128,7 +129,61 @@ describe('fetchBunAdvisories', () => {
   })
 })
 
+/** The first two are what GitHub's database returned for `affects=bun` on 2026-11-05 (GHSA-v9mx is in no repository advisory); the third is invented to exercise the join and the GraphQL patched form. */
+const DATABASE = [
+  { ghsa_id: 'GHSA-4j66-8f4r-3pjx', type: 'reviewed', severity: 'high', withdrawn_at: '2025-08-11T21:15:20Z', summary: 'Withdrawn', html_url: 'https://github.com/advisories/GHSA-4j66-8f4r-3pjx', vulnerabilities: [{ package: { ecosystem: 'npm', name: 'bun' }, vulnerable_version_range: '> 0.0.12, <= 1.1.39', first_patched_version: null }] },
+  { ghsa_id: 'GHSA-v9mx-4pqq-h232', type: 'reviewed', severity: 'medium', withdrawn_at: null, summary: 'Older install', html_url: 'https://github.com/advisories/GHSA-v9mx-4pqq-h232', vulnerabilities: [{ package: { ecosystem: 'npm', name: 'bun' }, vulnerable_version_range: '> 0.0.12, < 1.1.30', first_patched_version: '1.1.30' }] },
+  { ...LIVE[2], type: 'reviewed', state: undefined, html_url: 'https://github.com/advisories/GHSA-26q8-h657-pf84', vulnerabilities: [{ package: { ecosystem: 'npm', name: 'bun' }, vulnerable_version_range: '< 1.4.4', first_patched_version: { identifier: '1.4.4' } }] },
+]
+
+describe('fetchDatabaseAdvisories', () => {
+  it('reads the database shape: no state, a withdrawn record skipped, either patched form', async () => {
+    const { fetch, calls } = serve([{ body: DATABASE }])
+    const read = await fetchDatabaseAdvisories({ fetch, token: '' })
+
+    expect(calls[0]!.url).toBe('https://api.github.com/advisories?ecosystem=npm&affects=bun&per_page=100')
+    expect(read.ok && read.advisories.map((advisory) => [advisory.ghsa, advisory.vulnerabilities[0]!.patched])).toEqual([
+      ['GHSA-v9mx-4pqq-h232', '1.1.30'],
+      ['GHSA-26q8-h657-pf84', '1.4.4'],
+    ])
+  })
+})
+
 describe('judgeRuntime and runtimeFindings', () => {
+  it('joins both sources by GHSA, the repository record first', async () => {
+    const database = await fetchDatabaseAdvisories({ fetch: serve([{ body: DATABASE }]).fetch, token: '' })
+    const check = judgeRuntime([{ source: 'process', value: '1.1.0', exact: true, version: '1.1.0' }], { ok: true, advisories: await liveAdvisories() }, database)
+
+    expect(check.sources).toEqual(['repository', 'database'])
+    expect(check.coverage).toEqual({ status: 'complete', reasons: [] })
+    expect(check.matches.map(({ advisory }) => [advisory.ghsa, advisory.url])).toEqual([
+      ['GHSA-663w-cv8g-jj2p', 'https://github.com/oven-sh/bun/security/advisories/GHSA-663w-cv8g-jj2p'],
+      ['GHSA-26q8-h657-pf84', 'https://github.com/oven-sh/bun/security/advisories/GHSA-26q8-h657-pf84'],
+      ['GHSA-v9mx-4pqq-h232', 'https://github.com/advisories/GHSA-v9mx-4pqq-h232'],
+    ])
+  })
+
+  it('reads one unread source as partial, with a warning, and both as unavailable', async () => {
+    const running = [{ source: 'process' as const, value: '1.4.4', exact: true, version: '1.4.4' }]
+    const down = { ok: false as const, reason: 'api.github.com answered 502' }
+
+    const repositoryOnly = judgeRuntime(running, { ok: true, advisories: await liveAdvisories() }, down)
+    expect(repositoryOnly.coverage.status).toBe('partial')
+    expect(repositoryOnly.sources).toEqual(['repository'])
+    expect(runtimeFindings(repositoryOnly).map((finding) => [finding.key, finding.status, finding.message])).toEqual([
+      ['deps:runtime-scan', 'warn', "The Bun runtime was checked against one advisory source only: GitHub's advisory database could not be read for bun (api.github.com answered 502), so only oven-sh/bun's advisories were checked."],
+      ['deps:runtime:none', 'pass', "No advisory in oven-sh/bun's repository advisories holds the running Bun 1.4.4."],
+    ])
+
+    const databaseOnly = judgeRuntime(running, down, { ok: true, advisories: [] })
+    expect(databaseOnly.coverage.reasons.map((reason) => reason.code)).toEqual(['advisories-unavailable'])
+    expect(databaseOnly.sources).toEqual(['database'])
+
+    const neither = judgeRuntime(running, down, down)
+    expect(neither.coverage.status).toBe('unavailable')
+    expect(neither.coverage.reasons.map((reason) => reason.code)).toEqual(['advisories-unavailable', 'database-unavailable'])
+  })
+
   it('finds nothing for the patched release, against the live advisories', async () => {
     const check = judgeRuntime([{ source: 'process', value: '1.4.4', exact: true, version: '1.4.4' }], { ok: true, advisories: await liveAdvisories() })
 
@@ -164,7 +219,7 @@ describe('judgeRuntime and runtimeFindings', () => {
     expect(runtimeFindings(check).map((finding) => [finding.key, finding.message])).toEqual([
       ['deps:runtime-unpinned:Dockerfile:1', 'oven/bun:1 names no exact Bun release, so the runtime check cannot match it and a rebuild can pick up another release.'],
       ['deps:runtime-unpinned:Dockerfile:2', 'oven/bun:1.4.4 carries no digest, so a re-pushed tag can change the image.'],
-      ['deps:runtime:none', 'No oven-sh/bun advisory holds Dockerfile:2 oven/bun:1.4.4.'],
+      ['deps:runtime:none', "No advisory in oven-sh/bun's repository advisories holds Dockerfile:2 oven/bun:1.4.4."],
     ])
   })
 

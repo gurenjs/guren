@@ -29,11 +29,11 @@ describe('runtimeBoundary', () => {
   it('names the advisory source only when the runtime was checked', () => {
     expect(runtimeBoundary(undefined)).toEqual([{ from: 'runtime', message: 'The Bun runtime was not checked against its advisories in this run.' }])
 
-    const unavailable = runtimeBoundary({ coverage: { status: 'unavailable', reasons: [{ code: 'advisories-unavailable', message: "oven-sh/bun's advisories could not be read (offline)." }] } })
+    const unavailable = runtimeBoundary({ sources: [], coverage: { status: 'unavailable', reasons: [{ code: 'advisories-unavailable', message: "oven-sh/bun's advisories could not be read (offline)." }] } })
     expect(unavailable.map((entry) => entry.message)).toEqual(["The Bun runtime was not checked: oven-sh/bun's advisories could not be read (offline)."])
 
-    const checked = runtimeBoundary({ coverage: { status: 'partial', reasons: [{ code: 'inexact-version', message: 'Dockerfile:1 oven/bun:1 names no single Bun release, so it is not matched.', file: 'Dockerfile' }] } })
-    expect(checked[0]!.message).toContain("oven-sh/bun's repository advisories only")
+    const checked = runtimeBoundary({ sources: ['repository', 'database'], coverage: { status: 'partial', reasons: [{ code: 'inexact-version', message: 'Dockerfile:1 oven/bun:1 names no single Bun release, so it is not matched.', file: 'Dockerfile' }] } })
+    expect(checked[0]!.message).toBe("Bun's own advisories are read from oven-sh/bun's repository advisories and GitHub's advisory database only; one published only elsewhere (OSV, the NVD, or GitHub's database while still unreviewed) is not seen.")
     expect(checked[1]).toEqual({ from: 'runtime', message: 'Dockerfile:1 oven/bun:1 names no single Bun release, so it is not matched.', file: 'Dockerfile' })
   })
 })

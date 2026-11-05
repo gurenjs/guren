@@ -759,18 +759,50 @@ existing `deps:*` finding keys are unchanged; the new fields are optional.
 
 ## Open Questions
 
+Questions 1 to 6 were settled on 2026-11-05; each keeps its question with the answer.
+
 1. Should `@guren/*` stay excluded from the cooldown (§2), or should the release
    train publish and wait three days before the templates reference it?
+   **Resolved: stay excluded.** The templates reference a release the moment it
+   ships, so waiting would leave `create-guren-app` unable to install for three
+   days after every release. The `@guren` publish path is guarded where it
+   lives instead: the release workflow publishes through npm trusted publishing
+   (OIDC, `id-token: write`), so no long-lived npm token exists to steal.
 2. Three days or seven for the default age?
+   **Resolved: three days.** Most malicious releases are found and pulled within
+   hours to days, and a longer gate delays every advisory fix as long, which the
+   audit's fix search would then have to step past more often.
 3. Should the runtime check also read the global database once it catches up,
-   in case Bun files an advisory there and not in the repository? The two
-   have disagreed only in the repository's favour so far.
+   in case Bun files an advisory there and not in the repository?
+   **Resolved: read both.** The two had not only disagreed in the repository's
+   favour: on 2026-11-05 GitHub's database held GHSA-v9mx-4pqq-h232 (`bun`
+   below 1.1.30), which the repository does not. The check reads
+   `GET /advisories?ecosystem=npm&affects=bun` beside the repository's list and
+   joins them by GHSA, the repository's record first. `RuntimeCheck.sources`
+   names what was read; one source unread is a `database-unavailable` or
+   `advisories-unavailable` reason, a `partial` check, a `deps:runtime-scan`
+   warning and a `--deps-baseline` failure, and both unread is `unavailable`
+   as before.
 4. Should the trust boundary section also be written to `docs/spec/`? It would
    be drift-gated there, and every dependency bump would touch it.
+   **Resolved: no.** It holds counts and reader reasons that move with every
+   dependency bump, which would make the drift gate noise. A CI run that needs
+   a record keeps the `--json` report as an artifact.
 5. Is a name list the right default for sensitive columns, or should a schema
    annotation be required?
+   **Resolved: the name list stays the default.** A required annotation would
+   find nothing in an app that never wrote one, which is a silent miss. `hidden`
+   already adds columns to the list; an annotation that takes a column off it
+   can follow if false positives are reported.
 6. Which Bun release introduced `minimumReleaseAge`, and does an older Bun
    ignore the key or fail on it? Only 1.4.4 was measured.
+   **Resolved: 1.3.0, and older releases ignore it silently.** Measured on the
+   `oven/bun` images with a gate of ten years over `is-number@7.0.0`: 1.1.45,
+   1.2.0, 1.2.10, 1.2.15, 1.2.19, 1.2.20 and 1.2.23 install it with no warning,
+   1.3.0, 1.3.1 and 1.4.4 refuse it. `guren doctor`'s `supply-chain-cooldown`
+   warns when an exact Bun version the app names (the running Bun,
+   `engines.bun`, `packageManager`, an `oven/bun` image) is older than 1.3.0;
+   a range is not judged.
 7. Does `bun install --lockfile-only` apply `minimumReleaseAge` and the
    stability filter exactly as a full install does? On Bun 1.4.4 it applies the
    gate to direct and transitive packages alike, names the blocked specifier on

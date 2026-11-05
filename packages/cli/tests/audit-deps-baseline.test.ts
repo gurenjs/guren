@@ -62,9 +62,15 @@ describe('judgeDepsBaseline', () => {
 
     const unavailable = {
       ...report([]),
-      runtimeCheck: { coverage: { status: 'unavailable', reasons: [{ code: 'advisories-unavailable', message: 'api.github.com answered 500.' }] }, versions: [] },
+      runtimeCheck: { coverage: { status: 'unavailable', reasons: [{ code: 'advisories-unavailable', message: 'api.github.com answered 500.' }] }, versions: [], sources: [] },
     } as AuditReport
     expect(judgeDepsBaseline(unavailable, 'baseline.json', '[]').failure).toBe('The Bun runtime check is unavailable, so the baseline cannot tell what is new: api.github.com answered 500.')
+
+    const oneSource = {
+      ...report([]),
+      runtimeCheck: { coverage: { status: 'partial', reasons: [{ code: 'database-unavailable', message: 'GitHub\'s advisory database could not be read for bun (api.github.com answered 502).' }] }, versions: [], sources: ['repository'] },
+    } as AuditReport
+    expect(judgeDepsBaseline(oneSource, 'baseline.json', '[]').failure).toBe('An advisory source of the Bun runtime check could not be read, so the baseline cannot tell what is new: GitHub\'s advisory database could not be read for bun (api.github.com answered 502).')
   })
 
   it('fails on a baseline it could not read', () => {

@@ -141,7 +141,7 @@ export interface AuditReport {
   /** Response sinks read by the column exposure rule, and the values it could not follow (RFC 0039 §7). */
   dataExposure?: DataExposureReport
   /** The Bun runtime check, present when the dependency scan ran (RFC 0039 §6). */
-  runtimeCheck?: Pick<RuntimeCheck, 'coverage' | 'versions'>
+  runtimeCheck?: Pick<RuntimeCheck, 'coverage' | 'versions' | 'sources'>
   /** Coverage of the installed-package scan for CSRF exemptions. */
   csrfExemptionScan: CsrfExemptionScan
   /** What the dependency, runtime and response results rest on without checking (RFC 0039 §9). */
@@ -467,7 +467,7 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
     dependencyScan,
     ...(dependencyExposure ? { dependencyExposure } : {}),
     ...(dataExposure ? { dataExposure } : {}),
-    ...(runtimeCheck ? { runtimeCheck: { coverage: runtimeCheck.coverage, versions: runtimeCheck.versions } } : {}),
+    ...(runtimeCheck ? { runtimeCheck: { coverage: runtimeCheck.coverage, versions: runtimeCheck.versions, sources: runtimeCheck.sources } } : {}),
     csrfExemptionScan,
     ...(aiLocalTools ? { aiLocalTools } : {}),
     trustBoundary,
