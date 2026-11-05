@@ -1,5 +1,19 @@
 # create-guren-app
 
+## 1.21.0
+
+### Minor Changes
+
+- cea3812: New apps start with a `guren.arch.ts` (RFC 0039 §8). Files under `resources/js/` may not import `drizzle-orm`, `postgres`, `mysql2`, `@guren/orm` or `@guren/core`, and a controller importing `drizzle-orm` is a warning, which `guren check --ci` and `guren gate` count like any other. The API-only starter carries the controller rule alone.
+- c340202: A scaffolded app's `build` script now ends with `bunx vite build --mode mcp-app`, which builds one self-contained HTML document per page an `.agent({ ui })` route names (RFC 0038). An app with no such route builds nothing in that step and writes an empty `.guren/mcp-app/index.gen.ts`. An existing app adds the step to its own `build` script when it starts declaring `ui`. The scaffold's `.gitignore` lists `.guren/mcp-app/`, the step's output.
+- 4051ecc: Scaffolded apps ship a `bunfig.toml` that sets Bun's `minimumReleaseAge` to three days, so `bun install` and `bun add` hold back package versions published more recently than that, for transitive dependencies too. Every published `@guren` package, plugins included, is listed in `minimumReleaseAgeExcludes` by name (Bun does not read a scope pattern there), because a Guren upgrade asks for releases newer than the gate allows. To take a security fix younger than three days, add its exact `name@version` to that list. The operations guide describes the gate.
+
+### Patch Changes
+
+- 7561bae: A typed `<Link>` or `<Form>` now visits its route with the route's own method, so a `QUERY` route sends `query` and a `<Link>` to a `POST` route sends `post`; a route under a verb Inertia has no method for makes `<Form>` throw with the route's name. Sending `query` needs `@inertiajs/react` 3.10 or later in the app; `@guren/inertia-client` still accepts `^3.6.1`, so an app on an older Inertia keeps one copy. New apps start on `@inertiajs/react` `^3.11.0`, which also limits the XSRF token header to same-origin URLs and uses a unique IV for every encrypted history entry.
+- 6c77345: The default template no longer lists `mermaid` as a devDependency. mermaid depends on katex, so `guren audit` (A06) reported a katex advisory on every fresh app, for a library only the docs viewer uses. Without it the viewer shows each diagram's source with a `bun add -d mermaid` hint; run that command to render diagrams. An app scaffolded earlier keeps `mermaid`, and `bun remove mermaid` clears the warning if you do not need rendered diagrams.
+- ed4df27: The default template's `.env.example` lists `GUREN_VITE_PORT`, commented out, for moving the dev server's Vite off port 5173.
+
 ## 1.20.3
 
 ### Patch Changes

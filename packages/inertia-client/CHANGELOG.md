@@ -1,5 +1,32 @@
 # @guren/inertia-client
 
+## 1.4.0
+
+### Minor Changes
+
+- 5b27845: Add the client half of Inertia's live props (RFC 0037). `liveTransport()` from the new `@guren/inertia-client/live` entry is a transport over Guren's own `broadcast.webSocketMiddleware()` route, and `startInertiaClient({ live: liveTransport() })` hands it to Inertia, which then reloads a `live()` prop whenever one of its events is broadcast:
+
+  ```ts
+  import { startInertiaClient } from "@guren/inertia-client/app";
+  import { liveTransport } from "@guren/inertia-client/live";
+
+  startInertiaClient({ pages, live: liveTransport() });
+  ```
+
+  The transport opens one socket per tab on the first live prop and closes it a few seconds after the last one is gone (`idleTimeout`). It subscribes each channel once however many props listen on it, keeps at most 16 subscriptions waiting for an answer, and reconnects with backoff. After a reconnect it reports the connection only once every channel is subscribed again, so Inertia's catch-up reload sees the state after the subscription. It stops after five attempts that never connect, as on a runtime that cannot upgrade. It reports the socket's `socketId`, which Inertia sends as `X-Socket-Id` for `broadcastEvent(…, { except: this.ctx })`, and it removes `__inertia` from every payload, so an event can only trigger a reload. `url`, `throttle`, `pauseWhenHidden` and `webSocketFactory` are options.
+
+  Live props need `@inertiajs/react` 3.11 or later and `@guren/server` 2.36 or later. With an older Inertia, `startInertiaClient()` warns and ignores the option. A prototype build never opens a socket.
+
+- ee40e11: `@guren/inertia-client/mcp-app` mounts an Inertia page inside an MCP Apps host (RFC 0038). `startMcpApp({ pages, setup })` connects to the host, waits for the tool result, mounts the page it carries, and answers each visit with a tool call through the host: a redirect is followed, a 422 lands on the current page as `errors`, a visit no tool answers opens the application in the browser, and a call waiting for approval holds the page until `useMcpApp().pendingApproval.resubmit()`. A visit the view cannot carry out stays on the current page with `errors.mcp` set and is reported as `useMcpApp().refusal`, with the application URL to open. The view's visits are kept in memory, so they never become entries of the host's tab. `useMcpApp()` reports whether the page runs in a host, the host context and capabilities, and exposes `sendMessage()`, `updateModelContext()` and `openLink()`; in the ordinary app it reports `isMcpApp: false`.
+
+  The subpath loads `@modelcontextprotocol/ext-apps` (`^2.0.0`), an optional peer, only when `startMcpApp()` runs. An app that builds MCP App views adds it with `bun add @modelcontextprotocol/ext-apps`, which brings its required peers (`@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `zod`) along.
+
+### Patch Changes
+
+- 65b95d9: `startInertiaClient()` hydrates a page the server rendered instead of replacing it, as Inertia's own default setup does. Just before hydrating it records each form control a reader changed (compared with what its markup describes), and `useField` takes that value through the control's own `onChange` when the control hydrates. Text, textareas, numbers, checkboxes, selects, dates and files filled in before the client loaded are kept and submitted; a control nobody touched, one an app renders its own way, and every client-rendered one keep their state. A custom `setup` still mounts however it chooses.
+- 7561bae: A typed `<Link>` or `<Form>` now visits its route with the route's own method, so a `QUERY` route sends `query` and a `<Link>` to a `POST` route sends `post`; a route under a verb Inertia has no method for makes `<Form>` throw with the route's name. Sending `query` needs `@inertiajs/react` 3.10 or later in the app; `@guren/inertia-client` still accepts `^3.6.1`, so an app on an older Inertia keeps one copy. New apps start on `@inertiajs/react` `^3.11.0`, which also limits the XSRF token header to same-origin URLs and uses a unique IV for every encrypted history entry.
+- b2261df: `@guren/inertia-client` declares `"sideEffects": false`, so a client bundle keeps only the modules a page uses. A page importing `useTranslation` or `ErrorBoundary` from the root entry used to pull in `renderInertiaServer` and with it both builds of `react-dom/server`, which cannot be tree-shaken. In `examples/blog` the client's `inertia-vendor` chunk drops from 529.06 kB to 341.63 kB (164.56 kB to 107.61 kB gzipped). No module in the package does anything at load: the input kept from before hydration is still recorded by `startInertiaClient()` when it hydrates.
+
 ## 1.3.0
 
 ### Minor Changes

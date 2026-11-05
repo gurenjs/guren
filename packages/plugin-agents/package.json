@@ -55,14 +55,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.25.0",
+    "@guren/core": "^1.26.1",
     "agents": "^0.22.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.1.3",
     "@cloudflare/workers-types": "^4.20260702.1",
     "@guren/plugin-cloudflare": "workspace:*",
-    "@guren/plugin-mcp": "^0.6.1",
+    "@guren/plugin-mcp": "^0.7.0",
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^20.14.10",
     "hono": "^4.13.7",
