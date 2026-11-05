@@ -9,7 +9,7 @@ import {
   moduleNameFor,
 } from './discovery'
 import { moduleDescriptorOrScaffold } from './app-entry'
-import { memberKeyName, unwrapTypeAssertion, walk } from './ast-walk'
+import { blankComments, memberKeyName, unwrapTypeAssertion, walk } from './ast-walk'
 import { camelCase, escapeRegExp, referencesIdentifier } from './utils'
 import { ParseCache } from './parse-cache'
 import { check, type CheckResult } from './check-result'
@@ -24,7 +24,7 @@ const CONSOLE_ENTRY = 'src/console.ts'
  * module's entry file they put a name on its public surface.
  */
 interface EntrySource {
-  /** Top-level statements minus `import` declarations. */
+  /** Top-level statements minus `import` declarations, comments blanked. */
   body: string
   /** One entry per `import`: its specifier and the local names it binds. */
   imports: Array<{ specifier: string; names: string[] }>
@@ -34,9 +34,10 @@ async function readEntrySource(cache: ParseCache, absPath: string): Promise<Entr
   const parsed = await cache.get(absPath)
   if (!parsed) return null
 
+  const live = blankComments(parsed.source, parsed.ast)
   const body = parsed.ast.program.body
     .filter((node) => node.type !== 'ImportDeclaration')
-    .map((node) => parsed.source.slice(node.start ?? 0, node.end ?? 0))
+    .map((node) => live.slice(node.start ?? 0, node.end ?? 0))
     .join('\n')
 
   const imports = parsed.ast.program.body

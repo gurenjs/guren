@@ -236,3 +236,56 @@ export function soleReturnedValue(body: Node): Node | undefined {
   const [only] = returns
   return returns.length === 1 && only ? unwrapTypeAssertion(only) : undefined
 }
+
+/**
+ * Blanks with spaces everything the body regexes must not read as live code:
+ * comments, string/regex/JSX-text contents, template quasis, and whole
+ * type-alias/interface declarations (TS allows them inside a function, and their
+ * member signatures read exactly like a runtime call). Offsets are preserved so
+ * body slices still line up with AST positions. Template *expressions* are live code, kept.
+ */
+export function blankCommentsAndStrings(source: string, ast: File): string {
+  const ranges = commentRanges(ast)
+  walk(ast.program, (node) => {
+    const { type, start, end } = node
+    if (typeof start !== 'number' || typeof end !== 'number') return
+    if (type === 'StringLiteral' || type === 'DirectiveLiteral') {
+      ranges.push([start + 1, end - 1])
+    } else if (type === 'TemplateElement' || type === 'RegExpLiteral' || type === 'JSXText') {
+      ranges.push([start, end])
+    } else if (type === 'TSTypeAliasDeclaration' || type === 'TSInterfaceDeclaration') {
+      ranges.push([start, end])
+      return false
+    }
+  })
+  return blankRanges(source, ranges)
+}
+
+/** {@link blankCommentsAndStrings} for comments alone, for a reader that matches string keys such as `x['commands']`. */
+export function blankComments(source: string, ast: File): string {
+  return blankRanges(source, commentRanges(ast))
+}
+
+function commentRanges(ast: File): [number, number][] {
+  const ranges: [number, number][] = []
+  for (const comment of ast.comments ?? []) {
+    if (typeof comment.start === 'number' && typeof comment.end === 'number') {
+      ranges.push([comment.start, comment.end])
+    }
+  }
+  return ranges
+}
+
+function blankRanges(source: string, ranges: [number, number][]): string {
+  if (ranges.length === 0) return source
+
+  // split('') keeps UTF-16 code-unit indexing — Babel offsets are code units,
+  // and a code-point spread would shift everything after an astral character.
+  const chars = source.split('')
+  for (const [start, end] of ranges) {
+    for (let i = start; i < end && i < chars.length; i++) {
+      if (chars[i] !== '\n') chars[i] = ' '
+    }
+  }
+  return chars.join('')
+}

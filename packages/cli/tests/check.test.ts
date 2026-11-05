@@ -1556,6 +1556,23 @@ export function registerWebRoutes(baseRouter: Router): void {
     expect(statusOf(report, 'routes/admin.ts')).toBe('warn')
   })
 
+  it('warns when the only call to the registrar is commented out or inside a string', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+import { registerAdminRoutes } from './admin.js'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  // registerAdminRoutes(baseRouter)
+  /* registerAdminRoutes(baseRouter) */
+  baseRouter.get('/', (c) => c.text('registerAdminRoutes(baseRouter)'))
+}
+`,
+      'routes/admin.ts': ADMIN_ROUTES,
+    })
+
+    expect(statusOf(report, 'routes/admin.ts')).toBe('warn')
+  })
+
   // Crediting the whole file for any binding would pass this: the entry uses
   // admin.ts, but only for a constant — the registrar beside it is dead.
   it('does not credit a file whose non-registrar export is the one imported', async () => {

@@ -12,7 +12,7 @@ import type { AppManifest, ControllerRef, RouteEntry } from '@guren/server'
 import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './discovery'
 import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
-import { memberKeyName, walk } from './ast-walk'
+import { blankCommentsAndStrings, memberKeyName, walk } from './ast-walk'
 import { controllerImportFailures } from './introspect-controller-file'
 import { introspectedRoutes, type IntrospectSource } from './manifest-section'
 import { joinRouteDefinitions, type JoinableRoute } from './app-routes'
@@ -394,44 +394,7 @@ export const LOCAL_TOOL_WRITE_PATTERN = new RegExp(
   + `|${FORCE_WRITE_PATTERN.source}|\\.\\s*save\\s*\\(`,
 )
 
-/**
- * Blanks with spaces everything the body regexes must not read as live code:
- * comments, string/regex/JSX-text contents, template quasis, and whole
- * type-alias/interface declarations (TS allows them inside a function, and their
- * member signatures read exactly like a runtime call). Offsets are preserved so
- * body slices still line up with AST positions. Template *expressions* are live code, kept.
- */
-export function blankCommentsAndStrings(source: string, ast: File): string {
-  const ranges: [number, number][] = []
-  for (const comment of ast.comments ?? []) {
-    if (typeof comment.start === 'number' && typeof comment.end === 'number') {
-      ranges.push([comment.start, comment.end])
-    }
-  }
-  walk(ast.program, (node) => {
-    const { type, start, end } = node
-    if (typeof start !== 'number' || typeof end !== 'number') return
-    if (type === 'StringLiteral' || type === 'DirectiveLiteral') {
-      ranges.push([start + 1, end - 1])
-    } else if (type === 'TemplateElement' || type === 'RegExpLiteral' || type === 'JSXText') {
-      ranges.push([start, end])
-    } else if (type === 'TSTypeAliasDeclaration' || type === 'TSInterfaceDeclaration') {
-      ranges.push([start, end])
-      return false
-    }
-  })
-  if (ranges.length === 0) return source
-
-  // split('') keeps UTF-16 code-unit indexing — Babel offsets are code units,
-  // and a code-point spread would shift everything after an astral character.
-  const chars = source.split('')
-  for (const [start, end] of ranges) {
-    for (let i = start; i < end && i < chars.length; i++) {
-      if (chars[i] !== '\n') chars[i] = ' '
-    }
-  }
-  return chars.join('')
-}
+export { blankCommentsAndStrings }
 
 /**
  * Map of `ClassName.method` → method body source, for every controller in

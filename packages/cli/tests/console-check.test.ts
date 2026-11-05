@@ -54,6 +54,34 @@ kernel.registerMany([SendDigestCommand])`,
     }
   })
 
+  it('warns when the command is commented out inside registerMany()', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-commented-')
+
+    try {
+      await writeRootCommand(workspace.dir)
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+import SendDigestCommand from '../app/Console/Commands/SendDigestCommand.js'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany([
+  // SendDigestCommand,
+])`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const result = report.checks.find(c => c.key === 'console-command:SendDigestCommand')
+      expect(result).toBeDefined()
+      expect(result!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('warns when a generated command is never registered', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-console-unregistered-')
 
