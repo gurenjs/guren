@@ -414,11 +414,16 @@ ranges. The copied `bunfig.toml` keeps the app's `minimumReleaseAge`, so a
 step that needs a version younger than the gate, whether the patched package,
 a parent being updated or a new intermediate package, fails the resolution;
 each blocked version becomes a `cooldown-exclude` step with its exact
-`name@version`, and the resolution runs again. Bun's own stability filter
-(which can push resolution past a version the age alone would allow) is
-covered the same way, because the check resolves with Bun rather than
-predicting Bun. A registry that does not answer, a missing publish time, or a
-resolution that fails for another reason leaves the fix `candidate` or
+`name@version`, and the resolution runs again. Bun's own stability check
+(which, when releases came in quick succession just outside the gate, can
+resolve an older one than the age alone would allow) moves a resolution
+without a message, so no step is added for it. It is covered because the
+verdict reads the lockfile Bun wrote rather than predicting Bun, and it can
+move a resolution only down to the floor a step's range names: `update` keeps
+the patched version as the floor, and Bun exempts an `override`'s exact
+version and a `cooldown-exclude` entry from the check. A registry that does
+not answer, a missing publish time, or a resolution that fails for another
+reason leaves the fix `candidate` or
 `unavailable` with the reason, never a guessed version.
 
 The text report prints the routes, the attribution and the steps under each
@@ -759,7 +764,7 @@ existing `deps:*` finding keys are unchanged; the new fields are optional.
 
 ## Open Questions
 
-Questions 1 to 6 were settled on 2026-11-05; each keeps its question with the answer.
+All seven questions were settled on 2026-11-05; each keeps its question with the answer.
 
 1. Should `@guren/*` stay excluded from the cooldown (§2), or should the release
    train publish and wait three days before the templates reference it?
@@ -804,7 +809,15 @@ Questions 1 to 6 were settled on 2026-11-05; each keeps its question with the an
    `engines.bun`, `packageManager`, an `oven/bun` image) is older than 1.3.0;
    a range is not judged.
 7. Does `bun install --lockfile-only` apply `minimumReleaseAge` and the
-   stability filter exactly as a full install does? On Bun 1.4.4 it applies the
-   gate to direct and transitive packages alike, names the blocked specifier on
-   stderr, and writes no `node_modules`; the stability filter has not been
-   measured on its own.
+   stability filter exactly as a full install does?
+   **Resolved: yes, on Bun 1.4.4.** It applies the gate to direct and transitive
+   packages alike, names the blocked specifier on stderr, and writes no
+   `node_modules`. The stability check was measured against a local registry
+   whose packuments carry chosen publish times, with a fresh cache per run and
+   a three-day gate: three releases a few hours apart just outside the gate,
+   one inside it, and an older release more than three days before them. A
+   range, a transitive range and the `latest` tag resolved to that older
+   release under both commands; an exact version, an exact exclusion, a name
+   exclusion and an update from an existing lockfile also resolved alike, as
+   did a window the check gave up on after seven days. Bun prints nothing when
+   the check moves a resolution (§5).

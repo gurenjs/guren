@@ -4,7 +4,9 @@
  * the steps applied, and `bun install --lockfile-only` resolves there under the
  * app's own release-age gate. A version the gate blocks becomes a
  * `cooldown-exclude` step and the resolution runs again. Measured on Bun 1.4.4:
- * `--lockfile-only` applies the gate to transitive packages and writes no `node_modules`.
+ * `--lockfile-only` applies the gate and its stability check as a full install does,
+ * transitive packages included, and writes no `node_modules`. The stability check
+ * moves a resolution silently, so only the resolved lockfile tells (RFC 0039 OQ 7).
  */
 import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
