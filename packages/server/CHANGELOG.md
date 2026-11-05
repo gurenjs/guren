@@ -1,5 +1,43 @@
 # @guren/server
 
+## 2.36.0
+
+### Minor Changes
+
+- 16ba145: The broadcast WebSocket now names the channel on every event frame: `{ event, channel, data }`, so one socket can tell the same event apart on two channels (RFC 0037). The server's own frames (`connected`, `subscription`) keep `{ event, data }`. `WebSocketClient.send` and `SSEClient.send` gain an optional third `channel` argument, which a custom socket route may ignore.
+
+  Each WebSocket client gets a `socketId`, sent in `connected` beside `clientId` and never accepted as an input. `broadcastEvent(event, { except: this.ctx })` skips the sender's own socket: the one whose `socketId` the request names in `X-Socket-Id` and that the request's signed-in user opened. A guest, or a socket id another user's socket holds, skips nothing. `{ except: { socketId, user } }` names the two by hand. The mark travels inside the payload under `__inertia.socketId` and `__inertia.userId`, so any driver carries it. Those two fields are now reserved: `broadcast()`, `broadcastEvent()` and a channel's `broadcast()` remove them from the payload they are given, and delivery removes them before any client, WebSocket or SSE, receives the event. User ids compare strictly, so `7` and `'7'` are different users.
+
+- 67ac118: The Dev Center gains an MCP Apps preview at `/_guren/mcp-apps` (RFC 0038 §8). Paste a token from `guren token:issue`, and the page lists the tools whose `.agent({ ui })` view the token can see, calls one through the app's own App MCP endpoint, and renders its view the way a web host does: through a sandbox proxy on another origin, under the view's declared CSP, with every message between the host and the view listed beside it. The token stays in the page's memory and goes only to the endpoint on the page's origin.
+
+  The proxy is served at `/_guren/mcp-apps/sandbox` on `127.0.0.1` for a Dev Center opened on `localhost` at the same port, and refuses every other host, so the two can never share an origin; on any other host the page says to open it on `localhost`. A link the view asks to open and a message it drafts for the conversation are listed, never opened or sent. `@guren/server` mounts both paths behind the Dev MCP endpoint's guard; an older `@guren/cli` answers them 404. That second origin is the app's own, so the proxy isolates a view from the Dev Center page and its token, not from the app, and drops this machine's hosts (`localhost`, `127.x`, `0.0.0.0`) from the view's declared CSP: a view that only works by calling the dev server would fail in a real host.
+
+- 557982b: Add `live()`, the server half of Inertia's live props (RFC 0037). `live(value, { on: new OrderUpdated(order.id) })` wraps any other prop input (`live(defer(…))`, `live(always(…))`) and the page object gains `liveProps`, the channel and event listeners Inertia 3.11 subscribes to: every live prop on a full visit, deferred ones included, and the props a partial reload resolves. A page with no live prop sends the payload it sent before. `live()` must be the outermost helper: `always(live(…))` and a deferred or lazy value that resolves to a live prop throw, and `this.inertia()` refuses them as prop inputs.
+
+  `BroadcastManager.broadcastEvent(event)` sends a `BroadcastableEvent` on every channel `broadcastOn()` names, as `broadcastAs()`, else its `eventName`. `broadcastNameOf()` and `broadcastChannelsOf()` are that reading, which `live()` uses too, so a live prop listens for the name the event is sent under.
+
+  `ResolvedInertiaProp` now resolves through `always()`, so `always(defer(() => 1))` and `always(() => 1)` are typed as `number`, and `InertiaPropInput` accepts them.
+
+  `@guren/testing`'s controller module mock now exports `always`, `defer` and `live`, so a controller using them loads under the mock. `guren check`'s deferred-props warning sees a `defer()` inside `live()`.
+
+  The client transport is not part of this release.
+
+- 5949b76: MCP Apps, the server half (RFC 0038 Phase 1). A route can name the Inertia page an MCP Apps host should render its tool result with: `.agent({ ui: pages.posts.Show })`, or `.agent({ ui: { visibility: ['app'] } })` for a write only a view calls. `deriveAgentTools()` carries it as `DerivedAgentTool.ui`, and leaves out a tool whose `ui` is malformed rather than dropping `ui`, which would show an app-only tool to the model. `.guren/agents.gen.ts` renders `ui` and, when some tool names a page, `agentUiPages`.
+
+  `@guren/plugin-mcp` takes the built pages as a module (`mcpPlugin({ ui: { pages: () => import('@/.guren/mcp-app/index.gen') } })`, the build itself lands in Phase 2) and, when a tool declares `ui`, advertises `resources` and the `io.modelcontextprotocol/ui` extension, writes `_meta.ui` on the tool in `tools/list`, and serves `ui://<server>/pages/<page>?v=<hash>` and a per-caller bridge catalogue through `resources/list` and `resources/read`, filtered like `tools/list`. A page with no build loses its URI and keeps its visibility. Every route tool's result now carries `_meta["dev.guren/response"]` (`executed`, `denied` with the approval request, or `failed`), and a `ui` tool's Inertia result `_meta["dev.guren/inertia-page"]`.
+
+  An App MCP tool call now carries only the shared Inertia props named in `mcpPlugin({ ui: { sharedProps: [...] } })`, default none, in its text as in a view: `auth.user`, flash messages and the translation catalogue no longer reach the model unless the app lists them. An app that relied on one in a tool's text lists it there. The allowlist travels as `AgentInvocationOptions.sharedProps` on the exact request the agent pipeline dispatches, so browser requests, `TestApp.agent()` and `guren tool:call` are unchanged, and with the default empty list no `share()` resolver runs for the call.
+
+  `guren check` adds `agent-route-ui-page` and `agent-route-ui-shape` (fail), `agent-route-ui-output` (fail, `ui.page` with an `output` schema), and `agent-route-ui-renders`, `agent-route-ui-deferred`, `agent-route-ui-visibility` and `agent-route-ui-pages-module` (warn).
+
+- 3796cd7: `vite build --mode mcp-app` builds the MCP App views (RFC 0038 §4). It reads the pages `.agent({ ui })` routes name from `.guren/agents.gen.ts`, so `guren codegen` runs first, and builds each page as its own build of the app's Vite config, with one entry, no code splitting, and the stylesheet and assets inlined, since a host's default CSP lets a view load nothing from the application. Each page lands in `.guren/mcp-app/pages/<id>.html`, and `.guren/mcp-app/index.gen.ts` exports `mcpAppPages` with each document and its content hash, the module `mcpPlugin({ ui: { pages: () => import('@/.guren/mcp-app/index.gen') } })` takes. The first build writes `resources/js/mcp-app.tsx`, the app-owned `setup` every view mounts with (importing `resources/css/app.css` when it exists); the plugin option `mcpApp.entry` names another file. The build fails with the install command when `@modelcontextprotocol/ext-apps` is missing.
+- ed4df27: `listen()` starts its managed Vite dev server on `GUREN_VITE_PORT` when the variable is set, so two apps on one machine no longer both start on 5173. Unset or blank, the port stays with the project's Vite config (5173 by default). A busy port still makes Vite move to the next free one unless `vite.config.ts` sets `server.strictPort`, and the banner's Asset server line, `VITE_DEV_SERVER_URL` and the dev entry name the port Vite bound. A value that is not a port from 0 to 65535 fails `listen()` with an error naming the variable instead of falling back to 5173. An explicit `listen({ vite: { port } })` still wins. `startViteDevServer()` now reports the bound port, not the requested one, when Vite gives it no local URL.
+
+### Patch Changes
+
+- c28d3d1: `requireAuthenticated()` and `requireGuest()` without `redirectTo` answer a browser navigation with a 401 or 403 error page instead of raw JSON, the way a CSRF refusal does. JSON, XHR, Inertia and agent tool callers keep the JSON body.
+- 6c77345: The docs viewer picks up `mermaid` as soon as it is installed: after `bun add -d mermaid`, reloading the page renders the diagrams without restarting the dev server. The asset is read from `node_modules/mermaid/dist/mermaid.min.js` in the app root or its nearest ancestor, since Bun's module resolver remembers a failed lookup for the life of the process.
+
 ## 2.35.0
 
 ### Minor Changes

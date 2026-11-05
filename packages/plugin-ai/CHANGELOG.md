@@ -1,5 +1,21 @@
 # @guren/plugin-ai
 
+## 0.6.0
+
+### Minor Changes
+
+- 6bf5553: A chat page can now restore its messages after a reload. `ai.agent(Agent).as(user).history(id)` reads a stored conversation under the same owner and `agentName` checks as `continue()` and returns it as `useChat` messages, or `null` for an unknown id, another user's conversation and another agent's alike. Pass the result and the id in the page props and give them to `useChat({ id, messages })`; the next turn still sends only `{ conversation, message }`. `toUIMessages()` is the conversion on its own: one assistant message per turn with a `step-start` per model call, and each tool call as a `tool-<name>` part in its final state. `UIMessage` is re-exported from `@guren/plugin-ai` and `@guren/plugin-ai/client`.
+
+  `BoundAgent` gains the `history()` member, so a hand-written `BoundAgent` must add it. `fakeAi()` in `@guren/testing` forwards it; an older `@guren/testing` paired with this release leaves `history()` off the agents it records.
+
+  The harness's `ai-agent` skill says how a chat page restores its history.
+
+### Patch Changes
+
+- 9a5b092: `createChatTransport()` adopts the conversation id from the `X-Guren-Conversation` header, and calls `onConversation`, only once the turn's body has been read to its end after a `finish` chunk with no `error` or `abort`. A first turn stopped or failed before the model answered stores no conversation, and the transport used to keep its id anyway, so every later turn failed with "cannot continue conversation". Now the next turn starts a new conversation.
+- Updated dependencies [5949b76]
+  - @guren/core@1.26.1
+
 ## 0.5.1
 
 ### Patch Changes

@@ -1,5 +1,50 @@
 # @guren/core
 
+## 1.26.1
+
+### Patch Changes
+
+- 5949b76: MCP Apps, the server half (RFC 0038 Phase 1). A route can name the Inertia page an MCP Apps host should render its tool result with: `.agent({ ui: pages.posts.Show })`, or `.agent({ ui: { visibility: ['app'] } })` for a write only a view calls. `deriveAgentTools()` carries it as `DerivedAgentTool.ui`, and leaves out a tool whose `ui` is malformed rather than dropping `ui`, which would show an app-only tool to the model. `.guren/agents.gen.ts` renders `ui` and, when some tool names a page, `agentUiPages`.
+
+  `@guren/plugin-mcp` takes the built pages as a module (`mcpPlugin({ ui: { pages: () => import('@/.guren/mcp-app/index.gen') } })`, the build itself lands in Phase 2) and, when a tool declares `ui`, advertises `resources` and the `io.modelcontextprotocol/ui` extension, writes `_meta.ui` on the tool in `tools/list`, and serves `ui://<server>/pages/<page>?v=<hash>` and a per-caller bridge catalogue through `resources/list` and `resources/read`, filtered like `tools/list`. A page with no build loses its URI and keeps its visibility. Every route tool's result now carries `_meta["dev.guren/response"]` (`executed`, `denied` with the approval request, or `failed`), and a `ui` tool's Inertia result `_meta["dev.guren/inertia-page"]`.
+
+  An App MCP tool call now carries only the shared Inertia props named in `mcpPlugin({ ui: { sharedProps: [...] } })`, default none, in its text as in a view: `auth.user`, flash messages and the translation catalogue no longer reach the model unless the app lists them. An app that relied on one in a tool's text lists it there. The allowlist travels as `AgentInvocationOptions.sharedProps` on the exact request the agent pipeline dispatches, so browser requests, `TestApp.agent()` and `guren tool:call` are unchanged, and with the default empty list no `share()` resolver runs for the call.
+
+  `guren check` adds `agent-route-ui-page` and `agent-route-ui-shape` (fail), `agent-route-ui-output` (fail, `ui.page` with an `output` schema), and `agent-route-ui-renders`, `agent-route-ui-deferred`, `agent-route-ui-visibility` and `agent-route-ui-pages-module` (warn).
+
+- Updated dependencies [6bf5553]
+- Updated dependencies [ddfb8dd]
+- Updated dependencies [d61a95a]
+- Updated dependencies [c28d3d1]
+- Updated dependencies [16ba145]
+- Updated dependencies [e672ae3]
+- Updated dependencies [9c5a023]
+- Updated dependencies [e8ce28b]
+- Updated dependencies [a2d869f]
+- Updated dependencies [fa4a97a]
+- Updated dependencies [5f18136]
+- Updated dependencies [dffadef]
+- Updated dependencies [f3485dd]
+- Updated dependencies [79c8401]
+- Updated dependencies [67ac118]
+- Updated dependencies [4687357]
+- Updated dependencies [6c77345]
+- Updated dependencies [b67954f]
+- Updated dependencies [7564659]
+- Updated dependencies [557982b]
+- Updated dependencies [862fe16]
+- Updated dependencies [5949b76]
+- Updated dependencies [bd53693]
+- Updated dependencies [eeb1ce9]
+- Updated dependencies [ff9614c]
+- Updated dependencies [ff9614c]
+- Updated dependencies [7d2b560]
+- Updated dependencies [3796cd7]
+- Updated dependencies [ed4df27]
+- Updated dependencies [ed4df27]
+  - @guren/cli@2.36.0
+  - @guren/server@2.36.0
+
 ## 1.26.0
 
 ### Minor Changes
