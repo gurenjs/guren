@@ -337,10 +337,28 @@ collected.
   flag, `viaFramework`, so `postgres` behind `@guren/orm` reads `framework`
   even though the app declares it, and `hono` imported by one controller keeps
   the note that every route reaches it.
-- A served file that no graph node and no entry reaches (`src/app.ts`, `config/*`,
-  providers, middleware files, whose graph nodes carry no file) makes the
+- The server entry (`src/main.*`, `bin/serve.*`) is an entry too. What it reaches
+  before a graph node's file (`src/app.ts`, the routes files, `config/*`,
+  providers, middleware files, whose graph nodes carry no file) runs at boot and
+  is attributed to every route, an upper bound; without it no scaffolded app read
+  complete. A served file that no graph node and no entry reaches still makes the
   packages it imports `unknown`, with an `unowned-file` reason in the graph's
   coverage, never `none-found`. A test node reaching the file does not own it.
+- A `usesMiddleware` section partial only through `inline-middleware`
+  (`requireGuest({ … })` built in a routes file) does not make the graph partial
+  once a server entry exists: the function comes from a package or from a file the
+  routes file reaches, which the server entry attributes to every route. A
+  middleware exported from a graph node's file (a controller, a model) is the
+  case this misses: it is attributed to that node's routes only. The unresolved
+  entries are still listed in the trust boundary.
+- `src/console.*`, `app/Console/`, `db/seeders/` and `resources/js/dev-entry.*`
+  run from the CLI or only under the Vite dev server, as `scripts/` does, so they
+  are placed `build`. `resources/js/mcp-app.*`, the setup every MCP App view
+  bundles (RFC 0038), is a page entry, counted on every page route. Vite's output
+  under `public/assets/` is not scanned. With these, the default `create-guren-app`
+  scaffold reads complete; on `examples/blog`, 500 instances split into 19
+  `routes`, 275 `framework`, 206 `none-found` and none `unknown`, the graph
+  still partial on one module validator and two files no entry reaches.
 - The `package.json` files under the scanned directories are fingerprinted with
   the sources, since a directory's `main` picks the file an import of it lands on.
 - A bare name no installed package answers (a tsconfig alias other than `@/`, a
