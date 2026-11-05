@@ -25,6 +25,45 @@ describe('buildChannelModuleContent', () => {
 })
 
 describe('generateChannelTypes', () => {
+  it('writes one pattern when an authorizer and an event name the parameter differently', async () => {
+    const workspace = await createTempWorkspace('guren-cli-channel-types-shape-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Events'), { recursive: true })
+      await mkdir(join(workspace.dir, 'app/Providers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Providers/BroadcastProvider.ts'),
+        `export function setup(broadcast: any) {
+  broadcast.channel('counters.{id}', () => true)
+  broadcast.broadcastEvent(new CounterBumped(1))
+}
+`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Events/CounterBumped.ts'),
+        `export class CounterBumped {
+  static eventName = 'counter.bumped'
+  constructor(readonly counterId: number) {}
+  broadcastOn() {
+    return [\`counters.\${this.counterId}\`]
+  }
+}
+`,
+        'utf8',
+      )
+
+      const { outputPath, channels } = await generateChannelTypes({ appRoot: workspace.dir, force: true })
+
+      expect(channels).toEqual(['counters.{id}'])
+      const content = await readFile(outputPath, 'utf8')
+      expect(content).not.toContain('counters.{counterId}')
+      expect(content).toContain("'counters.{id}': ['counter.bumped']")
+      expect(content.match(/`counters\.\$\{string\}`/gu)).toHaveLength(2)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('reads broadcastEvent(new X(…)) through the event class, declared in another file (RFC 0037)', async () => {
     const workspace = await createTempWorkspace('guren-cli-channel-types-')
     try {
