@@ -274,6 +274,8 @@ export const logRequest = defineMiddleware(async (ctx, next) => {
 ### Authentication
 Guide: https://guren.dev/docs/guides/authentication
 
+Adding sign-in, guarding routes and testing both sides, step by step: the `auth` skill.
+
 ```typescript
 import { Router, requireAuthenticated } from '@guren/core'
 
@@ -468,6 +470,8 @@ Guide: https://guren.dev/docs/guides/notifications
 
 ### Storage
 Guide: https://guren.dev/docs/guides/storage
+
+Files users upload against a model go through attachments, not a disk by hand: the `attachments` skill.
 
 `StorageManager` / `createStorageManager`; drivers `LocalStorageDriver`,
 `MemoryStorageDriver`, `S3Driver`. On Cloudflare Workers, `R2Driver` from
