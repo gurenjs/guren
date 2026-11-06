@@ -19,7 +19,7 @@
     },
     "examples/agents": {
       "name": "@guren/example-agents",
-      "version": "0.1.30",
+      "version": "0.1.31",
       "dependencies": {
         "@ai-sdk/anthropic": "^4.0.78",
         "@ai-sdk/typesafe-ai": "^3.0.3",
@@ -53,7 +53,7 @@
     },
     "examples/api": {
       "name": "@guren/example-api",
-      "version": "0.1.62",
+      "version": "0.1.63",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
@@ -108,7 +108,7 @@
     },
     "packages/cli": {
       "name": "@guren/cli",
-      "version": "2.36.0",
+      "version": "2.36.1",
       "bin": {
         "guren": "./dist/bin.js",
       },
@@ -173,7 +173,7 @@
     },
     "packages/create-app": {
       "name": "create-guren-app",
-      "version": "1.21.0",
+      "version": "1.21.1",
       "bin": {
         "create-guren-app": "./dist/cli.js",
       },
@@ -470,7 +470,7 @@
     },
     "web": {
       "name": "web",
-      "version": "0.1.62",
+      "version": "0.1.63",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
