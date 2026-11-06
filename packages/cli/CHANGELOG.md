@@ -1,5 +1,16 @@
 # @guren/cli
 
+## 2.36.1
+
+### Patch Changes
+
+- 70329c3: `.guren/channels.gen.ts` writes one pattern for a channel that an authorizer and an event's `broadcastOn()` name with different parameters, such as `counters.{id}` and `counters.{counterId}`; the authorizer's spelling is kept.
+- 741623e: `guren check` no longer counts a commented-out call as wiring. A routes registrar whose only call in `routes/web.ts` is `// registerAdminRoutes(router)` (or sits in a string) is reported as unmounted, and a console command whose only mention in `registerMany([...])` is a comment as unregistered.
+- 90d9da9: `guren deps:exposure` reads an app from the default `create-guren-app` scaffold as complete. The files the server entry (`src/main.ts`, `bin/serve.ts`) loads at boot, such as `src/app.ts`, the routes files, `config/` and middleware files, are attributed to every route instead of making their packages `unknown`. Middleware built inline in a routes file no longer leaves the graph partial once a server entry exists. Seeders, console commands and `resources/js/dev-entry.ts` are placed `build`, `resources/js/mcp-app.tsx` counts as a page entry, and Vite's output under `public/assets/` is no longer scanned. The same attribution reaches the routes `guren audit` lists under each advisory.
+- d90c66d: The agent harness gains three skills. `deploy` covers `guren deploy`'s Docker, Fly.io and Railway recipes, the Vercel, Lambda and Cloudflare plugins, the production checklist (`NODE_ENV`, `APP_KEY`, `APP_URL`, migrations, shared session and cache stores, explicit providers, the hasher) and `guren doctor`'s deploy verdicts. `auth` takes an app from `guren add auth` or `make:auth --oauth` through guarded routes to a registered policy, `authorize()` with `[Model, record]`, `denyAsNotFound()` and tests for the owner and the denied user. `attachments` covers `guren add attachments`, `Attachable(...)` collections, `make:feature --attach`, delivery and the production disk, and the `attachments-*` check keys. Run `bunx guren agent:sync` to pick them up.
+- 23f5f71: The agent harness covers the features of 2.36. Two skills join it: `dependencies` (adding, upgrading or removing a package and fixing an advisory with `guren deps:why`, `guren deps:exposure`, `guren audit`'s verified fixes, the `minimumReleaseAge` gate and `--deps-baseline`) and `live-updates` (a page that refreshes itself with `live()` props, from the socket route and `liveTransport()` to the `live-props:*` warnings). `agent-interface` explains `.agent({ ui })`, the `vite build --mode mcp-app` build, `mcpPlugin({ ui })` and the Dev Center preview at `/_guren/mcp-apps`; `ai-agent` says a `--chat` page needs `bun add @ai-sdk/react@^4`. The controllers rule names the `exposure-sensitive-column` finding and the default `guren.arch.ts` warning for `drizzle-orm` in a controller, and the UI rule the imports a page may not make. Run `bunx guren agent:sync` to pick them up.
+- 53bf539: `guren check` reports an unpinned event once per action. Two `live()` props of one action listening for the same event used to give two `live-props:event-name` warnings with the same key.
+
 ## 2.36.0
 
 ### Minor Changes
