@@ -63,7 +63,7 @@ The file is a two-stage build. The builder stage installs every dependency and r
 
 Both stages use the Bun release running the command, pinned to the image digest Docker Hub reports for it, for example `oven/bun:1.4.4@sha256:…`. A rebuild therefore gets the same runtime even if the tag is pushed again. When Docker Hub cannot be reached, the command keeps the exact tag without a digest and says so; when it has no image for that release yet (a canary build, or a release published minutes ago), it writes the floating `oven/bun:1` tag instead. To move to a newer Bun, upgrade Bun and run the command again with `--force`.
 
-A Guren app has no `dist/` output and no `start` script, so a Dockerfile adapted from another Bun project will not start. Pass `--port` if the app listens on a port other than 3333. The command stops when a `Dockerfile` already exists; after upgrading Guren, run it again with `--force` to pick up changes to the recipe, then reapply any edits of your own.
+A Guren app has no `dist/` output and starts with `bun bin/serve.ts` under `NODE_ENV=production` (the `start` script runs the same command), so a Dockerfile adapted from another Bun project will not start. Pass `--port` if the app listens on a port other than 3333. The command stops when a `Dockerfile` already exists; after upgrading Guren, run it again with `--force` to pick up changes to the recipe, then reapply any edits of your own.
 
 Build and test locally:
 

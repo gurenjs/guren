@@ -70,7 +70,7 @@ sit under a name the harness itself ships — the claim is by name, so avoid the
 canonical skill names (`dev-workflow`, `db-manage`, `scaffold`, `feature`,
 `guren-api`, `plugin-authoring`, `agent-interface`, `ai-agent`,
 `github-projects`, `plan-write`, `plan-implement`, `verify-in-browser`,
-`dependencies`, `live-updates`) and the shipped rule filenames for your own.
+`dependencies`, `live-updates`, `deploy`, `auth`, `attachments`) and the shipped rule filenames for your own.
 
 ## The loop the harness expects
 

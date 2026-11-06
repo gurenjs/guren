@@ -114,3 +114,5 @@ On success, confirm:
 - No type errors found
 - Build completed successfully
 - All tests passing
+
+Writing the recipe, the production environment and the deploy verdicts: the `deploy` skill.
