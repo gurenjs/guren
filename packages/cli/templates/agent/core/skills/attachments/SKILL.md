@@ -90,14 +90,39 @@ async destroy() {
 - A soft delete keeps the attachments; purge on `forceDelete`.
 
 Variants are generated at attach time on Bun with `Bun.Image` and fall back to
-the original URL elsewhere; `attach(..., { queued: true })` moves them to
-`bunx guren queue:work` (the only way on Workers).
+the original URL elsewhere. `attach(..., { queued: true })` moves them to a job,
+which needs a queue the app shares across processes (`configureAttachments({ queue })`,
+or the app's booted queue; `attach()` throws without one) and a `bunx guren queue:work`
+worker running on Bun, since a worker with no image processor settles them `unavailable`.
+On Workers that means a Redis-backed queue and a separate Bun worker.
 
 ## Rendering URLs
 
 ```typescript
 const [withCover] = await Post.withAttachments([post], ['cover'])   // one query for a whole page of records
-return this.inertia(pages.posts.Show, { post: PostResource.make(withCover) })
+return this.inertia(pages.posts.Show, { post: new PostResource(withCover!).toJSON() })
+```
+
+The Resource `make:feature` writes serializes only the scalar columns, so add the
+collection to its input type, its payload and `toArray()`, or `cover` is dropped:
+
+```typescript
+import { Resource, type AttachmentData } from '@guren/core'
+
+type PostInput = PostRecord & { cover?: AttachmentData | null }   // records that skipped withAttachments() send null
+
+export interface PostResourceData extends Record<string, unknown> {
+  id: number
+  title: string
+  cover: AttachmentData | null
+}
+
+export class PostResource extends Resource<PostInput, PostResourceData> {
+  toArray(): PostResourceData {
+    const post = this.resource
+    return { id: post.id, title: post.title, cover: post.cover ?? null }
+  }
+}
 ```
 
 Each collection arrives as `AttachmentData` from `@guren/core` (`url`, `name`,
@@ -119,14 +144,16 @@ filesystem except an ephemeral `/tmp`, and Workers has none, so uploads there
 need S3, an S3-compatible service, or R2 (`r2Disk()` from
 `@guren/plugin-cloudflare` on Workers). To move attachments:
 
-1. Add an `s3` disk to `config/storage.ts` (`bucket`, `region`, `endpoint` for
+1. Install the SDK, an optional peer the S3 driver imports on first use:
+   `bun add @aws-sdk/client-s3 @aws-sdk/s3-request-presigner`.
+2. Add an `s3` disk to `config/storage.ts` (`bucket`, `region`, `endpoint` for
    S3-compatible services, `accessKeyId`, `secretAccessKey`). Declare every key
    it reads (`AWS_BUCKET`, `AWS_ACCESS_KEY_ID`, …) in `config/env.ts`, as
    `.optional()` unless every environment sets it.
-2. In `config/attachments.ts`, set `disk: 's3'` and add `s3: 'private'` to
+3. In `config/attachments.ts`, set `disk: 's3'` and add `s3: 'private'` to
    `disks`. `STORAGE_DISK` alone does not move attachments: they use their own
    `disk`.
-3. With several instances, pass `withCollectionLock` so concurrent `hasOne`
+4. With several instances, pass `withCollectionLock` so concurrent `hasOne`
    replacements serialize across processes.
 
 ## Check it

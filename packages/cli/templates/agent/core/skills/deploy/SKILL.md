@@ -76,6 +76,12 @@ bunx guren cloudflare:deploy --plan  # plan the one-run deploy (build, D1, migra
 bunx guren cloudflare:deploy --yes   # that deploy, no prompt (--ci in CI)
 ```
 
+On Workers, switch `config/database.ts` before the first build: `createD1Database({ binding: 'DB', … })`
+when `isWorkersRuntime()` (from `@guren/plugin-cloudflare/env`), the local SQLite factory
+otherwise, and write `db/schema.ts` in the SQLite dialect. The build stubs every other SQL
+client, so a config that never calls `createD1Database()` deploys and throws on its first query
+(`cloudflare:build` warns). The Cloudflare guide has the full file.
+
 Keep `.lambda/` and `.cloudflare/` out of git; rebuild before every deploy.
 Each build runs the deploy-runtime checks from step 4 and warns without failing.
 
