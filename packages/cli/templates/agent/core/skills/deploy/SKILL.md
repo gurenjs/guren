@@ -23,8 +23,8 @@ Bun project; the generated one copies exactly what `bun bin/serve.ts` reads.
 ## 2a. Container recipes (Docker, Fly.io, Railway)
 
 `docker` is the default target; `--target all --app my-app` writes all three.
-`--target cloudflare` writes `.github/workflows/deploy-cloudflare.yml`, which
-runs `cloudflare:deploy` (needs `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
+`--target cloudflare` writes a GitHub Actions workflow, `deploy-cloudflare.yml`
+under `.github/workflows/`, which runs `cloudflare:deploy` (needs `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
 repository secrets). `--target vercel` is rejected: use the plugin.
 
 - The Dockerfile is two stages: the builder installs every dependency and runs
