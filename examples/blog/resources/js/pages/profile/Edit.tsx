@@ -22,11 +22,12 @@ export default function EditProfile({ profile, status }: Props) {
     email: profile?.email ?? '',
     password: '',
     passwordConfirmation: '',
+    currentPassword: '',
   })
 
   useEffect(() => {
     if (status) {
-      form.reset('password', 'passwordConfirmation')
+      form.reset('password', 'passwordConfirmation', 'currentPassword')
     }
   }, [status])
 
@@ -152,13 +153,37 @@ export default function EditProfile({ profile, status }: Props) {
                   </p>
                 ) : null}
               </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <label htmlFor="currentPassword" className="block text-sm font-medium text-stone-700">
+                  Current Password <span className="text-xs font-normal text-stone-400">(required to change your email or password)</span>
+                </label>
+                <input
+                  id="currentPassword"
+                  type="password"
+                  value={form.data.currentPassword}
+                  onChange={(event) => form.setData('currentPassword', event.target.value)}
+                  className={`block w-full rounded-md border-0 py-2.5 px-3 text-stone-900 shadow-sm ring-1 ring-inset placeholder:text-stone-300 focus:ring-2 focus:ring-inset sm:text-sm sm:leading-6 ${form.errors.currentPassword
+                    ? 'ring-red-300 focus:ring-red-500'
+                    : 'ring-stone-200 focus:ring-stone-900'
+                    }`}
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                />
+                {form.errors.currentPassword ? (
+                  <p className="flex items-center gap-1 text-sm text-red-600">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    {form.errors.currentPassword}
+                  </p>
+                ) : null}
+              </div>
             </div>
 
             <div className="flex flex-col-reverse gap-3 border-t border-stone-100 pt-6 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 className="inline-flex items-center justify-center rounded-md bg-stone-100 px-5 py-2.5 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200"
-                onClick={() => form.reset('password', 'passwordConfirmation')}
+                onClick={() => form.reset('password', 'passwordConfirmation', 'currentPassword')}
               >
                 Reset Password Fields
               </button>

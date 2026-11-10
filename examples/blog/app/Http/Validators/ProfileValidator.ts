@@ -22,6 +22,7 @@ export const ProfileUpdateSchema = z
       .pipe(z.email('Please provide a valid email address.')),
     password: optionalPasswordField,
     passwordConfirmation: optionalPasswordField,
+    currentPassword: z.string().default(''),
   })
   .superRefine((data, ctx) => {
     const password = data.password ?? ''
