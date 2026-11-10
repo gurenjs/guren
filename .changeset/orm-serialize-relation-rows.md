@@ -1,0 +1,5 @@
+---
+"@guren/orm": patch
+---
+
+`Model.serialize()` and `serializeMany()` apply each eager-loaded relation's own model rules to its rows, at every depth, so a related model's `hidden` columns no longer reach the output: `Post.serializeMany(await Post.with('author'))` leaves out the author's `passwordHash` when `User` hides it. A morphTo row is filtered by the model `Model.morphMap` names for its type. When the related model sets `visible`, its rows keep the listed columns in their loaded order together with that model's own loaded relations, each filtered by its own model, except a relation its `hidden` names. A related model's `appends` are not computed for relation rows. A relation declared with a lazy reference (`() => Token`) is filtered once a load in the same process has resolved the reference; rows that arrived some other way while the reference was never resolved are left as they are, and under a holder whose model sets `visible` they are kept only when `visible` lists the relation. The serialized model's own `hidden`, `visible` and `appends` behave as before, and `serializeRecord()` is unchanged.

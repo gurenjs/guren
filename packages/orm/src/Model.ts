@@ -18,7 +18,7 @@ import { modelLifecycle } from './model-lifecycle'
 import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { everyFilterDropped } from './where-conditions'
-import { LIFECYCLE_DELETE, PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
+import { LIFECYCLE_DELETE, PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, RELATION_DEFINITIONS, SEAL_SCOPES } from './internal-keys'
 import { QueryBuilder } from './QueryBuilder'
 import type {
   EagerLoadConstraint,
@@ -26,7 +26,8 @@ import type {
   WhereGroupCallback,
   WhereOperator,
 } from './QueryBuilder'
-import { serializeRecord, serializeRecords } from './serialization'
+import { serializeLoadedRelations, serializeRecord } from './serialization'
+import type { RelationRowWalk } from './serialization'
 import { MassAssignmentException } from './MassAssignmentException'
 
 export type PlainObject = Record<string, unknown>
@@ -383,23 +384,34 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     )
   }
 
-  /** Applies hidden/visible filtering, accessors and appends. */
+  /**
+   * Applies hidden/visible filtering, accessors and appends, then each loaded
+   * relation's own model's hidden/visible to its rows, nested ones included.
+   */
   static serialize<T extends typeof Model>(this: T, record: TRecordFor<T>): PlainObject {
-    return serializeRecord(record, {
+    const serialized = serializeRecord(record, {
       hidden: this.hidden,
       visible: this.visible,
       appends: this.appends,
       accessors: this.accessors,
     })
+    return serializeLoadedRelations(this, record, serialized, { morphMap: Model.morphMap })
   }
 
   static serializeMany<T extends typeof Model>(this: T, records: TRecordFor<T>[]): PlainObject[] {
-    return serializeRecords(records, {
+    const options = {
       hidden: this.hidden,
       visible: this.visible,
       appends: this.appends,
       accessors: this.accessors,
-    })
+    }
+    const walk: RelationRowWalk = { morphMap: Model.morphMap }
+    return records.map((record) => serializeLoadedRelations(this, record, serializeRecord(record, options), walk))
+  }
+
+  /** @internal The serializer's view of the relations, symbol-keyed like `[READ_TRANSFORMS]`. */
+  static [RELATION_DEFINITIONS](): ReadonlyMap<string, RelationDefinition> {
+    return this.getRelationDefinitions()
   }
 
   static applyCasts<T extends PlainObject>(record: T): T {

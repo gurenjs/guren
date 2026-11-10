@@ -162,14 +162,29 @@ export async function countByChunks(
   return new Map(await loadByChunks(values, size, async (chunk) => Array.from(await count(chunk))))
 }
 
-export async function resolveModelReference(
-  reference: typeof Model | (() => typeof Model | Promise<typeof Model>),
-): Promise<typeof Model> {
+type ModelReference = typeof Model | (() => typeof Model | Promise<typeof Model>)
+
+// What each lazy reference resolved to on its latest load: the serializer runs
+// synchronously and must never call one itself.
+const resolvedReferences = new WeakMap<() => unknown, typeof Model>()
+
+function isModelClass(reference: ModelReference): reference is typeof Model {
   // Every Model class inherits a static `newQuery`; a thunk has none. Checked by
   // shape so this module needs no value import of Model, which imports it.
-  if (typeof (reference as { newQuery?: unknown }).newQuery === 'function') {
-    return reference as typeof Model
+  return typeof (reference as { newQuery?: unknown }).newQuery === 'function'
+}
+
+export async function resolveModelReference(reference: ModelReference): Promise<typeof Model> {
+  if (isModelClass(reference)) {
+    return reference
   }
 
-  return await (reference as () => typeof Model | Promise<typeof Model>)()
+  const model = await reference()
+  resolvedReferences.set(reference, model)
+  return model
+}
+
+/** The model a reference names, or `undefined` for a thunk no load has resolved. */
+export function knownModelReference(reference: ModelReference): typeof Model | undefined {
+  return isModelClass(reference) ? reference : resolvedReferences.get(reference)
 }
