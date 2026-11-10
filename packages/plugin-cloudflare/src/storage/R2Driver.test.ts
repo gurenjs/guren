@@ -158,6 +158,29 @@ describe('R2Driver against the binding', () => {
       expect(url.searchParams.get('X-Amz-Credential')).toMatch(/^AKIDEXAMPLE\/\d{8}\/auto\/s3\/aws4_request$/)
       expect(url.searchParams.get('X-Amz-Signature')).toMatch(/^[0-9a-f]{64}$/)
     })
+
+    test('refuses a path whose dot segments resolve outside the prefix or the bucket', async () => {
+      const prefixed = new R2Driver({ binding: () => bucket, prefix: 'uploads', presign })
+      const unprefixed = new R2Driver({ binding: () => bucket, presign })
+      const soon = new Date(Date.now() + 3600 * 1000)
+
+      await expect(prefixed.temporaryUrl('..', soon)).rejects.toThrow(/escapes the storage root/)
+      await expect(prefixed.temporaryUrl('../other/x', soon)).rejects.toThrow(/escapes the storage root/)
+      await expect(prefixed.temporaryUrl('../uploads2/x', soon)).rejects.toThrow(/escapes the storage root/)
+      await expect(prefixed.temporaryUrl('invoices/../../tenant-b/x', soon)).rejects.toThrow(/escapes the storage root/)
+      await expect(unprefixed.temporaryUrl('../other-bucket/secret', soon)).rejects.toThrow(/escapes the storage root/)
+    })
+
+    test('signs a dot segment that resolves inside the disk, as LocalDriver resolves one', async () => {
+      const prefixed = new R2Driver({ binding: () => bucket, prefix: 'uploads', presign })
+      const soon = new Date(Date.now() + 3600 * 1000)
+      const pathname = async (path: string) => new URL(await prefixed.temporaryUrl(path, soon)).pathname
+
+      expect(await pathname('a/../b')).toBe('/my-bucket/uploads/b')
+      expect(await pathname('../uploads/x')).toBe('/my-bucket/uploads/x')
+      expect(await pathname('a..b/c')).toBe('/my-bucket/uploads/a..b/c')
+      expect(await pathname('.../x')).toBe('/my-bucket/uploads/.../x')
+    })
   })
 })
 
