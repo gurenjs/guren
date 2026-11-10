@@ -26,6 +26,8 @@ export const QUERY_FIELD = 'authorize_query'
 export interface McpOAuthConsentPageProps {
   /** The client's own registered name, or its id when it registered none. */
   clientName: string
+  /** Where approving sends the authorization code: this request's redirect URI, reduced to scheme and host. */
+  redirectTarget: string
   /** The authorize request's query string, handed back on submit. */
   query: string
   /** The tools this request may grant — already intersected with what it asked for. */
@@ -44,6 +46,8 @@ const STYLES = `
   .desc { display: block; margin: .25rem 0 0 1.75rem; opacity: .8; }
   .badge { border: 1px solid currentColor; border-radius: .5rem; font-size: .75rem; margin-left: .5rem; padding: 0 .4rem; }
   .empty { opacity: .8; }
+  .target { border: 1px solid rgba(128,128,128,.35); border-radius: .5rem; margin: 1rem 0; padding: .75rem; }
+  .host { display: block; font-family: ui-monospace, monospace; font-weight: 600; overflow-wrap: anywhere; }
   code { font-family: ui-monospace, monospace; font-size: .9em; }
   button { font: inherit; padding: .5rem 1rem; }
 `
@@ -94,8 +98,15 @@ const NothingToGrant: FC = () => (
   </>
 )
 
+/**
+ * Registration at `/oauth/register` is open, so the name is whatever the caller
+ * chose and the redirect target is the only part of this page it cannot fake. The
+ * target stays text, never an `href`. An app that creates its own clients with
+ * `createClient()` and closes registration removes the label and its sentence by hand.
+ */
 export const McpOAuthConsentPage: FC<McpOAuthConsentPageProps> = ({
   clientName,
+  redirectTarget,
   query,
   tools,
   csrfToken,
@@ -109,8 +120,17 @@ export const McpOAuthConsentPage: FC<McpOAuthConsentPageProps> = ({
     </head>
     <body>
       <h1>
-        <strong>{clientName}</strong> is asking to use this application's tools
+        A client calling itself <strong>{clientName}</strong>{' '}
+        <span class="badge">unverified</span> is asking to use this application's tools
       </h1>
+      <p>
+        This application has not verified that name, and anyone can register a client under any
+        name. Go by where the access goes, not by what the client calls itself.
+      </p>
+      <p class="target">
+        Approving hands access to whoever controls{' '}
+        <span class="host">{redirectTarget}</span>
+      </p>
       <p>
         Approving lets it act as you, through the tools you select. Uncheck anything you would
         rather it could not do.
