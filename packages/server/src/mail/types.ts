@@ -1,3 +1,5 @@
+import type { ConnectionOptions } from 'node:tls'
+
 /** Email address with optional display name. */
 export interface MailAddress {
   email: string
@@ -98,6 +100,16 @@ export interface SmtpTransportOptions {
 
   /** Use TLS. @default false */
   secure?: boolean
+
+  /**
+   * Fail the send when the server does not upgrade with STARTTLS, rather than continue in cleartext.
+   * Without it, an on-path attacker can strip STARTTLS from the EHLO reply and read `auth`.
+   * @default false
+   */
+  requireTLS?: boolean
+
+  /** Node TLS options for the connection, such as `ca` for a relay on a private CA. */
+  tls?: ConnectionOptions
 
   /** Authentication credentials. */
   auth?: {

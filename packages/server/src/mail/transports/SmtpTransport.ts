@@ -4,7 +4,12 @@ import type { MailTransport, MailMessage, SendResult, SmtpTransportOptions } fro
 /** Format an email address for nodemailer. */
 function formatAddress(addr: { email: string; name?: string }): string {
   if (addr.name) {
-    return `"${addr.name}" <${addr.email}>`
+    // nodemailer re-reads the joined header with addressparser, where an unescaped `"` or `\` ends
+    // the quoted name and the rest reads as more recipients (CWE-140). A name that is already one
+    // complete quoted-string, as parseMailAddress('"Jane" <j@x.test>') leaves it, is not quoted twice.
+    const name = String(addr.name)
+    const quoted = /^"(?:[^"\\]|\\[\s\S])*"$/.test(name) ? name : `"${name.replace(/[\\"]/g, '\\$&')}"`
+    return `${quoted} <${addr.email}>`
   }
   return addr.email
 }
@@ -21,6 +26,8 @@ export class SmtpTransport implements MailTransport {
       host: options.host,
       port: options.port ?? 587,
       secure: options.secure ?? false,
+      requireTLS: options.requireTLS ?? false,
+      tls: options.tls,
       auth: options.auth,
       pool: options.pool ?? true,
       maxConnections: options.maxConnections ?? 5,
