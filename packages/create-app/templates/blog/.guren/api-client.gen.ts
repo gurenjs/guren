@@ -78,7 +78,7 @@ export interface ApiRoutes {
   'profile.update': {
     method: 'PUT'
     path: '/profile'
-    body: { name: string; email: string; password?: string }
+    body: { name: string; email: string; password?: string; currentPassword?: string }
   }
   'register': {
     method: 'GET'

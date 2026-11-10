@@ -151,7 +151,7 @@ declare module '@guren/core' {
       'posts.search': { body: { keywords: string[]; limit: number } }
       'posts.store': { body: { title: string; excerpt: string; body: string } }
       'posts.update': { body: { title: string; excerpt: string; body: string } }
-      'profile.update': { body: { name: string; email: string; password: string } }
+      'profile.update': { body: { name: string; email: string; password: string; currentPassword: string } }
       'register.store': { body: { name: string; email: string; password: string; passwordConfirmation: string } }
     }
   }

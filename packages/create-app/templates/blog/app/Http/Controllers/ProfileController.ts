@@ -23,8 +23,15 @@ export default class ProfileController extends Controller {
       return this.redirect('/login')
     }
 
-    const { name, email, password } = this.validated('profile.update').body
+    const { name, email, password, currentPassword } = this.validated('profile.update').body
     const emailChanged = email !== user.email
+
+    // Normalized as the schema normalizes `email`: a stored address differing
+    // only in case or whitespace is the same mailbox, so not a credential change.
+    const credentialsChanged = email !== user.email.trim().toLowerCase() || password !== ''
+    if (credentialsChanged) {
+      await this.currentPasswordCheck(user.email, currentPassword)
+    }
 
     if (emailChanged) {
       const existing = await User.where({ email })
@@ -49,5 +56,17 @@ export default class ProfileController extends Controller {
       profile: { name, email },
       status: 'Profile updated successfully.',
     }, { title: 'Profile' })
+  }
+
+  // A session alone must not rotate the credentials that recover the account.
+  // An account with no password hash (created through OAuth) fails here too.
+  private async currentPasswordCheck(email: string, currentPassword: string): Promise<void> {
+    if (currentPassword === '') {
+      throw ValidationException.withMessages({ currentPassword: 'Enter your current password to make this change.' })
+    }
+    const confirmed = await this.auth.guard().validate({ email, password: currentPassword })
+    if (!confirmed) {
+      throw ValidationException.withMessages({ currentPassword: 'The current password is incorrect.' })
+    }
   }
 }

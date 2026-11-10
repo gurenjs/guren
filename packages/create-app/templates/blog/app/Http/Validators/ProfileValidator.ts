@@ -12,12 +12,14 @@ export const ProfileUpdateSchema = z.object({
     .min(1, 'Email is required.')
     .toLowerCase()
     .pipe(z.email('Enter a valid email address.')),
-  // A default rather than a transform, so codegen types the parsed value as a string.
+  // Defaults rather than transforms, so codegen types the parsed values as strings.
   password: z
     .string()
     .trim()
     .default('')
     .refine((value) => value === '' || value.length >= 8, 'Password must be at least 8 characters.'),
+  // Untrimmed, as LoginSchema reads it: it is checked against the stored hash.
+  currentPassword: z.string().default(''),
 })
 
 export type ProfileUpdateInput = z.infer<typeof ProfileUpdateSchema>

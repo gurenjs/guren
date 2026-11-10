@@ -9,12 +9,12 @@ import type { ValidationErrors } from '@guren/core'
 
 interface Props {
   profile: { name: string; email: string }
-  errors?: ValidationErrors<'name' | 'email' | 'password'>
+  errors?: ValidationErrors<'name' | 'email' | 'password' | 'currentPassword'>
   status?: string
 }
 
 export default function ProfileEdit({ profile, status }: Props) {
-  const form = useRouteForm(profileUpdateForm, { name: profile.name, email: profile.email, password: '' })
+  const form = useRouteForm(profileUpdateForm, { name: profile.name, email: profile.email, password: '', currentPassword: '' })
 
   return (
     <Layout>
@@ -36,6 +36,7 @@ export default function ProfileEdit({ profile, status }: Props) {
           <Field form={form} name="name" />
           <Field form={form} name="email" />
           <Field form={form} name="password" as="password" label="New password" />
+          <Field form={form} name="currentPassword" as="password" hint="Required to change your email or password." />
           <Button type="submit" disabled={form.processing} block>
             Save changes
           </Button>
