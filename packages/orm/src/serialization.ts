@@ -2,7 +2,7 @@ import type { AccessorDefinitions } from './attributes'
 import { RELATION_DEFINITIONS } from './internal-keys'
 import type { Model, PlainObject } from './Model'
 import type { RelationDefinition } from './relation-definitions'
-import { knownModelReference } from './relation-records'
+import { knownModelReference, knownMorphTarget } from './relation-records'
 
 /** Serializes a record for JSON output: appends, then visible/hidden filtering. */
 export function serializeRecord(
@@ -83,7 +83,7 @@ export function serializeLoadedRelations(
     const definition = definitions.get(key)
     if (definition === undefined) continue
     const value = serialized[key]
-    const filtered = filterRelationValue(relatedModelOf(definition, source, walk.morphMap), value, walk)
+    const filtered = filterRelationValue(relatedModelOf(definition, source, value, walk.morphMap), value, walk)
     if (filtered !== value) serialized[key] = filtered
   }
   return serialized
@@ -91,15 +91,19 @@ export function serializeLoadedRelations(
 
 /**
  * The related model, read without calling a lazy reference: a thunk no load
- * has resolved yields `undefined`. A morphTo target comes from the holder's
- * type column as loaded, before the holder's own filter could drop it.
+ * has resolved yields `undefined`. A morphTo target is the model its load
+ * resolved, since the holder's casts or accessors may rewrite the type column
+ * afterwards; a row no load tagged falls back to that column.
  */
 function relatedModelOf(
   definition: RelationDefinition,
   holder: PlainObject,
+  value: unknown,
   morphMap: RelationRowWalk['morphMap'],
 ): ModelClass | undefined {
   if (definition.type !== 'morphTo') return knownModelReference(definition.related)
+  const loaded = knownMorphTarget(value)
+  if (loaded) return loaded
   const type = holder[`${definition.morphName}Type`]
   return typeof type === 'string' && morphMap && Object.hasOwn(morphMap, type) ? morphMap[type] : undefined
 }
@@ -177,7 +181,7 @@ function filterRow(
     const definition = definitions.get(key)
     if (definition === undefined) continue
     const value = row[key]
-    const next = filterRelationValue(relatedModelOf(definition, row, walk.morphMap), value, walk)
+    const next = filterRelationValue(relatedModelOf(definition, row, value, walk.morphMap), value, walk)
     if (next === value) continue
     if (entry.output === row) entry.output = { ...row }
     entry.output[key] = next
@@ -209,7 +213,7 @@ function filterColumns(
         continue
       }
       const definition = definitions.get(key)
-      if (definition && !hidden?.includes(key) && relatedModelOf(definition, row, morphMap)) kept[key] = row[key]
+      if (definition && !hidden?.includes(key) && relatedModelOf(definition, row, row[key], morphMap)) kept[key] = row[key]
     }
     return kept
   }

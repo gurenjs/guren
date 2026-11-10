@@ -96,6 +96,12 @@ class Image extends Model<ImageRecord> {
   static override visible = ['id', 'url']
 }
 
+class RelabelledImage extends Model<ImageRecord> {
+  static override table = imagesTable
+  static override visible = ['id', 'url']
+  static override accessors = { imageableType: (r: PlainObject) => String(r.imageableType).toLowerCase() }
+}
+
 class OpenUser extends Model<UserRecord> {
   static override table = usersTable
 }
@@ -125,6 +131,7 @@ Post.belongsTo('author', User, 'authorId', 'id')
 Post.belongsTo('listedAuthor', ListedUser, 'authorId', 'id')
 Post.hasMany('comments', Comment, 'postId', 'id')
 Image.morphTo('imageable', 'imageable')
+RelabelledImage.morphTo('imageable', 'imageable')
 OpenPost.belongsTo('author', OpenUser, 'authorId', 'id')
 OpenUser.hasMany('posts', OpenPost, 'authorId', 'id')
 
@@ -210,6 +217,17 @@ describe('serialize() filters eager-loaded relation rows (bun:sqlite)', () => {
     expect(alice.images).toEqual([
       { id: 1, url: 'avatar.png', imageable: { id: 1, name: 'Alice', email: 'alice@example.com' } },
     ])
+  })
+
+  it('filters a morphTo row by the model its load resolved when an accessor rewrites the type column', async () => {
+    const images = (await RelabelledImage.newQuery().with('imageable').orderBy('id', 'asc').get()) as Array<
+      ImageRecord & { imageable: UserRecord | null }
+    >
+    expect(images[0].imageableType).toBe('user')
+    expect(images[0].imageable?.passwordHash).toBe('hash-a')
+
+    const [image] = RelabelledImage.serializeMany(images) as Row[]
+    expect(image).toEqual({ id: 1, url: 'avatar.png', imageable: { id: 1, name: 'Alice', email: 'alice@example.com' } })
   })
 
   it('filters a lazily referenced relation once a load has resolved it, without calling the reference', async () => {

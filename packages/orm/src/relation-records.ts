@@ -184,6 +184,17 @@ export async function resolveModelReference(reference: ModelReference): Promise<
   return model
 }
 
+// The model each loaded morphTo row came from, keyed by the row object the loader assigns.
+const morphTargets = new WeakMap<object, typeof Model>()
+
+export function rememberMorphTarget(row: object, model: typeof Model): void {
+  morphTargets.set(row, model)
+}
+
+export function knownMorphTarget(row: unknown): typeof Model | undefined {
+  return row !== null && typeof row === 'object' ? morphTargets.get(row) : undefined
+}
+
 /** The model a reference names, or `undefined` for a thunk no load has resolved. */
 export function knownModelReference(reference: ModelReference): typeof Model | undefined {
   return isModelClass(reference) ? reference : resolvedReferences.get(reference)
