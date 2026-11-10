@@ -59,6 +59,9 @@ function decodeHtmlEntities(text: string): string {
  */
 export function createSlugger(): (text: string) => string {
   const usedSlugs = new Set<string>()
+  // Every `${base}-k` below a base's entry is taken, and `usedSlugs` only grows,
+  // so a probe resumes there; restarting at 1 makes N repeats cost O(N²).
+  const nextSuffix = new Map<string, number>()
 
   return (text: string): string => {
     let stripped = text
@@ -78,10 +81,11 @@ export function createSlugger(): (text: string) => string {
     slug = slug || 'heading'
 
     if (usedSlugs.has(slug)) {
-      let suffix = 1
+      let suffix = nextSuffix.get(slug) ?? 1
       while (usedSlugs.has(`${slug}-${suffix}`)) {
         suffix++
       }
+      nextSuffix.set(slug, suffix + 1)
       slug = `${slug}-${suffix}`
     }
     usedSlugs.add(slug)
