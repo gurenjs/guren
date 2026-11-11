@@ -90,8 +90,8 @@ export function serializeLoadedRelations(
 }
 
 /**
- * The related model, read without calling a lazy reference: a thunk no load
- * has resolved yields `undefined`. A morphTo target is the model its load
+ * The related model; an asynchronous reference no load has resolved yields
+ * `undefined`. A morphTo target is the model its load
  * resolved, since the holder's casts or accessors may rewrite the type column
  * afterwards; a row no load tagged falls back to that column.
  */
@@ -174,7 +174,7 @@ function filterRow(
     return seen.output
   }
 
-  const entry: RowEntry = { output: filtered ? filterColumns(model, definitions, row, walk.morphMap) : row, done: false }
+  const entry: RowEntry = { output: filtered ? filterColumns(model, row) : row, done: false }
   rows.set(row, entry)
 
   for (const key in entry.output) {
@@ -192,28 +192,18 @@ function filterRow(
 }
 
 /**
- * A related row's own columns: `visible` keeps loaded order and, beside the
- * columns it names, the model's relations it can filter in turn unless
- * `hidden` names them; otherwise `hidden` keys go. Appends are not computed.
+ * A related row's own columns, by the rule `serializeRecord` applies to the
+ * serialized record: `visible` keeps only the keys it names (relations
+ * included), in loaded order; otherwise `hidden` keys go. Appends are not computed.
  */
-function filterColumns(
-  model: ModelClass,
-  definitions: RelationDefinitions,
-  row: PlainObject,
-  morphMap: RelationRowWalk['morphMap'],
-): PlainObject {
+function filterColumns(model: ModelClass, row: PlainObject): PlainObject {
   const hidden = model.hidden
   const visible = model.visible
   const kept: PlainObject = {}
 
   if (visible && visible.length > 0) {
     for (const key in row) {
-      if (visible.includes(key)) {
-        kept[key] = row[key]
-        continue
-      }
-      const definition = definitions.get(key)
-      if (definition && !hidden?.includes(key) && relatedModelOf(definition, row, row[key], morphMap)) kept[key] = row[key]
+      if (visible.includes(key)) kept[key] = row[key]
     }
     return kept
   }

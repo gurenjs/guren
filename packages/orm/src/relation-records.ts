@@ -164,11 +164,11 @@ export async function countByChunks(
 
 type ModelReference = typeof Model | (() => typeof Model | Promise<typeof Model>)
 
-// What each lazy reference resolved to on its latest load: the serializer runs
-// synchronously and must never call one itself.
+// What each lazy reference resolved to on its latest load, or on a synchronous
+// call from the serializer, which cannot await an asynchronous one.
 const resolvedReferences = new WeakMap<() => unknown, typeof Model>()
 
-function isModelClass(reference: ModelReference): reference is typeof Model {
+function isModelClass(reference: ModelReference | Promise<typeof Model>): reference is typeof Model {
   // Every Model class inherits a static `newQuery`; a thunk has none. Checked by
   // shape so this module needs no value import of Model, which imports it.
   return typeof (reference as { newQuery?: unknown }).newQuery === 'function'
@@ -195,7 +195,22 @@ export function knownMorphTarget(row: unknown): typeof Model | undefined {
   return row !== null && typeof row === 'object' ? morphTargets.get(row) : undefined
 }
 
-/** The model a reference names, or `undefined` for a thunk no load has resolved. */
+/**
+ * The model a reference names. A thunk no load has resolved is called: rows can
+ * reach the serializer without a load in this process (a cache, a job payload).
+ * An asynchronous one yields `undefined` this time and is remembered once it settles.
+ */
 export function knownModelReference(reference: ModelReference): typeof Model | undefined {
-  return isModelClass(reference) ? reference : resolvedReferences.get(reference)
+  if (isModelClass(reference)) return reference
+  const known = resolvedReferences.get(reference)
+  if (known) return known
+
+  const result = reference()
+  if (isModelClass(result)) {
+    resolvedReferences.set(reference, result)
+    return result
+  }
+  // A rejection surfaces on the next load of the relation, which awaits the reference.
+  result.then((model) => resolvedReferences.set(reference, model), () => undefined)
+  return undefined
 }

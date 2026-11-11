@@ -68,7 +68,7 @@ class User extends Model<UserRecord> {
 
 class ListedUser extends Model<UserRecord> {
   static override table = usersTable
-  static override visible = ['email', 'name', 'id']
+  static override visible = ['email', 'name', 'id', 'roles', 'tokens']
   static override hidden = ['tokens']
 }
 
@@ -93,7 +93,7 @@ class Token extends Model<TokenRecord> {
 
 class Image extends Model<ImageRecord> {
   static override table = imagesTable
-  static override visible = ['id', 'url']
+  static override visible = ['id', 'url', 'imageable']
 }
 
 class RelabelledImage extends Model<ImageRecord> {
@@ -122,6 +122,7 @@ User.hasMany('unloadedTokens', () => {
   unloadedThunkCalls++
   return Token
 }, 'userId', 'id')
+User.hasMany('asyncTokens', async () => Token, 'userId', 'id')
 User.belongsToMany('roles', Role, userRolesTable, 'userId', 'roleId', 'id', 'id')
 User.morphMany('images', Image, 'imageable', 'id')
 ListedUser.belongsToMany('roles', Role, userRolesTable, 'userId', 'roleId', 'id', 'id')
@@ -195,16 +196,18 @@ describe('serialize() filters eager-loaded relation rows (bun:sqlite)', () => {
     expect(users[0].posts[0].comments[0].ip).toBe('10.0.0.1')
   })
 
-  it('keeps the loaded relations of a row its model\'s visible narrows, each filtered by its own model', async () => {
+  it('keeps only the relations a related model\'s visible names, each filtered by its own model', async () => {
     const posts = (await Post.newQuery()
       .with('listedAuthor.roles', 'listedAuthor.posts', 'listedAuthor.tokens')
       .orderBy('id', 'asc')
       .get()) as Array<PostRecord & { listedAuthor: Row & { posts: PostRecord[] } }>
 
     const [first] = Post.serializeMany(posts) as Array<Row & { listedAuthor: Row & { roles: Row[] } }>
-    expect(Object.keys(first.listedAuthor)).toEqual(['id', 'name', 'email', 'roles', 'posts'])
+    // As at the top level: `visible` drops `posts`, which it does not name, and wins over `hidden`.
+    expect(Object.keys(first.listedAuthor)).toEqual(['id', 'name', 'email', 'roles', 'tokens'])
     expect(first.listedAuthor.roles).toEqual([{ id: 1, name: 'admin' }])
-    expect(first.listedAuthor.posts).toBe(posts[0].listedAuthor.posts)
+    expect(first.listedAuthor.tokens).toEqual([{ id: 1, userId: 1 }])
+    expect(Object.keys(ListedUser.serialize(posts[0].listedAuthor)).sort()).toEqual(Object.keys(first.listedAuthor).sort())
   })
 
   it('resolves a morphTo row through morphMap from the type column its holder\'s visible drops', async () => {
@@ -241,15 +244,27 @@ describe('serialize() filters eager-loaded relation rows (bun:sqlite)', () => {
     expect(tokenThunkCalls).toBe(calls)
   })
 
-  it('passes a lazily referenced relation no load has resolved through as it is', () => {
+  it('calls a synchronous lazy reference no load has resolved, once, to filter its rows', () => {
     const tokens = [{ id: 1, userId: 1, hashedToken: 'token-hash' }]
-    const json = User.serialize({
-      id: 1, name: 'Alice', email: 'alice@example.com', passwordHash: 'hash-a', unloadedTokens: tokens,
-    }) as Row & { unloadedTokens: Row[] }
-
-    expect(json).not.toHaveProperty('passwordHash')
-    expect(json.unloadedTokens).toBe(tokens)
+    const record = { id: 1, name: 'Alice', email: 'alice@example.com', passwordHash: 'hash-a', unloadedTokens: tokens }
     expect(unloadedThunkCalls).toBe(0)
+
+    const json = User.serialize(record) as Row & { unloadedTokens: Row[] }
+    expect(json).not.toHaveProperty('passwordHash')
+    expect(json.unloadedTokens).toEqual([{ id: 1, userId: 1 }])
+    expect(tokens[0].hashedToken).toBe('token-hash')
+
+    User.serialize(record)
+    expect(unloadedThunkCalls).toBe(1)
+  })
+
+  it('passes the rows of an asynchronous lazy reference no load has resolved through, then filters once it settles', async () => {
+    const tokens = [{ id: 1, userId: 1, hashedToken: 'token-hash' }]
+    const record = { id: 1, name: 'Alice', email: 'alice@example.com', passwordHash: 'hash-a', asyncTokens: tokens }
+
+    expect((User.serialize(record) as Row & { asyncTokens: Row[] }).asyncTokens).toBe(tokens)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect((User.serialize(record) as Row & { asyncTokens: Row[] }).asyncTokens).toEqual([{ id: 1, userId: 1 }])
   })
 
   it('keeps every reference in a graph no reachable model filters', async () => {
