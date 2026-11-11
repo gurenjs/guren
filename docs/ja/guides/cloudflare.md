@@ -570,6 +570,15 @@ bunx guren cloudflare:deploy --secrets-file .env.production
 
 ただし、`triggers.crons` だけは出力しません。アプリがスケジュールタスクを登録しているかどうかは、スケジュールカーネルを見つけて読み込めたビルドにしか分からず、ほかの書き方で宣言したタスクは「ない」と判断されてしまうからです。そのため、ビルドは推測で出力することはせず、何も言いません。タスクがあって Workers でも動かしたい場合は、トリガーを手で追記してください（[スケジュールタスク](#スケジュールタスク)）。
 
+`--mcp-oauth` の同意フローも最初に 1 度だけ生成されるので、このビルドをすでに実行したアプリでは、同意画面も生成時のまま残ります。`/oauth/register` には誰でも好きな名前でクライアントを登録できるため、現在の同意画面では、クライアントの名前に `unverified`（未検証）のラベルを付け、認可コードの送り先のホストを表示します。この画面に更新するには、`@guren/plugin-cloudflare` を更新してから、次の 2 つのファイルを上書きコピーします。
+
+```bash
+cp node_modules/@guren/plugin-cloudflare/templates/mcp-oauth/app/Http/Controllers/McpOAuthController.ts app/Http/Controllers/
+cp node_modules/@guren/plugin-cloudflare/templates/mcp-oauth/app/View/McpOAuthConsentPage.tsx app/View/
+```
+
+そのファイルに加えていた変更は `git diff` を見て入れ直し、いつもどおりビルドしてください。2 つのファイルは必ず一緒にコピーします。ページが読む `redirectTarget` は新しいコントローラーだけが渡すので、古いコントローラーのままだと、エラーは出ないまま送り先が空欄になります。ファイルを退避して通常のビルドに生成し直させる方法は、ルートをマウントしたあとは使えません。先に走るアプリのビルドが、見つからないコントローラーのところで失敗します。
+
 ## デプロイ後
 
 - Cloudflare のダッシュボードでワーカーに独自ドメインを割り当て、あわせて OAuth のコールバック URL も更新します。

@@ -40,6 +40,14 @@ import {
 const LOGIN_PATH = '/login'
 
 /**
+ * The guard the consenting user is read from: the session guard `auth.useModel()`
+ * registers. Never an unqualified `this.auth.id()`, which answers with an API
+ * token's user for a request carrying `Authorization: Bearer`, and a grant minted
+ * for a token outlives revoking it. Change this if your session guard has another name.
+ */
+const SESSION_GUARD = 'web'
+
+/**
  * What a client that sent no `scope` is offered. RFC 6749 §3.3 requires a default
  * or a refusal, and the MCP clients measured (Claude's connector, MCP Inspector)
  * send none with no field to add one. It widens the *offer*, not the grant: the
@@ -55,7 +63,7 @@ interface WorkerEnvWithProvider {
 export default class McpOAuthController extends Controller {
   /** GET /oauth/authorize — render the consent screen. */
   async show(): Promise<Response> {
-    const userId = await this.auth.id()
+    const userId = await this.auth.guard(SESSION_GUARD).id()
     if (userId === null || userId === undefined) {
       return this.redirect(this.loginUrl())
     }
@@ -69,6 +77,8 @@ export default class McpOAuthController extends Controller {
 
     return this.view(McpOAuthConsentPage, {
       clientName: client?.clientName ?? parsed.clientId,
+      // From the request, never `client.redirectUris`: a client may register several.
+      redirectTarget: redirectTargetOf(parsed.redirectUri),
       query: new URL(this.ctx.req.url).searchParams.toString(),
       tools: this.offeredTools(parsed.scope),
       csrfToken: getCsrfToken(this.ctx),
@@ -77,7 +87,7 @@ export default class McpOAuthController extends Controller {
 
   /** POST /oauth/authorize — record the decision and hand back to the provider. */
   async approve(): Promise<Response> {
-    const userId = await this.auth.id()
+    const userId = await this.auth.guard(SESSION_GUARD).id()
     if (userId === null || userId === undefined) {
       return this.redirect(this.loginUrl())
     }
@@ -219,6 +229,21 @@ export default class McpOAuthController extends Controller {
   /** A plain, stack-free page for the arrivals that are nobody's bug. */
   private errorPage(status: number, title: string, advice: string): Promise<Response> {
     return this.view(McpOAuthErrorPage, { title, advice }, { status })
+  }
+}
+
+/**
+ * The redirect URI as `protocol//host`, or the scheme alone if it has no host,
+ * read by the `new URL` parse `completeAuthorization` redirects with, so userinfo
+ * like `https://claude.ai@attacker.example` shows the host the code really goes to.
+ * One that will not parse is shown as it came; the page escapes it.
+ */
+function redirectTargetOf(redirectUri: string): string {
+  try {
+    const { protocol, host } = new URL(redirectUri)
+    return host ? `${protocol}//${host}` : protocol
+  } catch {
+    return redirectUri
   }
 }
 

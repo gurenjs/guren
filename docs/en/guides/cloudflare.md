@@ -566,6 +566,15 @@ The build also names any placeholder id left in `d1_databases` or `kv_namespaces
 
 `triggers.crons` is the one entry it does not print. Whether an app registers scheduled tasks is only visible to a build that can find and load its schedule kernel, and a task declared any other way would read as absent, so the build stays quiet rather than guessing. An app that has tasks and wants them to run on Workers adds the trigger by hand; see [Scheduled Tasks](#scheduled-tasks).
 
+The `--mcp-oauth` consent flow is also scaffolded once, so an app that has already run that build keeps the consent screen it got. Anyone can register a client at `/oauth/register` under any name, so the current screen labels the client's name `unverified` and shows the host the authorization code goes to. To take that screen, update `@guren/plugin-cloudflare`, then copy the two files over yours:
+
+```bash
+cp node_modules/@guren/plugin-cloudflare/templates/mcp-oauth/app/Http/Controllers/McpOAuthController.ts app/Http/Controllers/
+cp node_modules/@guren/plugin-cloudflare/templates/mcp-oauth/app/View/McpOAuthConsentPage.tsx app/View/
+```
+
+Use `git diff` to put back any edits you had made in those files, then rebuild as usual. Copy both: the page reads a `redirectTarget` prop only the new controller passes, and with an old controller it renders an empty target and no error. A normal build cannot scaffold them again if you move your files aside: once the routes are mounted, the app build runs first and fails on the missing controller.
+
 ## Post-Deployment
 
 - Point a custom domain at the worker in the Cloudflare dashboard, then update any OAuth callback URLs to match.

@@ -1,10 +1,12 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test'
 import { z } from 'zod'
 import {
+  createApiToken,
   createApp,
   createCsrfMiddleware,
   createSessionMiddleware,
   generateAppKey,
+  MemoryApiTokenStore,
   MemorySessionStore,
   type Application,
   type Router,
@@ -89,19 +91,35 @@ const SCOPELESS_QUERY =
   'client_id=cli_1&redirect_uri=https%3A%2F%2Fclient.test%2Fcb&response_type=code&state=s2'
 
 let app: Application
+let apiTokens: MemoryApiTokenStore
 let previousTesting: string | undefined
 let previousAppKey: string | undefined
 
 /**
- * `X-Testing-User` is how `attachAuthContext` authenticates without a real
- * session, honoured only while `GUREN_TESTING` is set.
+ * Signs the user in through the session, where the controller's session guard
+ * reads it (`auth:user_id` is `SessionGuard`'s key), honoured only while
+ * `GUREN_TESTING` is set. Not `X-Testing-User`, which never reaches a named guard.
  */
 function asUser(id: string | number | undefined): Record<string, string> {
-  return id === undefined ? {} : { 'X-Testing-User': JSON.stringify({ id, __authId: id }) }
+  return id === undefined ? {} : { 'X-Testing-Session': JSON.stringify({ 'auth:user_id': id }) }
 }
 
 async function get(query: string, headers: Record<string, string> = {}): Promise<Response> {
   return app.fetch(new Request(`http://localhost/oauth/authorize?${query}`, { headers }))
+}
+
+/**
+ * The stateless `XSRF-TOKEN` a request with no session user is issued, and the
+ * cookie it must match: what a client holding no session can present.
+ */
+async function guestCsrf(): Promise<{ token: string; cookie: string }> {
+  const response = await get(AUTHORIZE_QUERY)
+  const cookie = response.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ')
+  const token = /XSRF-TOKEN=([^;]+)/.exec(cookie)?.[1]
+  if (!token) {
+    throw new Error(`no XSRF-TOKEN cookie on a guest request: ${cookie}`)
+  }
+  return { token: decodeURIComponent(token), cookie }
 }
 
 /** The `_token` value and session cookie a real browser would carry back. */
@@ -113,6 +131,18 @@ async function consentSession(query = AUTHORIZE_QUERY): Promise<{ token: string;
     throw new Error(`no CSRF token in the consent screen:\n${html.slice(0, 400)}`)
   }
   return { token, cookie: response.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ') }
+}
+
+function queryRedirectingTo(redirectUri: string): string {
+  return `client_id=cli_1&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&state=s3`
+}
+
+/** Above the form only: its hidden `authorize_query` field repeats every host in the query. */
+async function aboveForm(query: string): Promise<string> {
+  const html = await (await get(query, asUser(7))).text()
+  const end = html.indexOf('<form')
+  expect(end).toBeGreaterThan(0)
+  return html.slice(0, end)
 }
 
 async function post(
@@ -143,6 +173,8 @@ describe('scaffolded McpOAuthController', () => {
     process.env.APP_KEY ??= generateAppKey()
 
     app = createApp({ routes: registerRoutes })
+    apiTokens = new MemoryApiTokenStore()
+    app.auth.useTokens(apiTokens)
     // `'*'`, because `use()` takes a path first — and no `secret` option:
     // `SessionOptions` has none, so one passed here would be silently ignored.
     app.use('*', createSessionMiddleware({ store: new MemorySessionStore() }))
@@ -178,7 +210,8 @@ describe('scaffolded McpOAuthController', () => {
     })
 
     test('should redirect an unauthenticated POST to the login path', async () => {
-      const { token, cookie } = await consentSession()
+      // A guest's token: `consentSession()`'s cookie carries a signed-in session.
+      const { token, cookie } = await guestCsrf()
 
       const response = await app.fetch(
         new Request('http://localhost/oauth/authorize', {
@@ -190,6 +223,46 @@ describe('scaffolded McpOAuthController', () => {
 
       // 303, not 302: a redirect out of a POST is See Other, so the browser
       // follows it with a GET rather than re-posting the form.
+      expect(response.status).toBe(303)
+      expect(response.headers.get('Location')).toStartWith('/login?')
+      expect(calls.completeAuthorization).toHaveLength(0)
+    })
+
+    /**
+     * An unqualified `auth.id()` answers with a Bearer token's user once
+     * `useTokens()` is configured, and a grant minted for that user outlives
+     * revoking the token. The screen must read the user from the session alone.
+     */
+    test('should send a bearer-token caller with no session to the login path', async () => {
+      const { plainTextToken } = await createApiToken(apiTokens, { name: 'leaked', userId: 9 })
+
+      const response = await get(AUTHORIZE_QUERY, { Authorization: `Bearer ${plainTextToken}` })
+
+      expect(response.status).toBe(302)
+      expect(response.headers.get('Location')).toStartWith('/login?redirectTo=')
+    })
+
+    test('should mint no grant for a bearer-token caller with no session', async () => {
+      const { plainTextToken } = await createApiToken(apiTokens, { name: 'leaked', userId: 9 })
+      // A valid stateless CSRF pair, so the request reaches the controller's own check.
+      const { token, cookie } = await guestCsrf()
+
+      const response = await app.fetch(
+        new Request('http://localhost/oauth/authorize', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Authorization: `Bearer ${plainTextToken}`,
+            Cookie: cookie,
+          },
+          body: new URLSearchParams({
+            _token: token,
+            authorize_query: AUTHORIZE_QUERY,
+            scope: 'tool:posts.store',
+          }).toString(),
+        }),
+      )
+
       expect(response.status).toBe(303)
       expect(response.headers.get('Location')).toStartWith('/login?')
       expect(calls.completeAuthorization).toHaveLength(0)
@@ -282,6 +355,59 @@ describe('scaffolded McpOAuthController', () => {
       // Offered, and still unticked: the default widens the offer, not the grant.
       expect(html).toContain('value="tool:posts.destroy"')
       expect(html).not.toContain('value="tool:posts.destroy" checked')
+    })
+  })
+
+  /**
+   * Anyone can register at `/oauth/register` under any name, so the name proves
+   * nothing and the redirect target is what the person approving has to judge.
+   */
+  describe('who is asking', () => {
+    test('should label the client name as unverified', async () => {
+      const page = await aboveForm(AUTHORIZE_QUERY)
+
+      expect(page).toContain('A client calling itself <strong>Agent &lt;Client&gt;</strong>')
+      expect(page).toContain('<span class="badge">unverified</span> is asking')
+      expect(page).toContain('has not verified that name')
+      expect(page).toContain('anyone can register a client under any name')
+    })
+
+    test('should show the scheme, host and port of the redirect URI and nothing after them', async () => {
+      const page = await aboveForm(queryRedirectingTo('https://client.test:8443/cb?next=/home'))
+
+      expect(page).toContain('<span class="host">https://client.test:8443</span>')
+      expect(page).not.toContain('/cb')
+      expect(page).not.toContain('/home')
+      expect(page).not.toContain('href')
+    })
+
+    test('should show the URI this request redirects to rather than one the client registered', async () => {
+      const page = await aboveForm(queryRedirectingTo('https://other.test/cb'))
+
+      expect(page).toContain('<span class="host">https://other.test</span>')
+      expect(page).not.toContain('client.test')
+    })
+
+    test('should show the real host behind userinfo that names another one', async () => {
+      const page = await aboveForm(queryRedirectingTo('https://claude.ai@attacker.example/cb'))
+
+      expect(page).toContain('<span class="host">https://attacker.example</span>')
+      expect(page).not.toContain('claude.ai')
+    })
+
+    test('should show the scheme alone for a redirect URI with no host', async () => {
+      const page = await aboveForm(queryRedirectingTo('com.example.app:/oauth/cb'))
+
+      expect(page).toContain('<span class="host">com.example.app:</span>')
+      expect(page).not.toContain('/oauth/cb')
+    })
+
+    test('should show an unparseable redirect URI as it came, escaped and unlinked', async () => {
+      const page = await aboveForm(queryRedirectingTo('not a uri <img src=x>'))
+
+      expect(page).toContain('<span class="host">not a uri &lt;img src=x&gt;</span>')
+      expect(page).not.toContain('<img')
+      expect(page).not.toContain('href')
     })
   })
 
