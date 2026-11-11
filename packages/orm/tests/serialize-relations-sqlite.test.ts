@@ -98,7 +98,7 @@ class Image extends Model<ImageRecord> {
 
 class RelabelledImage extends Model<ImageRecord> {
   static override table = imagesTable
-  static override visible = ['id', 'url']
+  static override hidden = ['imageableType', 'imageableId']
   static override accessors = { imageableType: (r: PlainObject) => String(r.imageableType).toLowerCase() }
 }
 
