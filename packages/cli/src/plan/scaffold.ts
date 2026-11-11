@@ -337,7 +337,7 @@ class Emitter {
           extra.push(`foreignKey({ columns: [${tableAccess(column.name)}], foreignColumns: [${tableAccess(key)}] })${onDelete ? `.onDelete('${onDelete}')` : ''}`)
         } else if (target) {
           const options = onDelete ? `, { onDelete: '${onDelete}' }` : ''
-          parts.push({ code: `.references(() => ${target.table.identifier}.${key}${options})`, imports: [] })
+          parts.push({ code: `.references(() => ${propertyAccess(target.table.identifier, key)}${options})`, imports: [] })
         }
       }
       for (const part of parts) for (const name of part.imports) imports.add(name)

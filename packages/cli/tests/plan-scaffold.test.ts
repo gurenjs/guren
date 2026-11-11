@@ -1497,6 +1497,43 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     expect(() => new Bun.Transpiler({ loader: 'ts' }).transformSync(table)).not.toThrow()
   })
 
+  // hasColumn() admits any key on a table with spread columns, and one an earlier step declared quoted.
+  test('should write a foreign key to a column that is no identifier as a quoted key, never as code', () => {
+    const payload = "id), x: (evil(), text('x')).references(() => users.id"
+    const document = widgetsPlan()
+    const postId = document.models[3]!.columns.find((candidate) => candidate.name === 'postId')!
+    postId.references = { ...postId.references!, column: payload }
+    const others = ['tags'].map((table) => ({ identifier: table, tableName: table, module: null, columns: ['id'] }))
+    const pivot = { identifier: 'widgetTags', tableName: 'widget_tags', module: null, columns: ['widgetId', 'tagId'] }
+
+    for (const posts of [
+      { identifier: 'posts', tableName: 'posts', module: null, columns: ['id'], opaqueColumns: true },
+      { identifier: 'posts', tableName: 'posts', module: null, columns: ['id', payload] },
+    ]) {
+      const output = emitWidgets(document, 'pg', { app: { tables: [posts, ...others, pivot] } })
+      expect(output.refusals).toEqual([])
+      const table = output.tables[0]!.block
+      expect(table).toContain("postId: integer('post_id').notNull().references(() => posts['id), x: (evil(), text(\\'x\\')).references(() => users.id'], { onDelete: 'cascade' }),")
+      expect(table).not.toContain('posts.id), x:')
+      expect(() => new Bun.Transpiler({ loader: 'ts' }).transformSync(table)).not.toThrow()
+    }
+  })
+
+  // A `//` comment ends at any ECMAScript line terminator, so a page or column name holding one would go on as code in the class body.
+  test('should keep a view page or column name holding a line terminator inside the controller comment naming it', () => {
+    const document = widgetsPlan()
+    document.views = [{ id: 'view.widgets.index', change: { kind: 'add' }, page: 'widgets/Index\n  static { evil() }\u2028  static { evil() }\u2029  static { evil() }\r  static { evil() }\r\n  //', purpose: 'Lists widgets.', props: [], actions: [], states: {} }]
+    document.controllers![0]!.actions[0]!.response = { kind: 'inertia', view: 'view.widgets.index' }
+    document.models[3]!.columns.push(column('widget', 'odd\r\n  static { evil() }\u2029  //', 'integer', { id: 'column.widget.odd', references: { model: 'model.post', column: 'id' } }))
+    const output = emitWidgets(document, 'pg')
+    const controller = output.files.find((file) => file.path === 'app/Http/Controllers/WidgetController.ts')!.contents
+
+    expect(output.refusals).toEqual([])
+    expect(controller).toContain('  // Planned response: the Inertia page widgets/Index   static { evil() }   static { evil() }   static { evil() }   static { evil() }    //\n  async index(): Promise<Response> {')
+    expect(controller.split(/\r\n|[\n\r\u2028\u2029]/u).filter((line) => line.includes('evil()')).map((line) => line.trimStart().startsWith('// '))).toEqual([true, true])
+    expect(new Bun.Transpiler({ loader: 'ts' }).transformSync(controller)).not.toContain('evil')
+  })
+
   test('should list the step’s generates it does not write, for the http step, and no page', () => {
     const plan = loadParsedCommentsPlan()
     const { step } = findPlanStep(derivePlanTasks(plan), 'task/entity/model.comment/scaffold')!

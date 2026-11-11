@@ -5,7 +5,7 @@ import { coreImportLine, docComment, kebabCase, pagesAccessor, safeModuleName, s
 
 export interface ControllerActionSource {
   name: string
-  /** Comment lines above the method, without the `//`. */
+  /** Comment lines above the method, without the `//`. A line terminator inside one is written as a space. */
   comment?: string[]
   /** The statements inside the method, each line indented four spaces. */
   body: string
@@ -24,13 +24,16 @@ export interface ControllerSourceOptions {
   actions: ControllerActionSource[]
 }
 
+// ECMAScript's line terminators, each of which ends a `//` comment: one inside a line from a plan string would continue as code.
+const LINE_TERMINATORS = /[\n\r\u2028\u2029]/gu
+
 /** The controller `make:controller` and `make:feature` write, and `plan:scaffold` with the plan's actions as stubs. */
 export function buildControllerSource(options: ControllerSourceOptions): string {
   const imports = [coreImportLine(['Controller', ...(options.coreImports ?? [])]), ...(options.imports ?? [])].join('\n')
   const declarations = (options.declarations ?? []).map((declaration) => `${declaration}\n\n`).join('')
   const classComment = options.classComment ? docComment(options.classComment) : ''
   const actions = options.actions.map((action) => {
-    const comment = (action.comment ?? []).map((line) => `  // ${line}\n`).join('')
+    const comment = (action.comment ?? []).map((line) => `  // ${line.replace(LINE_TERMINATORS, ' ')}\n`).join('')
     return `${comment}  async ${action.name}(): Promise<Response> {\n${action.body}\n  }`
   })
   return `${imports}
