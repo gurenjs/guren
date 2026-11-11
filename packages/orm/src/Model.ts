@@ -649,17 +649,37 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     key?: keyof TRecordFor<T> & string,
     queryOptions?: ModelQueryOptions,
   ): Promise<(TRecordFor<T> & RelationTypePick<T, Names>) | null> {
-    const record = await this.find(id, key, queryOptions)
-    if (record == null) return null
-
     const relationList = normalizeRelations(relations)
-    if (relationList.length === 0) {
-      return record as TRecordFor<T> & RelationTypePick<T, Names>
+    const record = relationList.length === 0
+      ? await this.find(id, key, queryOptions)
+      : await this.findRawWith(id, relationList, key, queryOptions)
+    return record as (TRecordFor<T> & RelationTypePick<T, Names>) | null
+  }
+
+  /**
+   * `find()` with its relations loaded ahead of the read transforms: a loader
+   * matches rows on raw key values, which a cast or an accessor on this model
+   * would have rewritten.
+   */
+  private static async findRawWith<T extends typeof Model>(
+    this: T,
+    id: unknown,
+    relationList: readonly string[],
+    key: string = 'id',
+    queryOptions?: ModelQueryOptions,
+  ): Promise<TRecordFor<T> | null> {
+    if (id === undefined) return null
+    const where = { [key]: id } as Partial<Record<string, unknown>>
+    if (this.hasScopes()) {
+      return this.newQuery(queryOptions).where(where).with(...relationList).first()
     }
 
-    const copy = { ...record }
+    const record = await this.getAdapter().findUnique(this.resolveTable(), where as WhereClauseFor<T>, queryOptions)
+    if (record == null) return null
+
+    const copy = { ...record } as PlainObject
     await this.loadRelationsInto([copy], relationList, queryOptions)
-    return copy as TRecordFor<T> & RelationTypePick<T, Names>
+    return this.applyReadTransforms(copy) as TRecordFor<T>
   }
 
   /**
@@ -681,16 +701,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     key?: keyof TRecordFor<T> & string,
     queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T> & RelationTypePick<T, Names>> {
-    const record = await this.findOrFail(id, key, queryOptions)
-
-    const relationList = normalizeRelations(relations)
-    if (relationList.length === 0) {
-      return record as TRecordFor<T> & RelationTypePick<T, Names>
+    const record = await this.findWith(id, relations, key, queryOptions)
+    if (record == null) {
+      throw new ModelNotFoundException(this.name, id, key ?? 'id')
     }
-
-    const copy = { ...record }
-    await this.loadRelationsInto([copy], relationList, queryOptions)
-    return copy as TRecordFor<T> & RelationTypePick<T, Names>
+    return record
   }
 
   static async first<T extends typeof Model>(

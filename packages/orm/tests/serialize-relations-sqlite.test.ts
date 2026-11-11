@@ -102,6 +102,11 @@ class RelabelledImage extends Model<ImageRecord> {
   static override accessors = { imageableType: (r: PlainObject) => String(r.imageableType).toLowerCase() }
 }
 
+class LabelledPost extends Model<PostRecord> {
+  static override table = postsTable
+  static override accessors = { authorId: (r: PlainObject) => `user-${String(r.authorId)}` }
+}
+
 class OpenUser extends Model<UserRecord> {
   static override table = usersTable
 }
@@ -133,6 +138,7 @@ Post.belongsTo('listedAuthor', ListedUser, 'authorId', 'id')
 Post.hasMany('comments', Comment, 'postId', 'id')
 Image.morphTo('imageable', 'imageable')
 RelabelledImage.morphTo('imageable', 'imageable')
+LabelledPost.belongsTo('author', User, 'authorId', 'id')
 OpenPost.belongsTo('author', OpenUser, 'authorId', 'id')
 OpenUser.hasMany('posts', OpenPost, 'authorId', 'id')
 
@@ -231,6 +237,34 @@ describe('serialize() filters eager-loaded relation rows (bun:sqlite)', () => {
 
     const [image] = RelabelledImage.serializeMany(images) as Row[]
     expect(image).toEqual({ id: 1, url: 'avatar.png', imageable: { id: 1, name: 'Alice', email: 'alice@example.com' } })
+  })
+
+  it('loads a morphTo target through findWith() when an accessor rewrites the type column', async () => {
+    const image = (await RelabelledImage.findWith(1, 'imageable')) as
+      | (ImageRecord & { imageable: UserRecord | null })
+      | null
+    expect(image?.imageableType).toBe('user')
+    expect(image?.imageable?.id).toBe(1)
+
+    const required = (await RelabelledImage.findWithOrFail(1, 'imageable')) as ImageRecord & {
+      imageable: UserRecord | null
+    }
+    expect(required.imageable?.email).toBe('alice@example.com')
+    expect(RelabelledImage.serialize(required)).toEqual({
+      id: 1,
+      url: 'avatar.png',
+      imageable: { id: 1, name: 'Alice', email: 'alice@example.com' },
+    })
+  })
+
+  it('loads a belongsTo owner through findWith() when an accessor rewrites the foreign key', async () => {
+    const post = (await LabelledPost.findWith(3, 'author')) as (Row & { author: UserRecord | null }) | null
+    expect(post?.authorId).toBe('user-2')
+    expect(post?.author?.name).toBe('Bob')
+  })
+
+  it('throws from findWithOrFail() when no row matches', async () => {
+    await expect(RelabelledImage.findWithOrFail(999, 'imageable')).rejects.toThrow('RelabelledImage not found for id=999')
   })
 
   it('filters a lazily referenced relation once a load has resolved it, without calling the reference', async () => {
