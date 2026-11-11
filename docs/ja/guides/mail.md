@@ -168,10 +168,14 @@ await mail(mailManager)
 | `host` | 必須 | SMTP サーバーのホスト名 |
 | `port` | `587` | SMTP サーバーのポート |
 | `secure` | `false` | TLS を使う（通常はポート 465 と組み合わせる） |
+| `requireTLS` | `false` | サーバーが STARTTLS で暗号化しないときは送信を失敗させる |
+| `tls` | - | 接続に渡す Node の TLS オプション（プライベート CA のリレーなら `ca` など） |
 | `auth.user` | - | SMTP ユーザー名 |
 | `auth.pass` | - | SMTP パスワード |
 | `pool` | `true` | コネクションプーリングを使う |
 | `maxConnections` | `5` | プールの最大接続数 |
+
+`secure` を使わない接続は、サーバーの EHLO 応答に STARTTLS があるときだけ暗号化されます。通信経路上の攻撃者がその行を消すと、認証情報とメールの中身を読めてしまいます。自分で管理していないネットワークを通るリレーには `requireTLS: true` を指定してください。暗号化されない場合は平文に戻らず、送信が失敗します。TLS に対応していないローカルのメールキャッチャーでは指定しないでください。
 
 **Resend Transport:**
 | オプション | デフォルト | 説明 |
