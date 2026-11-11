@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test'
+import { describe, test, expect, spyOn } from 'bun:test'
 
 import { createSlugger } from './slugger'
 
@@ -30,6 +30,36 @@ describe('createSlugger', () => {
     expect(slugify('Setup')).toBe('setup')
     expect(slugify('Setup-1')).toBe('setup-1')
     expect(slugify('Setup')).toBe('setup-2')
+  })
+
+  test('should skip suffixes a literal heading claims after a base repeated', () => {
+    const slugify = createSlugger()
+    expect(slugify('Setup')).toBe('setup')
+    expect(slugify('Setup')).toBe('setup-1')
+    expect(slugify('Setup-2')).toBe('setup-2')
+    expect(slugify('Setup')).toBe('setup-3')
+    expect(slugify('Setup-1')).toBe('setup-1-1')
+    expect(slugify('Setup')).toBe('setup-4')
+  })
+
+  test('should probe a bounded number of slugs per repeated heading', () => {
+    const slugify = createSlugger()
+    const headings = 2000
+    const has = spyOn(Set.prototype, 'has')
+    let probes = 0
+    let last = ''
+    try {
+      for (let i = 0; i < headings; i++) {
+        last = slugify('')
+      }
+      // mockRestore() clears the recorded calls, so read them first.
+      probes = has.mock.calls.length
+    } finally {
+      has.mockRestore()
+    }
+    expect(last).toBe(`heading-${headings - 1}`)
+    // Two lookups per repeat; restarting each probe at suffix 1 makes about headings²/2.
+    expect(probes).toBeLessThan(headings * 4)
   })
 
   test('should fall back to a deterministic slug for empty headings', () => {
