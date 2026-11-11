@@ -8,7 +8,7 @@ import type {
 } from './relation-definitions'
 import {
   applyRelatedReadTransforms, distinctKeys, loadByChunks, loadRelatedRecords,
-  maxInListSize, resolveModelReference,
+  maxInListSize, rememberMorphTarget, resolveModelReference,
 } from './relation-records'
 
 async function loadRelationData(
@@ -325,6 +325,7 @@ export async function loadMorphTo(
     const idMap = new Map<unknown, PlainObject>()
     for (const r of results) idMap.set(r.id, { ...r })
     applyRelatedReadTransforms(modelClass, Array.from(idMap.values()), projected)
+    for (const row of idMap.values()) rememberMorphTarget(row, modelClass)
     resolved.set(type, idMap)
   }
 

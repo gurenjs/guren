@@ -18,6 +18,9 @@ export const READ_TRANSFORMS = Symbol('guren.orm.readTransforms')
 /** Rows as the adapter read them, for the joins a relation loader makes. */
 export const RAW_RESULTS = Symbol('guren.orm.rawResults')
 
+/** A model's own relation definitions, for the serializer, which cannot import `Model`. */
+export const RELATION_DEFINITIONS = Symbol('guren.orm.relationDefinitions')
+
 /**
  * Keys per IN list where nothing better is known: the adapter names no figure of
  * its own, or it cannot place the dialect. A relation load binds one variable per
