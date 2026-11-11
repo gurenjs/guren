@@ -454,8 +454,8 @@ describe('credential fingerprint', () => {
   let lookups: number
 
   /** The stored record is `user`; the fingerprint follows its `password`, as a model provider's follows the hash. */
-  function fingerprintingProvider(): UserProvider<MockUser> {
-    const base = createMockProvider([user])
+  function fingerprintingProvider(users: MockUser[] = [user]): UserProvider<MockUser> {
+    const base = createMockProvider(users)
     return {
       ...base,
       async retrieveById(id: unknown) {
@@ -565,6 +565,50 @@ describe('credential fingerprint', () => {
     expect(await createGuard().user()).toBeNull()
     expect(session.data.has('auth:remember_token')).toBe(false)
     expect(session.data.has(FINGERPRINT_KEY)).toBe(false)
+  })
+
+  test('should resolve a remembered session opened under the current credential', async () => {
+    user.rememberToken = 'remember-me'
+    session.set('auth:remember_token', 'remember-me')
+    session.set(FINGERPRINT_KEY, 'fp:hashed_password')
+
+    expect((await createGuard().user())?.id).toBe(1)
+  })
+
+  test('should end a bound session whose stored record carries no credential', async () => {
+    await createGuard().login(user)
+    delete (user as Partial<MockUser>).password
+
+    expect(await createGuard().check()).toBe(false)
+  })
+
+  test('should move the session to the new hash when validate() rehashes its own user', async () => {
+    const provider = fingerprintingProvider()
+    provider.rehashPasswordIfRequired = async (record) => {
+      record.password = 'rehashed_password'
+    }
+    await new SessionGuard<MockUser>({ provider, session }).login(user)
+
+    const confirming = new SessionGuard<MockUser>({ provider, session })
+    expect(await confirming.validate({ email: user.email, password: 'hashed_password' })).not.toBeNull()
+
+    expect(session.data.get(FINGERPRINT_KEY)).toBe('fp:rehashed_password')
+    expect(await createGuard().check()).toBe(true)
+  })
+
+  test('should leave the session alone when validate() rehashes another user', async () => {
+    const other = createMockUser({ id: 2, email: 'other@test.com', password: 'other_hash' })
+    const provider = fingerprintingProvider([user, other])
+    provider.rehashPasswordIfRequired = async (record) => {
+      record.password = `rehashed_${record.password}`
+    }
+    await new SessionGuard<MockUser>({ provider, session }).login(user)
+
+    const confirming = new SessionGuard<MockUser>({ provider, session })
+    expect(await confirming.validate({ email: 'other@test.com', password: 'other_hash' })).not.toBeNull()
+
+    expect(session.data.get(FINGERPRINT_KEY)).toBe('fp:hashed_password')
+    expect(await createGuard().check()).toBe(true)
   })
 
   test('should clear the fingerprint at logout', async () => {

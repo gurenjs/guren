@@ -72,8 +72,8 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
     return sanitizeUser(this.provider, user)
   }
 
-  // Derived from the session key, so two guards sharing one session never
-  // read each other's fingerprint.
+  // Derived from the session key: guards given distinct keys on one session
+  // keep distinct fingerprints.
   private fingerprintSessionKey(): string {
     return `${this.sessionKey()}:fingerprint`
   }
@@ -85,10 +85,10 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
    */
   private async holdsCurrentCredential(session: Session, user: User): Promise<boolean> {
     const current = await this.provider.credentialFingerprint?.(user)
-    if (current === undefined) return true
-
     const stored = session.get(this.fingerprintSessionKey())
-    if (current === null) return stored == null
+    // No credential to compare (`null`, or a record without one) passes only
+    // a session that was never bound: login() stores nothing for either.
+    if (current == null) return stored == null
     return typeof stored === 'string' && secureStringCompare(stored, current)
   }
 
@@ -106,6 +106,25 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       session.set(this.fingerprintSessionKey(), fingerprint)
     } else {
       session.forget(this.fingerprintSessionKey())
+    }
+  }
+
+  /**
+   * validate() may rehash the password of the user this session belongs to
+   * (a profile form confirming the current password). The session moves to the
+   * new hash, or its own next request would read as a password change.
+   */
+  private async followRehash(user: User, before: string | null | undefined): Promise<void> {
+    const session = this.currentSession
+    if (!session || typeof before !== 'string') return
+
+    const after = await this.provider.credentialFingerprint?.(user)
+    if (typeof after !== 'string' || after === before) return
+    if (session.get(this.sessionKey()) !== this.provider.getId(user)) return
+
+    const stored = session.get(this.fingerprintSessionKey())
+    if (typeof stored === 'string' && secureStringCompare(stored, before)) {
+      session.set(this.fingerprintSessionKey(), after)
     }
   }
 
@@ -249,11 +268,13 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
     // default, a testing-cost hash in production). Best effort: the credentials
     // were correct and the stored hash still verifies, so a failed write is a
     // stale row to fix later, never a refused login.
+    const fingerprint = await this.provider.credentialFingerprint?.(user)
     try {
       await this.provider.rehashPasswordIfRequired?.(user, credentials)
     } catch (error) {
       console.warn(`[guren] Rehashing the password for user ${this.describeUser(user)} failed; the login continues.`, redactQueryParams(error))
     }
+    await this.followRehash(user, fingerprint)
     return user
   }
 
