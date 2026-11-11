@@ -57,6 +57,11 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       return null
     }
 
+    if (!(await this.holdsCurrentCredential(this.currentSession, user))) {
+      this.forgetLogin(this.currentSession)
+      return null
+    }
+
     await this.provider.setRememberToken?.(user, rememberToken)
     const sanitized = this.sanitizeUser(user)
     this.cachedUser = sanitized
@@ -65,6 +70,49 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
 
   private sanitizeUser(user: User): User {
     return sanitizeUser(this.provider, user)
+  }
+
+  // Derived from the session key, so two guards sharing one session never
+  // read each other's fingerprint.
+  private fingerprintSessionKey(): string {
+    return `${this.sessionKey()}:fingerprint`
+  }
+
+  /**
+   * Whether the session was opened under the credential `user` holds now. A
+   * session with no fingerprint fails for an account that has a credential:
+   * nothing shows it was opened under the current one.
+   */
+  private async holdsCurrentCredential(session: Session, user: User): Promise<boolean> {
+    const current = await this.provider.credentialFingerprint?.(user)
+    if (current === undefined) return true
+
+    const stored = session.get(this.fingerprintSessionKey())
+    if (current === null) return stored == null
+    return typeof stored === 'string' && secureStringCompare(stored, current)
+  }
+
+  private async bindCredential(session: Session, user: User, identifier: unknown): Promise<void> {
+    const provider = this.provider
+    if (!provider.credentialFingerprint) return
+
+    let fingerprint = await provider.credentialFingerprint(user)
+    if (fingerprint === undefined) {
+      const stored = await provider.retrieveById(identifier)
+      fingerprint = stored ? await provider.credentialFingerprint(stored) : undefined
+    }
+
+    if (typeof fingerprint === 'string') {
+      session.set(this.fingerprintSessionKey(), fingerprint)
+    } else {
+      session.forget(this.fingerprintSessionKey())
+    }
+  }
+
+  private forgetLogin(session: Session): void {
+    session.forget(this.sessionKey())
+    session.forget(this.rememberSessionKey())
+    session.forget(this.fingerprintSessionKey())
   }
 
   private async resolveUser(): Promise<User | null> {
@@ -93,6 +141,12 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       return null
     }
 
+    if (!(await this.holdsCurrentCredential(session, user))) {
+      this.forgetLogin(session)
+      this.cachedUser = null
+      return null
+    }
+
     const sanitized = this.sanitizeUser(user)
     this.cachedUser = sanitized
     return sanitized
@@ -114,6 +168,11 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
   async id(): Promise<unknown> {
     const session = this.currentSession
     if (!session) {
+      return null
+    }
+
+    // A bound session's id is only as good as its credential check.
+    if (this.provider.credentialFingerprint && !(await this.resolveUser())) {
       return null
     }
 
@@ -142,6 +201,7 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
 
     const identifier = this.provider.getId(castUser)
     session.set(this.sessionKey(), identifier)
+    await this.bindCredential(session, castUser, identifier)
     this.cachedUser = this.sanitizeUser(castUser)
 
     if (remember) {
@@ -157,8 +217,7 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       return
     }
 
-    session.forget(this.sessionKey())
-    session.forget(this.rememberSessionKey())
+    this.forgetLogin(session)
     this.cachedUser = null
   }
 

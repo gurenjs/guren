@@ -445,3 +445,189 @@ describe('ModelUserProvider passwordless accounts', () => {
     expect(dummyHashes).toBe(1)
   })
 })
+
+describe('credential fingerprint', () => {
+  const FINGERPRINT_KEY = 'auth:user_id:fingerprint'
+
+  let session: ReturnType<typeof createMockSession>
+  let user: MockUser
+  let lookups: number
+
+  /** The stored record is `user`; the fingerprint follows its `password`, as a model provider's follows the hash. */
+  function fingerprintingProvider(): UserProvider<MockUser> {
+    const base = createMockProvider([user])
+    return {
+      ...base,
+      async retrieveById(id: unknown) {
+        lookups += 1
+        return base.retrieveById(id)
+      },
+      credentialFingerprint(record: MockUser) {
+        const password = (record as Partial<MockUser>).password
+        if (password === undefined) return undefined
+        return password === '' ? null : `fp:${password}`
+      },
+    }
+  }
+
+  function createGuard(options: Partial<{ sessionKey: string }> = {}) {
+    return new SessionGuard<MockUser>({ provider: fingerprintingProvider(), session, ...options })
+  }
+
+  beforeEach(() => {
+    session = createMockSession()
+    user = createMockUser()
+    lookups = 0
+  })
+
+  test('should store the fingerprint at login', async () => {
+    await createGuard().login(user)
+
+    expect(session.data.get(FINGERPRINT_KEY)).toBe('fp:hashed_password')
+  })
+
+  test('should keep resolving the user while the credential is unchanged', async () => {
+    await createGuard().login(user)
+
+    const next = createGuard()
+    expect(await next.check()).toBe(true)
+    expect(await next.id()).toBe(1)
+  })
+
+  test('should end the session once the credential changes', async () => {
+    await createGuard().login(user, true)
+    user.password = 'new_hashed_password'
+
+    const next = createGuard()
+    expect(await next.user()).toBeNull()
+    expect(await next.check()).toBe(false)
+    expect(await next.id()).toBeNull()
+    expect(session.data.has('auth:user_id')).toBe(false)
+    expect(session.data.has('auth:remember_token')).toBe(false)
+    expect(session.data.has(FINGERPRINT_KEY)).toBe(false)
+  })
+
+  test('should report no id for an ended session without a prior user() call', async () => {
+    await createGuard().login(user)
+    user.password = 'new_hashed_password'
+
+    expect(await createGuard().id()).toBeNull()
+  })
+
+  test('should keep the session that logs in again after the change', async () => {
+    await createGuard().login(user)
+    user.password = 'new_hashed_password'
+    await createGuard().login(user)
+
+    expect(await createGuard().check()).toBe(true)
+    expect(session.data.get(FINGERPRINT_KEY)).toBe('fp:new_hashed_password')
+  })
+
+  test('should end a session that carries no fingerprint', async () => {
+    session.set('auth:user_id', 1)
+
+    const guard = createGuard()
+    expect(await guard.check()).toBe(false)
+    expect(session.data.has('auth:user_id')).toBe(false)
+  })
+
+  test('should read the stored record when login() is given a sanitized one', async () => {
+    const { password: _password, ...sanitized } = user
+
+    await createGuard().login(sanitized as MockUser)
+
+    expect(lookups).toBe(1)
+    expect(session.data.get(FINGERPRINT_KEY)).toBe('fp:hashed_password')
+    expect(await createGuard().check()).toBe(true)
+  })
+
+  test('should not look the user up again when login() is given the full record', async () => {
+    await createGuard().login(user)
+
+    expect(lookups).toBe(0)
+  })
+
+  test('should accept an account with no credential and end its session once it gains one', async () => {
+    user.password = ''
+    await createGuard().login(user)
+    expect(session.data.has(FINGERPRINT_KEY)).toBe(false)
+    expect(await createGuard().check()).toBe(true)
+
+    user.password = 'hashed_password'
+    expect(await createGuard().check()).toBe(false)
+  })
+
+  test('should end a remembered session opened under a previous credential', async () => {
+    user.rememberToken = 'remember-me'
+    session.set('auth:remember_token', 'remember-me')
+    session.set(FINGERPRINT_KEY, 'fp:old_hashed_password')
+
+    expect(await createGuard().user()).toBeNull()
+    expect(session.data.has('auth:remember_token')).toBe(false)
+    expect(session.data.has(FINGERPRINT_KEY)).toBe(false)
+  })
+
+  test('should clear the fingerprint at logout', async () => {
+    const guard = createGuard()
+    await guard.login(user)
+    await guard.logout()
+
+    expect(session.data.has(FINGERPRINT_KEY)).toBe(false)
+  })
+
+  test('should derive the fingerprint key from a custom session key', async () => {
+    await createGuard({ sessionKey: 'admin:user' }).login(user)
+
+    expect(session.data.get('admin:user:fingerprint')).toBe('fp:hashed_password')
+    expect(session.data.has(FINGERPRINT_KEY)).toBe(false)
+    expect(await createGuard({ sessionKey: 'admin:user' }).check()).toBe(true)
+  })
+
+  test('should leave a provider without the capability unbound', async () => {
+    const guard = new SessionGuard<MockUser>({ provider: createMockProvider([user]), session })
+    await guard.login(user)
+    user.password = 'new_hashed_password'
+
+    expect(session.data.has(FINGERPRINT_KEY)).toBe(false)
+    expect(await new SessionGuard<MockUser>({ provider: createMockProvider([user]), session }).check()).toBe(true)
+  })
+})
+
+describe('ModelUserProvider credentialFingerprint', () => {
+  async function providerFor() {
+    const { ModelUserProvider } = await import('../../src/auth/providers/ModelUserProvider')
+    return new ModelUserProvider({} as never, { passwordColumn: 'passwordHash' })
+  }
+
+  test('should return a digest that does not contain the hash', async () => {
+    const provider = await providerFor()
+    const hash = '$scrypt$n=16384,r=8,p=1$c2FsdA$ZGVyaXZlZA'
+
+    const fingerprint = provider.credentialFingerprint({ id: 1, passwordHash: hash } as never)
+
+    expect(fingerprint).toMatch(/^[0-9a-f]{64}$/)
+    expect(fingerprint).not.toContain(hash)
+  })
+
+  test('should change when the hash changes', async () => {
+    const provider = await providerFor()
+
+    const before = provider.credentialFingerprint({ id: 1, passwordHash: 'hash-a' } as never)
+    const after = provider.credentialFingerprint({ id: 1, passwordHash: 'hash-b' } as never)
+
+    expect(before).not.toBe(after)
+  })
+
+  test('should return null for an account without a password hash', async () => {
+    const provider = await providerFor()
+
+    expect(provider.credentialFingerprint({ id: 1, passwordHash: null } as never)).toBeNull()
+    expect(provider.credentialFingerprint({ id: 1, passwordHash: '' } as never)).toBeNull()
+  })
+
+  test('should return undefined for a record that does not carry the column', async () => {
+    const provider = await providerFor()
+
+    expect(provider.credentialFingerprint({ id: 1 } as never)).toBeUndefined()
+  })
+})

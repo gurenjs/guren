@@ -4,6 +4,7 @@ import { resolveModelHasher } from '../password/configured-hasher'
 import { looksLikePasswordHash } from '../password/hash-format'
 import { capabilityOf } from '../model-capability'
 import type { AuthCredentials, Authenticatable } from '../types'
+import { hashToken } from '../utils'
 import { BaseUserProvider } from './UserProvider'
 
 interface CredentialColumnSource {
@@ -117,7 +118,6 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     }
 
     const rehashed = await this.hasher.hash(plain)
-    ;(user as PlainObject)[this.passwordColumn] = rehashed
     // storePasswordHash where the model offers it: a model that hashes in place
     // (passwordField === passwordHashField) hashes this value a second time if it
     // goes through update(). A plain Model has no such preparation, so the
@@ -128,6 +128,16 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     } else {
       await this.writeColumn(user, this.passwordColumn, rehashed)
     }
+    // After the write: the login that follows fingerprints this record, and a
+    // write that failed must leave it matching what the store still holds.
+    ;(user as PlainObject)[this.passwordColumn] = rehashed
+  }
+
+  /** A digest, so the hash itself never reaches the session store. */
+  credentialFingerprint(user: User): string | null | undefined {
+    const hashed = (user as PlainObject)[this.passwordColumn]
+    if (hashed === undefined) return undefined
+    return typeof hashed === 'string' && hashed !== '' ? hashToken(hashed) : null
   }
 
   /** forceUpdate keyed on the id column: both credential columns are denied to mass assignment. */

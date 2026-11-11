@@ -85,6 +85,44 @@ describe('rehash on login', () => {
     expect(writes).toHaveLength(1)
   })
 
+  test('the session a rehashing login opens outlives the rehash', async () => {
+    const argonRow = await new ScryptHasher({ memoryCost: 1024, timeCost: 1 }).hash('secret')
+    const rows: Row[] = [{ id: 1, email: 'a@example.com', passwordHash: argonRow }]
+    const { model, writes } = fakeModel(rows)
+    const manager = new AuthManager()
+    manager.useModel(model)
+    const session = fakeSession()
+    const guard = () => manager.createGuard<Row>('web', { ctx: {} as Context, session, manager })
+
+    expect(await guard().attempt({ email: 'a@example.com', password: 'secret' })).toBe(true)
+
+    expect(writes).toHaveLength(1)
+    expect(await guard().check()).toBe(true)
+  })
+
+  test('a rehash the model cannot write leaves the session bound to the stored hash', async () => {
+    const argonRow = await new ScryptHasher({ memoryCost: 1024, timeCost: 1 }).hash('secret')
+    const rows: Row[] = [{ id: 1, email: 'a@example.com', passwordHash: argonRow }]
+    const { model } = fakeModel(rows)
+    ;(model as unknown as { forceUpdate: () => Promise<never> }).forceUpdate = async () => {
+      throw new Error('database is read-only')
+    }
+    const manager = new AuthManager()
+    manager.useModel(model)
+    const session = fakeSession()
+    const guard = () => manager.createGuard<Row>('web', { ctx: {} as Context, session, manager })
+    const warn = console.warn
+    console.warn = () => {}
+    try {
+      expect(await guard().attempt({ email: 'a@example.com', password: 'secret' })).toBe(true)
+    } finally {
+      console.warn = warn
+    }
+
+    expect(rows[0].passwordHash).toBe(argonRow)
+    expect(await guard().check()).toBe(true)
+  })
+
   test('a failed attempt never rehashes', async () => {
     const argonRow = await new ScryptHasher({ memoryCost: 1024, timeCost: 1 }).hash('secret')
     const rows: Row[] = [{ id: 1, email: 'a@example.com', passwordHash: argonRow }]
