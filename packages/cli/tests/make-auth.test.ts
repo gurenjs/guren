@@ -1528,9 +1528,10 @@ export default app
       expect(validator).toContain('currentPassword: z')
       // The schema lowercases `email`, so a stored address differing only in
       // case must not make a name-only save ask for the password.
-      expect(controller).toContain("const credentialsChanged = email !== user.email.trim().toLowerCase() || password !== ''")
-      expect(controller).toContain('const emailChanged = email !== user.email\n')
-      expect(controller).toContain('this.auth.guard().validate({ email, password: currentPassword })')
+      expect(controller).toContain('const emailChanged = email !== user.email.trim().toLowerCase()\n')
+      expect(controller).toContain("if (emailChanged || password !== '') {")
+      // Unqualified, a Bearer request would resolve the token guard, whose validate() throws.
+      expect(controller).toContain("this.auth.guard('web').validate({ email, password: currentPassword })")
       // Before the conflict lookup, so a session alone cannot probe which addresses are taken.
       const gate = controller.indexOf('await this.currentPasswordCheck(user.email, currentPassword)')
       expect(gate).toBeGreaterThan(-1)

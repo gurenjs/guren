@@ -432,11 +432,13 @@ ${currentPasswordMethod}}
 
 const CURRENT_PASSWORD_CHECK_METHOD = `  // A session alone must not rotate the credentials that recover the account.
   // An account with no password hash (created through OAuth) fails here too.
+  // Named: unqualified, a Bearer request resolves the token guard, whose
+  // validate() always throws.
   private async currentPasswordCheck(email: string, currentPassword: string): Promise<void> {
     if (currentPassword === '') {
       throw ValidationException.withMessages({ currentPassword: 'Enter your current password to make this change.' })
     }
-    const confirmed = await this.auth.guard().validate({ email, password: currentPassword })
+    const confirmed = await this.auth.guard('web').validate({ email, password: currentPassword })
     if (!confirmed) {
       throw ValidationException.withMessages({ currentPassword: 'The current password is incorrect.' })
     }
@@ -498,10 +500,7 @@ import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'`
   const destructuredFields = includePassword ? '{ name, email, password, currentPassword }' : '{ name, email }'
   const credentialsGate = includePassword
     ? `
-    // Normalized as the schema normalizes \`email\`: a stored address differing
-    // only in case or whitespace is the same mailbox, so not a credential change.
-    const credentialsChanged = email !== user.email.trim().toLowerCase() || password !== ''
-    if (credentialsChanged) {
+    if (emailChanged || password !== '') {
       await this.currentPasswordCheck(user.email, currentPassword)
     }
 `
@@ -534,7 +533,9 @@ export default class ProfileController extends Controller {
     }
 
     const ${destructuredFields} = this.validated('profile.update').body
-    const emailChanged = email !== user.email
+    // Normalized as the schema normalizes \`email\`: a stored address differing
+    // only in case or whitespace is the same mailbox, so not a credential change.
+    const emailChanged = email !== user.email.trim().toLowerCase()
 ${credentialsGate}
     if (emailChanged) {
       const existing = await User.where({ email })

@@ -34,10 +34,11 @@ vi.mock('@guren/core', async () => {
 })
 import ProfileController from '../../app/Http/Controllers/ProfileController.js'
 
-function createAuthStub(user: unknown) {
+function createAuthStub(user: unknown, validate = vi.fn().mockResolvedValue(user)) {
   return {
     user: vi.fn().mockResolvedValue(user),
     login: vi.fn().mockResolvedValue(undefined),
+    guard: vi.fn(() => ({ validate })),
   }
 }
 
@@ -75,6 +76,7 @@ describe('ProfileController', () => {
         email: 'ada@example.com',
         password: 'password123',
         passwordConfirmation: 'password123',
+        currentPassword: 'old-password',
       }),
       headers: { 'Content-Type': 'application/json' },
     }) as unknown as Context
@@ -107,6 +109,7 @@ describe('ProfileController', () => {
         email: 'new@example.com',
         password: '',
         passwordConfirmation: '',
+        currentPassword: 'old-password',
       }),
       headers: { 'Content-Type': 'application/json' },
     }, { mail: {} }) as unknown as Context
@@ -123,5 +126,68 @@ describe('ProfileController', () => {
     )
     expect(mockSendEmailVerificationMail).toHaveBeenCalled()
     expect(payload.props.status).toBe('Profile updated. Check your new email address for a verification link.')
+  })
+
+  const changes = [
+    ['a password change', { email: 'ada@example.com', password: 'attacker-chosen', passwordConfirmation: 'attacker-chosen' }],
+    ['an email change', { email: 'attacker@example.com', password: '', passwordConfirmation: '' }],
+  ] as const
+  const refusals = [
+    ['without the current password', '', 'Enter your current password to make this change.'],
+    ['with a wrong current password', 'wrong-password', 'The current password is incorrect.'],
+  ] as const
+  for (const [change, fields] of changes) {
+    for (const [label, currentPassword, message] of refusals) {
+      it(`refuses ${change} ${label} and leaves the account and session alone`, async () => {
+        const controller = new ProfileController()
+        const validate = vi.fn().mockResolvedValue(null)
+        const auth = createAuthStub({ id: 1, name: 'Ada', email: 'ada@example.com' }, validate)
+        Object.defineProperty(controller, 'auth', { value: auth, configurable: true })
+        mockUserUpdate.mockClear()
+        mockUserWhere.mockClear()
+
+        const ctx = createControllerContext('http://blog.test/profile', {
+          method: 'POST',
+          body: JSON.stringify({ name: 'Ada', ...fields, currentPassword }),
+          headers: { 'Content-Type': 'application/json' },
+        }) as unknown as Context
+        controller.setContext(ctx)
+
+        await expect(controller.update()).rejects.toMatchObject({ errors: { currentPassword: [message] } })
+        expect(validate).toHaveBeenCalledTimes(currentPassword === '' ? 0 : 1)
+        // Unqualified, a Bearer request would resolve the token guard, whose validate() throws.
+        if (currentPassword !== '') expect(auth.guard).toHaveBeenCalledWith('web')
+        expect(mockUserWhere).not.toHaveBeenCalled()
+        expect(mockUserUpdate).not.toHaveBeenCalled()
+        expect(auth.login).not.toHaveBeenCalled()
+      })
+    }
+  }
+
+  it('treats an address differing only in case as unchanged: no password, no new verification', async () => {
+    const controller = new ProfileController()
+    const validate = vi.fn()
+    Object.defineProperty(controller, 'auth', {
+      value: createAuthStub({ id: 1, name: 'Ada', email: 'Ada@Example.com' }, validate),
+      configurable: true,
+    })
+    mockUserWhere.mockResolvedValue([])
+    mockUserUpdate.mockReset().mockResolvedValue(undefined)
+    mockUserFind.mockResolvedValue({ id: 1, name: 'Ada Lovelace', email: 'ada@example.com' })
+    mockSendEmailVerificationMail.mockClear()
+
+    const ctx = createControllerContext('http://blog.test/profile', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Ada Lovelace', email: 'ada@example.com', password: '', passwordConfirmation: '' }),
+      headers: { 'Content-Type': 'application/json' },
+    }) as unknown as Context
+    controller.setContext(ctx)
+
+    const response = await controller.update()
+    const { payload } = await readInertiaResponse(response)
+    expect(validate).not.toHaveBeenCalled()
+    expect(mockUserUpdate).toHaveBeenCalledWith({ id: 1 }, { name: 'Ada Lovelace', email: 'ada@example.com' })
+    expect(mockSendEmailVerificationMail).not.toHaveBeenCalled()
+    expect(payload.props.status).toBe('Profile updated successfully.')
   })
 })

@@ -3,7 +3,7 @@ import LoginController from '../app/Http/Controllers/Auth/LoginController.js'
 import RegisterController from '../app/Http/Controllers/Auth/RegisterController.js'
 import DashboardController from '../app/Http/Controllers/DashboardController.js'
 import ProfileController from '../app/Http/Controllers/ProfileController.js'
-import { throttleLogin, throttleRegistration } from '../app/Http/Middleware/AuthThrottle.js'
+import { throttleLogin, throttleProfileUpdate, throttleRegistration } from '../app/Http/Middleware/AuthThrottle.js'
 import { LoginSchema } from '../app/Http/Validators/LoginValidator.js'
 import { ProfileUpdateSchema } from '../app/Http/Validators/ProfileValidator.js'
 import { RegisterSchema } from '../app/Http/Validators/RegisterValidator.js'
@@ -21,6 +21,6 @@ export function registerAuthRoutes(router: Router<'auth' | 'guest'>): void {
     authed.post('/logout', [LoginController, 'destroy']).name('logout')
     authed.get('/dashboard', [DashboardController, 'index']).name('dashboard')
     authed.get('/profile', [ProfileController, 'edit']).name('profile.edit')
-    authed.put('/profile', { name: 'profile.update', body: ProfileUpdateSchema }, [ProfileController, 'update'])
+    authed.put('/profile', { name: 'profile.update', body: ProfileUpdateSchema, middlewares: [throttleProfileUpdate] }, [ProfileController, 'update'])
   })
 }

@@ -44,6 +44,7 @@ export const profileUpdateForm: RouteFormContract<'profile.update', 'PUT', '/pro
     name: { type: 'string', required: true, minLength: 1, maxLength: 120 },
     email: { type: 'string', required: true, format: 'email', minLength: 1 },
     password: { type: 'string', required: false },
+    currentPassword: { type: 'string', required: false },
   },
 }
 

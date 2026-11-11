@@ -26,10 +26,15 @@ export default class ProfileController extends Controller {
 
     // A ValidationException here is caught by InertiaServiceProvider, flashed to
     // the session and redirected back (303); useForm() keeps the typed input.
-    const { name, email, password: rawPassword } = await this.validateBody(ProfileUpdateSchema)
+    const { name, email, password: rawPassword, currentPassword } = await this.validateBody(ProfileUpdateSchema)
     const password = rawPassword ?? ''
 
-    const emailChanged = email !== authed.email
+    // Normalized as the schema normalizes `email`: a stored address differing only in case or
+    // whitespace is the same mailbox, so neither a credential change nor a new address to verify.
+    const emailChanged = email !== authed.email.trim().toLowerCase()
+    if (emailChanged || password !== '') {
+      await this.confirmCurrentPassword(authed.email, currentPassword)
+    }
 
     if (emailChanged) {
       const existing = await User.where({ email })
@@ -66,5 +71,19 @@ export default class ProfileController extends Controller {
         ? 'Profile updated. Check your new email address for a verification link.'
         : 'Profile updated successfully.',
     }, { title: 'Edit Profile | Guren Blog' })
+  }
+
+  // A session alone must not rotate the credentials that recover the account: the login()
+  // above would sign a stolen session in under the new password and sign the owner out.
+  // An account with no password hash (created through OAuth) fails here too. The guard is named:
+  // unqualified, a Bearer request resolves the token guard, whose validate() always throws.
+  private async confirmCurrentPassword(email: string, currentPassword: string): Promise<void> {
+    if (currentPassword === '') {
+      throw ValidationException.withMessages({ currentPassword: 'Enter your current password to make this change.' })
+    }
+    const confirmed = await this.auth.guard('web').validate({ email, password: currentPassword })
+    if (!confirmed) {
+      throw ValidationException.withMessages({ currentPassword: 'The current password is incorrect.' })
+    }
   }
 }
