@@ -342,8 +342,18 @@ export class R2Driver implements StorageDriver {
     // object's own metadata. TemporaryUrlOptions says an incapable driver ignores
     // them; callers needing the guarantee use `serve: 'proxy'`.
     void options
+    const bucketUrl = `https://${this.presign.accountId}.r2.cloudflarestorage.com/${this.presign.bucket}`
+    const url = `${bucketUrl}/${encodeKey(this.key(path))}`
+    // presignGetUrl() signs the pathname `new URL()` gives, which collapses `.` and `..`
+    // segments (encodeURIComponent keeps dots). Like LocalDriver, refuse a path that
+    // resolves outside the disk: the prefix, or the bucket when there is none.
+    const signedPath = new URL(url).pathname
+    const rootPath = trimTrailingSlashes(new URL(`${bucketUrl}/${encodeKey(this.prefix)}`).pathname)
+    if (signedPath !== rootPath && !signedPath.startsWith(`${rootPath}/`)) {
+      throw new Error(`R2Driver.temporaryUrl(): path escapes the storage root: "${path}"`)
+    }
     return presignGetUrl({
-      url: `https://${this.presign.accountId}.r2.cloudflarestorage.com/${this.presign.bucket}/${encodeKey(this.key(path))}`,
+      url,
       accessKeyId: this.presign.accessKeyId,
       secretAccessKey: this.presign.secretAccessKey,
       // R2's S3 API is single-region.
