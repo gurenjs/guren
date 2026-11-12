@@ -125,8 +125,8 @@ export async function makeController(name: string, options: WriterOptions = {}):
 
 /**
  * What `make:controller` leaves to do: the page its `index()` renders, while no
- * file provides it. The app does not typecheck until one does, and the path is
- * not the one `make:view <name>/Index --module` writes, which ignores the module.
+ * file provides it. The app does not typecheck until one does. The command it
+ * names carries `--module`, which `make:view` reads as the page's first directory.
  */
 export async function controllerNextStep(name: string, options: WriterOptions = {}): Promise<string | undefined> {
   const appRoot = writeRoot(options)
@@ -137,8 +137,11 @@ export async function controllerNextStep(name: string, options: WriterOptions = 
   for (const extension of PAGE_COMPONENT_EXTENSIONS) {
     if (await pathExists(resolve(appRoot, PAGES_DIR, `${view}${extension}`))) return undefined
   }
+  const command = moduleName
+    ? `make:view ${dirs.slice(1).join('/')}/Index --module ${moduleName}`
+    : `make:view ${view}`
   return (
     `Its index() renders ${pagesAccessor(...dirs)}.Index, which no page provides yet, so the app does not `
-    + `typecheck until one does: bunx guren make:view ${view}`
+    + `typecheck until one does: bunx guren ${command}`
   )
 }

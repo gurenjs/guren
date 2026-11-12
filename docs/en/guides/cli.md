@@ -356,7 +356,10 @@ Most `make:*` commands accept `--module <name>` to scaffold inside a module inst
 ```bash
 bunx guren make:controller Invoice --module billing   # modules/billing/app/Http/Controllers/InvoiceController.ts
 bunx guren make:model Invoice --module billing        # modules/billing/app/Models/Invoice.ts
+bunx guren make:view invoice/Index --module billing   # resources/js/pages/billing/invoice/Index.tsx
 ```
+
+Pages stay where codegen reads them. `make:view` and `make:feature` write a module's pages under the top-level `resources/js/pages/`, in a directory named after the module.
 
 `guren check`, `guren audit`, `guren context`, `model:list`, and `doctor` all scan `modules/*/` automatically, with no extra configuration needed. Two exceptions: `make:auth` (authentication is an app-wide concern, not a per-module one) and `make:migration` (drizzle-kit driven; migrations are generated from whichever schema paths `drizzle.config.ts` points at, module or not).
 

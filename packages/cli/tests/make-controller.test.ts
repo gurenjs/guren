@@ -136,7 +136,8 @@ describe('makeController', () => {
   })
 
   describe('controllerNextStep', () => {
-    const hintedView = (step: string | undefined): string => /make:view (\S+)$/u.exec(step ?? '')?.[1] ?? ''
+    const hintedCommand = (step: string | undefined): string => /bunx guren (make:view .+)$/u.exec(step ?? '')?.[1] ?? ''
+    const hintedView = (step: string | undefined): string => /^make:view (\S+)$/u.exec(hintedCommand(step))?.[1] ?? ''
 
     it('should name the page the scaffolded action renders and the command that writes it', async () => {
       await makeController('Comment')
@@ -154,20 +155,22 @@ describe('makeController', () => {
       expect(hintedView(await controllerNextStep('user-profile'))).toBe('userProfile/Index')
     })
 
-    it('should put a module controller page under the module name without --module', async () => {
+    it('should name a module controller page with the --module the controller was scaffolded with', async () => {
       await makeController('Invoice', { root: 'billing' })
 
       const step = await controllerNextStep('Invoice', { root: 'billing' })
 
       expect(step).toContain('pages.billing.invoice.Index')
-      expect(hintedView(step)).toBe('billing/invoice/Index')
+      expect(hintedCommand(step)).toBe('make:view invoice/Index --module billing')
     })
 
     it('should return nothing once the hinted command has written the page', async () => {
       await makeController('Invoice', { root: 'billing' })
-      const view = hintedView(await controllerNextStep('Invoice', { root: 'billing' }))
+      expect(hintedCommand(await controllerNextStep('Invoice', { root: 'billing' }))).toBe(
+        'make:view invoice/Index --module billing',
+      )
 
-      const written = await makeView(view)
+      const written = await makeView('invoice/Index', { root: 'billing' })
 
       expect(written).toContain('resources/js/pages/billing/invoice/Index.tsx')
       expect(await controllerNextStep('Invoice', { root: 'billing' })).toBeUndefined()

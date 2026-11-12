@@ -61,6 +61,29 @@ describe('makeView', () => {
     }
   })
 
+  // codegen reads pages from the top-level root only, so a page under modules/<name>/ would render nowhere.
+  it('should put a module page under the top-level pages root, in the module directory', async () => {
+    const workspace = await createTempWorkspace('guren-cli-view-module-')
+    try {
+      const result = await makeView('invoice/Index', { root: 'Billing' })
+
+      expect(result).toContain('resources/js/pages/billing/invoice/Index.tsx')
+      expect(existsSync(join(workspace.dir, 'modules'))).toBe(false)
+      expect(await readFile(result, 'utf8')).toContain('const Index')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('should reject a module name that would escape the pages root', async () => {
+    const workspace = await createTempWorkspace('guren-cli-view-module-traversal-')
+    try {
+      await expect(makeView('invoice/Index', { root: '../../outside' })).rejects.toThrow(/Invalid module name/)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   // Refuses before the write; "cannot tell" is carried by the tests above, and
   // the predicate's own branches are pinned in blueprints.test.ts.
   it('refuses an API-only app, writing nothing', async () => {
