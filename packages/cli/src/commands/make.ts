@@ -8,7 +8,7 @@ import { announceWrittenFiles, type WriterOptions } from '../utils'
 import { makeAuth } from '../make-auth'
 import { makeChannel } from '../make-channel'
 import { makeCommand, registerScaffoldedCommand } from '../make-command'
-import { makeController } from '../make-controller'
+import { controllerNextStep, makeController } from '../make-controller'
 import { makeEvent } from '../make-event'
 import { makeException } from '../make-exception'
 import { makeFactory } from '../make-factory'
@@ -45,9 +45,11 @@ function createMakeCommand(spec: MakeCommandSpec) {
       module: MODULE_ARG,
     },
     async run({ args }) {
-      const file = await makeFn(args.name, toWriterOptions(args))
+      const options = toWriterOptions(args)
+      const file = await makeFn(args.name, options)
       consola.success(`${resourceName} created at ${file}`)
-      if (nextStep) consola.info(nextStep)
+      const step = typeof nextStep === 'function' ? await nextStep(args.name, options) : nextStep
+      if (step) consola.info(step)
     },
   })
 }
@@ -60,14 +62,22 @@ type MakeCommandSpec = {
   resourceName: string
   /**
    * Printed after the success line, for a generator whose output does not work
-   * until the user does something else. Only `make:route` needs one: everything
-   * else here writes something the framework discovers.
+   * until the user does something else: `make:route` (nothing mounts the file)
+   * and `make:controller` (the page it renders). A function is asked after the
+   * write, and returns nothing when there is no step left.
    */
-  nextStep?: string
+  nextStep?: string | ((name: string, options: WriterOptions) => Promise<string | undefined>)
 }
 
 const makeCommandSpecs: MakeCommandSpec[] = [
-  { name: 'make:controller', description: 'Generate a new controller file.', argDescription: 'Controller class name', makeFn: makeController, resourceName: 'Controller' },
+  {
+    name: 'make:controller',
+    description: 'Generate a new controller file.',
+    argDescription: 'Controller class name',
+    makeFn: makeController,
+    resourceName: 'Controller',
+    nextStep: controllerNextStep,
+  },
   { name: 'make:model', description: 'Generate a new model file.', argDescription: 'Model class name', makeFn: makeModel, resourceName: 'Model' },
   { name: 'make:view', description: 'Generate a new view component.', argDescription: 'View component path', makeFn: makeView, resourceName: 'View' },
   {

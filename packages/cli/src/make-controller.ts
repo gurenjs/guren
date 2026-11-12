@@ -1,7 +1,22 @@
+import { resolve } from 'node:path'
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { CONTROLLERS_DIR } from './discovery'
+import { PAGE_COMPONENT_EXTENSIONS } from './inertia-pages'
 import type { WriterOptions } from './utils'
-import { coreImportLine, docComment, kebabCase, pagesAccessor, safeModuleName, scaffoldFile, writeRoot } from './utils'
+import {
+  coreImportLine,
+  docComment,
+  ensureSuffix,
+  kebabCase,
+  pagesAccessor,
+  pathExists,
+  resourceName,
+  safeModuleName,
+  scaffoldFile,
+  writeRoot,
+} from './utils'
+
+const PAGES_DIR = 'resources/js/pages'
 
 export interface ControllerActionSource {
   name: string
@@ -44,15 +59,25 @@ ${actions.join('\n\n')}
 `
 }
 
-function inertiaControllerTemplate(className: string, resourcePath: string, moduleName: string | undefined): string {
+/**
+ * The directories of the page the scaffolded `index()` renders, under the pages
+ * root. A key of `.guren/pages.gen.ts` is the directory name as written, so
+ * these are the accessor's keys (`userProfile`, below the module's name).
+ */
+function controllerPageDirs(className: string, moduleName: string | undefined): string[] {
+  const resourcePath = kebabCase(className.replace(/Controller$/u, ''))
   const pageVar = resourcePath.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
+  return moduleName ? [moduleName, pageVar] : [pageVar]
+}
+
+function inertiaControllerTemplate(className: string, moduleName: string | undefined): string {
   return buildControllerSource({
     className,
     imports: [`import { pages } from '@/.guren/pages.gen'`],
     actions: [
       {
         name: 'index',
-        body: `    return this.inertia(${pagesAccessor(moduleName, pageVar)}.Index, {}, {
+        body: `    return this.inertia(${pagesAccessor(...controllerPageDirs(className, moduleName))}.Index, {}, {
       title: '${className.replace(/Controller$/u, '')}',
     })`,
       },
@@ -93,8 +118,27 @@ export async function makeController(name: string, options: WriterOptions = {}):
       if (apiOnly) {
         return jsonControllerTemplate(normalizedName)
       }
-      const resourcePath = kebabCase(normalizedName.replace(/Controller$/u, ''))
-      return inertiaControllerTemplate(normalizedName, resourcePath, moduleName)
+      return inertiaControllerTemplate(normalizedName, moduleName)
     },
   }, { ...options, cwd: appRoot })
+}
+
+/**
+ * What `make:controller` leaves to do: the page its `index()` renders, while no
+ * file provides it. The app does not typecheck until one does, and the path is
+ * not the one `make:view <name>/Index --module` writes, which ignores the module.
+ */
+export async function controllerNextStep(name: string, options: WriterOptions = {}): Promise<string | undefined> {
+  const appRoot = writeRoot(options)
+  if (await isConfirmedApiOnlyApp(appRoot)) return undefined
+  const moduleName = options.root ? safeModuleName(options.root) : undefined
+  const dirs = controllerPageDirs(ensureSuffix(resourceName(name).className, 'Controller'), moduleName)
+  const view = [...dirs, 'Index'].join('/')
+  for (const extension of PAGE_COMPONENT_EXTENSIONS) {
+    if (await pathExists(resolve(appRoot, PAGES_DIR, `${view}${extension}`))) return undefined
+  }
+  return (
+    `Its index() renders ${pagesAccessor(...dirs)}.Index, which no page provides yet, so the app does not `
+    + `typecheck until one does: bunx guren make:view ${view}`
+  )
 }
