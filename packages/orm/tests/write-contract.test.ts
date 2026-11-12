@@ -125,7 +125,7 @@ function writeContract(name: string, factory: (() => WriteFixture | Promise<Writ
     })
 
     it('refuses a string amount the adapter is handed directly, where it would be inlined', async () => {
-      await expect(DrizzleAdapter.incrementAdvanced?.(fixture.table, [], 'balance', '1; DROP TABLE entries')).rejects.toThrow('not a decimal literal')
+      await expect(DrizzleAdapter.incrementAdvanced?.(fixture.table, [], 'balance', '1; DROP TABLE entries')).rejects.toThrow('not a numeric literal')
       expect(await Entry.newQuery().count()).toBe(2)
     })
 

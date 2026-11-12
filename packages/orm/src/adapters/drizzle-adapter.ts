@@ -1,5 +1,5 @@
 import { and, asc, count, desc, eq, inArray, isNull, max, min, sql } from 'drizzle-orm'
-import type { AnyColumn } from 'drizzle-orm'
+import type { AnyColumn, SQL } from 'drizzle-orm'
 import { DECIMAL_LITERAL } from '../increment-amount'
 import type { IncrementValue } from '../increment-amount'
 import { DEFAULT_IN_LIST_SIZE } from '../internal-keys'
@@ -189,22 +189,43 @@ async function resolveWithReturning<T>(query: unknown): Promise<{ usedReturning:
   return { usedReturning: false, row: undefined }
 }
 
+/** A string-typed column that still holds a number: `numeric`/`decimal` (unsigned too) and a bigint in string mode. */
+const NUMERIC_STRING_DETAILS = new Set(['numeric', 'unumeric', 'int64', 'uint64'])
+
 /**
  * Refuses `column + amount` where SQL would not add: SQLite stores `'one' + 1`
  * as `1` and `1.5` in an integer column, both without an error. `dataType` is
- * `number int32`, `bigint int64`, `string numeric`, `string`, `object date`, …
+ * `number int32`, `number uint32`, `bigint int64`, `string numeric`, `string`,
+ * `boolean`, `object date`, …; a `custom` column is the database's to judge.
  */
 function assertAddable(column: AnyColumn, field: string, amount: IncrementValue): void {
   const dataType = (column as { dataType?: unknown }).dataType
   if (typeof dataType !== 'string') return
-  const [kind, width = ''] = dataType.split(' ')
-  if (kind !== 'number' && kind !== 'bigint' && dataType !== 'string numeric') {
+  const [kind, detail = ''] = dataType.split(' ')
+  const refused = kind === 'string' ? !NUMERIC_STRING_DETAILS.has(detail) : kind === 'boolean' || kind === 'object' || kind === 'array'
+  if (refused) {
     throw new TypeError(`DrizzleAdapter: cannot add to "${field}", a ${dataType} column; increment() and decrement() take a numeric column.`)
   }
   const fractional = typeof amount === 'number' ? !Number.isInteger(amount) : typeof amount === 'string' && amount.includes('.')
-  if (fractional && width.startsWith('int')) {
+  if (fractional && /^u?int\d/.test(detail)) {
     throw new TypeError(`DrizzleAdapter: cannot add ${String(amount)} to "${field}", an integer column.`)
   }
+}
+
+/** `String(number)` of a finite number, a bigint, or a decimal string: digits, one point, an exponent. */
+const NUMERIC_LITERAL = /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/
+
+/**
+ * The amount as a SQL literal. A bound amount reaches each driver in its own
+ * encoding: D1 takes no bigint, the Data API sends one as a string, and MySQL
+ * reads a bound string as a double, which a `decimal` column cannot afford.
+ */
+function amountLiteral(amount: IncrementValue): SQL {
+  const literal = String(amount)
+  if (typeof amount === 'string' ? !DECIMAL_LITERAL.test(literal) : !NUMERIC_LITERAL.test(literal)) {
+    throw new TypeError(`DrizzleAdapter: increment amount ${JSON.stringify(literal)} is not a numeric literal.`)
+  }
+  return sql.raw(literal)
 }
 
 /**
@@ -515,14 +536,9 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
       if (!db.update) {
         throw new Error('DrizzleAdapter: configured database does not support updates.')
       }
-      if (typeof amount === 'string' && !DECIMAL_LITERAL.test(amount)) {
-        throw new TypeError(`DrizzleAdapter: increment amount ${JSON.stringify(amount)} is not a decimal literal.`)
-      }
-
+      const delta = amountLiteral(amount)
       const column = resolveColumn(table, field)
       assertAddable(column, field, amount)
-      // MySQL reads a bound string as a double; an inlined literal keeps `decimal` arithmetic exact.
-      const delta = typeof amount === 'string' ? sql.raw(amount) : amount
       const data = { [field]: sql`${column} + ${delta}` }
       const clause = buildDrizzleConditions(table, conditions)
       return countChangedRows(clause ? db.update(table).set(data).where(clause) : db.update(table).set(data), column)

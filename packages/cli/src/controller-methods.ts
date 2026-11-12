@@ -299,7 +299,7 @@ const UPDATE_CALL_PATTERN = modelCallPattern('update')
 
 const COUNTER_NAMES = ['increment', 'decrement']
 const STATIC_COUNTER_PATTERN = new RegExp(staticCallSource(COUNTER_NAMES))
-const CHAINED_COUNTER_PATTERN = new RegExp(`\\)\\s*\\.\\s*(?:${COUNTER_NAMES.join('|')})\\s*\\(`, 'g')
+const CHAINED_COUNTER_PATTERN = new RegExp(`\\)\\s*\\??\\.\\s*(?:${COUNTER_NAMES.join('|')})\\s*\\(`, 'g')
 
 /**
  * `increment()`/`decrement()` on a model: on the class, or ending a chain that
@@ -314,23 +314,64 @@ function countsOnModel(body: string): boolean {
   return false
 }
 
-/** The name a call chain starts from, given where its last call closes: `Product` in `Product.where(a).where(b)`. */
+const IDENTIFIER_CHAR = /[\w$]/
+const SPACE = /\s/
+
+function skipSpaceBack(body: string, end: number): number {
+  while (end > 0 && SPACE.test(body[end - 1]!)) end--
+  return end
+}
+
+/** The identifier ending at `end`, spaces before `end` skipped. */
+function identifierBefore(body: string, end: number): { name: string; start: number } | undefined {
+  const stop = skipSpaceBack(body, end)
+  let start = stop
+  while (start > 0 && IDENTIFIER_CHAR.test(body[start - 1]!)) start--
+  return start === stop ? undefined : { name: body.slice(start, stop), start }
+}
+
+/** Where the `(` or `<` matching the closer at `close` opens. */
+function openerOf(body: string, close: number, open: string, closer: string): number {
+  let depth = 0
+  for (let at = close; at >= 0; at--) {
+    if (body[at] === closer) depth++
+    else if (body[at] === open && --depth === 0) return at
+  }
+  return -1
+}
+
+/**
+ * The name a call chain starts from, given where its last call closes:
+ * `Product` in `Product.where(a)?.where<T>(b)`. Undefined for `new Limiter().hit()`,
+ * whose root is an instance. Scans backward by index: a regex over the text
+ * before each call is quadratic in a long identifier.
+ */
 function chainRoot(body: string, close: number): string | undefined {
   let at = close
   for (;;) {
-    let depth = 0
-    for (; at >= 0; at--) {
-      if (body[at] === ')') depth++
-      else if (body[at] === '(' && --depth === 0) break
+    let open = openerOf(body, at, '(', ')')
+    if (open < 0) return undefined
+    let beforeCall = skipSpaceBack(body, open)
+    if (body[beforeCall - 1] === '>') {
+      open = openerOf(body, beforeCall - 1, '<', '>')
+      if (open < 0) return undefined
+      beforeCall = open
     }
-    if (at < 0) return undefined
-    const callee = /([A-Za-z_$][\w$]*)\s*$/.exec(body.slice(0, at))
-    if (!callee) return undefined
-    const before = body.slice(0, callee.index).trimEnd()
-    if (!before.endsWith('.')) return callee[1]
-    const receiver = before.slice(0, -1).trimEnd()
-    if (!receiver.endsWith(')')) return /([A-Za-z_$][\w$]*)(?:\s*\.\s*[A-Za-z_$][\w$]*)*$/.exec(receiver)?.[1]
-    at = receiver.length - 1
+    let name = identifierBefore(body, beforeCall)
+    for (;;) {
+      if (!name) return undefined
+      let receiverEnd = skipSpaceBack(body, name.start)
+      if (body[receiverEnd - 1] !== '.') {
+        return identifierBefore(body, receiverEnd)?.name === 'new' ? undefined : name.name
+      }
+      receiverEnd = skipSpaceBack(body, receiverEnd - 1)
+      if (body[receiverEnd - 1] === '?') receiverEnd = skipSpaceBack(body, receiverEnd - 1)
+      if (body[receiverEnd - 1] === ')') {
+        at = receiverEnd - 1
+        break
+      }
+      name = identifierBefore(body, receiverEnd)
+    }
   }
 }
 

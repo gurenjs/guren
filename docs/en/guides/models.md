@@ -177,7 +177,7 @@ await Post.increment({ id: post.id }, 'views')
 await Product.decrement({ id: product.id }, 'stock', 2)
 ```
 
-Reading a value, adding to it in the controller and writing it back loses counts when two requests overlap. Here the database does the addition, so every call counts.
+Reading a value, adding to it in the controller and writing it back loses counts when two requests overlap. Here the database does the addition, so every call counts. A counter kept in a GET action also counts `HEAD` requests and Inertia prefetches unless the action guards it: see [Writes in a GET Action](./controllers.md#writes-in-a-get-action).
 
 Both resolve to the number of rows they changed, so a condition works as a guard:
 
