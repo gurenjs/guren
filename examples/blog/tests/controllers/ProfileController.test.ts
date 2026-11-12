@@ -88,6 +88,9 @@ describe('ProfileController', () => {
 
     expect(payload.component).toBe('profile/Edit')
     expect(payload.props.status).toBe('Profile updated successfully.')
+    // The password changed, so the session follows the new hash.
+    const { auth } = controller as unknown as { auth: ReturnType<typeof createAuthStub> }
+    expect(auth.login).toHaveBeenCalledWith({ id: 1, name: 'Ada Lovelace', email: 'ada@example.com' })
   })
 
   it('clears emailVerifiedAt and sends a new verification email when the email changes', async () => {
@@ -187,6 +190,9 @@ describe('ProfileController', () => {
     const { payload } = await readInertiaResponse(response)
     expect(validate).not.toHaveBeenCalled()
     expect(mockUserUpdate).toHaveBeenCalledWith({ id: 1 }, { name: 'Ada Lovelace', email: 'ada@example.com' })
+    // No password change: logging in again would bind the session to whatever hash is stored by now.
+    const { auth } = controller as unknown as { auth: ReturnType<typeof createAuthStub> }
+    expect(auth.login).not.toHaveBeenCalled()
     expect(mockSendEmailVerificationMail).not.toHaveBeenCalled()
     expect(payload.props.status).toBe('Profile updated successfully.')
   })

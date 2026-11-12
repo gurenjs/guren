@@ -264,7 +264,7 @@ if (refreshed) {
 }
 ```
 
-The generated profile controller does this. Two other events sign sessions out the same way: a session opened before the app ran a version with this check carries no digest, and a login or a `validate()` call that rehashes the stored password (see [Password hasher](#password-hasher)) changes the hash for that account's other sessions.
+The generated profile controller does this, and only when the request changed the password. `login()` binds the session to the hash stored at that moment, so after any other update it could carry a session past a password reset that landed during the request. Two other events sign sessions out the same way: a session opened before the app ran a version with this check carries no digest, and a login or a `validate()` call that rehashes the stored password (see [Password hasher](#password-hasher)) changes the hash for that account's other sessions.
 
 A custom user provider opts in by implementing `credentialFingerprint(user)`. Without it, the guard does not bind sessions to a credential.
 
