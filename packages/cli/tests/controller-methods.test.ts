@@ -171,9 +171,43 @@ describe('controller member patterns', () => {
     expect(mutatesRecords('if (!new PostPolicy().delete(user, post)) return this.redirect(back)')).toBe(false)
   })
 
+  // A builder is held in a local as often as it is chained off the class, and a transaction hands its scope to a parameter.
+  it('should count a chain that starts at a local standing for a model', () => {
+    expect(mutatesRecords('const query = Post.newQuery()\nawait query.where({ id }).update(data)')).toBe(true)
+    expect(mutatesRecords('const scoped: Scope = Post.inTransaction(trx)\nawait scoped.where(a).delete()')).toBe(true)
+    expect(mutatesRecords('await Post.transaction(async (_trx, txPost) => {\n  await txPost.where({ id }).delete()\n})')).toBe(true)
+    expect(mutatesRecords('await Post.transaction(async (trx: Handle, posts) => { await posts.where(a).update(data) })')).toBe(true)
+  })
+
+  it('should not count a chain that starts at a local holding something else', () => {
+    expect(mutatesRecords('const post = await Post.find(1)\nawait post.comments().delete()')).toBe(false)
+    expect(mutatesRecords('const store = cache()\nawait store.tags(a).delete(key)')).toBe(false)
+    expect(mutatesRecords('await Post.transaction(async (trx, posts) => { await trx.savepoint(a).delete() })')).toBe(false)
+  })
+
+  it('should find the start of a chain through parentheses, a non-null assertion, a subscript and type arguments', () => {
+    expect(mutatesRecords('await (Post.where({ id })).delete()')).toBe(true)
+    expect(mutatesRecords('await Post.where({ id })!.where({ active: true }).delete()')).toBe(true)
+    expect(mutatesRecords('await Post.where({ id })!.delete()')).toBe(true)
+    expect(mutatesRecords("await Models['Post'].where({ id }).delete()")).toBe(true)
+    expect(mutatesRecords('await Post.newQuery<typeof Post & { f: () => void }>()\n  .where({ id }).delete()')).toBe(true)
+  })
+
+  it('should not count a chain those lead to something other than a model', () => {
+    expect(mutatesRecords('await (cache().store()).delete(key)')).toBe(false)
+    expect(mutatesRecords('await posts[0].where(a).delete()')).toBe(false)
+    expect(mutatesRecords('return (await Post.find(1)).versions().delete()')).toBe(false)
+  })
+
+  it('should read an unbalanced body as no write, without throwing', () => {
+    expect(mutatesRecords('a).delete()')).toBe(false)
+    expect(mutatesRecords('x]).update()')).toBe(false)
+    expect(mutatesRecords('>().delete()')).toBe(false)
+  })
+
   it('should count a create() and a save() as a local tool write, beside what an action counts', () => {
     expect(writesInLocalTool('return Note.create({ text })')).toBe(true)
-    expect(writesInLocalTool('await Ticket.query().where(a).update(data)')).toBe(true)
+    expect(writesInLocalTool('await Ticket.newQuery().where(a).update(data)')).toBe(true)
     expect(writesInLocalTool('await ticket.save()')).toBe(true)
     expect(writesInLocalTool("await Ticket.increment({ id }, 'replies')")).toBe(true)
     expect(mutatesRecords('return Note.create({ text })')).toBe(false)

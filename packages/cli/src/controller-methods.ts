@@ -279,19 +279,24 @@ export function authTypeArgumentPattern(typeName: string): RegExp {
 
 /**
  * A test for a call to one of `names` on a model: on the class (`Post.update(…)`),
- * or ending a chain that starts at a PascalCase name (`Post.where(…).delete()`).
- * The names are common ones, and other chains end the same way:
- * `createHash(algo).update(data)`, `storage.disk().delete(path)`,
- * `cache().store().increment(key)`. `map.delete(key)` follows no call at all.
+ * or ending a chain that starts at one (`Post.where(…).delete()`) or at a local
+ * standing for one ({@link modelLocals}). The names are common ones, and other
+ * chains end the same way: `createHash(algo).update(data)`,
+ * `storage.disk().delete(path)`. `map.delete(key)` follows no call at all.
  */
 function modelCall(...names: string[]): (body: string) => boolean {
   const alternation = names.join('|')
   const onClass = new RegExp(`\\b[A-Z][A-Za-z0-9_]*\\s*\\.\\s*(?:${alternation})\\s*\\(`)
-  const chained = new RegExp(`\\)\\s*\\??\\.\\s*(?:${alternation})\\s*\\(`, 'g')
+  const chained = new RegExp(`\\)\\s*(?:\\?|!\\s*)?\\.\\s*(?:${alternation})\\s*\\(`, 'g')
   return (body) => {
     if (onClass.test(body)) return true
+    let locals: Set<string> | undefined
     for (const match of body.matchAll(chained)) {
-      if (/^[A-Z]/.test(chainRoot(body, match.index) ?? '')) return true
+      const root = chainRoot(body, match.index)
+      if (root === undefined) continue
+      if (/^[A-Z]/.test(root)) return true
+      locals ??= modelLocals(body)
+      if (locals.has(root)) return true
     }
     return false
   }
@@ -300,8 +305,26 @@ function modelCall(...names: string[]): (body: string) => boolean {
 /** What the annotation-honesty rules count as a write beside the force writes (RFC 0016 §5.5). */
 const writesOnModel = modelCall('delete', 'forceDelete', 'update', 'increment', 'decrement')
 
+// Not awaited: `const post = await Post.find(1)` holds a record, `const query = Post.newQuery()` a builder.
+const BUILDER_BINDING_PATTERN = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]*)?=\s*[A-Z][A-Za-z0-9_]*\s*\./g
+// `Post.transaction(async (trx, posts) => …)`: the scope is the callback's second parameter.
+const TRANSACTION_SCOPE_PATTERN
+  = /\b[A-Z][A-Za-z0-9_]*\s*\.\s*transaction\s*\(\s*(?:async\s+)?(?:function\s*)?\(\s*[\w$]+\s*(?::[^,()]*)?,\s*([A-Za-z_$][\w$]*)/g
+
+/** The locals of a body that stand for a model: a builder it binds off one, and a transaction's scope. */
+function modelLocals(body: string): Set<string> {
+  const names = new Set<string>()
+  for (const pattern of [BUILDER_BINDING_PATTERN, TRANSACTION_SCOPE_PATTERN]) {
+    for (const match of body.matchAll(pattern)) names.add(match[1]!)
+  }
+  return names
+}
+
 const IDENTIFIER_CHAR = /[\w$]/
 const SPACE = /\s/
+// A `(` after one of these opens a parenthesized expression, not a call's arguments.
+const EXPRESSION_KEYWORDS = new Set(['await', 'return', 'yield', 'void', 'typeof', 'throw', 'case', 'else', 'in', 'of'])
+const AWAITED_GROUP_PATTERN = /^\s*await\b/
 
 function skipSpaceBack(body: string, end: number): number {
   while (end > 0 && SPACE.test(body[end - 1]!)) end--
@@ -316,21 +339,35 @@ function identifierBefore(body: string, end: number): { name: string; start: num
   return start === stop ? undefined : { name: body.slice(start, stop), start }
 }
 
-/** Where the `(` or `<` matching the closer at `close` opens. */
+/** Where the `(`, `[` or `<` matching the closer at `close` opens. An arrow's `>` closes no type argument. */
 function openerOf(body: string, close: number, open: string, closer: string): number {
   let depth = 0
   for (let at = close; at >= 0; at--) {
-    if (body[at] === closer) depth++
+    if (body[at] === closer && !(closer === '>' && body[at - 1] === '=')) depth++
     else if (body[at] === open && --depth === 0) return at
   }
   return -1
 }
 
+/** `end` moved back over what trails a receiver without naming one: `?`, `!` and `[…]`. -1 for an unopened bracket. */
+function receiverEndBefore(body: string, end: number): number {
+  let at = skipSpaceBack(body, end)
+  for (;;) {
+    const last = body[at - 1]
+    if (last === '?' || last === '!') at = skipSpaceBack(body, at - 1)
+    else if (last === ']') {
+      const open = openerOf(body, at - 1, '[', ']')
+      if (open < 0) return -1
+      at = skipSpaceBack(body, open)
+    } else return at
+  }
+}
+
 /**
  * The name a call chain starts from, given where its last call closes:
- * `Product` in `Product.where(a)?.where<T>(b)`. Undefined for `new Limiter().hit()`,
- * whose root is an instance. Scans backward by index: a regex over the text
- * before each call is quadratic in a long identifier.
+ * `Product` in `Product.where(a)?.where<T>(b)` and in `(Models['Product'].where(a))`.
+ * Undefined for `new Limiter().hit()`, whose root is an instance. Scans backward
+ * by index: a regex over the text before each call is quadratic in a long identifier.
  */
 function chainRoot(body: string, close: number): string | undefined {
   let at = close
@@ -338,20 +375,28 @@ function chainRoot(body: string, close: number): string | undefined {
     let open = openerOf(body, at, '(', ')')
     if (open < 0) return undefined
     let beforeCall = skipSpaceBack(body, open)
-    if (body[beforeCall - 1] === '>') {
+    const typeArguments = body[beforeCall - 1] === '>'
+    if (typeArguments) {
       open = openerOf(body, beforeCall - 1, '<', '>')
       if (open < 0) return undefined
       beforeCall = open
     }
     let name = identifierBefore(body, beforeCall)
+    if (!typeArguments && (!name || EXPRESSION_KEYWORDS.has(name.name))) {
+      const inner = receiverEndBefore(body, at)
+      // `(await Post.find(1))` is what the call resolved to, a record.
+      if (body[inner - 1] !== ')' || AWAITED_GROUP_PATTERN.test(body.slice(open + 1, open + 16))) return undefined
+      at = inner - 1
+      continue
+    }
     for (;;) {
       if (!name) return undefined
       let receiverEnd = skipSpaceBack(body, name.start)
       if (body[receiverEnd - 1] !== '.') {
         return identifierBefore(body, receiverEnd)?.name === 'new' ? undefined : name.name
       }
-      receiverEnd = skipSpaceBack(body, receiverEnd - 1)
-      if (body[receiverEnd - 1] === '?') receiverEnd = skipSpaceBack(body, receiverEnd - 1)
+      receiverEnd = receiverEndBefore(body, receiverEnd - 1)
+      if (receiverEnd < 0) return undefined
       if (body[receiverEnd - 1] === ')') {
         at = receiverEnd - 1
         break
