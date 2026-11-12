@@ -97,6 +97,7 @@ const hits = await Post.where((q) => {
 | `.sum(column)` / `.avg(column)` | Sum or average of a column over matching records |
 | `.min(column)` / `.max(column)` | Smallest or largest value of a column |
 | `.exists()` | Whether any record matches |
+| `.increment(column, amount?)` / `.decrement(column, amount?)` | Add to or subtract from a column in one `UPDATE` |
 | `.toDrizzle(query?)` | A Drizzle select that carries the model's conditions and scopes |
 
 ### Aggregates
@@ -166,6 +167,34 @@ await Post.delete({ id: post.id })
 ```
 
 Bulk `update()`, `forceUpdate()`, and `delete()` reject `limit()`, `offset()`, and `orderBy()`. Select the intended IDs first, then write with `whereIn()`. On a `SoftDeletes` model, builder `delete()` also marks rows deleted; use `forceDelete()` for permanent removal.
+
+### Incrementing a column
+
+`increment()` and `decrement()` add to a numeric column inside the database, in a single `UPDATE`:
+
+```ts
+await Post.increment({ id: post.id }, 'views')
+await Product.decrement({ id: product.id }, 'stock', 2)
+```
+
+Reading a value, adding to it in the controller and writing it back loses counts when two requests overlap. Here the database does the addition, so every call counts.
+
+Both resolve to the number of rows they changed, so a condition works as a guard:
+
+```ts
+const taken = await Product.where({ id: product.id })
+  .where('stock', '>=', quantity)
+  .decrement('stock', quantity)
+
+if (taken === 0) {
+  // Not enough stock. Nothing was written.
+}
+```
+
+- The amount defaults to `1`. A `numeric` or `decimal` column also takes a decimal string such as `'10.50'`, which keeps every digit.
+- [Global scopes](#global-scopes) apply as they do to `update()`. `fillable`, mutators, and [hooks](#model-hooks) do not run, since the column is named in your code and no request data is written.
+- A `NULL` stays `NULL`. Declare a counter column with `.notNull().default(0)`.
+- On a builder, `limit()`, `offset()`, and `orderBy()` are rejected, as for the other bulk writes.
 
 ### Transactions
 

@@ -98,6 +98,7 @@ const hits = await Post.where((q) => {
 | `.sum(column)` / `.avg(column)` | マッチするレコードの列の合計・平均を返す |
 | `.min(column)` / `.max(column)` | 列の最小値・最大値を返す |
 | `.exists()` | マッチするレコードがあるかを返す |
+| `.increment(column, amount?)` / `.decrement(column, amount?)` | 1 回の `UPDATE` でカラムに加算・減算する |
 | `.toDrizzle(query?)` | モデルの条件とスコープを持った Drizzle の select を返す |
 
 ### 集計
@@ -169,6 +170,34 @@ await Post.delete({ id: post.id })
 ```
 
 一括の `update()`・`forceUpdate()`・`delete()` では、`limit()`・`offset()`・`orderBy()` を指定できません。先に対象の ID を取得してから、`whereIn()` で更新・削除してください。`SoftDeletes` を使うモデルでは、ビルダーの `delete()` も論理削除になります。物理削除には `forceDelete()` を使います。
+
+### カラムの加算と減算
+
+`increment()` と `decrement()` は、数値のカラムへの加算をデータベースの中で行います。発行される `UPDATE` は 1 回です。
+
+```ts
+await Post.increment({ id: post.id }, 'views')
+await Product.decrement({ id: product.id }, 'stock', 2)
+```
+
+値を読み、コントローラで足してから書き戻す方法では、2 つのリクエストが重なったときに片方の加算が失われます。この 2 つのメソッドではデータベースが加算するので、呼び出した回数がそのまま反映されます。
+
+どちらも変更した行数を返すので、条件を付けると在庫の確認を兼ねられます。
+
+```ts
+const taken = await Product.where({ id: product.id })
+  .where('stock', '>=', quantity)
+  .decrement('stock', quantity)
+
+if (taken === 0) {
+  // 在庫が足りず、何も書き込まれていない
+}
+```
+
+- 加算する量を省略すると `1` になります。`numeric` や `decimal` のカラムには `'10.50'` のような小数の文字列も渡せて、桁が落ちません。
+- [グローバルスコープ](#グローバルスコープ)は `update()` と同じように適用されます。カラムはコードで指定し、リクエストのデータは書き込まないので、`fillable`、ミューテータ、[フック](#モデルフック)は通りません。
+- `NULL` のカラムは `NULL` のままです。カウンタにするカラムは `.notNull().default(0)` で定義してください。
+- ビルダーでは、ほかの一括書き込みと同じく `limit()`・`offset()`・`orderBy()` を指定できません。
 
 ### トランザクション
 

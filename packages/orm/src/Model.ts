@@ -23,6 +23,8 @@ import { QueryBuilder } from './QueryBuilder'
 import type {
   EagerLoadConstraint,
   EagerLoadConstraints,
+  IncrementAmount,
+  NumericFieldKey,
   WhereGroupCallback,
   WhereOperator,
 } from './QueryBuilder'
@@ -1250,6 +1252,32 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     await lifecycle.after(result as unknown as Record<string, unknown>)
 
     return this.applyReadTransforms(result)
+  }
+
+  /**
+   * `field = field + amount` in one statement for the rows matching `where`,
+   * resolving to how many changed. Runs no hooks; see `QueryBuilder.increment()`.
+   * @example await Post.increment({ id }, 'views')
+   */
+  static async increment<T extends typeof Model, K extends NumericFieldKey<TRecordFor<T>>>(
+    this: T,
+    where: WhereClauseFor<T>,
+    field: K,
+    amount?: IncrementAmount<TRecordFor<T>[K]>,
+    writeOptions?: ModelWriteOptions,
+  ): Promise<number> {
+    return this.newQuery(writeOptions).where(where as Partial<Record<string, unknown>>).increment(field, amount)
+  }
+
+  /** `increment()` with `amount` subtracted. */
+  static async decrement<T extends typeof Model, K extends NumericFieldKey<TRecordFor<T>>>(
+    this: T,
+    where: WhereClauseFor<T>,
+    field: K,
+    amount?: IncrementAmount<TRecordFor<T>[K]>,
+    writeOptions?: ModelWriteOptions,
+  ): Promise<number> {
+    return this.newQuery(writeOptions).where(where as Partial<Record<string, unknown>>).decrement(field, amount)
   }
 
   static async delete<T extends typeof Model>(

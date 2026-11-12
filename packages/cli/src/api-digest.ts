@@ -15,7 +15,8 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
   \`all()\` · \`create(data)\` · \`update(where, data)\` · \`delete(where)\` · \`paginate(options?)\` ·
   \`create(data, { set: { authorId } })\` / \`update(where, data, { set })\` (server-chosen columns kept out of fillable) ·
   \`transaction(async (trx, txModel) => ...)\` (\`txModel\` = \`Model.inTransaction(trx)\`; any other model joins via
-  \`Other.inTransaction(trx)\`) · \`forceCreate/forceUpdate\` (bypass fillable — never pass request input)
+  \`Other.inTransaction(trx)\`) · \`forceCreate/forceUpdate\` (bypass fillable — never pass request input) ·
+  \`increment(where, column, amount = 1)\` / \`decrement(...)\` (one atomic \`UPDATE\`, resolves to rows changed; also on the chain)
 - Where: \`where({ a: 1, ids: [1, 2] })\` (object = AND, array value = IN) or \`where(field, op, value)\` —
   operators (exact set): \`=\` \`!=\` \`>\` \`<\` \`>=\` \`<=\` \`like\` \`in\` \`not in\` \`is null\` \`is not null\`.
   NULL: \`whereNull(field)\` / \`whereNotNull(field)\`, or the operator form \`where(field, 'is null', null)\` / \`orWhere(field, 'is null', null)\`;

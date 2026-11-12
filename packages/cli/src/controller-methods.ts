@@ -294,7 +294,7 @@ function modelCallPattern(...names: string[]): RegExp {
 /** A record deletion, for the annotation-honesty rules (RFC 0016 §5.5). */
 export const DELETE_CALL_PATTERN = modelCallPattern('delete', 'forceDelete')
 
-const UPDATE_CALL_PATTERN = modelCallPattern('update')
+const UPDATE_CALL_PATTERN = modelCallPattern('update', 'increment', 'decrement')
 
 /**
  * A write that bypasses mass-assignment protection, counted as state change by
@@ -390,7 +390,7 @@ export function mutatesRecords(body: string): boolean {
  * receiver, since it is called on an instance.
  */
 export const LOCAL_TOOL_WRITE_PATTERN = new RegExp(
-  `${modelCallPattern('create', 'update', 'delete', 'forceDelete').source}`
+  `${modelCallPattern('create', 'update', 'increment', 'decrement', 'delete', 'forceDelete').source}`
   + `|${FORCE_WRITE_PATTERN.source}|\\.\\s*save\\s*\\(`,
 )
 

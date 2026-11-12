@@ -114,6 +114,8 @@ describe('controller member patterns', () => {
     expect(mutatesRecords('await Post.update({ id }, data)')).toBe(true)
     expect(mutatesRecords('await Post.where("id", id).update(data)')).toBe(true)
     expect(mutatesRecords('await Post.forceUpdate({ id }, data)')).toBe(true)
+    expect(mutatesRecords("await Post.increment({ id }, 'views')")).toBe(true)
+    expect(mutatesRecords("await Post.where('id', id).decrement('stock', 2)")).toBe(true)
     expect(mutatesRecords('const post = await Post.find(1)')).toBe(false)
   })
 
@@ -122,6 +124,7 @@ describe('controller member patterns', () => {
   it('does not read an arbitrary update() as a record mutation', () => {
     expect(mutatesRecords('progress.update(50)')).toBe(false)
     expect(mutatesRecords('this.state.update(next)')).toBe(false)
+    expect(mutatesRecords('counter.increment()')).toBe(false)
   })
 
   it('matches a model deletion in both its static and chained forms', () => {

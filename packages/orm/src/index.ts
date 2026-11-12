@@ -51,6 +51,7 @@ export type {
   AggregateFunction,
   SumValue,
   AvgValue,
+  IncrementAmount,
   DrizzleSelectQuery,
 } from './QueryBuilder'
 export { SoftDeletes } from './SoftDeletes'

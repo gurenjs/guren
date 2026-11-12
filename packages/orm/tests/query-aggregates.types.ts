@@ -78,3 +78,27 @@ const joined = Entry.newQuery()
   .toDrizzle(db.select({ id: ledger.id, account: accounts.name }).from(ledger).leftJoin(accounts, eq(ledger.amount, accounts.id)))
   .limit(20)
 assertType<Equals<Awaited<typeof joined>, Array<{ id: number; account: string | null }>>>()
+
+// increment()/decrement() resolve to a row count, and the amount follows the column's kind.
+assertType<Equals<Awaited<ReturnType<typeof query.increment<'amount'>>>, number>>()
+assertType<Equals<Awaited<ReturnType<typeof Entry.decrement<typeof Entry, 'amount'>>>, number>>()
+void query.increment('amount')
+void query.increment('tip', 2)
+void query.decrement('price', '10.50')
+void query.decrement('price', 10.5)
+void query.increment('units', 2n)
+void query.increment('units', 2)
+void Entry.increment({ id: 1 }, 'views', 3)
+void Entry.decrement({ id: 1 }, 'price', '0.01')
+void trashed.increment('amount', '1.5')
+
+// @ts-expect-error an integer column takes no decimal string
+void query.increment('amount', '1')
+// @ts-expect-error a number column takes no bigint
+void query.increment('views', 1n)
+// @ts-expect-error a timestamp cannot be added to
+void query.increment('placedAt')
+// @ts-expect-error a boolean cannot be added to
+void Entry.increment({ id: 1 }, 'paid')
+// @ts-expect-error not a column of the model
+void Entry.decrement({ id: 1 }, 'missing')

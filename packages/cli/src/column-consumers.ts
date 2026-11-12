@@ -135,8 +135,9 @@ export const QUERY_METHOD_RESULTS = {
   ],
   paginated: ['paginate', 'withPaginate'],
   none: [
-    'count', 'countBy', 'exists', 'avg', 'sum', 'min', 'max', 'delete', 'forceDelete', 'restore', 'toSql', 'toDrizzle', 'getConditions',
-    'getOptions', 'then', 'catch', 'constructor', 'addGlobalScope', 'removeGlobalScope', 'applyCasts', 'belongsTo', 'belongsToMany',
+    'count', 'countBy', 'exists', 'avg', 'sum', 'min', 'max', 'increment', 'decrement', 'delete', 'forceDelete', 'restore', 'toSql', 'toDrizzle',
+    'getConditions', 'getOptions', 'then', 'catch', 'constructor', 'addGlobalScope', 'removeGlobalScope', 'applyCasts', 'belongsTo',
+    'belongsToMany',
     'hasMany', 'hasManyThrough', 'hasOne', 'morphMany', 'morphTo', 'clearObservers', 'observe', 'filterFillable', 'getAdapter',
     'useAdapter', 'getRelationDefinition', 'inTransaction', 'transaction', 'loadRelationInto', 'loadRelationsInto',
     'prepareBulkPersistencePayload', 'resolveTable', 'serialize', 'serializeMany', 'attach', 'detach', 'attachmentUrl', 'purgeAttachments',
@@ -164,6 +165,8 @@ const STATIC_ARGUMENTS: ReadonlyMap<string, ArgumentPositions> = new Map([
   ['forceCreate', { data: 0 }],
   ['update', { where: 0, data: 1, options: 2 }],
   ['forceUpdate', { where: 0, data: 1 }],
+  ['increment', { where: 0, data: 1 }],
+  ['decrement', { where: 0, data: 1 }],
   ['delete', { where: 0 }],
   ['first', { where: 0 }],
   ['restore', { where: 0 }],
@@ -178,6 +181,8 @@ const BUILDER_ARGUMENTS: ReadonlyMap<string, ArgumentPositions> = new Map([
   ['forceCreate', { data: 0 }],
   ['update', { data: 0, options: 1 }],
   ['forceUpdate', { data: 0 }],
+  ['increment', { data: 0 }],
+  ['decrement', { data: 0 }],
 ])
 
 /** The class itself, or `Model.inTransaction(trx)`, whose scope takes the class's own write signatures. */

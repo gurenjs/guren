@@ -312,6 +312,7 @@ describe('GUREN_API_DIGEST', () => {
       "belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey = 'id', relatedKey = 'id')",
       "hasManyThrough(name, related, through, firstKey, secondKey, localKey = 'id', secondLocalKey = 'id')",
       'withPaginate',
+      'increment(where, column, amount = 1)',
     ],
     'rules/orm-models.md': [
       'create(data, { set: { authorId } })',

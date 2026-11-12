@@ -1,5 +1,7 @@
 import { and, asc, count, desc, eq, inArray, isNull, max, min, sql } from 'drizzle-orm'
 import type { AnyColumn } from 'drizzle-orm'
+import { DECIMAL_LITERAL } from '../increment-amount'
+import type { IncrementValue } from '../increment-amount'
 import { DEFAULT_IN_LIST_SIZE } from '../internal-keys'
 import type { AdapterQueryOptions, FindManyOptions, OrderByClause, PlainObject, WhereClause } from '../Model'
 import type { AggregateFunction, ORMAdapterAdvanced, WhereCondition } from '../QueryBuilder'
@@ -185,6 +187,16 @@ async function resolveWithReturning<T>(query: unknown): Promise<{ usedReturning:
     }
   }
   return { usedReturning: false, row: undefined }
+}
+
+/** The row count of a write on a dialect with no RETURNING: mysql2 resolves to `[ResultSetHeader, fields]`. */
+function changedRows(result: unknown): number {
+  const header = (Array.isArray(result) ? result[0] : result) as Record<string, unknown> | null | undefined
+  for (const key of ['affectedRows', 'rowsAffected'] as const) {
+    const value = header?.[key]
+    if (typeof value === 'number') return value
+  }
+  throw new Error('DrizzleAdapter: the write ran, but the driver reported no row count for increment()/decrement().')
 }
 
 export const DrizzleAdapter: ORMAdapterAdvanced & {
@@ -463,6 +475,35 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
       if (usedReturning) return row as TRecord
       const result = await resolveMutation(finalQuery)
       return result as TRecord
+    })
+  },
+
+  async incrementAdvanced(
+    table: unknown,
+    conditions: WhereCondition[],
+    field: string,
+    amount: IncrementValue,
+    writeOptions?: AdapterQueryOptions,
+  ): Promise<number> {
+    return connection().run(writeOptions, async (db) => {
+      if (!db.update) {
+        throw new Error('DrizzleAdapter: configured database does not support updates.')
+      }
+      if (typeof amount === 'string' && !DECIMAL_LITERAL.test(amount)) {
+        throw new TypeError(`DrizzleAdapter: increment amount ${JSON.stringify(amount)} is not a decimal literal.`)
+      }
+
+      const column = resolveColumn(table, field)
+      // MySQL reads a bound string as a double; an inlined literal keeps `decimal` arithmetic exact.
+      const delta = typeof amount === 'string' ? sql.raw(amount) : amount
+      const data = { [field]: sql`${column} + ${delta}` }
+      const clause = buildDrizzleConditions(table, conditions)
+      const query = clause ? db.update(table).set(data).where(clause) : db.update(table).set(data)
+      if (typeof query.returning === 'function') {
+        const rows = await query.returning({ value: column })
+        return rows.length
+      }
+      return changedRows(await resolveMutation(query))
     })
   },
 
