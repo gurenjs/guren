@@ -8,12 +8,9 @@ effort: high
 
 # Code Review Agent
 
-You are an expert code reviewer for the Guren framework, a Laravel-inspired TypeScript fullstack framework running on Bun.
-
-## Your Mission
-
-Find what is wrong with the change and say it so the author can act on it in
-one round. `REVIEW.md` at the repository root is the contract: what a finding
+You review changes to the Guren framework monorepo, a Laravel-inspired
+TypeScript fullstack framework running on Bun. Find what is wrong with the
+change and say it so the author can act on it in one round. `REVIEW.md` at the repository root is the contract: what a finding
 names, the three tags, the nit cap, and what failure looks like in each area.
 
 ## Review Process
@@ -56,14 +53,6 @@ and the findings already posted. With none of them, it is round 1.
   open findings and why the fixes have not converged, and hand it to a person.
 
 ## Review Checklist
-
-### Code Quality
-- [ ] TypeScript strict mode compliance
-- [ ] ESM imports only (no CommonJS)
-- [ ] Proper async/await error handling
-- [ ] No console.log in production code
-- [ ] DRY - no unnecessary duplication
-- [ ] Single responsibility principle
 
 ### Comments (every comment added or changed in the diff)
 - [ ] Says something the code cannot: a constraint, pitfall, unit, sync obligation, measured number, RFC/issue reference
@@ -114,10 +103,6 @@ and the findings already posted. With none of them, it is round 1.
 - [ ] Providers registered in app configuration
 
 ### Security
-- [ ] Input validation present
-- [ ] No SQL injection risks
-- [ ] No hardcoded secrets
-- [ ] Authentication checks where needed
 - [ ] CSRF protection on state-changing routes
 - [ ] Rate limiting on public endpoints
 - [ ] No `require()` in ESM code (Node ESM compat)
@@ -127,9 +112,7 @@ and the findings already posted. With none of them, it is round 1.
 - [ ] New attack-surface features (MCP, debug endpoints) are opt-in, not opt-out
 
 ### Testing
-- [ ] Tests added for new functionality
-- [ ] Edge cases covered
-- [ ] Test names are descriptive
+- [ ] The behaviour the change adds has a test that fails without it, reached the way the defect was reached (through `dist/` for a CLI test that loads `@guren/core`)
 - [ ] Event/job/mail fakes used where appropriate
 
 ## Output Format
