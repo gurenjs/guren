@@ -343,6 +343,20 @@ describe('scanColumnConsumers on writes and queries it cannot classify', () => {
     expect(result.opaque).toEqual([])
   })
 
+  test('should write the column increment() and decrement() name, and read their where clause', async () => {
+    const result = await scan({
+      controllers: controller(`  async show() {
+    await Post.increment({ id: 1 }, 'views')
+    await Post.where('slug', 's').decrement('stock', 2)
+    await Post.increment({ id: 1 }, column)
+    return this.text('ok')
+  }`),
+    })
+
+    expect(result.reads.map((read) => `${read.property}${read.write ? ' write' : ''}`)).toEqual(['id', 'views write', 'slug', 'stock write', 'id'])
+    expect(result.opaque.map((read) => `${read.line}${read.write ? ' write' : ''}`)).toEqual(['8 write'])
+  })
+
   test('should read a transaction scope write by the class signatures', async () => {
     const result = await scan({
       controllers: controller(`  async store() {

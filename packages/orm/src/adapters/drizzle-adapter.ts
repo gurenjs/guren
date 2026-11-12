@@ -1,5 +1,7 @@
 import { and, asc, count, desc, eq, inArray, isNull, max, min, sql } from 'drizzle-orm'
-import type { AnyColumn } from 'drizzle-orm'
+import type { AnyColumn, SQL } from 'drizzle-orm'
+import { DECIMAL_LITERAL } from '../increment-amount'
+import type { IncrementValue } from '../increment-amount'
 import { DEFAULT_IN_LIST_SIZE } from '../internal-keys'
 import type { AdapterQueryOptions, FindManyOptions, OrderByClause, PlainObject, WhereClause } from '../Model'
 import type { AggregateFunction, ORMAdapterAdvanced, WhereCondition } from '../QueryBuilder'
@@ -185,6 +187,63 @@ async function resolveWithReturning<T>(query: unknown): Promise<{ usedReturning:
     }
   }
   return { usedReturning: false, row: undefined }
+}
+
+/** A string-typed column that still holds a number: `numeric`/`decimal` (unsigned too) and a bigint in string mode. */
+const NUMERIC_STRING_DETAILS = new Set(['numeric', 'unumeric', 'int64', 'uint64'])
+
+/**
+ * Refuses `column + amount` where SQL would not add: SQLite stores `'one' + 1`
+ * as `1` and `1.5` in an integer column, both without an error. `dataType` is
+ * `number int32`, `number uint32`, `bigint int64`, `string numeric`, `string`,
+ * `boolean`, `object date`, …; a `custom` column is the database's to judge.
+ */
+function assertAddable(column: AnyColumn, field: string, amount: IncrementValue): void {
+  const dataType = (column as { dataType?: unknown }).dataType
+  if (typeof dataType !== 'string') return
+  const [kind, detail = ''] = dataType.split(' ')
+  const refused = kind === 'string' ? !NUMERIC_STRING_DETAILS.has(detail) : kind === 'boolean' || kind === 'object' || kind === 'array'
+  if (refused) {
+    throw new TypeError(`DrizzleAdapter: cannot add to "${field}", a ${dataType} column; increment() and decrement() take a numeric column.`)
+  }
+  const fractional = typeof amount === 'number' ? !Number.isInteger(amount) : typeof amount === 'string' && amount.includes('.')
+  if (fractional && /^u?int\d/.test(detail)) {
+    throw new TypeError(`DrizzleAdapter: cannot add ${String(amount)} to "${field}", an integer column.`)
+  }
+}
+
+/** `String(number)` of a finite number, a bigint, or a decimal string: digits, one point, an exponent. */
+const NUMERIC_LITERAL = /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/
+
+/**
+ * The amount as a SQL literal. A bound amount reaches each driver in its own
+ * encoding: D1 takes no bigint, the Data API sends one as a string, and MySQL
+ * reads a bound string as a double, which a `decimal` column cannot afford.
+ */
+function amountLiteral(amount: IncrementValue): SQL {
+  const literal = String(amount)
+  if (typeof amount === 'string' ? !DECIMAL_LITERAL.test(literal) : !NUMERIC_LITERAL.test(literal)) {
+    throw new TypeError(`DrizzleAdapter: increment amount ${JSON.stringify(literal)} is not a numeric literal.`)
+  }
+  return sql.raw(literal)
+}
+
+/**
+ * Runs an update and counts the rows it changed: the RETURNING rows where the
+ * dialect has them (`column` keeps each one small), else the driver's header,
+ * which mysql2 resolves as `[ResultSetHeader, fields]`.
+ */
+async function countChangedRows(query: DrizzleLikeUpdate, column: AnyColumn): Promise<number> {
+  if (typeof query.returning === 'function') {
+    return (await query.returning({ value: column })).length
+  }
+  const result = await resolveMutation(query)
+  const header = (Array.isArray(result) ? result[0] : result) as Record<string, unknown> | null | undefined
+  for (const key of ['affectedRows', 'rowsAffected'] as const) {
+    const value = header?.[key]
+    if (typeof value === 'number') return value
+  }
+  throw new Error('DrizzleAdapter: the write ran, but the driver reported no count of the rows it changed.')
 }
 
 export const DrizzleAdapter: ORMAdapterAdvanced & {
@@ -463,6 +522,26 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
       if (usedReturning) return row as TRecord
       const result = await resolveMutation(finalQuery)
       return result as TRecord
+    })
+  },
+
+  async incrementAdvanced(
+    table: unknown,
+    conditions: WhereCondition[],
+    field: string,
+    amount: IncrementValue,
+    writeOptions?: AdapterQueryOptions,
+  ): Promise<number> {
+    return connection().run(writeOptions, async (db) => {
+      if (!db.update) {
+        throw new Error('DrizzleAdapter: configured database does not support updates.')
+      }
+      const delta = amountLiteral(amount)
+      const column = resolveColumn(table, field)
+      assertAddable(column, field, amount)
+      const data = { [field]: sql`${column} + ${delta}` }
+      const clause = buildDrizzleConditions(table, conditions)
+      return countChangedRows(clause ? db.update(table).set(data).where(clause) : db.update(table).set(data), column)
     })
   },
 

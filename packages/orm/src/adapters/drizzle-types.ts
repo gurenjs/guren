@@ -24,7 +24,7 @@ export type DrizzleLikeInsertResult = {
 export type DrizzleLikeUpdate = {
   set: (record: PlainObject) => DrizzleLikeUpdate
   where: (clause: unknown) => DrizzleLikeUpdate
-  returning?: () => Promise<unknown[]>
+  returning?: (selection?: Record<string, unknown>) => Promise<unknown[]>
 }
 
 export type DrizzleLikeDelete = {

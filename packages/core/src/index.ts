@@ -84,6 +84,7 @@ export type {
   AggregateFunction,
   SumValue,
   AvgValue,
+  IncrementAmount,
   DrizzleSelectQuery,
   HookName,
   HookCallback,

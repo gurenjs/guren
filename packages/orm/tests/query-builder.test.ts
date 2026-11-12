@@ -501,6 +501,43 @@ describe('QueryBuilder', () => {
     })
   })
 
+  describe('increment / decrement', () => {
+    type IncrementCall = { conditions: WhereCondition[]; field: string; amount: unknown }
+
+    function recordIncrements(): IncrementCall[] {
+      const calls: IncrementCall[] = []
+      adapter.incrementAdvanced = async (_table, conditions, field, amount) => {
+        calls.push({ conditions, field, amount })
+        return 3
+      }
+      return calls
+    }
+
+    it('should hand the adapter the conditions, the column and the signed amount', async () => {
+      const calls = recordIncrements()
+
+      expect(await qb().where('role', 'user').increment('score')).toBe(3)
+      expect(await qb().decrement('score', 5)).toBe(3)
+
+      expect(calls.map(({ field, amount }) => [field, amount])).toEqual([['score', 1], ['score', -5]])
+      expect(calls[0]?.conditions).toEqual([{ type: 'simple', field: 'role', operator: '=', value: 'user' }])
+    })
+
+    it('should refuse when the adapter cannot increment, naming the method', async () => {
+      await expect(qb().where('id', 1).decrement('score')).rejects.toThrow('decrement() needs an adapter that implements incrementAdvanced')
+    })
+
+    it('should refuse an amount that is not a number before reaching the adapter', async () => {
+      const calls = recordIncrements()
+
+      await expect(qb().increment('score', Number.POSITIVE_INFINITY)).rejects.toThrow(TypeError)
+      await expect(qb().increment('score', '1 + 1' as unknown as number)).rejects.toThrow(TypeError)
+      // Only an omitted amount defaults to 1: a null that slipped past the types must not take one unit.
+      await expect(qb().decrement('score', null as unknown as number)).rejects.toThrow(TypeError)
+      expect(calls).toEqual([])
+    })
+  })
+
   describe('thenable', () => {
     it('should be awaitable directly', async () => {
       const results = await qb().where('role', 'admin')

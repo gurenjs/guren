@@ -285,16 +285,95 @@ export function authTypeArgumentPattern(typeName: string): RegExp {
  */
 function modelCallPattern(...names: string[]): RegExp {
   const alternation = names.join('|')
-  return new RegExp(
-    `\\b[A-Z][A-Za-z0-9_]*\\s*\\.\\s*(?:${alternation})\\s*\\(`
-    + `|\\)\\s*\\.\\s*(?:${alternation})\\s*\\(`,
-  )
+  return new RegExp(`${staticCallSource(names)}|\\)\\s*\\.\\s*(?:${alternation})\\s*\\(`)
+}
+
+function staticCallSource(names: string[]): string {
+  return `\\b[A-Z][A-Za-z0-9_]*\\s*\\.\\s*(?:${names.join('|')})\\s*\\(`
 }
 
 /** A record deletion, for the annotation-honesty rules (RFC 0016 §5.5). */
 export const DELETE_CALL_PATTERN = modelCallPattern('delete', 'forceDelete')
 
 const UPDATE_CALL_PATTERN = modelCallPattern('update')
+
+const COUNTER_NAMES = ['increment', 'decrement']
+const STATIC_COUNTER_PATTERN = new RegExp(staticCallSource(COUNTER_NAMES))
+const CHAINED_COUNTER_PATTERN = new RegExp(`\\)\\s*\\??\\.\\s*(?:${COUNTER_NAMES.join('|')})\\s*\\(`, 'g')
+
+/**
+ * `increment()`/`decrement()` on a model: on the class, or ending a chain that
+ * starts at a PascalCase name (`Product.where(…).decrement(…)`). The cache store
+ * has both names, and `cache().store().increment(key)` ends the same way.
+ */
+function countsOnModel(body: string): boolean {
+  if (STATIC_COUNTER_PATTERN.test(body)) return true
+  for (const match of body.matchAll(CHAINED_COUNTER_PATTERN)) {
+    if (/^[A-Z]/.test(chainRoot(body, match.index) ?? '')) return true
+  }
+  return false
+}
+
+const IDENTIFIER_CHAR = /[\w$]/
+const SPACE = /\s/
+
+function skipSpaceBack(body: string, end: number): number {
+  while (end > 0 && SPACE.test(body[end - 1]!)) end--
+  return end
+}
+
+/** The identifier ending at `end`, spaces before `end` skipped. */
+function identifierBefore(body: string, end: number): { name: string; start: number } | undefined {
+  const stop = skipSpaceBack(body, end)
+  let start = stop
+  while (start > 0 && IDENTIFIER_CHAR.test(body[start - 1]!)) start--
+  return start === stop ? undefined : { name: body.slice(start, stop), start }
+}
+
+/** Where the `(` or `<` matching the closer at `close` opens. */
+function openerOf(body: string, close: number, open: string, closer: string): number {
+  let depth = 0
+  for (let at = close; at >= 0; at--) {
+    if (body[at] === closer) depth++
+    else if (body[at] === open && --depth === 0) return at
+  }
+  return -1
+}
+
+/**
+ * The name a call chain starts from, given where its last call closes:
+ * `Product` in `Product.where(a)?.where<T>(b)`. Undefined for `new Limiter().hit()`,
+ * whose root is an instance. Scans backward by index: a regex over the text
+ * before each call is quadratic in a long identifier.
+ */
+function chainRoot(body: string, close: number): string | undefined {
+  let at = close
+  for (;;) {
+    let open = openerOf(body, at, '(', ')')
+    if (open < 0) return undefined
+    let beforeCall = skipSpaceBack(body, open)
+    if (body[beforeCall - 1] === '>') {
+      open = openerOf(body, beforeCall - 1, '<', '>')
+      if (open < 0) return undefined
+      beforeCall = open
+    }
+    let name = identifierBefore(body, beforeCall)
+    for (;;) {
+      if (!name) return undefined
+      let receiverEnd = skipSpaceBack(body, name.start)
+      if (body[receiverEnd - 1] !== '.') {
+        return identifierBefore(body, receiverEnd)?.name === 'new' ? undefined : name.name
+      }
+      receiverEnd = skipSpaceBack(body, receiverEnd - 1)
+      if (body[receiverEnd - 1] === '?') receiverEnd = skipSpaceBack(body, receiverEnd - 1)
+      if (body[receiverEnd - 1] === ')') {
+        at = receiverEnd - 1
+        break
+      }
+      name = identifierBefore(body, receiverEnd)
+    }
+  }
+}
 
 /**
  * A write that bypasses mass-assignment protection, counted as state change by
@@ -379,6 +458,7 @@ export function mutatesRecords(body: string): boolean {
   return (
     DELETE_CALL_PATTERN.test(body)
     || UPDATE_CALL_PATTERN.test(body)
+    || countsOnModel(body)
     || FORCE_WRITE_PATTERN.test(body)
   )
 }
@@ -389,10 +469,14 @@ export function mutatesRecords(body: string): boolean {
  * which `readOnlyHint` honesty shares and must stay narrow. `.save(` takes any
  * receiver, since it is called on an instance.
  */
-export const LOCAL_TOOL_WRITE_PATTERN = new RegExp(
+const LOCAL_TOOL_WRITE_PATTERN = new RegExp(
   `${modelCallPattern('create', 'update', 'delete', 'forceDelete').source}`
   + `|${FORCE_WRITE_PATTERN.source}|\\.\\s*save\\s*\\(`,
 )
+
+export function writesInLocalTool(body: string): boolean {
+  return LOCAL_TOOL_WRITE_PATTERN.test(body) || countsOnModel(body)
+}
 
 export { blankCommentsAndStrings }
 

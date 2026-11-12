@@ -114,6 +114,12 @@ describe('controller member patterns', () => {
     expect(mutatesRecords('await Post.update({ id }, data)')).toBe(true)
     expect(mutatesRecords('await Post.where("id", id).update(data)')).toBe(true)
     expect(mutatesRecords('await Post.forceUpdate({ id }, data)')).toBe(true)
+    expect(mutatesRecords("await Post.increment({ id }, 'views')")).toBe(true)
+    expect(mutatesRecords("await Product.decrement({ id }, 'stock', 2)")).toBe(true)
+    expect(mutatesRecords("await Product.where({ id }).where('stock', '>=', n).decrement('stock', n)")).toBe(true)
+    expect(mutatesRecords("await Models.Post.newQuery().increment('views')")).toBe(true)
+    expect(mutatesRecords("await Product.where({ id })?.increment('views')")).toBe(true)
+    expect(mutatesRecords("await Product.where<typeof Product>({ id }).increment('views')")).toBe(true)
     expect(mutatesRecords('const post = await Post.find(1)')).toBe(false)
   })
 
@@ -122,6 +128,23 @@ describe('controller member patterns', () => {
   it('does not read an arbitrary update() as a record mutation', () => {
     expect(mutatesRecords('progress.update(50)')).toBe(false)
     expect(mutatesRecords('this.state.update(next)')).toBe(false)
+    expect(mutatesRecords('counter.increment()')).toBe(false)
+  })
+
+  // The cache store's counters share the names, and its chain ends the way a query builder's does.
+  it('does not read an increment() ending a chain that starts off a model as a record mutation', () => {
+    expect(mutatesRecords('await cache().store().increment(key)')).toBe(false)
+    expect(mutatesRecords("await cache().store().tags(['hits']).decrement(key)")).toBe(false)
+    expect(mutatesRecords('await this.limiter.for(Post.name).increment(key)')).toBe(false)
+    expect(mutatesRecords('await new RateLimiter().store().increment(key)')).toBe(false)
+  })
+
+  // A regex over the text before each call is quadratic here: 3 s at 20,000
+  // characters, so this length runs out the test's own timeout.
+  it('reads a chain after a very long identifier in linear time', () => {
+    const body = `const ${'a'.repeat(200_000)} = 1; await cache().store().increment(key)`
+
+    expect(mutatesRecords(body)).toBe(false)
   })
 
   it('matches a model deletion in both its static and chained forms', () => {

@@ -4,7 +4,7 @@ import { SoftDeletes } from '../src/SoftDeletes'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 import { sqliteWriteFixture, postgresWriteFixture, mysqlWriteFixture, type WriteFixture } from './write-contract-fixtures'
 
-type EntryRecord = { id: number; tenant: number; name: string; deletedAt: Date | null }
+type EntryRecord = { id: number; tenant: number; name: string; deletedAt: Date | null; balance: string }
 
 /** A live driver runs only where a URL names a server; without one there is no fixture to build. */
 function liveFixture(url: string | undefined, make: (url: string) => Promise<WriteFixture>): (() => Promise<WriteFixture>) | undefined {
@@ -77,10 +77,64 @@ function writeContract(name: string, factory: (() => WriteFixture | Promise<Writ
     it('rolls back writes from every entry point in one transaction', async () => {
       await expect(Entry.transaction(async () => {
         await Entry.update({ id: 1 }, { name: 'temporary' })
+        await Entry.increment({ id: 1 }, 'tenant', 40)
         await Entry.where({ id: 2 }).delete()
         throw new Error('rollback')
       })).rejects.toThrow('rollback')
-      expect((await Entry.newQuery().orderBy('id').get()).map((entry) => entry.name)).toEqual(['one!', 'two!'])
+      const entries = await Entry.newQuery().orderBy('id').get()
+      expect(entries.map((entry) => [entry.name, entry.tenant])).toEqual([['one!', 1], ['two!', 2]])
+    })
+
+    const tenants = async () => (await Entry.newQuery().orderBy('id').get()).map((entry) => entry.tenant)
+
+    it('adds to a column in one statement and reports the rows changed', async () => {
+      expect(await Entry.increment({ id: 1 }, 'tenant')).toBe(1)
+      expect(await Entry.newQuery().increment('tenant', 5)).toBe(2)
+      expect(await Entry.decrement({ id: 99 }, 'tenant')).toBe(0)
+      expect(await tenants()).toEqual([7, 7])
+    })
+
+    it('decrements only the rows a condition admits, which is how a guard reads a refusal', async () => {
+      expect(await Entry.where({ id: 2 }).where('tenant', '>=', 3).decrement('tenant', 3)).toBe(0)
+      expect(await Entry.where({ id: 2 }).where('tenant', '>=', 2).decrement('tenant', 2)).toBe(1)
+      expect(await tenants()).toEqual([1, 0])
+    })
+
+    it('keeps tenant scopes on increments from the model and the builder', async () => {
+      Entry.addGlobalScope('tenant', (query) => query.where('tenant', 1))
+      expect(await Entry.increment({}, 'tenant', 10)).toBe(1)
+      expect(await Entry.where({ id: 2 }).increment('tenant', 10)).toBe(0)
+      Entry.removeGlobalScope('tenant')
+      expect(await tenants()).toEqual([11, 2])
+    })
+
+    it('adds a decimal string without passing it through a float', async () => {
+      // 2^53 + 1: a double cannot hold it, so a driver that binds the amount as one stores ...992.01.
+      expect(await Entry.increment({ id: 1 }, 'balance', '9007199254740993.01')).toBe(1)
+      expect(await Entry.decrement({ id: 1 }, 'balance', '0.01')).toBe(1)
+      const balance = (await Entry.find(1))?.balance
+      if (fixture.exactDecimals) expect(balance).toBe('9007199254740993.00')
+      else expect(Number(balance)).toBeCloseTo(2 ** 53, -2)
+    })
+
+    it('refuses an increment it cannot run before mutation', async () => {
+      await expect(Entry.increment({ id: undefined }, 'tenant')).rejects.toThrow('unfiltered')
+      await expect(Entry.newQuery().limit(1).increment('tenant')).rejects.toThrow('limit()')
+      await expect(Entry.increment({ id: 1 }, 'balance', '1; DROP TABLE entries')).rejects.toThrow(TypeError)
+      expect(await tenants()).toEqual([1, 2])
+    })
+
+    it('refuses a string amount the adapter is handed directly, where it would be inlined', async () => {
+      await expect(DrizzleAdapter.incrementAdvanced?.(fixture.table, [], 'balance', '1; DROP TABLE entries')).rejects.toThrow('not a numeric literal')
+      expect(await Entry.newQuery().count()).toBe(2)
+    })
+
+    it('refuses to add to a column that is not numeric, or a fraction to an integer one', async () => {
+      // SQLite would store 'one!' + 1 as 1 and 1 + 1.5 as 2.5, both without an error.
+      await expect(Entry.increment({ id: 1 }, 'name', 1)).rejects.toThrow('cannot add to "name"')
+      await expect(Entry.increment({ id: 1 }, 'tenant', 1.5)).rejects.toThrow('an integer column')
+      const entry = await Entry.find(1)
+      expect([entry?.name, entry?.tenant]).toEqual(['one!', 1])
     })
   })
 }

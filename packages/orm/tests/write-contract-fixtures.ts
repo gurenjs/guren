@@ -1,15 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import { Database } from 'bun:sqlite'
 import { drizzle as sqliteDrizzle } from 'drizzle-orm/bun-sqlite'
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
-import { pgTable, integer as pgInteger, text as pgText, timestamp } from 'drizzle-orm/pg-core'
-import { mysqlTable, int, varchar, datetime } from 'drizzle-orm/mysql-core'
+import { integer, numeric as sqliteNumeric, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { pgTable, integer as pgInteger, numeric, text as pgText, timestamp } from 'drizzle-orm/pg-core'
+import { mysqlTable, int, decimal, varchar, datetime } from 'drizzle-orm/mysql-core'
 import type { DrizzleDatabase } from '../src/adapters/drizzle-types'
 import { databaseUrl } from './database-url'
 
 export interface WriteFixture {
   db: DrizzleDatabase
   table: unknown
+  /** Whether the `balance` column keeps every digit; SQLite stores a `numeric` past 2^53 as a float. */
+  exactDecimals: boolean
   clear(): Promise<void>
   close(): Promise<void>
 }
@@ -19,10 +21,11 @@ export function sqliteWriteFixture(): WriteFixture {
   const table = sqliteTable('entries', {
     id: integer('id').primaryKey(), tenant: integer('tenant').notNull(),
     name: text('name').notNull(), deletedAt: integer('deleted_at', { mode: 'timestamp' }),
+    balance: sqliteNumeric('balance').notNull().default('0'),
   })
-  client.exec('CREATE TABLE entries (id integer primary key, tenant integer not null, name text not null, deleted_at integer)')
+  client.exec('CREATE TABLE entries (id integer primary key, tenant integer not null, name text not null, deleted_at integer, balance numeric not null default 0)')
   return {
-    db: sqliteDrizzle({ client }) as unknown as DrizzleDatabase, table,
+    db: sqliteDrizzle({ client }) as unknown as DrizzleDatabase, table, exactDecimals: false,
     async clear() { client.exec('DELETE FROM entries') },
     async close() { client.close() },
   }
@@ -45,13 +48,14 @@ export async function postgresWriteFixture(url: string): Promise<WriteFixture> {
   }
   const client = postgres(databaseUrl(url, name), { max: 2 })
   try {
-    await client.unsafe('CREATE TABLE entries (id integer primary key, tenant integer not null, name text not null, deleted_at timestamp)')
+    await client.unsafe('CREATE TABLE entries (id integer primary key, tenant integer not null, name text not null, deleted_at timestamp, balance numeric(30, 2) not null default 0)')
     const table = pgTable('entries', {
       id: pgInteger('id').primaryKey(), tenant: pgInteger('tenant').notNull(),
       name: pgText('name').notNull(), deletedAt: timestamp('deleted_at', { mode: 'date' }),
+      balance: numeric('balance', { precision: 30, scale: 2 }).notNull().default('0'),
     })
     return {
-      db: drizzle({ client }) as unknown as DrizzleDatabase, table,
+      db: drizzle({ client }) as unknown as DrizzleDatabase, table, exactDecimals: true,
       async clear() { await client.unsafe('DELETE FROM entries') },
       async close() {
         await client.end()
@@ -82,13 +86,14 @@ export async function mysqlWriteFixture(url: string): Promise<WriteFixture> {
   const pool = createPool({ uri: databaseUrl(url, name), connectionLimit: 2 })
   const client = pool.promise()
   try {
-    await client.query('CREATE TABLE entries (id integer primary key, tenant integer not null, name varchar(255) not null, deleted_at datetime)')
+    await client.query('CREATE TABLE entries (id integer primary key, tenant integer not null, name varchar(255) not null, deleted_at datetime, balance decimal(30, 2) not null default 0)')
     const table = mysqlTable('entries', {
       id: int('id').primaryKey(), tenant: int('tenant').notNull(),
       name: varchar('name', { length: 255 }).notNull(), deletedAt: datetime('deleted_at', { mode: 'date' }),
+      balance: decimal('balance', { precision: 30, scale: 2 }).notNull().default('0'),
     })
     return {
-      db: drizzle({ client: pool }) as unknown as DrizzleDatabase, table,
+      db: drizzle({ client: pool }) as unknown as DrizzleDatabase, table, exactDecimals: true,
       async clear() { await client.query('DELETE FROM entries') },
       async close() {
         await client.end()

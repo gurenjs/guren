@@ -30,6 +30,7 @@ carries no request data (see Mass assignment below).
 `find(id)` → record | null · `findOrFail(id)` throws `ModelNotFoundException` (renders 404) ·
 `first(where?)` → record | null · `all()` · `create(data, { set? })` · `forceCreate(data)` ·
 `update(where, data, { set? })` · `forceUpdate(where, data)` · `delete(where)` ·
+`increment(where, column, amount = 1)` / `decrement(where, column, amount = 1)` → rows changed ·
 `paginate(options?)` · `transaction(async (trx, scope) => ...)` ·
 `inTransaction(trx)` (the same `scope` for any model: `all`, `find`, `findOrFail`,
 `first`, `where`, `newQuery`, `create`, `update`, `delete`, `paginate`)
@@ -71,7 +72,15 @@ so guarding `if (ids.length === 0)` before a `where in` is optional, not require
 
 Terminate with: `get()` / `first()` / `firstOrFail()` / `count()` /
 `paginate(page?, perPage?)` or `paginate({ page, perPage })` /
-`update(data, { set? })` / `forceUpdate(data)` / `delete()`
+`update(data, { set? })` / `forceUpdate(data)` / `delete()` /
+`increment(column, amount = 1)` / `decrement(column, amount = 1)`
+
+`increment` / `decrement` run `column = column + amount` in one `UPDATE` and resolve to the
+number of rows changed. Use them for a counter (never read, add and write back, which
+loses counts under concurrent requests), and add a condition to guard a decrement:
+`Product.where({ id }).where('stock', '>=', n).decrement('stock', n)` resolves to `0` when
+stock is short. Scopes apply; `fillable`, mutators and hooks do not. A `numeric` column
+also takes a decimal string (`'10.50'`).
 
 ## Relations — declaration signatures
 

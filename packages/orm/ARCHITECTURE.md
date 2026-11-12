@@ -14,6 +14,11 @@ boundary. Internal soft-delete timestamps bypass user payload transforms.
 `SoftDeletes` supplies the `BULK_DELETE` handler used by both static and
 builder deletion; `PHYSICAL_DELETE` is the internal path for explicit hard deletes.
 
+`increment()` and `decrement()` are builder writes too: they pass the same
+validation, then call the adapter's `incrementAdvanced`, which owns the SQL
+arithmetic and the row count it resolves to. They carry no payload, so they
+never cross `PREPARED_UPDATE`, and the static forms fire no model events.
+
 ## Model lifecycle
 
 `model-lifecycle.ts` owns event order and cancellation for static create, update,

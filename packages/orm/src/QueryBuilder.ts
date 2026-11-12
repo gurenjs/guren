@@ -1,6 +1,8 @@
 import { and, asc, desc } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { buildDrizzleConditions, resolveColumn } from './adapters/drizzle-conditions'
+import { signedAmount } from './increment-amount'
+import type { IncrementValue } from './increment-amount'
 import { BULK_DELETE, PHYSICAL_DELETE, PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
 import { DEFAULT_PAGINATION_SIZE } from './Model'
 import { ModelNotFoundException } from './ModelNotFoundException'
@@ -53,6 +55,13 @@ export type NumericFieldKey<TRecord extends PlainObject> = string extends keyof 
   : {
       [K in FieldKey<TRecord>]: [SumValue<TRecord[K]>] extends [never] ? never : K
     }[FieldKey<TRecord>]
+
+/**
+ * What `increment()`/`decrement()` add: a plain number, or the column's own
+ * kind ({@link SumValue}), so a `numeric`/`decimal` column takes a decimal string.
+ * A text column is a `string` too; the adapter refuses that one at runtime.
+ */
+export type IncrementAmount<TValue> = [SumValue<TValue>] extends [never] ? never : SumValue<TValue> | number
 
 type DrizzleSelectable = { select: (...args: any[]) => any } // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -596,6 +605,33 @@ export class QueryBuilder<
   }
 
   /**
+   * `field = field + amount` in one statement, so concurrent calls lose no
+   * count; resolves to the number of rows changed. Scopes apply as in
+   * `update()`; `fillable`, mutators and hooks do not, since code names the
+   * column. A `NULL` stays `NULL`.
+   */
+  async increment<TKey extends NumericFieldKey<TRecord>>(field: TKey, amount?: IncrementAmount<TRecord[TKey]>): Promise<number> {
+    return this.addToColumn('increment', field, amount)
+  }
+
+  /**
+   * `increment()` with `amount` subtracted. A condition makes it a guard.
+   * @example await Product.where({ id }).where('stock', '>=', 2).decrement('stock', 2) // 0: not enough stock
+   */
+  async decrement<TKey extends NumericFieldKey<TRecord>>(field: TKey, amount?: IncrementAmount<TRecord[TKey]>): Promise<number> {
+    return this.addToColumn('decrement', field, amount)
+  }
+
+  private async addToColumn(method: 'increment' | 'decrement', field: string, amount: unknown): Promise<number> {
+    const signed = signedAmount(`${this.modelClass.name}.${method}`, amount === undefined ? 1 : amount, method === 'decrement')
+    const adapter = this.assertWritable('update')
+    if (typeof adapter.incrementAdvanced !== 'function') {
+      throw new Error(`${this.modelClass.name}: ${method}() needs an adapter that implements incrementAdvanced.`)
+    }
+    return adapter.incrementAdvanced(this.table, this.effectiveConditions(), field, signed, { trx: this.options.trx })
+  }
+
+  /**
    * The object-where a basic adapter takes; a condition the flat object cannot
    * carry (an OR group, an operator, two values on one field) refuses rather
    * than writing with it dropped.
@@ -907,6 +943,17 @@ export interface ORMAdapterAdvanced extends ORMAdapter {
     data: PlainObject,
     writeOptions?: AdapterQueryOptions,
   ): Promise<TRecord>
+  /**
+   * `UPDATE ... SET field = field + amount` under `conditions`, resolving to
+   * the number of rows changed. A string `amount` is a decimal literal.
+   */
+  incrementAdvanced?(
+    table: unknown,
+    conditions: WhereCondition[],
+    field: string,
+    amount: IncrementValue,
+    writeOptions?: AdapterQueryOptions,
+  ): Promise<number>
   // oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
   deleteAdvanced?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
