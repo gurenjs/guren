@@ -34,6 +34,7 @@ describe('Posts', () => {
 
 ```ts
 await http.get('/posts')
+await http.head('/posts/1')              // GET ルートが応答し、ボディは返らない
 await http.post('/posts', body)
 await http.put('/posts/1', body)
 await http.patch('/posts/1', body)

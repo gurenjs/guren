@@ -29,6 +29,24 @@ class FakeApplication {
   }
 }
 
+describe('TestApp.head', () => {
+  it('sends a HEAD request, which get() does not', async () => {
+    const methods: string[] = []
+    const http = await TestApp.fromApp({
+      async boot() {},
+      fetch(request: Request) {
+        methods.push(request.method)
+        return new Response(null)
+      },
+    })
+
+    await http.head('/posts/1').assertOk()
+    await http.get('/posts/1').assertOk()
+
+    expect(methods).toEqual(['HEAD', 'GET'])
+  })
+})
+
 describe('TestApp.fromApp', () => {
   it('boots the app and binds fetch to the instance', async () => {
     const app = new FakeApplication()

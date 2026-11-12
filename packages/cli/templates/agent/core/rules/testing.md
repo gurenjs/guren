@@ -33,7 +33,8 @@ describe('posts', () => {
 ## Client
 
 `http.get / post / put / patch / delete / query(path, body?)` (body auto-JSON
-unless FormData) return a `PendingTestResponse`: awaitable and chainable.
+unless FormData) and `http.head(path)` (the GET route answers it, with no body)
+return a `PendingTestResponse`: awaitable and chainable.
 `http.actingAs(user)`, `http.json()` (Accept: application/json),
 `http.withHeader(name, value)` and `await http.withCsrf()` each return a NEW `TestApp`.
 
