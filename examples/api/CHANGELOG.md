@@ -1,5 +1,18 @@
 # @guren/example-api
 
+## 0.1.65
+
+### Patch Changes
+
+- Updated dependencies [e612633]
+- Updated dependencies [7f03edc]
+- Updated dependencies [1a89a1b]
+- Updated dependencies [a3a41f9]
+  - @guren/cli@2.36.3
+  - @guren/orm@2.16.0
+  - @guren/core@1.27.0
+  - @guren/testing@1.15.0
+
 ## 0.1.64
 
 ### Patch Changes
