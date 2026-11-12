@@ -251,6 +251,23 @@ The generated setup is built from these parts, which the rest of the page config
 
 Guards keep the signed-in user in the session. When `createApp()` receives an `auth` option, the session middleware and CSRF protection are attached for you, and `guren add auth` makes the session database-backed from the start. Cookie options, the available stores and how to pick one per environment are described in [Sessions](./sessions.md).
 
+### Password changes end other sessions
+
+At login, `SessionGuard` stores a digest of the user's password hash in the session and compares it on every request. Once the hash changes (a password reset, a profile update), a session opened under the old password stops authenticating at its next request. This holds on every session driver, `cookie` included, since nothing has to be deleted from a store. To keep the session that made the change, log the user in again after the write:
+
+```ts
+await User.update({ id: user.id }, { password })
+
+const refreshed = await User.find(user.id)
+if (refreshed) {
+  await this.auth.login(refreshed)
+}
+```
+
+The generated profile controller does this, and only when the request changed the password. `login()` binds the session to the hash stored at that moment, so after any other update it could carry a session past a password reset that landed during the request. Two other events sign sessions out the same way: a session opened before the app ran a version with this check carries no digest, and a login or a `validate()` call that rehashes the stored password (see [Password hasher](#password-hasher)) changes the hash for that account's other sessions.
+
+A custom user provider opts in by implementing `credentialFingerprint(user)`. Without it, the guard does not bind sessions to a credential.
+
 ## Configuring Providers & Guards
 
 ### Using the `auth.useModel()` Shorthand (Recommended)

@@ -52,12 +52,17 @@ export default class ProfileController extends Controller {
       await User.update({ id: authed.id }, data)
     }
 
-    const refreshedUser = await User.find(authed.id)
-    if (!refreshedUser) {
-      throw new Error('Failed to reload user after profile update.')
-    }
+    // Only after a password change: logging in again binds the session to the
+    // hash stored by then, which after any other update may be a password
+    // reset's, and would keep a session the reset meant to end.
+    if (password !== '') {
+      const refreshedUser = await User.find(authed.id)
+      if (!refreshedUser) {
+        throw new Error('Failed to reload user after profile update.')
+      }
 
-    await this.auth.login(refreshedUser)
+      await this.auth.login(refreshedUser)
+    }
 
     if (emailChanged) {
       const { token } = await createEmailVerificationToken(email, emailVerificationStore)

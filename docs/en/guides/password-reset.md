@@ -69,6 +69,8 @@ if (!user) {
 return ctx.json({ message: 'Password updated successfully' })
 ```
 
+With `ModelUserProvider`, the new hash also ends every session opened under the old password. See [Password changes end other sessions](./authentication.md#password-changes-end-other-sessions).
+
 ## Full Implementation Example
 
 ### Routes
