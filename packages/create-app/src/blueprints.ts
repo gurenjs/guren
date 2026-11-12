@@ -85,6 +85,13 @@ export interface AppBlueprint {
    * tests/resource-example.test.ts pins it.
    */
   resourceExample?: ResourceExample
+  /**
+   * Set when the template's schema is the app's own, not a starting point: the
+   * scaffolder generates its first migration under this name. Unset, the first
+   * `make:migration` a user runs creates every shipped table under the name of
+   * their change, which the tutorial builds on and a ready-to-run starter must not.
+   */
+  initialMigration?: string
   postScaffold?: (context: BlueprintContext) => Promise<void>
 }
 
@@ -156,6 +163,7 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
     transformFiles: BLOG_TRANSFORM_FILES,
     includesAuth: true,
     resourceExample: { name: 'tags', fields: 'name:string' },
+    initialMigration: 'create_users_and_posts',
   },
   worker: {
     name: 'worker',

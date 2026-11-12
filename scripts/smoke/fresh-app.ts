@@ -345,7 +345,7 @@ async function assertCanonicalScaffolds(appDir: string): Promise<void> {
  * way: an unregistered policy, a mass-assignable `authorId`, or a leftover
  * per-driver schema variant all typecheck fine and all break the app.
  */
-async function assertBlogScaffold(appDir: string): Promise<void> {
+async function assertBlogScaffold(appDir: string, scaffoldInstalled: boolean): Promise<void> {
   for (const driver of DATABASE_DRIVERS) {
     assert(
       !await fileExists(join(appDir, `db/schema.${driver}.ts`)),
@@ -356,6 +356,22 @@ async function assertBlogScaffold(appDir: string): Promise<void> {
   const schema = await readFile(join(appDir, 'db/schema.ts'), 'utf8')
   assert(schema.includes('export const posts'), 'Blog blueprint must ship a posts table.')
   assert(schema.includes('author_id'), 'Blog posts must carry their author.')
+
+  // Without it, the first `make:migration add_x` a user runs creates both tables under that name.
+  // The scaffolder generates it with the CLI its own `bun install` put in the app, from npm: between
+  // a version bump and its publish that install fails, and the scaffolder leaves `db:make` to the user.
+  if (scaffoldInstalled) {
+    const migrations = (await readdir(join(appDir, 'db/migrations'), { withFileTypes: true })).filter((entry) => entry.isDirectory())
+    assert(migrations.length === 1, `Blog blueprint must be scaffolded with its first migration; found ${migrations.length}.`)
+    const name = migrations[0]!.name
+    const migration = await readFile(join(appDir, 'db/migrations', name, 'migration.sql'), 'utf8')
+    assert(
+      name.endsWith('_create_users_and_posts') && /CREATE TABLE\W+users\b/.test(migration) && /CREATE TABLE\W+posts\b/.test(migration),
+      `Blog blueprint's first migration (${name}) must create users and posts.`,
+    )
+  } else {
+    console.log('\nFirst-migration check skipped (blog): the scaffolder\'s own install did not complete, so it generated none.')
+  }
 
   const appBootstrap = await readFile(join(appDir, 'src/app.ts'), 'utf8')
   assert(appBootstrap.includes('AuthProvider'), 'Blog blueprint must register AuthProvider.')
@@ -694,6 +710,8 @@ async function main(): Promise<void> {
     // All blueprints require a mode flag to avoid interactive prompt
     createArgs.push('--mode', blueprint === 'api' ? 'spa' : 'ssr')
     await run(createArgs, repoRoot, runtimeEnv)
+    // Read before the vendored install below, which succeeds where the scaffolder's own may not have.
+    const scaffoldInstalled = await fileExists(join(appDir, 'node_modules/@guren/cli/dist/bin.js'))
 
     await assertCoreFirstStarter(appDir)
 
@@ -764,7 +782,7 @@ async function main(): Promise<void> {
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
     } else if (blueprint === 'blog') {
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
-      await assertBlogScaffold(appDir)
+      await assertBlogScaffold(appDir, scaffoldInstalled)
     } else if (blueprint === 'worker') {
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
       const appTs = await readFile(join(appDir, 'src/app.ts'), 'utf8')

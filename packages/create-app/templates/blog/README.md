@@ -10,11 +10,12 @@ bun install
 <!-- guren:container -->
 bun run db:up        # start the __DATABASE_LABEL__ container
 <!-- /guren:container -->
-bun run db:make      # generate the first migration from db/schema.ts
-bun run db:migrate
+bun run db:migrate   # create the users and posts tables
 bun run db:seed      # demo@example.com / secret, plus two sample posts
 bun run dev
 ```
+
+`create-guren-app` wrote the first migration into `db/migrations/` when it installed dependencies. If that folder holds no migration (the app was created with `--no-install`), run `bun run db:make` before `bun run db:migrate`.
 
 <!-- guren:container -->
 __DATABASE_LABEL__ runs in the container `docker-compose.yml` defines, and `DATABASE_URL` in `.env` points at it. `bun run db:down` stops it.

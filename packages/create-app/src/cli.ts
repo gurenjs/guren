@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { relative, resolve } from 'node:path'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { consola } from 'consola'
 import { defineCommand, runMain } from 'citty'
@@ -285,6 +285,22 @@ async function runCodegen(cwd: string): Promise<boolean> {
   return true
 }
 
+/**
+ * `make:migration` exits 0 for "nothing to migrate" as well, so the folder
+ * drizzle-kit writes per migration is the evidence that one exists.
+ */
+async function generateInitialMigration(cwd: string, name: string): Promise<boolean> {
+  consola.start('Generating the first migration...')
+  const ran = await runAppCli(cwd, ['make:migration', name])
+  const entries = ran ? await readdir(join(cwd, 'db/migrations'), { withFileTypes: true }).catch(() => []) : []
+  if (!entries.some((entry) => entry.isDirectory())) {
+    consola.warn('The first migration was not generated (see the output above). Run `bun run db:make` inside the app.')
+    return false
+  }
+  consola.success('Generated the first migration in db/migrations/')
+  return true
+}
+
 const command = defineCommand({
   meta: {
     name: 'create-guren-app',
@@ -444,6 +460,9 @@ const command = defineCommand({
       }
     }
 
+    const migrationGenerated = installed && blueprint.initialMigration !== undefined
+      && await generateInitialMigration(targetDir, blueprint.initialMigration)
+
     // add auth may fail halfway; types generated over that would describe an
     // app that is not there yet.
     const authFailed = includeAuth && !authInstalled
@@ -487,7 +506,9 @@ const command = defineCommand({
     if (!codegenRan) {
       consola.log('  bun run codegen')
     }
-    consola.log('  bun run db:make')
+    if (!migrationGenerated) {
+      consola.log('  bun run db:make')
+    }
     consola.log('  bun run db:migrate')
     consola.log('  bun run db:seed')
     consola.log('')
