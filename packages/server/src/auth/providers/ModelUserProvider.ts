@@ -118,15 +118,18 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     }
 
     const rehashed = await this.hasher.hash(plain)
+    // Keyed on the verified hash as well as the id: a password reset that
+    // landed since the row was read keeps its hash, and this write matches nothing.
+    const where = { [this.idColumn]: this.getId(user), [this.passwordColumn]: hashed }
     // storePasswordHash where the model offers it: a model that hashes in place
     // (passwordField === passwordHashField) hashes this value a second time if it
     // goes through update(). A plain Model has no such preparation, so the
     // column write is the equivalent.
     const writer = passwordHashWriter(this.model)
     if (writer) {
-      await writer.storePasswordHash({ [this.idColumn]: this.getId(user) }, this.passwordColumn, rehashed)
+      await writer.storePasswordHash(where, this.passwordColumn, rehashed)
     } else {
-      await this.writeColumn(user, this.passwordColumn, rehashed)
+      await (this.model as typeof Model).forceUpdate(where, { [this.passwordColumn]: rehashed })
     }
     // After the write: the login that follows fingerprints this record, and a
     // write that failed must leave it matching what the store still holds.

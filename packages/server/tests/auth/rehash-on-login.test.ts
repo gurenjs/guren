@@ -77,7 +77,7 @@ describe('rehash on login', () => {
     expect(await webGuard(manager).attempt({ email: 'a@example.com', password: 'secret' })).toBe(true)
 
     expect(writes).toHaveLength(1)
-    expect(writes[0].where).toEqual({ id: 1 })
+    expect(writes[0].where).toEqual({ id: 1, passwordHash: argonRow })
     expect(rows[0].passwordHash.startsWith('$scrypt$')).toBe(true)
 
     expect(await webGuard(manager).attempt({ email: 'a@example.com', password: 'secret' })).toBe(true)
@@ -152,6 +152,25 @@ describe('rehash on login', () => {
 
     expect(rows[0].passwordHash).not.toBe(current)
     expect(await guardOf(after).check()).toBe(true)
+  })
+
+  test('a rehash leaves a password reset that landed after the row was read', async () => {
+    class Account extends AuthenticatableModel<PlainObject> {
+      static override table = 'users'
+    }
+    const verified = await new NodeHasher({ cost: 1024 }).hash('secret')
+    const rows: PlainObject[] = [{ id: 1, email: 'a@example.com', passwordHash: verified }]
+    Account.useAdapter(storeAdapter(rows))
+    const manager = new AuthManager({ hasher: new NodeHasher({ cost: 2048 }) })
+    manager.useModel(Account as unknown as typeof Model<PlainObject>)
+    const provider = manager.getProvider<Row>('users')
+
+    const read = await provider.retrieveByCredentials({ email: 'a@example.com' })
+    const reset = await new NodeHasher({ cost: 2048 }).hash('new-secret')
+    rows[0].passwordHash = reset
+    await provider.rehashPasswordIfRequired?.(read!, { email: 'a@example.com', password: 'secret' })
+
+    expect(rows[0].passwordHash).toBe(reset)
   })
 
   test('a failed attempt never rehashes', async () => {
