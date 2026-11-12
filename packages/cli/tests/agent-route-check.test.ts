@@ -599,6 +599,17 @@ ${member}
         expect(honesty?.message).toContain('read-only tools by default')
       })
 
+      // An ETag is why a read action calls something named update(), and that chain ends like a query's.
+      it('should stay quiet on a GET action that hashes what it returns', async () => {
+        const results = await runIndex(
+          "    const posts = await Post.all()\n"
+          + "    const etag = createHash('sha256').update(JSON.stringify(posts)).digest('hex')\n"
+          + '    return this.json({ etag, posts })',
+        )
+
+        expect(keys(results)).not.toContain('agent-route-annotation:GET:/posts')
+      })
+
       // An unverifiable default would fire on every read route whose controller is unreadable.
       it('does not chase the method default into an unreadable body', async () => {
         const results = await run([

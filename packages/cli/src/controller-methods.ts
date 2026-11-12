@@ -278,41 +278,27 @@ export function authTypeArgumentPattern(typeName: string): RegExp {
 }
 
 /**
- * A call to one of `names` on a model, in its two shapes: a static on the class
- * (PascalCase receiver) and a terminated query chain (call follows a closing
- * paren) — the discipline `MODEL_ATTACH_PATTERN` in audit.ts also applies.
- * Without it every `map.delete(key)` would read as a database write.
+ * A test for a call to one of `names` on a model: on the class (`Post.update(…)`),
+ * or ending a chain that starts at a PascalCase name (`Post.where(…).delete()`).
+ * The names are common ones, and other chains end the same way:
+ * `createHash(algo).update(data)`, `storage.disk().delete(path)`,
+ * `cache().store().increment(key)`. `map.delete(key)` follows no call at all.
  */
-function modelCallPattern(...names: string[]): RegExp {
+function modelCall(...names: string[]): (body: string) => boolean {
   const alternation = names.join('|')
-  return new RegExp(`${staticCallSource(names)}|\\)\\s*\\.\\s*(?:${alternation})\\s*\\(`)
-}
-
-function staticCallSource(names: string[]): string {
-  return `\\b[A-Z][A-Za-z0-9_]*\\s*\\.\\s*(?:${names.join('|')})\\s*\\(`
-}
-
-/** A record deletion, for the annotation-honesty rules (RFC 0016 §5.5). */
-export const DELETE_CALL_PATTERN = modelCallPattern('delete', 'forceDelete')
-
-const UPDATE_CALL_PATTERN = modelCallPattern('update')
-
-const COUNTER_NAMES = ['increment', 'decrement']
-const STATIC_COUNTER_PATTERN = new RegExp(staticCallSource(COUNTER_NAMES))
-const CHAINED_COUNTER_PATTERN = new RegExp(`\\)\\s*\\??\\.\\s*(?:${COUNTER_NAMES.join('|')})\\s*\\(`, 'g')
-
-/**
- * `increment()`/`decrement()` on a model: on the class, or ending a chain that
- * starts at a PascalCase name (`Product.where(…).decrement(…)`). The cache store
- * has both names, and `cache().store().increment(key)` ends the same way.
- */
-function countsOnModel(body: string): boolean {
-  if (STATIC_COUNTER_PATTERN.test(body)) return true
-  for (const match of body.matchAll(CHAINED_COUNTER_PATTERN)) {
-    if (/^[A-Z]/.test(chainRoot(body, match.index) ?? '')) return true
+  const onClass = new RegExp(`\\b[A-Z][A-Za-z0-9_]*\\s*\\.\\s*(?:${alternation})\\s*\\(`)
+  const chained = new RegExp(`\\)\\s*\\??\\.\\s*(?:${alternation})\\s*\\(`, 'g')
+  return (body) => {
+    if (onClass.test(body)) return true
+    for (const match of body.matchAll(chained)) {
+      if (/^[A-Z]/.test(chainRoot(body, match.index) ?? '')) return true
+    }
+    return false
   }
-  return false
 }
+
+/** What the annotation-honesty rules count as a write beside the force writes (RFC 0016 §5.5). */
+const writesOnModel = modelCall('delete', 'forceDelete', 'update', 'increment', 'decrement')
 
 const IDENTIFIER_CHAR = /[\w$]/
 const SPACE = /\s/
@@ -378,7 +364,7 @@ function chainRoot(body: string, close: number): string | undefined {
 /**
  * A write that bypasses mass-assignment protection, counted as state change by
  * the audit's force-write heuristic and the agent-route annotation rules. Looser
- * than {@link modelCallPattern} — any receiver will do — because `forceCreate`/`forceUpdate`
+ * than {@link modelCall} — any receiver will do — because `forceCreate`/`forceUpdate`
  * are ORM names distinctive enough not to collide, where `update` and `delete` plainly
  * are. A receiver is still required: the bare name also matches a *declaration*.
  */
@@ -455,13 +441,11 @@ function enclosingCallName(body: string, at: number): string | undefined {
  * declaration, so it fires only on unambiguous shapes.
  */
 export function mutatesRecords(body: string): boolean {
-  return (
-    DELETE_CALL_PATTERN.test(body)
-    || UPDATE_CALL_PATTERN.test(body)
-    || countsOnModel(body)
-    || FORCE_WRITE_PATTERN.test(body)
-  )
+  return writesOnModel(body) || FORCE_WRITE_PATTERN.test(body)
 }
+
+const writesOnModelInLocalTool = modelCall('create', 'update', 'delete', 'forceDelete', 'increment', 'decrement')
+const INSTANCE_SAVE_PATTERN = /\.\s*save\s*\(/
 
 /**
  * A Model write in an in-process agent's local tool (RFC 0029 §2.4): the calls
@@ -469,13 +453,8 @@ export function mutatesRecords(body: string): boolean {
  * which `readOnlyHint` honesty shares and must stay narrow. `.save(` takes any
  * receiver, since it is called on an instance.
  */
-const LOCAL_TOOL_WRITE_PATTERN = new RegExp(
-  `${modelCallPattern('create', 'update', 'delete', 'forceDelete').source}`
-  + `|${FORCE_WRITE_PATTERN.source}|\\.\\s*save\\s*\\(`,
-)
-
 export function writesInLocalTool(body: string): boolean {
-  return LOCAL_TOOL_WRITE_PATTERN.test(body) || countsOnModel(body)
+  return writesOnModelInLocalTool(body) || FORCE_WRITE_PATTERN.test(body) || INSTANCE_SAVE_PATTERN.test(body)
 }
 
 export { blankCommentsAndStrings }
