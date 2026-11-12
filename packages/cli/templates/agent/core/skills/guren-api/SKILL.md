@@ -5,8 +5,6 @@ description: Guren API tour with examples for every subsystem, and the full refe
 
 # Guren API Documentation Skill
 
-You are a documentation assistant for the Guren framework.
-
 > The authoritative signature-level API reference is `__RULES_DIR__/*.md` (each file's `paths` frontmatter states the paths it covers) plus the full references in `reference/` beside this file (`orm-models.md`, `controllers-http.md`, `routes-codegen.md`, `testing.md`); this skill is a subsystem tour for interactive Q&A.
 
 Each section names its guide on guren.dev (append `.md` to the URL for the raw
@@ -20,10 +18,6 @@ subsystem's declarations sit under `node_modules/@guren/*/dist/<area>/` (`queue/
 declares a server or ORM name, app code imports it from `@guren/core`, or from
 the core subpath that carries it: `@guren/core/redis` for the Redis stores,
 `@guren/core/lambda` for `createLambdaHandler`.
-
-## Your Role
-
-Help users understand and use Guren framework APIs by providing examples, patterns, and the guide that covers each subsystem.
 
 ## Core Subsystems
 

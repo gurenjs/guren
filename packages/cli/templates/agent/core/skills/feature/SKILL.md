@@ -5,25 +5,24 @@ description: "Generate a whole CRUD entity in one go (model, controller, pages, 
 
 # Feature Skill
 
-You are a full-feature scaffolding assistant for the Guren framework.
+`make:feature` writes everything a CRUD entity needs except the three things it
+prints as next steps: the table, the route registration and the migration. The
+feature is done when those are in, `bunx guren codegen` has run, and
+`bunx guren gate` exits 0.
 
 > When filling in generated code, follow the API rules in `__RULES_DIR__/` (orm-models, controllers-http, routes-codegen, testing) and, for signatures they leave out, their full references in `__SKILLS_DIR__/guren-api/reference/`.
 
-## Your Role
-
-Generate all components needed for a complete CRUD feature in one workflow. This is the "batteries-included" approach — creating everything an entity needs to work end-to-end with full type safety.
-
 ## Workflow
 
-When given a feature name (e.g., "Post", "Product"):
-
 ### 1. Generate all components
-
-**Preferred:** Use `make:feature` which generates type-safe code with proper imports:
 
 ```bash
 bunx guren make:feature <Name> --fields "title:string,body:text,published:boolean"
 ```
+
+`store`, `update` and `destroy` require a signed-in user unless `--public` is
+passed. `--test` adds a controller test, `--factory` a model factory, and
+`--policy` a policy the mutating actions enforce.
 
 Add `--module <name>` to scaffold the feature inside an existing `modules/<name>/` directory instead of the project root — app/ files move under `modules/<name>/`, but pages stay top-level, namespaced by module name (`resources/js/pages/<name>/...`), not colocated.
 
@@ -39,18 +38,17 @@ This generates Validator, Resource, Controller, Views (Index/Show/New/Edit), and
 - `ApiRoutes` for form data types
 - A validation error under each form field, read from `form.errors`
 
-**Or generate individually:**
+**One piece at a time**, when the entity needs only some of them:
 
 ```bash
 bunx guren make:model <Name>
-bunx guren make:migration create_<names>_table
 bunx guren make:controller <Name>
 bunx guren make:view <names>/Index
 bunx guren make:view <names>/Show
 bunx guren make:view <names>/New
 bunx guren make:view <names>/Edit
 bunx guren make:route <names>
-bunx guren make:test controllers/<Name>Controller --runner=vitest
+bunx guren make:test controllers/<Name>Controller   # the runner is detected from the project
 bunx guren make:factory <Name> --model=<Name>
 bunx guren make:seeder <Name>
 bunx guren make:resource <Name> --model=<Name>
@@ -61,38 +59,45 @@ Don't hand-write the Validator — `make:validator` emits the same file `make:fe
 
 The Validator is needed for both controller validation and route body schema binding.
 
-### 2. Register routes with body schemas
+### 2. Add the table
 
-When registering routes in `routes/web.ts`, **always attach Zod body schemas** to mutation routes. This enables codegen to extract types for the frontend:
+Add the table to `db/schema.ts` (see Schema Example below). `make:feature` says
+so in its next steps, or reports that the schema already declares it.
+
+### 3. Register the routes
+
+`make:feature` prints the block to add to `routes/web.ts` (the module's routes
+file with `--module`). Paste it as printed: the mutating routes carry their Zod
+`body` schema, which is what codegen types the forms from, and the `auth`
+middleware unless the feature is `--public`.
 
 ```typescript
 import <Name>Controller from '../app/Http/Controllers/<Name>Controller.js'
 import { <Name>PayloadSchema } from '../app/Http/Validators/<Name>Validator.js'
 
-router.group('/<names>', (<names>) => {
+const authRouter = router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+authRouter.group('/<names>', (<names>) => {
   <names>.get('/', [<Name>Controller, 'index']).name('<names>.index')
-  <names>.get('/new', [<Name>Controller, 'create']).name('<names>.create')
+  <names>.get('/create', [<Name>Controller, 'create']).name('<names>.create')
   <names>.get('/:id', [<Name>Controller, 'show']).name('<names>.show')
   <names>.get('/:id/edit', [<Name>Controller, 'edit']).name('<names>.edit')
-  <names>.post('/', { name: '<names>.store', body: <Name>PayloadSchema }, [<Name>Controller, 'store'])
-  <names>.put('/:id', { name: '<names>.update', body: <Name>PayloadSchema }, [<Name>Controller, 'update'])
+  <names>.post('/', { name: '<names>.store', body: <Name>PayloadSchema }, [<Name>Controller, 'store']).middleware('auth')
+  <names>.put('/:id', { name: '<names>.update', body: <Name>PayloadSchema }, [<Name>Controller, 'update']).middleware('auth')
+  <names>.delete('/:id', { name: '<names>.destroy' }, [<Name>Controller, 'destroy']).middleware('auth')
 })
 ```
 
 Where `<Name>` is PascalCase singular (e.g., `Post`) and `<names>` is kebab-case plural (e.g., `posts`).
 
-### 3. Run codegen
+### 4. Migrate and run codegen
 
 ```bash
-bunx guren codegen
+bun run db:make && bun run db:migrate   # drizzle-kit writes the migration from db/schema.ts
+bunx guren codegen                      # typed route helpers and API client types in .guren/
 ```
 
-This generates typed route helpers and API client types in `.guren/`.
-
-### 4. Report created files and next steps
-
-- Add table schema to `db/schema.ts`
-- Run migration: `bun run db:migrate`
+With `--policy`, also register the policy in a provider's `boot()`, as the
+command prints; an unregistered policy denies every request.
 
 ## Type Safety Patterns
 
@@ -179,17 +184,17 @@ app/
 ├── Http/Controllers/PostController.ts
 ├── Http/Resources/PostResource.ts
 ├── Http/Validators/PostValidator.ts
-└── Models/Post.ts
+├── Models/Post.ts
+└── Policies/PostPolicy.ts                 ← with --policy
 db/
-├── factories/PostFactory.ts
-├── migrations/{timestamp}_create_posts_table.sql
-└── seeders/PostSeeder.ts
+├── factories/PostFactory.ts               ← with --factory
+└── migrations/<folder>/migration.sql      ← written by `bun run db:make`, not by make:feature
 resources/js/pages/posts/
 ├── Index.tsx    ← typed props, route() links
 ├── Show.tsx     ← typed props, route() links
 ├── New.tsx      ← ApiRoutes form type, form.errors per field, route() submit
 └── Edit.tsx     ← ApiRoutes form type, form.errors per field, route() submit
-tests/controllers/PostController.test.ts
+tests/controllers/PostController.test.ts   ← with --test
 ```
 
 ## Schema Example

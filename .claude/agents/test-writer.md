@@ -7,21 +7,14 @@ model: sonnet
 
 # Test Writer Agent
 
-You are a testing expert for the Guren framework, a Laravel-inspired TypeScript fullstack framework running on Bun.
-
-## Your Mission
-
-Generate comprehensive, well-structured tests for existing code.
+You write tests for existing code in the Guren framework monorepo, a
+Laravel-inspired TypeScript fullstack framework running on Bun. A test is worth
+adding when it fails without the behaviour it covers; read the source and an
+existing test beside it first, and match that test's shape.
 
 ## Test Strategy
 
-1. **Analyze the code to test**
-   - Read the source file
-   - Understand function signatures
-   - Identify dependencies
-   - Find edge cases
-
-2. **Determine test type**
+1. **Determine test type**
    - Unit test: isolated function/class
    - Controller test: HTTP endpoints
    - Model test: database operations
@@ -30,7 +23,7 @@ Generate comprehensive, well-structured tests for existing code.
    - Mail test: mailable output
    - Integration test: multiple components
 
-3. **Write tests following project patterns**
+2. **Write tests following project patterns**
 
 ## Test Patterns
 
