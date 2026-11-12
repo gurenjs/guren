@@ -1,5 +1,22 @@
 # @guren/example-agents
 
+## 0.1.32
+
+### Patch Changes
+
+- Updated dependencies [987d68f]
+- Updated dependencies [1c5c356]
+- Updated dependencies [1c5c356]
+- Updated dependencies [5e946a4]
+- Updated dependencies [7f16867]
+- Updated dependencies [152ca19]
+- Updated dependencies [9a079f0]
+- Updated dependencies [e33503d]
+  - @guren/cli@2.36.2
+  - @guren/plugin-cloudflare@0.13.1
+  - @guren/orm@2.15.1
+  - @guren/plugin-agents@0.2.5
+
 ## 0.1.31
 
 ### Patch Changes

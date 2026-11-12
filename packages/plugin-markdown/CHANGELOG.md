@@ -1,5 +1,11 @@
 # @guren/plugin-markdown
 
+## 0.4.4
+
+### Patch Changes
+
+- eb7cf21: Heading slugs are deduplicated in linear time. A document with many headings sharing one name no longer makes the slugger rescan every earlier suffix, which let a large Markdown body spend quadratic time in rendering.
+
 ## 0.4.3
 
 ### Patch Changes
