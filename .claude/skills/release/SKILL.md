@@ -142,14 +142,19 @@ upgrade notes, then the changes. Say plainly:
 
 ## 5. Merge when green and nothing moved
 
-Before merging, all three hold:
+Before merging, all four hold:
 
 - every PR check passed. A pending or missing check is not a pass:
   `gh pr view <n> --json statusCheckRollup -q '.statusCheckRollup[] | select(.status != "COMPLETED" or (.conclusion != "SUCCESS" and .conclusion != "SKIPPED")) | .name'`
   prints nothing, and the list it filtered was not empty;
 - the canary run on the version branch concluded `success`;
 - `git fetch origin main && git rev-list --count origin/chore/version-packages-vX.Y.Z..origin/main`
-  prints `0`.
+  prints `0`;
+- `bun run audit:deps` in the release worktree exits 0. CI ran it when the PR
+  was pushed, but an advisory can be published at any hour, and `validate`
+  runs the audit again at publish time. Caught here, the fix is one more commit
+  on the version PR. Caught after the Release exists, it costs a second PR and
+  a Release made twice.
 
 If `main` moved, look at what arrived. A commit with a changeset means the
 changelog would miss it: rebuild the PR (troubleshooting has the commands). A
