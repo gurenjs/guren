@@ -385,6 +385,7 @@ function buildProviderOwnedEmailProfileControllerTemplate(includePassword: boole
 `
     : ''
   const currentPasswordMethod = includePassword ? `\n${CURRENT_PASSWORD_CHECK_METHOD}` : ''
+  const relogin = includePassword ? RELOGIN_AFTER_PASSWORD_CHANGE : ''
 
   return `import { ${coreImports} } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'
@@ -415,12 +416,7 @@ export default class ProfileController extends Controller {
     const ${destructuredFields} = this.validated('profile.update').body
 ${passwordGate}
     await User.update({ id: user.id }, ${updateFields})
-
-    const refreshed = await User.find(user.id)
-    if (refreshed) {
-      await this.auth.login(refreshed)
-    }
-
+${relogin}
     return this.inertia(pages.profile.Edit, {
       profile: { name, email: user.email },
       status: 'Profile updated successfully.',
@@ -429,6 +425,18 @@ ${passwordGate}
 ${currentPasswordMethod}}
 `
 }
+
+const RELOGIN_AFTER_PASSWORD_CHANGE = `
+    // Only after a password change: logging in again binds the session to the
+    // hash stored by then, which after any other update may be a password
+    // reset's, and would keep a session the reset meant to end.
+    if (password) {
+      const refreshed = await User.find(user.id)
+      if (refreshed) {
+        await this.auth.login(refreshed)
+      }
+    }
+`
 
 const CURRENT_PASSWORD_CHECK_METHOD = `  // A session alone must not rotate the credentials that recover the account.
   // An account with no password hash (created through OAuth) fails here too.
@@ -506,6 +514,7 @@ import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'`
 `
     : ''
   const currentPasswordMethod = includePassword ? `\n${CURRENT_PASSWORD_CHECK_METHOD}` : ''
+  const relogin = includePassword ? RELOGIN_AFTER_PASSWORD_CHANGE : ''
 
   return `import { ${coreImports} } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'${verifyImports}
@@ -546,12 +555,7 @@ ${credentialsGate}
     }
 
     ${profileWrite}
-
-    const refreshed = await User.find(user.id)
-    if (refreshed) {
-      await this.auth.login(refreshed)
-    }
-${verifyResend}
+${relogin}${verifyResend}
     return this.inertia(pages.profile.Edit, {
       profile: { name, email },
       status: ${statusMessage},

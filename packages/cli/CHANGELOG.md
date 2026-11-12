@@ -1,5 +1,21 @@
 # @guren/cli
 
+## 2.36.2
+
+### Patch Changes
+
+- 987d68f: The profile controller `guren make:auth` scaffolds checks the current password through the `web` guard by name. Unqualified, a request carrying `Authorization: Bearer` resolved the token guard, whose `validate()` throws, so a profile update over an API token failed with a 500. An address that differs from the stored one only in case is now treated as unchanged throughout `update()`, so it no longer clears the verified status or sends a verification mail. Apps scaffolded earlier are not modified.
+- 152ca19: `plan:scaffold` writes generated code that a plan's names cannot break out of: a foreign key to a column whose name is no identifier is written as a quoted property access, and a page or column name holding a line terminator (including U+2028 and U+2029) stays inside the controller comment that names it.
+- 9a079f0: The profile controller `make:auth` and the blog template generate logs the user in again only after a password change. `login()` binds the session to the password hash stored at that moment, so the unconditional call let a name-only update carry a session past a password reset that landed during the request.
+- Updated dependencies [5e946a4]
+- Updated dependencies [7f16867]
+- Updated dependencies [9a079f0]
+- Updated dependencies [9a079f0]
+- Updated dependencies [c6080d0]
+- Updated dependencies [c6080d0]
+  - @guren/orm@2.15.1
+  - @guren/server@2.37.0
+
 ## 2.36.1
 
 ### Patch Changes

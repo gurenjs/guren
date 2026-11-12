@@ -1,5 +1,23 @@
 # @guren/server
 
+## 2.37.0
+
+### Minor Changes
+
+- 9a079f0: `SessionGuard` binds a session to the password it was opened under. `ModelUserProvider` reports a digest of the password hash through the new optional `UserProvider.credentialFingerprint()`, the guard stores it at login, and a session whose copy differs from the stored record's stops authenticating at its next request. A password reset or a profile password change therefore signs out every other session of the account, on every session driver, with no change to the app. Log the user in again after the write to keep the session that made the change, as the `make:auth` profile controller does.
+
+  Sessions opened before this version carry no fingerprint and are signed out once. A login or a `validate()` call that rehashes the stored password signs out that account's other sessions and keeps the one that made the call. `auth.id()` now loads the user for a provider with the capability, so an ended session reports no id. A test that writes `auth:user_id` into the session directly has to log in through the guard instead. A custom provider without `credentialFingerprint()` keeps the previous behaviour.
+
+- c6080d0: `SmtpTransport` accepts `requireTLS` and `tls` and passes them to nodemailer. With `requireTLS: true`, a send to a server that does not upgrade with STARTTLS fails instead of sending credentials and mail in cleartext; `tls` takes Node TLS options such as `ca` for a relay on a private CA. The default stays `false`.
+
+### Patch Changes
+
+- 9a079f0: The rehash `ModelUserProvider` writes at login is keyed on the hash it verified as well as the user id. A password reset that lands between the read and the rehash keeps its hash; before, the rehash wrote over it and the old password worked again. The provider reads the row back after the write, so of two logins that rehash the same account at once, the one whose write matched nothing binds its session to the hash that was stored.
+- c6080d0: `SmtpTransport` escapes `"` and `\` in a display name, so a name such as `x" <attacker@example.com>, "y` is shown as written and no longer adds an address to the From, To, Cc, Bcc or Reply-To header. A name that is already one quoted string, as `parseMailAddress('"Jane Doe" <jane@example.com>')` leaves it, is sent as it is.
+- Updated dependencies [5e946a4]
+- Updated dependencies [7f16867]
+  - @guren/orm@2.15.1
+
 ## 2.36.0
 
 ### Minor Changes

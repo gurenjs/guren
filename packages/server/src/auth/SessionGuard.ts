@@ -57,6 +57,11 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       return null
     }
 
+    if (!(await this.holdsCurrentCredential(this.currentSession, user))) {
+      this.forgetLogin(this.currentSession)
+      return null
+    }
+
     await this.provider.setRememberToken?.(user, rememberToken)
     const sanitized = this.sanitizeUser(user)
     this.cachedUser = sanitized
@@ -65,6 +70,80 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
 
   private sanitizeUser(user: User): User {
     return sanitizeUser(this.provider, user)
+  }
+
+  // Derived from the session key: guards given distinct keys on one session
+  // keep distinct fingerprints.
+  private fingerprintSessionKey(): string {
+    return `${this.sessionKey()}:fingerprint`
+  }
+
+  /**
+   * Whether the session was opened under the credential `user` holds now. A
+   * session with no fingerprint fails for an account that has a credential:
+   * nothing shows it was opened under the current one.
+   */
+  private async holdsCurrentCredential(session: Session, user: User): Promise<boolean> {
+    const current = await this.provider.credentialFingerprint?.(user)
+    const stored = session.get(this.fingerprintSessionKey())
+    // No credential to compare (`null`, or a record without one) passes only
+    // a session that was never bound: login() stores nothing for either.
+    if (current == null) return stored == null
+    return typeof stored === 'string' && secureStringCompare(stored, current)
+  }
+
+  private async bindCredential(session: Session, user: User, identifier: unknown): Promise<void> {
+    const provider = this.provider
+    if (!provider.credentialFingerprint) return
+
+    let fingerprint = await provider.credentialFingerprint(user)
+    if (fingerprint === undefined) {
+      const stored = await provider.retrieveById(identifier)
+      fingerprint = stored ? await provider.credentialFingerprint(stored) : undefined
+    }
+
+    if (typeof fingerprint === 'string') {
+      session.set(this.fingerprintSessionKey(), fingerprint)
+    } else {
+      session.forget(this.fingerprintSessionKey())
+    }
+  }
+
+  /**
+   * validate() may rehash the password of the user this session belongs to
+   * (a profile form confirming the current password). The session moves to the
+   * new hash, or its own next request would read as a password change.
+   */
+  private async followRehash(user: User, before: string | null | undefined, owner: unknown): Promise<void> {
+    const session = this.currentSession
+    if (!session || typeof before !== 'string') return
+
+    const after = await this.provider.credentialFingerprint?.(user)
+    if (typeof after !== 'string' || after === before) return
+    if (owner == null || owner !== this.provider.getId(user)) return
+
+    const stored = session.get(this.fingerprintSessionKey())
+    if (typeof stored === 'string' && secureStringCompare(stored, before)) {
+      session.set(this.fingerprintSessionKey(), after)
+    }
+  }
+
+  /**
+   * Whose session this is. A remembered session carries no id key, and must be
+   * resolved before a rehash: afterwards its fingerprint reads as stale.
+   */
+  private async sessionUserId(): Promise<unknown> {
+    const identifier = this.currentSession?.get(this.sessionKey())
+    if (identifier != null) return identifier
+
+    const user = await this.resolveUser()
+    return user ? this.provider.getId(user) : null
+  }
+
+  private forgetLogin(session: Session): void {
+    session.forget(this.sessionKey())
+    session.forget(this.rememberSessionKey())
+    session.forget(this.fingerprintSessionKey())
   }
 
   private async resolveUser(): Promise<User | null> {
@@ -93,6 +172,12 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       return null
     }
 
+    if (!(await this.holdsCurrentCredential(session, user))) {
+      this.forgetLogin(session)
+      this.cachedUser = null
+      return null
+    }
+
     const sanitized = this.sanitizeUser(user)
     this.cachedUser = sanitized
     return sanitized
@@ -114,6 +199,11 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
   async id(): Promise<unknown> {
     const session = this.currentSession
     if (!session) {
+      return null
+    }
+
+    // A bound session's id is only as good as its credential check.
+    if (this.provider.credentialFingerprint && !(await this.resolveUser())) {
       return null
     }
 
@@ -142,6 +232,7 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
 
     const identifier = this.provider.getId(castUser)
     session.set(this.sessionKey(), identifier)
+    await this.bindCredential(session, castUser, identifier)
     this.cachedUser = this.sanitizeUser(castUser)
 
     if (remember) {
@@ -157,8 +248,7 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       return
     }
 
-    session.forget(this.sessionKey())
-    session.forget(this.rememberSessionKey())
+    this.forgetLogin(session)
     this.cachedUser = null
   }
 
@@ -190,11 +280,14 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
     // default, a testing-cost hash in production). Best effort: the credentials
     // were correct and the stored hash still verifies, so a failed write is a
     // stale row to fix later, never a refused login.
+    const fingerprint = await this.provider.credentialFingerprint?.(user)
+    const owner = typeof fingerprint === 'string' ? await this.sessionUserId() : null
     try {
       await this.provider.rehashPasswordIfRequired?.(user, credentials)
     } catch (error) {
       console.warn(`[guren] Rehashing the password for user ${this.describeUser(user)} failed; the login continues.`, redactQueryParams(error))
     }
+    await this.followRehash(user, fingerprint, owner)
     return user
   }
 

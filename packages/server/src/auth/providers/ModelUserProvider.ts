@@ -4,6 +4,7 @@ import { resolveModelHasher } from '../password/configured-hasher'
 import { looksLikePasswordHash } from '../password/hash-format'
 import { capabilityOf } from '../model-capability'
 import type { AuthCredentials, Authenticatable } from '../types'
+import { hashToken } from '../utils'
 import { BaseUserProvider } from './UserProvider'
 
 interface CredentialColumnSource {
@@ -117,17 +118,39 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     }
 
     const rehashed = await this.hasher.hash(plain)
-    ;(user as PlainObject)[this.passwordColumn] = rehashed
+    // Keyed on the verified hash as well as the id: a password reset that
+    // landed since the row was read keeps its hash, and this write matches nothing.
+    const where = { [this.idColumn]: this.getId(user), [this.passwordColumn]: hashed }
     // storePasswordHash where the model offers it: a model that hashes in place
     // (passwordField === passwordHashField) hashes this value a second time if it
     // goes through update(). A plain Model has no such preparation, so the
     // column write is the equivalent.
     const writer = passwordHashWriter(this.model)
     if (writer) {
-      await writer.storePasswordHash({ [this.idColumn]: this.getId(user) }, this.passwordColumn, rehashed)
+      await writer.storePasswordHash(where, this.passwordColumn, rehashed)
     } else {
-      await this.writeColumn(user, this.passwordColumn, rehashed)
+      await (this.model as typeof Model).forceUpdate(where, { [this.passwordColumn]: rehashed })
     }
+    // Read back, never assumed: the write matches nothing once another login's
+    // rehash or a reset replaced the verified hash. The login that follows
+    // fingerprints this record, so it takes the stored hash only where this
+    // password opens it, and a write that threw leaves it as it was read.
+    const stored = await this.retrieveById(this.getId(user))
+    const current = stored ? (stored as PlainObject)[this.passwordColumn] : undefined
+    if (current === rehashed || (await this.opens(current, plain))) {
+      ;(user as PlainObject)[this.passwordColumn] = current
+    }
+  }
+
+  private async opens(hashed: unknown, plain: string): Promise<boolean> {
+    return typeof hashed === 'string' && looksLikePasswordHash(hashed) && (await this.hasher.verify(hashed, plain))
+  }
+
+  /** A digest, so the hash itself never reaches the session store. */
+  credentialFingerprint(user: User): string | null | undefined {
+    const hashed = (user as PlainObject)[this.passwordColumn]
+    if (hashed === undefined) return undefined
+    return typeof hashed === 'string' && hashed !== '' ? hashToken(hashed) : null
   }
 
   /** forceUpdate keyed on the id column: both credential columns are denied to mass assignment. */

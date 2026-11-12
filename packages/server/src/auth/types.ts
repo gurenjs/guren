@@ -41,6 +41,13 @@ export interface UserProvider<User = Authenticatable> {
    * hash needs it, and persist the new value.
    */
   rehashPasswordIfRequired?(user: User, credentials: AuthCredentials): Promise<void> | void
+  /**
+   * A digest of the credential a password change replaces. `SessionGuard`
+   * stores it at login and ends a session whose copy differs from it.
+   * `null`: the account has no such credential. `undefined`: this record does
+   * not carry it (a sanitized one), so the guard reads the stored record.
+   */
+  credentialFingerprint?(user: User): Promise<string | null | undefined> | string | null | undefined
 }
 
 /** The conventional credential column names `ModelUserProvider.sanitize()` strips. */

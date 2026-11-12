@@ -46,9 +46,14 @@ export default class ProfileController extends Controller {
       ...(password ? { password } : {}),
     })
 
-    const refreshed = await User.find(user.id)
-    if (refreshed) {
-      await this.auth.login(refreshed)
+    // Only after a password change: logging in again binds the session to the
+    // hash stored by then, which after any other update may be a password
+    // reset's, and would keep a session the reset meant to end.
+    if (password) {
+      const refreshed = await User.find(user.id)
+      if (refreshed) {
+        await this.auth.login(refreshed)
+      }
     }
 
     return this.inertia(pages.profile.Edit, {

@@ -1,6 +1,6 @@
 {
   "name": "@guren/plugin-cloudflare",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "description": "Deploy a Guren application to Cloudflare Workers, with D1 as the database.",
   "keywords": [
     "guren",
