@@ -1,5 +1,12 @@
 # create-guren-app
 
+## 1.21.2
+
+### Patch Changes
+
+- 987d68f: The blog template asks for the current password before a profile update changes the email address or the password, and rate-limits profile updates, so a stolen session alone cannot take over the account.
+- 9a079f0: The profile controller `make:auth` and the blog template generate logs the user in again only after a password change. `login()` binds the session to the password hash stored at that moment, so the unconditional call let a name-only update carry a session past a password reset that landed during the request.
+
 ## 1.21.1
 
 ### Patch Changes

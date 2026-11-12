@@ -1,5 +1,94 @@
 # @guren/plugin-cloudflare
 
+## 0.13.1
+
+### Patch Changes
+
+- 1c5c356: Read the consenting user from the session on the `--mcp-oauth` consent screen
+
+  The scaffolded `McpOAuthController` read the signed-in user with `this.auth.id()`.
+  In an app that calls `auth.useTokens()`, that call answers with an API token's user
+  for any request carrying `Authorization: Bearer`. A leaked token with ordinary
+  abilities could therefore open the consent screen, approve any tool the app
+  exposes to MCP, and receive an OAuth grant for the token's user. Revoking the API
+  token does not end that grant: it lasts until the provider's refresh token expires.
+
+  `GET` and `POST /oauth/authorize` now read the user from the session guard by name,
+  `this.auth.guard(SESSION_GUARD).id()`, where `SESSION_GUARD` is `'web'`, the guard
+  `auth.useModel()` registers. A request with no signed-in session is sent to the
+  login path as before, whatever `Authorization` header it carries. Signing in and
+  approving works as it did. When a request carries both a session and a bearer
+  token, the grant goes to the session's user. A test that signs a user in with
+  `TestApp.actingAs()` now gets the redirect to the login path on these two routes,
+  since `actingAs()` does not reach a guard asked for by name; such a test has to put
+  the user in the session.
+
+  The scaffold never overwrites a controller the app already has, so an app that ran
+  `--mcp-oauth` before this release keeps the old check until it changes its copy.
+  After updating this package, make the change by hand in
+  `app/Http/Controllers/McpOAuthController.ts`:
+
+  ```ts
+  // beside LOGIN_PATH, at the top of the file:
+  const SESSION_GUARD = "web";
+
+  // in show() and in approve(), the line that reads the user:
+  const userId = await this.auth.guard(SESSION_GUARD).id();
+  ```
+
+  Use your session guard's name if it is registered under another one. Or copy the
+  template over your file and put your own edits back with `git diff`:
+
+  ```bash
+  cp node_modules/@guren/plugin-cloudflare/templates/mcp-oauth/app/Http/Controllers/McpOAuthController.ts app/Http/Controllers/
+  ```
+
+  If you copy, also compare your `app/View/` pages with the package's
+  `templates/mcp-oauth/app/View/`, since the controller passes them their props.
+  Moving your controller aside so a build scaffolds a new one does not work once the
+  routes are mounted: the app build runs before the scaffold and fails on the missing
+  controller.
+
+  Grants issued before the change stay valid until they expire.
+  `env.OAUTH_PROVIDER.listUserGrants(userId)` and `revokeGrant(grantId, userId)` end
+  one sooner.
+
+- 1c5c356: Label the client's name as unverified on the `--mcp-oauth` consent screen, and show where the grant goes
+
+  The scaffolded consent screen named the client by the name it chose for itself and
+  never said where the authorization code would be sent. Anyone can register at
+  `/oauth/register`, so a client registered as `Claude` with a redirect URI on an
+  attacker's host read as Claude, and a signed-in user who approved it handed that
+  host a code it could redeem with its own PKCE verifier.
+
+  The heading now reads "A client calling itself **name** `unverified` is asking…",
+  a sentence says the application has not verified the name and that anyone can
+  register under any name, and a block above the form shows the scheme and host of
+  the redirect URI this request really uses. The host comes from the same `new URL`
+  parse `completeAuthorization` redirects with, so userinfo such as
+  `https://claude.ai@attacker.example` shows `https://attacker.example`. It is
+  escaped text, never a link.
+
+  Registration itself stays open, as it was, so keep the label unless the app creates
+  its own clients with `createClient()` and has closed registration.
+
+  The scaffold never overwrites a file the developer already has, so an app that
+  already ran `--mcp-oauth` keeps the old screen until it applies this by hand. After
+  updating this package, copy the two files over yours:
+
+  ```bash
+  cp node_modules/@guren/plugin-cloudflare/templates/mcp-oauth/app/Http/Controllers/McpOAuthController.ts app/Http/Controllers/
+  cp node_modules/@guren/plugin-cloudflare/templates/mcp-oauth/app/View/McpOAuthConsentPage.tsx app/View/
+  ```
+
+  Use `git diff` to put back any edits you had made in those files, then rebuild as
+  usual. Copy both: the page reads a `redirectTarget` prop only the new controller
+  passes, and with an old controller it renders an empty target and no error. A
+  normal build cannot scaffold them again if you move your files aside: once the routes
+  are mounted, the app build runs first and fails on the missing controller.
+
+- e33503d: `R2Driver.temporaryUrl()` refuses a path whose `..` segments resolve outside the disk (its `prefix`, or the bucket when there is none), as `LocalDriver` refuses a path escaping its root. It used to sign the collapsed URL, so `temporaryUrl('../tenant-b/invoice.pdf')` handed out a link to an object outside the prefix, or in another bucket the R2 API token can read. A path that resolves inside the disk signs the same URL as before.
+
 ## 0.13.0
 
 ### Minor Changes
