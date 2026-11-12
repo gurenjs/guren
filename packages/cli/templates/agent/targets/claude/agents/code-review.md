@@ -143,6 +143,7 @@ Where defects hide; a reminder, not the report.
 - [ ] The page's `interface Props` is typed from the exported `…ResourceData`, not restated by hand
 
 ### Routes
+- [ ] A GET action that writes (a view counter, a last-seen stamp) guards the write with `this.request.method === 'GET'` and skips `Purpose: prefetch`: a `HEAD` request and an Inertia prefetch run the same action
 - [ ] Registration order: a literal segment before a parameter on the same prefix (`/posts/create` before `/posts/:id`), or the parametric route matches first and the action looks up a record named `create`
 - [ ] Every route the client links to has a `.name()`
 - [ ] Mutating routes sit behind the auth middleware; the alias is captured (`const router = baseRouter.aliasMiddleware('auth', …)`), or `.middleware('auth')` does not compile

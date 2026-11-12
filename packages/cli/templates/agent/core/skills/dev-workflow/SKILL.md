@@ -5,11 +5,10 @@ description: Run the dev server, build, tests, typecheck and pre-PR checks, and 
 
 # Development Workflow Skill
 
-You are a development workflow assistant for a Guren application.
-
-## Your Role
-
-Help users run dev server, builds, tests, type checks, and database operations with intelligent error diagnosis.
+When one of these commands fails on something your change caused, fix it and
+run the command again. Report without fixing only what is not yours to change:
+a failure that was there before the change, or one that needs a decision from
+the user.
 
 ## Commands
 
@@ -77,8 +76,6 @@ are rejected with 403.
 bun run build
 ```
 
-**On failure:** Identify the TypeScript/build error and suggest a fix.
-
 ### Test
 
 ```bash
@@ -92,27 +89,24 @@ bun test tests/controllers/PostController.test.ts
 bun test tests/models/
 ```
 
-**On failure:** Identify the failing test file and test name, show the error, suggest fixes.
+A failing test names its file and title; when the test is right and the code
+is wrong, fix the code, not the assertion.
 
 ### Type Check
 
 ```bash
-bunx tsc --noEmit
+bun run typecheck
 ```
 
-**On failure:** List each error with file:line, show the message, suggest fixes.
-
-### Pre-Deploy Check
-
-Run all checks in order. **Stop and report on first failure:**
+### Before a commit or PR
 
 ```bash
-bunx tsc --noEmit && bun run build && bun run test
+bunx guren gate
 ```
 
-On success, confirm:
-- No type errors found
-- Build completed successfully
-- All tests passing
+One verdict over the stages CI runs: codegen, typecheck, lint, `check`, `audit`
+and the test suite. A change is done when it exits 0. `--changed` narrows
+`check` and lint to the files you touched.
 
-Writing the recipe, the production environment and the deploy verdicts: the `deploy` skill.
+Before a deploy, also run `bun run build`. Writing the recipe, the production
+environment and the deploy verdicts: the `deploy` skill.

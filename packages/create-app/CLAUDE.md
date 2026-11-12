@@ -87,6 +87,13 @@ Scaffolding CLI that copies templates from `templates/default` and replaces toke
   checks every blueprint × mode × driver, and that each block another README
   carries is one `templates/default/README.md` carries verbatim, so edit a
   block there and copy it.
+- **A blueprint whose schema is the finished app's sets `initialMigration`**, and
+  the scaffolder generates that migration through the app's installed CLI before
+  codegen and the initial commit. Only `blog` does. `default` deliberately ships
+  its `users` table with no migration: tutorial chapter 3 teaches from the first
+  `db:make` creating both tables. `tests/initial-migration.test.ts` pins the call,
+  its order and the next steps; the blog smoke checks the real migration only
+  when the scaffolder's own npm install completed.
 - **Advertise nothing without a smoke.** Each blueprint gets a
   `smoke:starter:<name>` script and a CI step — `bun run typecheck` and
   `bun run build` inside a real scaffold are the only things that catch a

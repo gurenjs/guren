@@ -148,6 +148,27 @@ if (await this.has('email')) {
 
 これらのヘルパーは、JSON とフォームエンコードのどちらのリクエストボディでも使えます。ボディを読むメソッド（`input`、`only`、`except`、`has`）はリクエストボディを非同期でパースするので、`await` が必要です。`query` メソッドは URL のクエリパラメータを読むだけなので、同期的に値を返します。
 
+## GET アクションでの書き込み
+
+GET のルートには、ページの表示以外のリクエストも届きます。`HEAD` リクエスト（死活監視、リンクチェッカー、クローラー）は GET ルートのアクションを実行し、ボディだけを捨てます。Inertia のプリフェッチ（`<Link prefetch>`）は、リンクにポインタを載せた時点でページを取得します。こうしたアクションに閲覧数のカウントや最終閲覧日時の更新を書くと、誰も見ていないリクエストまで数えてしまいます。
+
+書き込みは、リクエストの種類を確かめてから行います。
+
+```ts
+async show() {
+  const post = this.model(Post)
+
+  const prefetch = this.request.header('Purpose') === 'prefetch'
+  if (this.request.method === 'GET' && !prefetch) {
+    await Post.forceUpdate({ id: post.id }, { lastViewedAt: new Date() })
+  }
+
+  return this.inertia(pages.posts.Show, { post })
+}
+```
+
+HEAD リクエストでは、実行されるのが GET ルートのアクションでも、`this.request.method` は `HEAD` になります。テストでは `http.head('/posts/1')` で HEAD リクエストを送れます（[テスト](./testing.md#testapp)を参照）。
+
 ## レスポンスの返却
 
 | ヘルパー | 用途 |

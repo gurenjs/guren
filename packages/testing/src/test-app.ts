@@ -679,6 +679,15 @@ export class TestApp {
   }
 
   /**
+   * Make a HEAD request. The app answers it with the GET route's action and
+   * drops the body, so this shows what that action does for a monitor or a
+   * link checker.
+   */
+  head(path: string): PendingTestResponse {
+    return this.request('HEAD', path)
+  }
+
+  /**
    * Make a POST request.
    */
   post(path: string, body?: unknown): PendingTestResponse {

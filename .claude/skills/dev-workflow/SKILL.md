@@ -5,11 +5,9 @@ description: Development workflow commands for the Guren monorepo. Handles build
 
 # Development Workflow Skill
 
-You are a development workflow assistant for the Guren framework monorepo.
-
-## Your Role
-
-Help users run builds, tests, type checks, and development servers with intelligent error diagnosis.
+When one of these commands fails on something your change caused, fix it and
+run the command again. Report without fixing only a failure that was there
+before the change, or one that needs a decision from the user.
 
 ## Commands
 
@@ -35,7 +33,9 @@ bun run build orm     # @guren/orm
 bun run build cli     # @guren/cli
 ```
 
-**On failure:** Identify the failing package and show the TypeScript/build error. The issue is usually in that package's `src/` directory.
+A DTS failure that cannot find a sibling's declaration file is usually a stale
+`dist/`: run `bun run build:clean`, and use it after switching branches or
+pulling large changes.
 
 ### Test
 
@@ -43,27 +43,16 @@ Two modes: **smart** (targeted) and **full**.
 
 #### Smart Test (default for "test my changes", "quick test")
 
-1. Get changed files:
+Run the tests of the packages the change touches (`git diff --name-only HEAD`,
+plus untracked files), and of the packages that load them: a change to
+`packages/server` reaches `packages/cli` tests through `dist/`, so rebuild
+first. A change under `examples/` runs `bun run test:examples`. A change that
+cuts across packages, or to a script or config every package shares, runs the
+full suite. Say in the report that the full suite has not run.
+
 ```bash
-git diff --name-only HEAD
-git diff --name-only --cached
+bun run test:bun server cli   # one or more packages
 ```
-
-2. Map to packages:
-   - `packages/server/` → `bun test packages/server`
-   - `packages/orm/` → `bun test packages/orm`
-   - `packages/cli/` → `bun test packages/cli`
-   - `packages/testing/` → `bun test packages/testing`
-   - `examples/blog/` → `bun run test:examples`
-   - `examples/api/` → `bun run test:examples`
-
-3. Decision logic:
-   - < 3 files in same package → run package tests
-   - Multiple packages changed → run affected packages
-   - > 10 files or cross-cutting → run full suite
-   - No test impact detected → skip tests
-
-4. After smart tests pass, remind: "Consider running full suite before PR: `bun run test`"
 
 #### Full Test Suite (default for "run tests", "test")
 
@@ -78,7 +67,8 @@ Runs:
 - `bun run test:examples` — Example app tests (blog, api)
 - `bun run test:testing` — `@guren/testing` only (vitest, so not part of `test:bun`)
 
-**On failure:** Identify the failing test file and test name, show the error, suggest fixes.
+A test that fails only when run with the whole suite and passes alone is not a
+verdict on the change: re-run its file alone before reading the assertion.
 
 ### Type Check
 
@@ -87,8 +77,6 @@ bun run typecheck
 ```
 
 Runs root monorepo + blog example type checks.
-
-**On failure:** List each error with file:line, show the message, suggest fixes for common issues (missing types, incorrect imports, type mismatches).
 
 ### Lint
 
@@ -102,16 +90,17 @@ oxlint with the type-aware rules (`typescript/no-floating-promises`) plus the re
 
 ### PR Check (pre-PR validation)
 
-Run all checks in order. **Stop and report on first failure:**
+The list is "Before Opening PRs" in `CLAUDE.md`; this is its always-run part:
 
 ```bash
 bun run build && bun run typecheck && bun run lint && bun run test
+bun run audit:core-first && bun run audit:docs
 ```
 
-On success, confirm:
-- All packages built successfully
-- No type errors found
-- All tests passing
+`bun run audit:prose` when `docs/` changed. When `packages/create-app/templates/`
+or `packages/cli/templates/` changed, also `bun run audit:starter-template` and
+the starter smokes that section names. Report which of these ran and which did
+not.
 
 ### E2E Tests (default for "e2e", "playwright", "end to end")
 

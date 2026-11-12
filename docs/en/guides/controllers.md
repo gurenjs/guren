@@ -129,6 +129,27 @@ async store() {
 > [!TIP]
 > Body-reading methods (`input`, `has`, `validateBody`) are `async` because they parse the request body. The `query` method reads URL parameters and is synchronous.
 
+## Writes in a GET Action
+
+A GET route answers more than page views. A `HEAD` request (uptime monitors, link checkers, crawlers) runs the GET route's action and drops the body, and an Inertia prefetch (`<Link prefetch>`) requests the page when a pointer hovers over the link. A write in such an action, like a view counter or a last-viewed timestamp, then counts requests nobody saw.
+
+Guard the write on the request itself:
+
+```ts
+async show() {
+  const post = this.model(Post)
+
+  const prefetch = this.request.header('Purpose') === 'prefetch'
+  if (this.request.method === 'GET' && !prefetch) {
+    await Post.forceUpdate({ id: post.id }, { lastViewedAt: new Date() })
+  }
+
+  return this.inertia(pages.posts.Show, { post })
+}
+```
+
+`this.request.method` reads `HEAD` for a HEAD request, although the action that runs is the GET route's. In a test, `http.head('/posts/1')` sends one (see [Testing](./testing.md#testapp)).
+
 ## Validation
 
 ### Route Contracts (Recommended)

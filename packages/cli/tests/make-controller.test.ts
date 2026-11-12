@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, readFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { makeController } from '../src/make-controller'
+import { controllerNextStep, makeController } from '../src/make-controller'
+import { makeView } from '../src/make-view'
 import { seedApiOnlyApp, seedShippedApiOnlyApp } from './helpers'
 
 describe('makeController', () => {
@@ -132,6 +133,52 @@ describe('makeController', () => {
 
   it('rejects a --module value that would escape modules/ (path traversal)', async () => {
     await expect(makeController('Invoice', { root: '../../outside' })).rejects.toThrow(/Invalid module name/)
+  })
+
+  describe('controllerNextStep', () => {
+    const hintedView = (step: string | undefined): string => /make:view (\S+)$/u.exec(step ?? '')?.[1] ?? ''
+
+    it('should name the page the scaffolded action renders and the command that writes it', async () => {
+      await makeController('Comment')
+
+      const step = await controllerNextStep('Comment')
+
+      expect(step).toContain('pages.comment.Index')
+      expect(hintedView(step)).toBe('comment/Index')
+    })
+
+    it('should name the directory by the accessor key, not the kebab-cased name', async () => {
+      const content = await readFile(await makeController('user-profile'), 'utf8')
+
+      expect(content).toContain('inertia(pages.userProfile.Index')
+      expect(hintedView(await controllerNextStep('user-profile'))).toBe('userProfile/Index')
+    })
+
+    it('should put a module controller page under the module name without --module', async () => {
+      await makeController('Invoice', { root: 'billing' })
+
+      const step = await controllerNextStep('Invoice', { root: 'billing' })
+
+      expect(step).toContain('pages.billing.invoice.Index')
+      expect(hintedView(step)).toBe('billing/invoice/Index')
+    })
+
+    it('should return nothing once the hinted command has written the page', async () => {
+      await makeController('Invoice', { root: 'billing' })
+      const view = hintedView(await controllerNextStep('Invoice', { root: 'billing' }))
+
+      const written = await makeView(view)
+
+      expect(written).toContain('resources/js/pages/billing/invoice/Index.tsx')
+      expect(await controllerNextStep('Invoice', { root: 'billing' })).toBeUndefined()
+    })
+
+    it('should return nothing on an API-only app, whose controller renders no page', async () => {
+      await seedApiOnlyApp(tempDir)
+      await makeController('User')
+
+      expect(await controllerNextStep('User')).toBeUndefined()
+    })
   })
 
   // Only the wiring is pinned here — "cannot tell" keeps Inertia via the tests

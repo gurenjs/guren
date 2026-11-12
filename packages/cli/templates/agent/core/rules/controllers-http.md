@@ -55,6 +55,22 @@ which drops the model's `hidden` columns.
 Query through a Model: a controller importing `drizzle-orm` is a
 `guren check` warning under the default `guren.arch.ts`, which `guren gate` counts.
 
+## Writes in a GET action
+
+A GET action also runs for `HEAD` (monitors, link checkers; the body is dropped)
+and for an Inertia prefetch (`<Link prefetch>`, sent on hover with
+`Purpose: prefetch`). A write there (a view counter, a last-seen stamp) counts
+requests nobody saw, so guard it:
+
+```typescript
+const prefetch = this.request.header('Purpose') === 'prefetch'
+if (this.request.method === 'GET' && !prefetch) {
+  // the write
+}
+```
+
+Cover it with `await http.head('/posts/1')` and assert the row did not change.
+
 ## Auth and authorization
 
 `this.auth` methods are all async: `check()` · `guest()` · `user<T>()` ·
