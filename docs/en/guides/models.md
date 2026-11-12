@@ -191,7 +191,8 @@ if (taken === 0) {
 }
 ```
 
-- The amount defaults to `1`. A `numeric` or `decimal` column also takes a decimal string such as `'10.50'`, which keeps every digit.
+- The amount defaults to `1`. A `numeric` or `decimal` column also takes a decimal string such as `'10.50'`, which PostgreSQL and MySQL add exactly. SQLite stores such a column as a floating-point number.
+- A column that is not numeric is refused, and so is a fractional amount on an integer column.
 - [Global scopes](#global-scopes) apply as they do to `update()`. `fillable`, mutators, and [hooks](#model-hooks) do not run, since the column is named in your code and no request data is written.
 - A `NULL` stays `NULL`. Declare a counter column with `.notNull().default(0)`.
 - On a builder, `limit()`, `offset()`, and `orderBy()` are rejected, as for the other bulk writes.

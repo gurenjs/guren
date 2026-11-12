@@ -1,15 +1,14 @@
-/** What an adapter adds to a column: a string is a decimal literal, already validated. */
+/** What an adapter adds to a column; a string must match `DECIMAL_LITERAL`. */
 export type IncrementValue = number | bigint | string
 
 /** A decimal as every dialect reads it unquoted; the only string an adapter may inline. */
 export const DECIMAL_LITERAL = /^-?\d+(?:\.\d+)?$/
 
-/** `amount` with `sign` applied; `caller` names the method in the refusal. */
-export function signedAmount(caller: string, amount: unknown, sign: 1 | -1): IncrementValue {
-  if (typeof amount === 'bigint') return sign === 1 ? amount : -amount
-  if (typeof amount === 'number' && Number.isFinite(amount)) return sign === 1 ? amount : -amount
+/** Refuses anything but a finite number, a bigint or a `DECIMAL_LITERAL` string. */
+export function signedAmount(caller: string, amount: unknown, negate: boolean): IncrementValue {
+  if (typeof amount === 'bigint' || (typeof amount === 'number' && Number.isFinite(amount))) return negate ? -amount : amount
   if (typeof amount === 'string' && DECIMAL_LITERAL.test(amount)) {
-    if (sign === 1) return amount
+    if (!negate) return amount
     return amount.startsWith('-') ? amount.slice(1) : `-${amount}`
   }
   throw new TypeError(

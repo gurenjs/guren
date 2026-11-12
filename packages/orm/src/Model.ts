@@ -1254,11 +1254,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return this.applyReadTransforms(result)
   }
 
-  /**
-   * `field = field + amount` in one statement for the rows matching `where`,
-   * resolving to how many changed. Runs no hooks; see `QueryBuilder.increment()`.
-   * @example await Post.increment({ id }, 'views')
-   */
+  /** `QueryBuilder.increment()` for the rows matching `where`; fires no model events. */
   static async increment<T extends typeof Model, K extends NumericFieldKey<TRecordFor<T>>>(
     this: T,
     where: WhereClauseFor<T>,

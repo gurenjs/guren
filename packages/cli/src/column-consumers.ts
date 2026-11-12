@@ -153,7 +153,7 @@ const QUERY_RESULT_OF = new Map<string, QueryResult>(
 interface ArgumentPositions {
   /** A where clause, or `find(value, key)`'s key: the columns it names are read. */
   where?: number
-  /** The data a write is given: the columns it names are written. */
+  /** The data a write is given, or the column `increment()` names: the columns it names are written. */
   data?: number
   /** A write's options, whose `set` names columns written beside the data (RFC 0031). */
   options?: number

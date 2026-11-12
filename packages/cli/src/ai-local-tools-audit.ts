@@ -13,7 +13,7 @@ import { scanAiAgents } from './ai-agent-scan'
 import { inlineAuditIgnore } from './audit-config'
 import {
   controllerMethodFor,
-  LOCAL_TOOL_WRITE_PATTERN,
+  writesInLocalTool,
   type ControllerMethodScan,
   type ControllerTarget,
 } from './controller-methods'
@@ -97,7 +97,7 @@ export async function auditAiLocalTools(
       })
     }
     for (const tool of agent.localTools) {
-      const writes = tool.executeBody !== undefined && LOCAL_TOOL_WRITE_PATTERN.test(tool.executeBody)
+      const writes = tool.executeBody !== undefined && writesInLocalTool(tool.executeBody)
       const listing: AiLocalToolListing = {
         agent: agent.className,
         tool: tool.name,

@@ -57,18 +57,11 @@ export type NumericFieldKey<TRecord extends PlainObject> = string extends keyof 
     }[FieldKey<TRecord>]
 
 /**
- * What `increment()`/`decrement()` add, by the column's kind: a `numeric` or
- * `decimal` column also takes a decimal string, so no digit is lost.
+ * What `increment()`/`decrement()` add: a plain number, or the column's own
+ * kind ({@link SumValue}), so a `numeric`/`decimal` column takes a decimal string.
+ * A text column is a `string` too; the adapter refuses that one at runtime.
  */
-export type IncrementAmount<TValue> = unknown extends TValue
-  ? IncrementValue
-  : NonNullable<TValue> extends number
-    ? number
-    : NonNullable<TValue> extends bigint
-      ? bigint | number
-      : NonNullable<TValue> extends string
-        ? string | number
-        : never
+export type IncrementAmount<TValue> = [SumValue<TValue>] extends [never] ? never : SumValue<TValue> | number
 
 type DrizzleSelectable = { select: (...args: any[]) => any } // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -618,7 +611,7 @@ export class QueryBuilder<
    * column. A `NULL` stays `NULL`.
    */
   async increment<TKey extends NumericFieldKey<TRecord>>(field: TKey, amount?: IncrementAmount<TRecord[TKey]>): Promise<number> {
-    return this.addToColumn('increment', field, amount, 1)
+    return this.addToColumn('increment', field, amount)
   }
 
   /**
@@ -626,11 +619,11 @@ export class QueryBuilder<
    * @example await Product.where({ id }).where('stock', '>=', 2).decrement('stock', 2) // 0: not enough stock
    */
   async decrement<TKey extends NumericFieldKey<TRecord>>(field: TKey, amount?: IncrementAmount<TRecord[TKey]>): Promise<number> {
-    return this.addToColumn('decrement', field, amount, -1)
+    return this.addToColumn('decrement', field, amount)
   }
 
-  private async addToColumn(method: 'increment' | 'decrement', field: string, amount: unknown, sign: 1 | -1): Promise<number> {
-    const signed = signedAmount(`${this.modelClass.name}.${method}`, amount ?? 1, sign)
+  private async addToColumn(method: 'increment' | 'decrement', field: string, amount: unknown): Promise<number> {
+    const signed = signedAmount(`${this.modelClass.name}.${method}`, amount === undefined ? 1 : amount, method === 'decrement')
     const adapter = this.assertWritable('update')
     if (typeof adapter.incrementAdvanced !== 'function') {
       throw new Error(`${this.modelClass.name}: ${method}() needs an adapter that implements incrementAdvanced.`)

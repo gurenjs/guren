@@ -532,13 +532,8 @@ describe('QueryBuilder', () => {
 
       await expect(qb().increment('score', Number.POSITIVE_INFINITY)).rejects.toThrow(TypeError)
       await expect(qb().increment('score', '1 + 1' as unknown as number)).rejects.toThrow(TypeError)
-      expect(calls).toEqual([])
-    })
-
-    it('should refuse limit() like the other bulk writes', async () => {
-      const calls = recordIncrements()
-
-      await expect(qb().limit(1).increment('score')).rejects.toThrow('Bulk writes do not support limit()')
+      // Only an omitted amount defaults to 1: a null that slipped past the types must not take one unit.
+      await expect(qb().decrement('score', null as unknown as number)).rejects.toThrow(TypeError)
       expect(calls).toEqual([])
     })
   })

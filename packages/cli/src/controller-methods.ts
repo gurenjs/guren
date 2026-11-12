@@ -285,16 +285,54 @@ export function authTypeArgumentPattern(typeName: string): RegExp {
  */
 function modelCallPattern(...names: string[]): RegExp {
   const alternation = names.join('|')
-  return new RegExp(
-    `\\b[A-Z][A-Za-z0-9_]*\\s*\\.\\s*(?:${alternation})\\s*\\(`
-    + `|\\)\\s*\\.\\s*(?:${alternation})\\s*\\(`,
-  )
+  return new RegExp(`${staticCallSource(names)}|\\)\\s*\\.\\s*(?:${alternation})\\s*\\(`)
+}
+
+function staticCallSource(names: string[]): string {
+  return `\\b[A-Z][A-Za-z0-9_]*\\s*\\.\\s*(?:${names.join('|')})\\s*\\(`
 }
 
 /** A record deletion, for the annotation-honesty rules (RFC 0016 §5.5). */
 export const DELETE_CALL_PATTERN = modelCallPattern('delete', 'forceDelete')
 
-const UPDATE_CALL_PATTERN = modelCallPattern('update', 'increment', 'decrement')
+const UPDATE_CALL_PATTERN = modelCallPattern('update')
+
+const COUNTER_NAMES = ['increment', 'decrement']
+const STATIC_COUNTER_PATTERN = new RegExp(staticCallSource(COUNTER_NAMES))
+const CHAINED_COUNTER_PATTERN = new RegExp(`\\)\\s*\\.\\s*(?:${COUNTER_NAMES.join('|')})\\s*\\(`, 'g')
+
+/**
+ * `increment()`/`decrement()` on a model: on the class, or ending a chain that
+ * starts at a PascalCase name (`Product.where(…).decrement(…)`). The cache store
+ * has both names, and `cache().store().increment(key)` ends the same way.
+ */
+function countsOnModel(body: string): boolean {
+  if (STATIC_COUNTER_PATTERN.test(body)) return true
+  for (const match of body.matchAll(CHAINED_COUNTER_PATTERN)) {
+    if (/^[A-Z]/.test(chainRoot(body, match.index) ?? '')) return true
+  }
+  return false
+}
+
+/** The name a call chain starts from, given where its last call closes: `Product` in `Product.where(a).where(b)`. */
+function chainRoot(body: string, close: number): string | undefined {
+  let at = close
+  for (;;) {
+    let depth = 0
+    for (; at >= 0; at--) {
+      if (body[at] === ')') depth++
+      else if (body[at] === '(' && --depth === 0) break
+    }
+    if (at < 0) return undefined
+    const callee = /([A-Za-z_$][\w$]*)\s*$/.exec(body.slice(0, at))
+    if (!callee) return undefined
+    const before = body.slice(0, callee.index).trimEnd()
+    if (!before.endsWith('.')) return callee[1]
+    const receiver = before.slice(0, -1).trimEnd()
+    if (!receiver.endsWith(')')) return /([A-Za-z_$][\w$]*)(?:\s*\.\s*[A-Za-z_$][\w$]*)*$/.exec(receiver)?.[1]
+    at = receiver.length - 1
+  }
+}
 
 /**
  * A write that bypasses mass-assignment protection, counted as state change by
@@ -379,6 +417,7 @@ export function mutatesRecords(body: string): boolean {
   return (
     DELETE_CALL_PATTERN.test(body)
     || UPDATE_CALL_PATTERN.test(body)
+    || countsOnModel(body)
     || FORCE_WRITE_PATTERN.test(body)
   )
 }
@@ -389,10 +428,14 @@ export function mutatesRecords(body: string): boolean {
  * which `readOnlyHint` honesty shares and must stay narrow. `.save(` takes any
  * receiver, since it is called on an instance.
  */
-export const LOCAL_TOOL_WRITE_PATTERN = new RegExp(
-  `${modelCallPattern('create', 'update', 'increment', 'decrement', 'delete', 'forceDelete').source}`
+const LOCAL_TOOL_WRITE_PATTERN = new RegExp(
+  `${modelCallPattern('create', 'update', 'delete', 'forceDelete').source}`
   + `|${FORCE_WRITE_PATTERN.source}|\\.\\s*save\\s*\\(`,
 )
+
+export function writesInLocalTool(body: string): boolean {
+  return LOCAL_TOOL_WRITE_PATTERN.test(body) || countsOnModel(body)
+}
 
 export { blankCommentsAndStrings }
 

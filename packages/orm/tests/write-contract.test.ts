@@ -120,9 +120,21 @@ function writeContract(name: string, factory: (() => WriteFixture | Promise<Writ
     it('refuses an increment it cannot run before mutation', async () => {
       await expect(Entry.increment({ id: undefined }, 'tenant')).rejects.toThrow('unfiltered')
       await expect(Entry.newQuery().limit(1).increment('tenant')).rejects.toThrow('limit()')
-      await expect(Entry.increment({ id: 1 }, 'tenant', Number.NaN)).rejects.toThrow(TypeError)
       await expect(Entry.increment({ id: 1 }, 'balance', '1; DROP TABLE entries')).rejects.toThrow(TypeError)
       expect(await tenants()).toEqual([1, 2])
+    })
+
+    it('refuses a string amount the adapter is handed directly, where it would be inlined', async () => {
+      await expect(DrizzleAdapter.incrementAdvanced?.(fixture.table, [], 'balance', '1; DROP TABLE entries')).rejects.toThrow('not a decimal literal')
+      expect(await Entry.newQuery().count()).toBe(2)
+    })
+
+    it('refuses to add to a column that is not numeric, or a fraction to an integer one', async () => {
+      // SQLite would store 'one!' + 1 as 1 and 1 + 1.5 as 2.5, both without an error.
+      await expect(Entry.increment({ id: 1 }, 'name', 1)).rejects.toThrow('cannot add to "name"')
+      await expect(Entry.increment({ id: 1 }, 'tenant', 1.5)).rejects.toThrow('an integer column')
+      const entry = await Entry.find(1)
+      expect([entry?.name, entry?.tenant]).toEqual(['one!', 1])
     })
   })
 }

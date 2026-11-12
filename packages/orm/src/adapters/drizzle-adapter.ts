@@ -189,14 +189,40 @@ async function resolveWithReturning<T>(query: unknown): Promise<{ usedReturning:
   return { usedReturning: false, row: undefined }
 }
 
-/** The row count of a write on a dialect with no RETURNING: mysql2 resolves to `[ResultSetHeader, fields]`. */
-function changedRows(result: unknown): number {
+/**
+ * Refuses `column + amount` where SQL would not add: SQLite stores `'one' + 1`
+ * as `1` and `1.5` in an integer column, both without an error. `dataType` is
+ * `number int32`, `bigint int64`, `string numeric`, `string`, `object date`, …
+ */
+function assertAddable(column: AnyColumn, field: string, amount: IncrementValue): void {
+  const dataType = (column as { dataType?: unknown }).dataType
+  if (typeof dataType !== 'string') return
+  const [kind, width = ''] = dataType.split(' ')
+  if (kind !== 'number' && kind !== 'bigint' && dataType !== 'string numeric') {
+    throw new TypeError(`DrizzleAdapter: cannot add to "${field}", a ${dataType} column; increment() and decrement() take a numeric column.`)
+  }
+  const fractional = typeof amount === 'number' ? !Number.isInteger(amount) : typeof amount === 'string' && amount.includes('.')
+  if (fractional && width.startsWith('int')) {
+    throw new TypeError(`DrizzleAdapter: cannot add ${String(amount)} to "${field}", an integer column.`)
+  }
+}
+
+/**
+ * Runs an update and counts the rows it changed: the RETURNING rows where the
+ * dialect has them (`column` keeps each one small), else the driver's header,
+ * which mysql2 resolves as `[ResultSetHeader, fields]`.
+ */
+async function countChangedRows(query: DrizzleLikeUpdate, column: AnyColumn): Promise<number> {
+  if (typeof query.returning === 'function') {
+    return (await query.returning({ value: column })).length
+  }
+  const result = await resolveMutation(query)
   const header = (Array.isArray(result) ? result[0] : result) as Record<string, unknown> | null | undefined
   for (const key of ['affectedRows', 'rowsAffected'] as const) {
     const value = header?.[key]
     if (typeof value === 'number') return value
   }
-  throw new Error('DrizzleAdapter: the write ran, but the driver reported no row count for increment()/decrement().')
+  throw new Error('DrizzleAdapter: the write ran, but the driver reported no count of the rows it changed.')
 }
 
 export const DrizzleAdapter: ORMAdapterAdvanced & {
@@ -494,16 +520,12 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
       }
 
       const column = resolveColumn(table, field)
+      assertAddable(column, field, amount)
       // MySQL reads a bound string as a double; an inlined literal keeps `decimal` arithmetic exact.
       const delta = typeof amount === 'string' ? sql.raw(amount) : amount
       const data = { [field]: sql`${column} + ${delta}` }
       const clause = buildDrizzleConditions(table, conditions)
-      const query = clause ? db.update(table).set(data).where(clause) : db.update(table).set(data)
-      if (typeof query.returning === 'function') {
-        const rows = await query.returning({ value: column })
-        return rows.length
-      }
-      return changedRows(await resolveMutation(query))
+      return countChangedRows(clause ? db.update(table).set(data).where(clause) : db.update(table).set(data), column)
     })
   },
 
