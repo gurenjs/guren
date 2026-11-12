@@ -1,5 +1,22 @@
 # @guren/cli
 
+## 2.36.3
+
+### Patch Changes
+
+- e612633: The agent harness skills `db-manage`, `dev-workflow`, `feature` and `scaffold` match what the CLI does today. `db-manage` resets a database with `guren db:reset --seed` (stopping and starting the container kept the data in its volume), no longer suggests the unsupported rollback, and leaves `--force` in production to the user. `feature` shows the route block `make:feature` prints (`/create`, the `auth` middleware, the destroy route) and no longer scaffolds a vitest test in a `bun test` app. `dev-workflow` names `guren gate` as the check before a commit. `scaffold` generates the companions a request needs without stopping to ask about each one. `guren agent:sync` brings the files to an existing app.
+- 7f03edc: `guren make:controller` names the page its scaffolded `index()` renders and the `make:view` command that writes it, while no file provides that page. The generated controller refers to `pages.<name>.Index`, so the app did not typecheck until the page existed, and nothing said so. The path is the one codegen keys the page by: `userProfile/Index` for `make:controller user-profile`, and `billing/invoice/Index` for a controller in the `billing` module, which `make:view --module` does not write.
+- 1a89a1b: Models and the query builder gain `increment()` and `decrement()`: `Post.increment({ id }, 'views')` and `Product.where({ id }).where('stock', '>=', 2).decrement('stock', 2)`. Each runs `column = column + amount` in one `UPDATE`, so concurrent requests lose no count, and resolves to the number of rows it changed on every dialect, which lets a condition act as a guard. The amount defaults to `1`; a `numeric` or `decimal` column also takes a decimal string such as `'10.50'`, which PostgreSQL and MySQL add exactly. A column that is not numeric is refused, as is a fractional amount on an integer column. Global scopes apply as they do to `update()`; `fillable`, mutators and hooks do not run. `@guren/core` re-exports the new `IncrementAmount` type, and a custom adapter supports the methods by implementing `incrementAdvanced`.
+
+  `guren audit`, `guren check` and the plan impact scan read the two methods as writes of the column they name, and the agent harness reference lists them.
+
+- a3a41f9: `TestApp` gains `head(path)`. A `HEAD` request (uptime monitors, link checkers) runs the GET route's action and drops the body, so a view counter or a last-seen stamp written there counted requests nobody saw, and a test had no way to send one short of calling `app.fetch()` by hand.
+
+  The controllers guide and the agent harness's controller rule now say that a GET action also runs for `HEAD` and for an Inertia prefetch, and show the guard: `this.request.method === 'GET'` and no `Purpose: prefetch` header. The harness's review checklist asks for it, and the plan and impact scans read `http.head()` as a request to the GET route that answers it.
+
+- Updated dependencies [1a89a1b]
+  - @guren/orm@2.16.0
+
 ## 2.36.2
 
 ### Patch Changes

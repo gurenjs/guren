@@ -19,7 +19,7 @@
     },
     "examples/agents": {
       "name": "@guren/example-agents",
-      "version": "0.1.32",
+      "version": "0.1.33",
       "dependencies": {
         "@ai-sdk/anthropic": "^4.0.78",
         "@ai-sdk/typesafe-ai": "^3.0.3",
@@ -53,7 +53,7 @@
     },
     "examples/api": {
       "name": "@guren/example-api",
-      "version": "0.1.64",
+      "version": "0.1.65",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
@@ -108,13 +108,13 @@
     },
     "packages/cli": {
       "name": "@guren/cli",
-      "version": "2.36.2",
+      "version": "2.36.3",
       "bin": {
         "guren": "./dist/bin.js",
       },
       "dependencies": {
         "@babel/parser": "^7.24.7",
-        "@guren/orm": "^2.15.1",
+        "@guren/orm": "^2.16.0",
         "@guren/server": "^2.37.0",
         "@modelcontextprotocol/server": "^2.0.0",
         "citty": "^0.1.6",
@@ -127,7 +127,7 @@
         "@ai-sdk/react": "4.0.110",
         "@axe-core/playwright": "~4.14.0",
         "@babel/types": "^7.29.0",
-        "@guren/core": "^1.26.1",
+        "@guren/core": "^1.27.0",
         "@inertiajs/react": "^3.6.1",
         "@modelcontextprotocol/client": "^2.0.0",
         "@modelcontextprotocol/ext-apps": "2.1.0",
@@ -155,13 +155,13 @@
     },
     "packages/core": {
       "name": "@guren/core",
-      "version": "1.26.1",
+      "version": "1.27.0",
       "bin": {
         "guren": "./dist/bin.js",
       },
       "dependencies": {
-        "@guren/cli": "^2.36.0",
-        "@guren/orm": "^2.15.0",
+        "@guren/cli": "^2.36.3",
+        "@guren/orm": "^2.16.0",
         "@guren/server": "^2.36.0",
       },
       "devDependencies": {
@@ -173,7 +173,7 @@
     },
     "packages/create-app": {
       "name": "create-guren-app",
-      "version": "1.21.2",
+      "version": "1.21.3",
       "bin": {
         "create-guren-app": "./dist/cli.js",
       },
@@ -227,7 +227,7 @@
     },
     "packages/orm": {
       "name": "@guren/orm",
-      "version": "2.15.1",
+      "version": "2.16.0",
       "dependencies": {
         "drizzle-orm": "1.0.0-rc.4",
       },
@@ -440,7 +440,7 @@
     },
     "packages/testing": {
       "name": "@guren/testing",
-      "version": "1.14.4",
+      "version": "1.15.0",
       "devDependencies": {
         "@types/react": "^19.0.0",
         "tsdown": "^0.22.14",
@@ -470,7 +470,7 @@
     },
     "web": {
       "name": "web",
-      "version": "0.1.64",
+      "version": "0.1.65",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
