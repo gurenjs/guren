@@ -298,7 +298,10 @@ bunx guren make:module Billing
 ```bash
 bunx guren make:controller Invoice --module billing   # modules/billing/app/Http/Controllers/InvoiceController.ts
 bunx guren make:model Invoice --module billing        # modules/billing/app/Models/Invoice.ts
+bunx guren make:view invoice/Index --module billing   # resources/js/pages/billing/invoice/Index.tsx
 ```
+
+ページは `modules/` の下には移りません。`make:view` と `make:feature` は、モジュールのページをトップレベルの `resources/js/pages/` に、モジュール名のディレクトリを切って生成します。
 
 `guren check`・`guren audit`・`guren context`・`model:list`・`doctor` は、どれも `modules/*/` を自動でスキャンするので、設定を足す必要はありません。例外は 2 つあります。1 つは `make:auth` で、認証はモジュールごとではなくアプリ全体で扱うものだからです。もう 1 つは `make:migration` で、drizzle-kit が `drizzle.config.ts` の指すスキーマのパスからマイグレーションを生成するので、モジュールがあってもなくても同じように動きます。
 

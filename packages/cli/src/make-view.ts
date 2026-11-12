@@ -1,6 +1,6 @@
 import { assertNotApiOnly } from './app-surface'
 import type { WriterOptions } from './utils'
-import { pascalCase, safePathSegments, writeRoot, writeScaffoldFile } from './utils'
+import { pascalCase, safeModuleName, safePathSegments, writeRoot, writeScaffoldFile } from './utils'
 
 const VIEW_ROOT = 'resources/js/pages'
 
@@ -32,13 +32,16 @@ export default ${componentName}
 /**
  * Refuses a confirmed API-only app: codegen leaves the page out of
  * `.guren/pages.gen.ts` (`planPageManifest`), so nothing could render it.
+ * A module's pages stay under the top-level pages root, in a directory named
+ * after the module (RFC 0002), which is where `make:feature --module` puts them.
  */
 export async function makeView(name: string, options: WriterOptions = {}): Promise<string> {
   // Before the shape check, so a malformed name reports as a usage error
   // rather than being masked by the app's shape.
   const segments = safePathSegments(name, 'view name')
   const componentName = pascalCase(segments[segments.length - 1]!)
-  const filePath = `${VIEW_ROOT}/${segments.join('/')}.tsx`
+  const moduleDir = options.root ? `${safeModuleName(options.root)}/` : ''
+  const filePath = `${VIEW_ROOT}/${moduleDir}${segments.join('/')}.tsx`
   const appRoot = writeRoot(options)
   await assertNotApiOnly(appRoot, {
     does: 'guren make:view scaffolds a React page component',

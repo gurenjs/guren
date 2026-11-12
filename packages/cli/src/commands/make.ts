@@ -36,13 +36,13 @@ import { describePath, describeMigrationsFolder } from './display-paths'
 import { ATTACH_ARG, FIELDS_ARG, FORCE_ARG, MODULE_ARG, toWriterOptions } from './scaffold-options'
 
 function createMakeCommand(spec: MakeCommandSpec) {
-  const { name: commandName, description, argDescription, makeFn, resourceName, nextStep } = spec
+  const { name: commandName, description, argDescription, makeFn, resourceName, nextStep, moduleDescription } = spec
   return defineCommand({
     meta: { name: commandName, description },
     args: {
       name: { type: 'positional', required: true, description: argDescription },
       force: FORCE_ARG,
-      module: MODULE_ARG,
+      module: moduleDescription ? { ...MODULE_ARG, description: moduleDescription } : MODULE_ARG,
     },
     async run({ args }) {
       const options = toWriterOptions(args)
@@ -67,6 +67,8 @@ type MakeCommandSpec = {
    * write, and returns nothing when there is no step left.
    */
   nextStep?: string | ((name: string, options: WriterOptions) => Promise<string | undefined>)
+  /** What `--help` says of `--module`, for a generator whose output does not go under `modules/<name>/`. */
+  moduleDescription?: string
 }
 
 const makeCommandSpecs: MakeCommandSpec[] = [
@@ -79,7 +81,14 @@ const makeCommandSpecs: MakeCommandSpec[] = [
     nextStep: controllerNextStep,
   },
   { name: 'make:model', description: 'Generate a new model file.', argDescription: 'Model class name', makeFn: makeModel, resourceName: 'Model' },
-  { name: 'make:view', description: 'Generate a new view component.', argDescription: 'View component path', makeFn: makeView, resourceName: 'View' },
+  {
+    name: 'make:view',
+    description: 'Generate a new view component.',
+    argDescription: 'View component path',
+    makeFn: makeView,
+    resourceName: 'View',
+    moduleDescription: "Write the page under resources/js/pages/<name>/, where a module's pages live.",
+  },
   {
     name: 'make:route',
     description: 'Generate a new route group.',
