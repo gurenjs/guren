@@ -596,6 +596,22 @@ describe('credential fingerprint', () => {
     expect(await createGuard().check()).toBe(true)
   })
 
+  test('should move a remembered session to the new hash when validate() rehashes its user', async () => {
+    user.rememberToken = 'remember-me'
+    session.set('auth:remember_token', 'remember-me')
+    session.set(FINGERPRINT_KEY, 'fp:hashed_password')
+    const provider = fingerprintingProvider()
+    provider.rehashPasswordIfRequired = async (record) => {
+      record.password = 'rehashed_password'
+    }
+
+    const confirming = new SessionGuard<MockUser>({ provider, session })
+    expect(await confirming.validate({ email: user.email, password: 'hashed_password' })).not.toBeNull()
+
+    expect(session.data.get(FINGERPRINT_KEY)).toBe('fp:rehashed_password')
+    expect((await createGuard().user())?.id).toBe(1)
+  })
+
   test('should leave the session alone when validate() rehashes another user', async () => {
     const other = createMockUser({ id: 2, email: 'other@test.com', password: 'other_hash' })
     const provider = fingerprintingProvider([user, other])

@@ -131,9 +131,19 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     } else {
       await (this.model as typeof Model).forceUpdate(where, { [this.passwordColumn]: rehashed })
     }
-    // After the write: the login that follows fingerprints this record, and a
-    // write that failed must leave it matching what the store still holds.
-    ;(user as PlainObject)[this.passwordColumn] = rehashed
+    // Read back, never assumed: the write matches nothing once another login's
+    // rehash or a reset replaced the verified hash. The login that follows
+    // fingerprints this record, so it takes the stored hash only where this
+    // password opens it, and a write that threw leaves it as it was read.
+    const stored = await this.retrieveById(this.getId(user))
+    const current = stored ? (stored as PlainObject)[this.passwordColumn] : undefined
+    if (current === rehashed || (await this.opens(current, plain))) {
+      ;(user as PlainObject)[this.passwordColumn] = current
+    }
+  }
+
+  private async opens(hashed: unknown, plain: string): Promise<boolean> {
+    return typeof hashed === 'string' && looksLikePasswordHash(hashed) && (await this.hasher.verify(hashed, plain))
   }
 
   /** A digest, so the hash itself never reaches the session store. */

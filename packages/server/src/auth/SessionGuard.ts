@@ -114,18 +114,30 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
    * (a profile form confirming the current password). The session moves to the
    * new hash, or its own next request would read as a password change.
    */
-  private async followRehash(user: User, before: string | null | undefined): Promise<void> {
+  private async followRehash(user: User, before: string | null | undefined, owner: unknown): Promise<void> {
     const session = this.currentSession
     if (!session || typeof before !== 'string') return
 
     const after = await this.provider.credentialFingerprint?.(user)
     if (typeof after !== 'string' || after === before) return
-    if (session.get(this.sessionKey()) !== this.provider.getId(user)) return
+    if (owner == null || owner !== this.provider.getId(user)) return
 
     const stored = session.get(this.fingerprintSessionKey())
     if (typeof stored === 'string' && secureStringCompare(stored, before)) {
       session.set(this.fingerprintSessionKey(), after)
     }
+  }
+
+  /**
+   * Whose session this is. A remembered session carries no id key, and must be
+   * resolved before a rehash: afterwards its fingerprint reads as stale.
+   */
+  private async sessionUserId(): Promise<unknown> {
+    const identifier = this.currentSession?.get(this.sessionKey())
+    if (identifier != null) return identifier
+
+    const user = await this.resolveUser()
+    return user ? this.provider.getId(user) : null
   }
 
   private forgetLogin(session: Session): void {
@@ -269,12 +281,13 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
     // were correct and the stored hash still verifies, so a failed write is a
     // stale row to fix later, never a refused login.
     const fingerprint = await this.provider.credentialFingerprint?.(user)
+    const owner = typeof fingerprint === 'string' ? await this.sessionUserId() : null
     try {
       await this.provider.rehashPasswordIfRequired?.(user, credentials)
     } catch (error) {
       console.warn(`[guren] Rehashing the password for user ${this.describeUser(user)} failed; the login continues.`, redactQueryParams(error))
     }
-    await this.followRehash(user, fingerprint)
+    await this.followRehash(user, fingerprint, owner)
     return user
   }
 

@@ -171,6 +171,39 @@ describe('rehash on login', () => {
     await provider.rehashPasswordIfRequired?.(read!, { email: 'a@example.com', password: 'secret' })
 
     expect(rows[0].passwordHash).toBe(reset)
+
+    // The login the old password opened is bound to the hash it verified, not the reset's.
+    const session = fakeSession()
+    const guard = () => manager.createGuard<Row>('web', { ctx: {} as Context, session, manager })
+    await guard().login(read!)
+    expect(await guard().check()).toBe(false)
+  })
+
+  test('a login that loses the rehash to a concurrent one follows the hash that won', async () => {
+    class Account extends AuthenticatableModel<PlainObject> {
+      static override table = 'users'
+    }
+    const verified = await new NodeHasher({ cost: 1024 }).hash('secret')
+    const rows: PlainObject[] = [{ id: 1, email: 'a@example.com', passwordHash: verified }]
+    Account.useAdapter(storeAdapter(rows))
+    const manager = new AuthManager({ hasher: new NodeHasher({ cost: 2048 }) })
+    manager.useModel(Account as unknown as typeof Model<PlainObject>)
+    const provider = manager.getProvider<Row>('users')
+    const credentials = { email: 'a@example.com', password: 'secret' }
+
+    const first = await provider.retrieveByCredentials(credentials)
+    const second = await provider.retrieveByCredentials(credentials)
+    await provider.rehashPasswordIfRequired?.(first!, credentials)
+    const won = rows[0].passwordHash
+    await provider.rehashPasswordIfRequired?.(second!, credentials)
+
+    expect(won).not.toBe(verified)
+    expect(rows[0].passwordHash).toBe(won)
+
+    const session = fakeSession()
+    const guard = () => manager.createGuard<Row>('web', { ctx: {} as Context, session, manager })
+    await guard().login(second!)
+    expect(await guard().check()).toBe(true)
   })
 
   test('a failed attempt never rehashes', async () => {
