@@ -34,6 +34,7 @@ The examples on this page call the `TestApp` `http` and the application `app`. A
 
 ```ts
 await http.get('/posts')
+await http.head('/posts/1')              // answered by the GET route, without a body
 await http.post('/posts', body)
 await http.put('/posts/1', body)
 await http.patch('/posts/1', body)

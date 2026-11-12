@@ -18,8 +18,11 @@ import { PATH_PARAM_PATTERN } from './utils'
 
 const TESTING = '@guren/testing'
 
-/** `TestApp` members returning a `PendingTestResponse`; `tests/test-requests.test.ts` pins them to the class. */
-export const REQUEST_METHODS: Readonly<Record<string, string>> = { get: 'GET', post: 'POST', put: 'PUT', patch: 'PATCH', delete: 'DELETE', query: 'QUERY' }
+/**
+ * `TestApp` members returning a `PendingTestResponse`, by the method of the route that answers;
+ * `tests/test-requests.test.ts` pins them to the class. hono answers a HEAD with the GET route.
+ */
+export const REQUEST_METHODS: Readonly<Record<string, string>> = { get: 'GET', head: 'GET', post: 'POST', put: 'PUT', patch: 'PATCH', delete: 'DELETE', query: 'QUERY' }
 /** `TestApp` members returning a `TestApp` or a promise of one; `withCsrf(path = '/')` also GETs its path. */
 export const BUILDERS: ReadonlySet<string> = new Set(['actingAs', 'json', 'withHeaders', 'withHeader', 'withCsrf'])
 

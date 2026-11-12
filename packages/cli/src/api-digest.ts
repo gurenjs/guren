@@ -109,7 +109,7 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
 
 ### Testing (@guren/testing)
 - \`const app = await TestApp.create()\` · \`app.actingAs(user)\` / \`app.json()\` / \`await app.withCsrf()\` — each returns a NEW TestApp
-- HTTP helpers: \`get(path)\` · \`post/put/patch/delete/query(path, body?)\` (\`query\` = HTTP QUERY, RFC 10008)
+- HTTP helpers: \`get(path)\` · \`head(path)\` (the GET route answers it) · \`post/put/patch/delete/query(path, body?)\` (\`query\` = HTTP QUERY, RFC 10008)
 - \`await app.get('/posts').assertOk()\` · assertions: \`assertStatus / assertCreated / assertRedirect(url?) /
   assertUnprocessable / assertJson / assertJsonPath(path, value) / assertInertia(component, props?)\`
 - A page is asserted as JSON: \`await app.json().get(url).assertInertia(component, props?)\`; a plain GET returns HTML

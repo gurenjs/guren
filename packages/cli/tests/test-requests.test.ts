@@ -88,6 +88,15 @@ await http.post(\`/posts/\${id}/comments?x=\${id}\`, {})
     ])
   })
 
+  // hono answers a HEAD with the GET route, so that route's action is what the request exercises.
+  test('should hang a head() request off the GET route that answers it', async () => {
+    const result = await scanOne(`${IMPORT}
+const http = await TestApp.fromApp(app)
+await http.head('/posts/1').assertOk()
+`)
+    expect(reached(result)).toEqual(['GET /posts/1 -> GET /posts/:id'])
+  })
+
   test('should report a path it cannot spell as unresolved, never guess a route for it', async () => {
     const result = await scanOne(`${IMPORT}
 const http = await TestApp.fromApp(app)
