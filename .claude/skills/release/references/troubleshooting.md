@@ -163,7 +163,21 @@ depends on its environment can pass in CI and fail here. Decide whether the
 failure is deterministic by reading the test, not by rerunning. If it is, fix
 it on `main`, delete the Release and its tag, and create the Release again
 under the same number on the new commit. npm never saw the first attempt, so no
-version is skipped.
+version is skipped. The user runs both commands:
+
+```bash
+gh release delete vX.Y.Z --cleanup-tag --yes
+gh release create vX.Y.Z --target <full sha of the fix's merge commit> --latest --title vX.Y.Z --notes-file <notes file>
+```
+
+The `Dependency audit` step is the one failure here that no earlier run could
+have shown: an advisory published after the version PR's CI. `bun pm why <pkg>`
+names the holder. A transitive one is fixed by raising the root `overrides`
+entry and running `bun install`. That resolves to the newest version in range;
+when the newest is days old, lock the oldest fixed one by setting the override
+to that exact version, installing, then restoring the caret range and
+installing again. `bun run audit:deps` confirms it. Root `overrides` and the
+lockfile are not published, so the fix needs no changeset.
 
 **`publish` failed.** Some packages are already out and cannot be withdrawn.
 Do not delete the Release. Find which package failed (`New tag:` lines list the
