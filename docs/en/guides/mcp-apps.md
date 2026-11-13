@@ -2,6 +2,10 @@
 
 An MCP App renders a tool's result as a page inside the agent's host. With Guren, the page is the Inertia page the route already renders: add `ui` to a route's `.agent()` declaration, build the views, and a host that supports MCP Apps, such as Claude on the web, shows `posts/Show` where it would otherwise print the post as text. Links and forms inside the view keep working: each Inertia visit becomes a call to the matching tool.
 
+The picture shows a demo app's kitchen board, an ordinary Inertia page, in a conversation in Claude. The buttons are the page's own: pressing one runs the same route it would in a browser.
+
+![A conversation in Claude on the web. Below the message "Show me the kitchen board." the kitchen_board tool of a connector named Guren Diner renders the app's Kitchen page: four orders, each with a status and a button for its next step](../../images/mcp-apps-claude.png)
+
 This builds on the [Agent Interface](./agent-interface.md): the route must already be an agent tool served by `mcpPlugin()`.
 
 ## Declaring a view
