@@ -56,7 +56,7 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^20.14.10",
-    "hono": "^4.13.7",
+    "hono": "^4.13.16",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
     "zod": "^4"
