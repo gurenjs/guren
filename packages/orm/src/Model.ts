@@ -1262,7 +1262,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     const result = await this.newQuery(writeOptions)
       .where(where as Partial<Record<string, unknown>>)
-      [PREPARED_UPDATE](payload) as TRecordFor<T>
+      [PREPARED_UPDATE](payload) as TRecordFor<T> | undefined
+
+    // A RETURNING dialect resolves to no row when nothing matched: nothing was updated, so no `updated` event.
+    if (result == null) return result as unknown as TRecordFor<T>
 
     await lifecycle.after(result as unknown as Record<string, unknown>)
 
