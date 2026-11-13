@@ -109,7 +109,7 @@
   },
   "overrides": {
     "qs": "^6.16.1",
-    "hono": "^4.13.13",
+    "hono": "^4.13.16",
     "@hono/node-server": "^2.1.6",
     "axios": "^1.17.0",
     "follow-redirects": "^1.16.0",
