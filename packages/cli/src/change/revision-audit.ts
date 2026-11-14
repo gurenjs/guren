@@ -1,13 +1,14 @@
 /**
  * The audit of each side of a change (RFC 0040 §3): a revision is exported from git objects into
  * a temp directory, given the install that is on disk when its lockfile is that install's, and
- * audited by this CLI in a child. It runs the application's code, as `guren audit` does.
+ * audited by this CLI in a child. It runs the application's code under the caller's environment,
+ * as `guren audit` does.
  */
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { promisify } from 'node:util'
 
 import type { AuditReport } from '../audit'
@@ -21,13 +22,10 @@ const CODEGEN_TIMEOUT_MS = 60_000
 const AUDIT_TIMEOUT_MS = 120_000
 const OUTPUT_LIMIT = 64 * 1024 * 1024
 
-/** One side's audit, or why it could not be taken. */
-export type RevisionAudit = { report: AuditReport } | { unavailable: string }
+type RevisionAudit = { report: AuditReport } | { unavailable: string }
 
-export interface ChangeAudits {
-  base: RevisionAudit
-  head: RevisionAudit
-}
+/** The audit of both sides, or why the two could not be compared; never one side alone. */
+export type ChangeAudits = { base: AuditReport; head: AuditReport } | { unavailable: string }
 
 /** The repository root, then each directory down to the application root, each with its trailing slash. */
 function installDirectories(appPrefix: string): string[] {
@@ -37,6 +35,21 @@ function installDirectories(appPrefix: string): string[] {
 
 async function onDisk(path: string): Promise<string | null> {
   return readFile(path, 'utf8').catch(() => null)
+}
+
+/**
+ * A package installed as a link into this repository (a workspace member, a `link:` dependency).
+ * The link resolves in the working tree, so an export would run the tree's copy at both revisions.
+ */
+async function linkedFromRepository(root: string, modules: string): Promise<string | undefined> {
+  const [repository, entries] = [await realpath(root), await readdir(modules).catch(() => [] as string[])]
+  const names = (await Promise.all(entries.map(async (entry) => (entry.startsWith('@') ? (await readdir(join(modules, entry)).catch(() => [] as string[])).map((name) => `${entry}/${name}`) : [entry])))).flat()
+  for (const name of names) {
+    if (!(await lstat(join(modules, name)).catch(() => undefined))?.isSymbolicLink()) continue
+    const target = await realpath(join(modules, name)).catch(() => undefined)
+    if (target?.startsWith(`${repository}${sep}`) && !target.includes(`${sep}node_modules${sep}`)) return name
+  }
+  return undefined
 }
 
 function parseReport(stdout: string): AuditReport | undefined {
@@ -72,22 +85,35 @@ async function auditExport(appDir: string): Promise<RevisionAudit> {
  * audited: its dependencies are not here, and another install's would answer for the wrong code.
  */
 export async function auditChangeRevisions(cwd: string, change: ResolvedChange, reader: ChangeReader): Promise<ChangeAudits> {
-  const unavailable = (reason: string): ChangeAudits => ({ base: { unavailable: reason }, head: { unavailable: reason } })
+  const unavailable = (reason: string): ChangeAudits => ({ unavailable: reason })
   const root = await execute('git', ['rev-parse', '--show-toplevel'], { cwd }).then((result) => result.stdout.replace(/\n$/, ''), () => undefined)
   if (root === undefined) return unavailable('git could not name the repository root')
   const directories = installDirectories(change.appPrefix)
   const installs = directories.filter((directory) => existsSync(join(root, directory, 'node_modules')))
   if (installs.length === 0) return unavailable('no node_modules is installed here; run bun install')
 
+  for (const directory of installs) {
+    const linked = await linkedFromRepository(root, join(root, directory, 'node_modules'))
+    if (linked) return unavailable(`${linked} is installed as a link into this repository, so each commit's own copy of it would not be the one that runs`)
+  }
+  const lockfiles = directories.flatMap((directory) => LOCKFILES.map((lockfile) => `${directory}${lockfile}`))
+  const installed = new Map(await Promise.all(lockfiles.map(async (path) => [path, await onDisk(join(root, path))] as const)))
+  if ([...installed.values()].every((content) => content === null)) return unavailable('no lockfile here says which install this is')
+  const mismatch = async (side: ChangeSide): Promise<string | undefined> => {
+    for (const path of lockfiles) {
+      if ((await reader.readOutside(side, path)) !== installed.get(path)) return `${path} at ${(side === 'base' ? change.mergeBase : change.head).slice(0, 12)} is not the lockfile installed here`
+    }
+    return undefined
+  }
+  // Neither side is exported unless both can be: one audit alone compares with nothing.
+  for (const side of ['head', 'base'] as const) {
+    const reason = await mismatch(side)
+    if (reason !== undefined) return unavailable(`the ${side} was not audited: ${reason}`)
+  }
+
   const scratch = await mkdtemp(join(tmpdir(), 'guren-change-audit-'))
   const auditSide = async (side: ChangeSide): Promise<RevisionAudit> => {
     const rev = side === 'base' ? change.mergeBase : change.head
-    for (const directory of directories) {
-      for (const lockfile of LOCKFILES) {
-        const path = `${directory}${lockfile}`
-        if ((await reader.readOutside(side, path)) !== (await onDisk(join(root, path)))) return { unavailable: `${path} at ${rev.slice(0, 12)} is not the lockfile installed here` }
-      }
-    }
     const tree = join(scratch, side)
     const env = { ...process.env, GIT_INDEX_FILE: join(scratch, `${side}.index`) }
     try {
@@ -103,7 +129,10 @@ export async function auditChangeRevisions(cwd: string, change: ResolvedChange, 
     return auditExport(join(tree, change.appPrefix))
   }
   try {
-    return { base: await auditSide('base'), head: await auditSide('head') }
+    const [base, head] = [await auditSide('base'), await auditSide('head')]
+    if ('unavailable' in head) return unavailable(`the head was not audited: ${head.unavailable}`)
+    if ('unavailable' in base) return unavailable(`the base was not audited: ${base.unavailable}`)
+    return { base: base.report, head: head.report }
   } finally {
     await rm(scratch, { recursive: true, force: true })
   }

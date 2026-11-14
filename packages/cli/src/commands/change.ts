@@ -25,11 +25,21 @@ export function renderChangeLane(report: ChangeLaneReport): string {
   if (report.plans.length > 0) {
     lines.push('', 'Plans at the head', ...report.plans.map((plan) => `  ${plan.file}: ${plan.standing}${plan.hash ? ` at ${short(plan.hash)}` : ''}`))
   }
+  lines.push('', 'What this rests on without checking', ...trustBoundary(report).map((line) => `  ${line}`))
   return lines.join('\n')
 }
 
+/** RFC 0040 §13, built from what this run did: it never names a check the run skipped. */
+function trustBoundary(report: ChangeLaneReport): string[] {
+  return [
+    'The floor guards against mistakes. It does not stop an author who writes code to defeat it.',
+    'Facts are lower bounds: a fact that did not appear has not proved the code unchanged.',
+    ...(report.audited ? ["The audit loaded the code of both commits under this shell's environment, so it is no evidence about a change that attacks the runner."] : []),
+  ]
+}
+
 export const changeLaneCommand = defineCommand({
-  meta: { name: 'change:lane', description: 'Print the facts of a change and the review lane they set as a floor (RFC 0040). Reads git objects; writes nothing in the repository.' },
+  meta: { name: 'change:lane', description: "Print the facts of a change and the review lane they set as a floor (RFC 0040). Reads git objects and, to audit both commits, loads the application's code; writes nothing in the repository." },
   args: {
     base: { type: 'string', description: 'The commit the change is measured against, by SHA; the merge base with --head is what is read.' },
     head: { type: 'string', description: 'The last commit of the change, by SHA.' },

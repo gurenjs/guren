@@ -3,24 +3,32 @@
  * sensitive column, a CSRF exemption, a security toggle or a suppression the base did not have,
  * and an escalating warning on a file the change touches.
  */
+import { sep } from 'node:path'
+
 import type { AuditFinding, AuditReport } from '../audit'
 import { escalatesOnChange } from '../audit-taxonomy'
 import type { ChangeFact } from './lane'
 import type { ChangeReader, ChangeSide, ResolvedChange } from './resolve'
 
-const rule = (key: string): string => (key.includes(':') ? key.slice(0, key.indexOf(':')) : key)
+/** `filePath` is relative to the application root in the separators of the OS that ran the audit. */
+const posixPath = (path: string): string => path.split(sep).join('/')
 
 /**
- * What tells one finding from another across two revisions. A line-anchored key names its line
- * number, which an unrelated edit above it moves, so such a finding is known by its rule, its
- * file as the head names it, and the text of the line.
+ * What tells one finding from another across two revisions: its key, with its file as the head
+ * names it. A key that ends in its line number moves with any edit above the line, so that
+ * number gives way to the text of the line. A key with no line number stays whole: an exposure
+ * names its model and column, and two columns of one sink share a line.
  */
 async function identities(reader: ChangeReader, side: ChangeSide, findings: readonly AuditFinding[], renamed: ReadonlyMap<string, string>): Promise<string[]> {
   return Promise.all(findings.map(async (finding) => {
-    if (finding.filePath === undefined || finding.line === undefined) return finding.key === 'csrf-exemption:plugin' ? `${finding.key}\n${finding.message}` : finding.key
-    const text = (await reader.read(side, finding.filePath))?.split('\n')[finding.line - 1]?.trim()
-    const file = side === 'base' ? (renamed.get(finding.filePath) ?? finding.filePath) : finding.filePath
-    return text === undefined ? finding.key : `${rule(finding.key)}\n${file}\n${text}`
+    let key = finding.key === 'csrf-exemption:plugin' ? `${finding.key}\n${finding.message}` : finding.key
+    if (finding.filePath === undefined) return key
+    const file = posixPath(finding.filePath)
+    const now = side === 'base' ? (renamed.get(file) ?? file) : file
+    key = key.split(finding.filePath).join(now).split(file).join(now)
+    if (finding.line === undefined || !finding.key.endsWith(`:${finding.line}`)) return key
+    const text = (await reader.read(side, file))?.split('\n')[finding.line - 1]?.trim()
+    return text === undefined ? key : `${key.slice(0, -`:${finding.line}`.length)}\n${text}`
   }))
 }
 
@@ -53,7 +61,7 @@ export async function auditFacts(change: ResolvedChange, reader: ChangeReader, b
       code,
       lane: 'high',
       target: finding.key,
-      files: finding.filePath === undefined ? [] : [finding.filePath],
+      files: finding.filePath === undefined ? [] : [posixPath(finding.filePath)],
       evidence: finding.evidence === 'manifest' ? 'registered' : 'static',
       message: `${finding.title}: ${finding.message}`,
     })
@@ -67,7 +75,24 @@ export async function auditFacts(change: ResolvedChange, reader: ChangeReader, b
   for (const finding of added((entry) => entry.status === 'fail', (entry) => entry.status === 'fail')) fact('audit-fail', finding)
   for (const finding of added(startsWith('security-toggle:'), startsWith('security-toggle:'))) fact('audit-warn-changed', finding)
   for (const finding of head.findings) {
-    if (finding.status === 'warn' && escalatesOnChange(finding.key) && finding.filePath !== undefined && touched.has(finding.filePath)) fact('audit-warn-changed', finding)
+    if (finding.status === 'warn' && escalatesOnChange(finding.key) && finding.filePath !== undefined && touched.has(posixPath(finding.filePath))) fact('audit-warn-changed', finding)
   }
   return facts
+}
+
+const PARTIAL_KEYS = ['routes:load', 'routes:module-load:', 'introspection-unavailable', 'controller-unreadable:', 'controller-unparsed:', 'csrf-scan:', 'audit-config:load']
+
+/** What an audit says it could not read: a rule that did not run finds nothing, which is not a pass. */
+function partialSignals(report: AuditReport): string[] {
+  const findings = report.findings
+    .filter((finding) => finding.status !== 'pass' && (PARTIAL_KEYS.some((prefix) => finding.key.startsWith(prefix)) || (finding.key.startsWith('policy:') && finding.filePath === undefined)))
+    .map((finding) => `${finding.key}: ${finding.message}`)
+  const unread = (report.dataExposure?.unread ?? []).map((entry) => `a response value not followed at ${posixPath(entry.file)} (${entry.where}): ${entry.reason}`)
+  return [...(report.routesAnalyzed ? [] : ['the routes did not load, so the route-level rules did not run']), ...findings, ...unread]
+}
+
+/** What the head's audit could not read that the base's could, each as the audit says it. */
+export function auditCoverageGaps(base: AuditReport, head: AuditReport): string[] {
+  const known = new Set(partialSignals(base))
+  return partialSignals(head).filter((signal) => !known.has(signal))
 }

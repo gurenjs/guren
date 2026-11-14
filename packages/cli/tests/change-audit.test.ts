@@ -1,13 +1,19 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, spyOn, test } from 'bun:test'
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
+import { runCommand } from 'citty'
+
 import type { AuditFinding, AuditReport } from '../src/audit'
-import { auditFacts } from '../src/change/audit-facts'
+import { auditCoverageGaps, auditFacts } from '../src/change/audit-facts'
 import { judgeChangeLane, type ChangeLaneReport } from '../src/change/lane'
 import { openChange, resolveChange, type ChangedPath, type ChangeReader, type ResolvedChange } from '../src/change/resolve'
 import { auditChangeRevisions } from '../src/change/revision-audit'
+import { builtinSubCommands } from '../src/commands'
 import { createTempRoot, DEFAULT_ROUTES_FIXTURE, linkWorkspaceCore } from './helpers'
+
+// Each case exports two commits and runs the CLI on both, past Bun's 5 s default under a loaded suite.
+setDefaultTimeout(60_000)
 
 const ROOT_PREFIX = 'guren-change-audit-test-'
 let ROOT: string
@@ -51,14 +57,15 @@ const APP_FILES: Record<string, string> = {
   [CONTROLLER_PATH]: controller(),
 }
 
-async function createApp(files: Record<string, string> = APP_FILES, install = true): Promise<{ repo: string; base: string }> {
+/** `app` is where the application sits below the repository root, with its trailing slash. */
+async function createApp(files: Record<string, string> = APP_FILES, install = true, app = ''): Promise<{ repo: string; base: string }> {
   const repo = join(ROOT, `repo-${repos++}`)
   await mkdir(repo, { recursive: true })
   await git(repo, ['init', '--initial-branch=main'])
   await git(repo, ['config', 'user.email', 'test@example.com'])
   await git(repo, ['config', 'user.name', 'Test'])
-  const base = await commit(repo, files)
-  if (install) await linkWorkspaceCore(repo)
+  const base = await commit(repo, Object.fromEntries(Object.entries(files).map(([path, content]) => [path === '.gitignore' ? path : `${app}${path}`, content])))
+  if (install) await linkWorkspaceCore(join(repo, app))
   return { repo, base }
 }
 
@@ -115,6 +122,63 @@ describe('change:lane with the audit of both sides', () => {
     expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'audit', reason: expect.stringContaining('no node_modules is installed here') }))
   })
 
+  test('should audit an application below the repository root', async () => {
+    const { repo, base } = await createApp(APP_FILES, true, 'apps/web/')
+    const report = await laneOf(join(repo, 'apps/web'), base, await commit(repo, { [`apps/web/${CONTROLLER_PATH}`]: controller(`    ${RAW_SQL}`) }))
+
+    expect(report.facts).toContainEqual(expect.objectContaining({ code: 'audit-fail', files: [CONTROLLER_PATH] }))
+    expect(report.audited).toBe(true)
+  })
+
+  test('should audit a file the lane calls a test where the audit scans it', async () => {
+    const { repo, base } = await createApp()
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Providers/Extra.spec.ts': 'export const options = { autoCsrf: false }\n' }))
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane])).toEqual([['file-added', 'medium'], ['audit-warn-changed', 'high']])
+  })
+
+  test('should say the audit was not taken for a change to the lockfile alone', async () => {
+    const { repo, base } = await createApp()
+    const report = await laneOf(repo, base, await commit(repo, { 'bun.lock': '{ "changed": true }' }))
+
+    expect(readers(report)).toEqual(['audit', 'dependency-advisory'])
+    expect(report.audited).toBe(false)
+  })
+
+  test('should not audit where a package is linked from the repository itself', async () => {
+    const { repo, base } = await createApp()
+    const head = await commit(repo, { [CONTROLLER_PATH]: controller(`    ${RAW_SQL}`), 'packages/shared/index.ts': 'export {}\n' })
+    await mkdir(join(repo, 'node_modules/@acme'), { recursive: true })
+    await symlink(join(repo, 'packages/shared'), join(repo, 'node_modules/@acme/shared'), 'dir')
+
+    const report = await laneOf(repo, base, head)
+
+    expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'audit', reason: expect.stringContaining('@acme/shared is installed as a link into this repository') }))
+    expect(report.facts.map((fact) => fact.code)).not.toContain('audit-fail')
+  })
+
+  test('should say what the audit read less of at the head', async () => {
+    const { repo, base } = await createApp()
+    const report = await laneOf(repo, base, await commit(repo, { 'routes/web.ts': "import { nothing } from './missing'\nexport default nothing\n" }))
+
+    expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'audit-coverage', lane: 'medium', reason: expect.stringContaining('the routes did not load') }))
+  })
+
+  test('should leave the audit out under --no-audit', async () => {
+    const { repo, base } = await createApp()
+    const head = await commit(repo, { [CONTROLLER_PATH]: controller(`    ${RAW_SQL}`) })
+    const log = spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await runCommand(builtinSubCommands['change:lane'], { rawArgs: ['--base', base, '--head', head, '--app', repo, '--json', '--no-audit'] })
+      const report = JSON.parse(String(log.mock.calls[0]?.[0])) as ChangeLaneReport
+
+      expect(report.audited).toBe(false)
+      expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'audit', reason: expect.stringContaining('the audit was not run on the two sides') }))
+    } finally {
+      log.mockRestore()
+    }
+  })
+
   test('should not run the audit for a change that touches nothing it reads', async () => {
     const { repo, base } = await createApp()
     const head = await commit(repo, { 'docs/guide.md': 'A guide.\n' })
@@ -162,19 +226,32 @@ describe('auditFacts', () => {
 
   test('should call a sensitive column, a CSRF exemption and a suppression the base did not have by their own facts', async () => {
     const head = report([
-      { key: 'exposure-sensitive-column:User.passwordHash:app/Http/Resources/UserResource.ts:toArray' },
+      { key: 'exposure-sensitive-column:User.passwordHash:app/Http/Resources/UserResource.ts:toArray', filePath: 'app/Http/Resources/UserResource.ts', line: 5 },
       { key: 'csrf-exemption:plugin', message: 'a-plugin calls declareCookielessAuthPath' },
       { key: 'auth:POST /posts', status: 'ignored' },
       { key: 'csrf-exemption:plugin-ok', status: 'pass' },
     ])
-    const base = report([{ key: 'csrf-exemption:plugin', message: 'no plugin calls it', status: 'pass' }, { key: 'auth:POST /posts', status: 'fail' }])
+    const base = report([
+      { key: 'exposure-sensitive-column:User.gravatarHash:app/Http/Resources/UserResource.ts:toArray', filePath: 'app/Http/Resources/UserResource.ts', line: 5 },
+      { key: 'csrf-exemption:plugin', message: 'no plugin calls it', status: 'pass' },
+      { key: 'auth:POST /posts', status: 'fail' },
+    ])
+    const sink = fakeReader({ base: { 'app/Http/Resources/UserResource.ts': 'a\nb\nc\nd\nreturn {\n' }, head: { 'app/Http/Resources/UserResource.ts': 'a\nb\nc\nd\nreturn {\n' } })
 
-    expect(await codes(base, head)).toEqual([
+    expect(await codes(base, head, edited, sink)).toEqual([
       'audit-suppressed auth:POST /posts',
       'sensitive-exposure exposure-sensitive-column:User.passwordHash:app/Http/Resources/UserResource.ts:toArray',
       'csrf-exemption csrf-exemption:plugin',
     ])
-    expect(await codes(head, head)).toEqual([])
+    expect(await codes(head, head, edited, sink)).toEqual([])
+  })
+
+  test('should list what the head could not read that the base could', () => {
+    const partial = report([{ key: 'controller-unparsed:app/Http/Controllers/PostController.ts' }, { key: 'policy:POST /posts', message: 'could not be verified' }, { key: 'raw-sql:app/x.ts:1', status: 'fail' }])
+
+    expect(auditCoverageGaps(report([]), partial)).toEqual(['controller-unparsed:app/Http/Controllers/PostController.ts: a finding', 'policy:POST /posts: could not be verified'])
+    expect(auditCoverageGaps(partial, partial)).toEqual([])
+    expect(auditCoverageGaps(report([]), { ...report([]), routesAnalyzed: false })).toEqual(['the routes did not load, so the route-level rules did not run'])
   })
 
   test('should know a line-anchored finding by its line text across a rename', async () => {
