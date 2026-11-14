@@ -853,7 +853,8 @@ changes before anyone has approved it. Merging the pull request approves the
 plan and the screens together. The person stops once, and what they approve
 is something they clicked.
 
-Three rules keep this from weakening what is already decided.
+Three rules keep this from weakening what is already decided, and a fourth
+says what the walk cannot show.
 
 - **A fixture never stands in for a behaviour.** The screens task mounts
   every route ahead of the tests that request it, so a test that asserts only
@@ -905,6 +906,15 @@ Three rules keep this from weakening what is already decided.
   target is promoted. A forgotten promotion is quiet where the refusal was
   loud, and the release record is where it shows. Choosing `skip` is an edit
   to the application entry outside its lists, so a person reads it (§3).
+
+- **The static build has no server to filter the navigation.** There the
+  shared props come from the fixture, so `build:prototype` writes
+  `navigation` into them from `config/navigation.ts`, which is data it can
+  read: `auth` and `where` are decided against the fixture's one user, and an
+  entry with `can` is shown, since no gate runs in a browser. The walk shows
+  the screens one identity reaches. It does not show who else may see a
+  link, or that a route refuses anyone: RFC 0021 left personas to a
+  follow-up, and those are the tests' and the security record's to say.
 
 What this buys the lanes, by paths on the same 43 tasks with each task's
 pages step taken out: 13 could be low today, 25 with the application entry
@@ -1628,7 +1638,7 @@ measured is listed at the end, with the deliverable that measures it.
     numbers are written monthly into one pinned issue (§11).
 13. ~~**Edits inside a file.**~~
     **Resolved (2026-11-14):** an edit to existing source is medium, and
-    span accounting is not scheduled: a prototype accounted for 4 of 27
+    span accounting is not scheduled: a prototype accounted for 6 of 26
     edited files, and what it left over were edits a person should see (§3).
 14. ~~**Deciding in the Dev Center.** RFC 0030 kept the Dev Center to one
     write and a copied command, on purpose.~~
