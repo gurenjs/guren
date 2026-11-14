@@ -124,6 +124,11 @@ function literal(value: Primitive): string {
   return typeof value === 'string' ? quoteString(value) : String(value)
 }
 
+/** The labels a view's form shows. */
+function labelsOf(view: PlanView): string[] {
+  return (view.form?.fields ?? []).filter((field) => field.input !== 'hidden').map((field) => field.label)
+}
+
 /** The view that sends `route`: one whose form submits to it, else one with an action for it. Its form counts only in the first case. */
 function sendingView(views: readonly PlanView[], route: string): PlanView | undefined {
   const live = views.filter((view) => view.change.kind !== 'drop').sort((a, b) => compareStrings(a.id, b.id))
@@ -135,6 +140,17 @@ type ViewForm = NonNullable<PlanView['form']>
 
 const NUMERIC = new Set<ValidatorField['type']>(['integer', 'number', 'decimal'])
 const TEXTUAL = new Set<ValidatorField['type']>(['string', 'text'])
+/** What an `email` control accepts, from the HTML standard's "valid e-mail address". */
+const HTML_EMAIL = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/u
+
+/** A date control keeps only a real calendar date: `Date.parse()` rolls `2025-02-30` over into March. */
+function isCalendarDate(value: string): boolean {
+  const parsed = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])/u.exec(value)
+  if (!parsed || Number.isNaN(Date.parse(value))) return false
+  const [year, month, day] = [Number(parsed[1]), Number(parsed[2]), Number(parsed[3])]
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
 
 /** Whether `value` breaks a constraint the field's control renders (`min`, `max`, `step`, a length or an input type), read from the plan's rules. */
 function breaksRenderedRule(field: ValidatorField, value: Primitive): boolean {
@@ -144,10 +160,10 @@ function breaksRenderedRule(field: ValidatorField, value: Primitive): boolean {
   })
   const outside = (size: number): boolean => bounds.some(({ side, bound }) => side === 'min' ? size < bound : size > bound)
   if (NUMERIC.has(field.type)) return typeof value !== 'number' || (field.type === 'integer' && !Number.isInteger(value)) || outside(value)
-  if (field.type === 'date' || field.type === 'datetime') return typeof value !== 'string' || Number.isNaN(Date.parse(value))
+  if (field.type === 'date' || field.type === 'datetime') return typeof value !== 'string' || !isCalendarDate(value)
   if (!TEXTUAL.has(field.type) || typeof value !== 'string') return false
   const formats = new Set(field.rules.map((rule) => FORMAT_RULES[rule.trim().toLowerCase()]))
-  return outside(value.length) || (formats.has('email') && !/^[^\s@]+@[^\s@]+$/u.test(value)) || (formats.has('uri') && !URL.canParse(value))
+  return outside(value.length) || (formats.has('email') && !HTML_EMAIL.test(value)) || (formats.has('uri') && !URL.canParse(value))
 }
 
 /**
@@ -194,14 +210,17 @@ function buildInstruction(view: PlanView, form: ViewForm | undefined, route: str
 
 /**
  * The redirect as a URL assertion, or none when it cannot be one: an optional or wildcard segment, or
- * the start page itself, which holds before the step. A parameter the start page fills is its value;
- * any other is one segment, except a literal another GET route has there (`/posts/create` for `/posts/:id`).
+ * a path the start page's URL would satisfy before the step (the same literals, a parameter wherever
+ * the start page has one, whatever its name or constraint). A parameter the start page fills is its
+ * value; any other is one segment, except a literal another GET route has there (`/posts/create` for `/posts/:id`).
  */
 function redirectPin(redirect: string, startPath: string, startParameters: ReadonlySet<string>, getPaths: readonly string[]): string | undefined {
   const parts = lexPath(redirect)
-  if (redirect === startPath || !isClosed(parts)) return undefined
-  if (parts.every((part) => typeof part === 'string')) return `await expect(browser).toHaveURL(${quoteString(redirect)})`
   const segments = segmentsOf(redirect)
+  const startSegments = segmentsOf(startPath)
+  const heldBefore = segments.length === startSegments.length && segments.every((segment, index) => segment === startSegments[index])
+  if (heldBefore || !isClosed(parts)) return undefined
+  if (parts.every((part) => typeof part === 'string')) return `await expect(browser).toHaveURL(${quoteString(redirect)})`
   const positions = segments.flatMap((segment, index) => segment === undefined ? [index] : [])
   const params = parts.filter((part): part is PathParam => typeof part !== 'string')
   const rendered = parts.map((part) => {
@@ -274,12 +293,13 @@ function behaviourCase(file: string, plan: Plan, behaviour: PlanAcceptance, app:
   if (inputs.length !== decoded.length) return skip(REASONS.input)
 
   const startParameters = new Set(startParts.flatMap((part) => typeof part === 'string' ? [] : [part.name]))
-  // The sending view's own labels and actions showed before the step, so they pin nothing.
-  const landing = behaviour.expect.inertia === undefined || behaviour.expect.inertia === view.id ? undefined : plan.views.find((entry) => entry.id === behaviour.expect.inertia)
+  // What the sending view shows was on the page before the step, under any view's name: it pins nothing.
+  const shownBefore = { labels: new Set(labelsOf(view)), actions: new Set(view.actions.map((action) => action.label)) }
+  const landing = behaviour.expect.inertia === undefined ? undefined : plan.views.find((entry) => entry.id === behaviour.expect.inertia)
   const errorLabels = (behaviour.expect.errors ?? []).flatMap((key) => form?.fields.find((field) => field.field === key && field.input !== 'hidden')?.label ?? [])
   const screenPins = [
-    ...(landing?.form?.fields ?? []).filter((field) => field.input !== 'hidden').map((field) => visible(labelLocator(field.label))),
-    ...(landing?.actions ?? []).map((action) => visible(actionLocator(action.label))),
+    ...(landing ? labelsOf(landing) : []).filter((label) => !shownBefore.labels.has(label)).map((label) => visible(labelLocator(label))),
+    ...(landing?.actions ?? []).filter((action) => !shownBefore.actions.has(action.label)).map((action) => visible(actionLocator(action.label))),
     ...errorLabels.map((label) => `await expect(${labelLocator(label)}.first()).toHaveAttribute('aria-invalid', 'true')`),
   ]
   const urlPin = behaviour.expect.redirect === undefined ? undefined : redirectPin(behaviour.expect.redirect, start.path, startParameters, app.getPaths)

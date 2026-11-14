@@ -58,6 +58,7 @@ function planOf(acceptance: PlanAcceptance[], views: ViewInput[] = VIEWS): Plan 
       { name: 'body', type: 'text', required: false, rules: [] },
       { name: 'rating', type: 'integer', required: false, rules: ['min 1', 'max 5'] },
       { name: 'email', type: 'string', required: false, rules: ['email'] },
+      { name: 'publishedOn', type: 'date', required: false, rules: [] },
     ] }],
     routes: [
       planRoute('index', 'GET', '/posts'), planRoute('create', 'GET', '/posts/create'), planRoute('store', 'POST', '/posts'),
@@ -195,6 +196,13 @@ describe('the behaviour specs', () => {
     expect(contentsOf([{ ...STORE, expect: { redirect: '/posts/:id?' , inertia: 'view.posts.show' } }])).not.toContain('toHaveURL')
   })
 
+  test('leave out a label or an action the sending view shows too, whatever view the plan lands on', () => {
+    const update = behaviour('AC-posts-update-1', 'update', { input: input({ title: 'Again' }), expect: { inertia: 'view.posts.new' } })
+    const contents = contentsOf([update])
+    expect(contents).not.toContain("await expect(screen.getByLabel('Title'")
+    expect(contents).toContain("await expect(screen.getByRole('button', 'Create').or(screen.getByRole('link', 'Create')).first()).toBeVisible()")
+  })
+
   test('give a changed test another title, and keep brackets out of it', () => {
     const digest = (contents: string): string => /AC-posts-store-1 \(([0-9a-f]{6})\)/u.exec(contents)![1]!
     const first = contentsOf([STORE])
@@ -265,14 +273,21 @@ describe('a behaviour the spec cannot write is skipped, naming why', () => {
   })
 
   test('a validation input the form\'s own control may stop', () => {
-    const fields = [titleField, { field: 'rating', label: 'Rating', input: 'number' }, { field: 'email', label: 'Email', input: 'text' }] as const
+    const fields = [
+      titleField, { field: 'rating', label: 'Rating', input: 'number' }, { field: 'email', label: 'Email', input: 'text' },
+      { field: 'publishedOn', label: 'Published on', input: 'date' },
+    ] as const
     const views = withView('view.posts.new', { form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [...fields] } })
     const validation = behaviour('AC-posts-store-3', 'store', { kind: 'validation', expect: { errors: ['title'] } })
-    const stopped = [{ title: '' }, { title: null }, { body: 'x' }, { title: 'Hi', rating: 0 }, { title: 'Hi', rating: 1.5 }, { title: 'Hi', rating: '3' }, { title: 'Hi', email: 'nope' }, { title: 'a title past twelve' }]
+    const stopped = [
+      { title: '' }, { title: null }, { body: 'x' }, { title: 'Hi', rating: 0 }, { title: 'Hi', rating: 1.5 }, { title: 'Hi', rating: '3' },
+      { title: 'Hi', email: 'nope' }, { title: 'Hi', email: 'a@b..test' }, { title: 'Hi', publishedOn: '2025-02-30' }, { title: 'Hi', publishedOn: 'soon' },
+      { title: 'a title past twelve' },
+    ]
     for (const values of stopped) {
       expect(skipped({ ...validation, input: input(values) }, { views })).toContain('its input is one a control of the form may stop or change')
     }
-    const written = contentsOf([{ ...validation, input: input({ title: '   ', rating: 3, email: 'a@b.test' }) }], { views })
+    const written = contentsOf([{ ...validation, input: input({ title: '   ', rating: 3, email: 'a@b.test', publishedOn: '2025-02-28' }) }], { views })
     expect(written).toContain("toHaveAttribute('aria-invalid', 'true')")
   })
 
@@ -280,6 +295,17 @@ describe('a behaviour the spec cannot write is skipped, naming why', () => {
     expect(skipped({ ...STORE, expect: { status: 302, database: [{ table: 'posts', has: [{ name: 'title', json: '"First"' }] }] } })).toContain('no outcome a browser can check')
     expect(skipped({ ...STORE, kind: 'validation', input: input({ title: '   ' }), expect: { errors: ['authorId'] } })).toContain('no outcome a browser can check')
     expect(skipped({ ...STORE, expect: { redirect: '/posts/create', inertia: 'view.posts.new' } })).toContain('already showed before the step')
+  })
+
+  test('a redirect the start page satisfies under another parameter name or constraint', () => {
+    for (const redirect of ['/posts/:post', '/posts/:id{[0-9]+}']) {
+      expect(skipped(behaviour('AC-posts-destroy-1', 'destroy', { expect: { redirect } }))).toContain('already showed before the step')
+    }
+  })
+
+  test('a view that lands on nothing the sending view does not show', () => {
+    const views = withView('view.posts.new', { actions: [] })
+    expect(skipped(behaviour('AC-posts-update-1', 'update', { input: input({ title: 'Again' }), expect: { inertia: 'view.posts.new' } }), { views })).toContain('already showed before the step')
   })
 })
 
@@ -298,7 +324,7 @@ describe('the spec files', () => {
       const plan = planOf([STORE])
       const run = (): ReturnType<typeof runBrowserMap> => runBrowserMap({ cwd: workspace.dir, write: true, map: mapOf(plan), plans: [{ file: FILE, plan }] })
 
-      await writeWorkspaceFiles(workspace.dir, { 'package.json': '{ "name": "app", "devDependencies": { "e2e": "0.23.1" } }\n' })
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': '{ "name": "app", "devDependencies": { "e2e": "0.23.1" } }\n', [`${GENERATED_BEHAVIOURS_DIR}/mine.e2e.ts`]: '// mine\n' })
       const never = await run()
       expect(never.behavioursOff).toBeUndefined()
       expect(never.unlabelledInputs).toBeUndefined()
@@ -328,6 +354,11 @@ describe('the spec files', () => {
       expect(signedIn.changed).toContain('tests/browser/generated/smoke.browser.ts')
       expect(await readFile(join(workspace.dir, SPEC), 'utf8')).toBe(contentsOf([STORE], { signIn: true }))
 
+      const otherPlans = await runBrowserMap({ cwd: workspace.dir, write: true, map: mapOf(plan), plans: [] })
+      expect(otherPlans.specsHeld).toBeDefined()
+      expect(otherPlans.removed).toEqual([])
+      expect(await readFile(join(workspace.dir, SPEC), 'utf8')).toBe(contentsOf([STORE], { signIn: true }))
+
       await writeWorkspaceFiles(workspace.dir, { [SPEC]: '// mine\n' })
       await expect(run()).rejects.toThrow(`${SPEC}: it has no generated header, so it is yours; move it out of ${GENERATED_BEHAVIOURS_DIR}/`)
       await writeWorkspaceFiles(workspace.dir, { [SPEC]: `${GENERATED_HEADER}\n` })
@@ -340,6 +371,22 @@ describe('the spec files', () => {
       const oneMissing = await run()
       expect(oneMissing.behavioursOff).toBe('e2e is not in package.json')
       expect(oneMissing.removed).toEqual([SPEC])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('browser:map refuses an author\'s spec that differs from a generated one only by the case of its suffix', async () => {
+    const workspace = await createTempWorkspace('guren-browser-map-behaviours-case-')
+    try {
+      const plan = planOf([STORE])
+      const mine = `${GENERATED_BEHAVIOURS_DIR}/posts.E2E.ts`
+      await writeWorkspaceFiles(workspace.dir, {
+        'package.json': '{ "name": "app", "devDependencies": { "e2e": "0.23.1", "@e2e-dev/web": "0.16.0" } }\n',
+        [BEHAVIOURS_CONFIG]: '// config\n', [BEHAVIOURS_GIVEN_FILE]: '// given\n', [mine]: '// mine\n',
+      })
+      await expect(runBrowserMap({ cwd: workspace.dir, write: true, map: mapOf(plan), plans: [{ file: FILE, plan }] })).rejects.toThrow('only by case')
+      expect(await readFile(join(workspace.dir, mine), 'utf8')).toBe('// mine\n')
     } finally {
       await workspace.cleanup()
     }

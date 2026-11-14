@@ -76,7 +76,8 @@ async function readExisting(cwd: string, dir: string, suffix: string): Promise<M
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return files
     throw new CliError(`${dir} could not be read: ${(error as Error).message}`)
   }
-  for (const name of names.filter((entry) => entry.endsWith(suffix)).sort()) {
+  // Without case: on a case-insensitive filesystem `posts.E2E.ts` is the file a run would write as `posts.e2e.ts`.
+  for (const name of names.filter((entry) => entry.toLowerCase().endsWith(suffix)).sort()) {
     const file = `${dir}/${name}`
     files.set(file, await readFile(join(cwd, file), 'utf8'))
   }
@@ -132,7 +133,7 @@ async function accessibilityOff(cwd: string): Promise<string | undefined> {
   return undefined
 }
 
-const HELD = 'the browser map is incomplete or a plan could not be read'
+const HELD = 'the browser map is incomplete, a plan could not be read, or the plans are not the ones the map was built from'
 
 /**
  * The generated specs a run writes, and the specs on disk beside them. The Playwright specs: none
@@ -147,7 +148,8 @@ async function generatedSpecs(
 ): Promise<GeneratedSpecs> {
   const playwright = planned !== undefined || await pathExists(join(cwd, BROWSER_TESTS_CONFIG))
   const [behaviours, behavioursOnDisk] = await Promise.all([behavioursOff(cwd), readExisting(cwd, GENERATED_BEHAVIOURS_DIR, '.e2e.ts')])
-  const behavioursNoted = behaviours.off !== undefined && (behaviours.asked || behavioursOnDisk.size > 0)
+  const leftOnDisk = [...behavioursOnDisk.values()].some((content) => content.startsWith(GENERATED_HEADER))
+  const behavioursNoted = behaviours.off !== undefined && (behaviours.asked || leftOnDisk)
   if (!playwright && behaviours.off !== undefined && !behavioursNoted) return { outputs: new Map(), onDisk: new Map() }
   // A partial map would regenerate the specs as fixme only, or delete an unread plan's: one failed read must not empty the suite.
   if (!map.complete || map.unreadablePlans.length > 0) return { outputs: new Map(), onDisk: new Map(), held: HELD }
@@ -170,9 +172,11 @@ async function generatedSpecs(
 
   let unlabelled: string[] = []
   if (behaviours.off === undefined) {
-    // A caller that passed its own map without its plans has them read here, under the same hold.
+    // A caller that passed its own map without its plans has them read here. Either way they have to be
+    // the plans the map placed: with others, a spec would be written or removed for a plan the map never read.
     const read = plans ? { plans, unreadable: [] } : await approvedPlans(cwd)
-    if (read.unreadable.length > 0) return { outputs: new Map(), onDisk: new Map(), held: HELD }
+    const files = read.plans.map((entry) => entry.file).sort(compareStrings)
+    if (read.unreadable.length > 0 || files.join('\0') !== map.plans.join('\0')) return { outputs: new Map(), onDisk: new Map(), held: HELD }
     const written = buildBehaviourSpecs(map, read.plans, { signIn: await pathExists(join(cwd, BEHAVIOURS_SETUP)) }, sharedSlugs)
     for (const entry of written.files) outputs.set(entry.path, entry.contents)
     unlabelled = written.unlabelled

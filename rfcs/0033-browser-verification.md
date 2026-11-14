@@ -1193,8 +1193,9 @@ type, and any of them stops a submit as `required` does. The generator reads
 the plan, not the app's contract, so it judges from the plan's validator and
 towards skipping: a labelled field left empty, a required one left out, a
 number outside a `min` or `max` rule or not an integer where the type is one, a
-string outside its length rules or not shaped as its `email` or `url` rule
-says, a date that is none. A rule the plan words in prose is taken to be the
+string outside its length rules, one an `email` control would refuse (by the
+HTML standard's rule) or that is no URL under a `url` rule, a date that is no
+calendar date. A rule the plan words in prose is taken to be the
 server's. The rule can skip a behaviour a browser could have run (an edit form
 keeps the value of a key the input leaves out); it is meant never to write one
 whose submit cannot happen.
@@ -1251,10 +1252,12 @@ test('AC-posts-update-1 (6a2991): a signed-in user retitles a post', { session: 
   sets. `agent.assert` is never generated: it calls the model on every run, so
   a spec holding one cannot run in CI without a login.
 - **A pin that held before the step is not written** (amended in
-  implementation). A redirect to the start page itself, and the labels and
-  actions of the view that sent the request, are true before the agent does
-  anything, so a submit that did nothing would pass them. A behaviour left
-  with nothing is skipped. An optional or wildcard segment in a redirect is not
+  implementation). A redirect the start page's URL already satisfies (the same
+  literals, and a parameter wherever the start page has one, whatever its name
+  or constraint), and any label or action the sending view shows, under
+  whatever view the plan lands on, are true before the agent does anything, so
+  a submit that did nothing would pass them. A behaviour left with nothing is
+  skipped. An optional or wildcard segment in a redirect is not
   pinned either, and one in the start page skips the behaviour.
 - **At least one pin, or no test.** The runner saves a recording only after a
   locator or URL assertion passes behind the step; an assertion on a plain
