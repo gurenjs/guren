@@ -604,8 +604,8 @@ being rewired: 17 of the 22 edit a file from before the plan, the layout in
 and 12 uploads a test left under `storage/`.
 
 So on a new application about half the tasks stop for one person, who reads
-a fifth of each, and what the line gives that person first is the evidence
-and a reading list, not an empty queue. Three further readings would move
+a few dozen lines of each, and what the line gives that person first is the
+evidence and a reading list, not an empty queue. Three further readings would move
 tasks and are not adopted here: the layout's edits as navigation entries
 (15 low, at best), added helper files of a kind no plan section describes
 (16 with the layout), and a declared `alter` on a model taken for the whole
