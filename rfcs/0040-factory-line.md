@@ -930,17 +930,35 @@ what the walk cannot show.
   every route ahead of the tests that request it, so a test that asserts only
   a page would pass on fixture data before any action exists. So a plan's
   tests run with the fixtures off, and the switch is in the test file: the
-  skeleton `plan:scaffold` writes boots its `TestApp` with an option under
-  which a `prototype` route answers 501, with its middleware and its contract
-  still applied and its fixture never imported. `plan:verify`, the replay of
-  red runs in §4 and the gate all run that file, so the three see the same
-  route, and no existing test changes: a `TestApp` booted without the option
-  renders fixtures as it does today. Today a route dispatched without its
-  fixture throws, which §4 would read as a load failure and not as a red run. `planMayPassNow` and the test
-  skeletons treat a route on its fixture as one that does not answer yet.
+  skeleton `plan:scaffold` writes takes its `TestApp` with
+  `TestApp.fromApp(app, { prototypeFixtures: false })`. It cannot be a
+  setting read at boot, since the test files of one run share one booted
+  application. The option does two things: it defers the fixture's load, so
+  a first boot evaluates nothing, and it marks each of that `TestApp`'s
+  requests, a mark honoured only under `GUREN_TESTING` as the testing user's
+  header is. A marked request to a `prototype` route passes the route's
+  middleware and its contract and then answers 501. `plan:verify`, the
+  replay of red runs in §4 and the gate all run that file, so the three see
+  the same route, and a `TestApp` taken without the option renders fixtures
+  as it does today. A prototype showed both orders working on one shared
+  application.
+
+  What the 501 does not cover is a behaviour the route already satisfies
+  without an action: a guest sent to sign in by the route's middleware, an
+  invalid body refused by its contract. Their tests pass as soon as the
+  screens task registers the route, so no red run of theirs can be observed,
+  and `planMayPassNow` reports them before approval as RFC 0030's
+  `alreadyHolds` behaviours. In the measured plans 82 of the 364 behaviours
+  expect a guest to be redirected to sign in, and 67 more expect a 422, which
+  holds early wherever the route carries the validator as its contract.
+  Screens first gives up those red runs. A behaviour that needs the action,
+  a write or a 403 from a policy, keeps its own.
 - **Promotion keeps the route's guards.** A route on its fixture already runs
-  its middleware and validates its contract: the router builds the same chain
-  around the `prototype` handler as around an action. So its security record
+  its middleware, and the `prototype` handler enforces the contract's params,
+  query and body itself (not its output): a prototype saw a guest redirected
+  and an invalid body refused with the same 422 a controller route gives. The
+  route's definition carries its middleware, schemas and capabilities
+  whatever its handler. So its security record
   has a base, and a promotion is compared like any other change (§3): a
   middleware or a contract schema the promoted route no longer has is
   `authorization-removed` or `validation-removed`. Only what the action
@@ -966,29 +984,37 @@ what the walk cannot show.
 
   ```typescript
   createApp({
-    prototype: { fixture: () => import('../resources/js/prototype/index.js'), inProduction: 'skip' },
+    prototype: { load: () => import('../resources/js/prototype/index.js'), inProduction: 'skip' },
   })
   ```
 
   Under `skip` a production boot mounts each route on the `prototype` handler
-  in its registered place with a handler that answers 404, never imports the
-  fixture, and logs those routes once. The route is answered and not left
-  out, because a route registered after it could otherwise take its requests:
-  `/posts/:id` would answer `/posts/new`. No fixture is served, which is what
-  the refusal was for. `GUREN_PROTOTYPE_ROUTES=1` still serves fixtures on
-  purpose, and the loader given alone keeps today's meaning. Then the default
-  branch can release at any commit, and a release contains what has been
-  promoted so far, which is what merging task by task already gives a plan
-  without screens.
+  in its registered place with a handler that answers 404, never evaluates
+  the fixture, and logs those routes once per start. The route is answered
+  and not left out, because a route registered after it would otherwise take
+  its requests: in a prototype, `/posts/new` left out was answered by
+  `/posts/:id`. The 404 is the answer an unregistered path gets, and the
+  route's own middleware does not run in front of it, so a dark route cannot
+  be told from a path nothing registers. Behind its middleware a guest would
+  be redirected to sign in and meet the 404 after it. Global middleware runs
+  as for any path. No fixture is served, which is what the refusal was for.
+  `GUREN_PROTOTYPE_ROUTES=1` still serves fixtures on purpose, and the loader
+  given alone keeps today's meaning. Then the default branch can release at
+  any commit, and a release contains what has been promoted so far, which is
+  what merging task by task already gives a plan without screens.
 
-  The route stays registered, so the typed route manifest, `Router.route()`
-  and the introspection manifest keep it. The manifest says for each route
-  whether production serves it and what the application chose, and the rest
-  reads that: the navigation leaves out an entry whose route is dark,
-  `prototype-routes` in `guren doctor` is a warning only where the choice is
-  `skip`, and the release record names the routes not served. A link inside a
-  page is not filtered, so a promoted page can link to a 404 until its target
-  is promoted. A forgotten promotion is quiet where the refusal was loud, and
+  The route stays registered, so the typed route manifest and
+  `Router.route()` keep it. The introspection manifest states the choice for
+  each such route. It cannot state what a deployed process does, where
+  `GUREN_PROTOTYPE_ROUTES` is read, and it is not available to a running
+  application, so the application itself says which routes are dark and the
+  navigation reads that. `prototype-routes` in `guren doctor` is a warning
+  where the manifest shows `skip` and stays a failure where it is read
+  without introspection, which cannot see the choice. The release record
+  names the routes not served. `guren add prototype --remove` and the
+  backlog line of `guren context` learn the new form. A link inside a page is
+  not filtered, so a promoted page can link to a 404 until its target is
+  promoted. A forgotten promotion is quiet where the refusal was loud, and
   the release record is where it shows. Choosing `skip` is an edit to the
   application entry outside its lists, so a person reads it (§3).
 
@@ -1795,6 +1821,7 @@ which for a later task is not that task's own merge base.
 | Which step brings the defects a person has to see? | The 80 task defects by the kind of step whose commit introduced them | Pages 27 (13 user experience, 11 accessibility, 2 performance, 1 correctness), http 36, scaffold 14, tests 2, data 1. Every accessibility defect came from a pages step | Why the screens come before approval (§5) |
 | What do the tasks look like without their pages? | The same paths with each task's pages step left out (23 steps) | 13 could be low today, 25 with the application entry, 30 with environment keys, of 43 | The bound screens first would give the tasks that remain. The screens task is a person's |
 | Does the navigation design cover what the plans did to the layout? | The nine layout edits read against §5: entries added, changed or removed, the account controls and their labels, the brand, `<Layout wide>` | 7 of 9 are declared entries alone; the other 2 also change the page's vertical padding. Of the five tasks that only the layout kept out of low, 4 fit: 27 of 43 | The layout, the width and the declared removal are part of the module, not additions to it |
+| Do `skip` and fixtures-off work on the framework as it is? | A prototype in a worktree, driven by probes on a minimal application, one process per scenario, and a bundle built with the production define | Under `skip` the boot succeeds, the fixture is never evaluated, a dark `/posts/new` answers 404 where the omitted route was answered by `/posts/:id`, and the refusal's read of `NODE_ENV` survives bundling. Fixtures off cannot be a boot setting on a shared application; carried per request by the `TestApp` it works in both orders, and a guard and a contract answer before the 501. A route on its fixture already redirects a guest and refuses an invalid body | The rules of §5 for `skip`, for the test switch, for promotion, and the behaviours that lose their red run |
 | Does the navigation module work on the framework as it is? | A prototype in a worktree: the definition, the filter, the lazy prop, a syntax reader and both writers, driven by probes on minimal applications with four identities | A config definition's `boot` hook can share the prop, with routes and gate in reach. A guest's payload carries no ability, hidden label, hidden route or denial message. The prop is skipped on partial reloads that do not ask for it and on JSON. A missing route name answers 500 on every page unless the entry is linked at boot. No type lists route names today. A policy that reads a `null` user throws for every guest. All 24 append round trips read back; 19 removals restored the bytes | The runtime rules of §5 that the first text left to `guren check` or did not state |
 | Can the navigation checks be read, and are they right? | A prototype over the 31 links the plans wrote, their routes, actions and policies, by syntax | Every link, route, action and policy method read. Sign-in mismatch: 4 warnings, 4 right. Role checks that restate an ability the action authorizes: 4 of 6, all nameable. Policy methods: 8 user only, 29 a required second parameter, 8 an optional one. 74 of 85 candidate routes make no `authorize()` call | The three readings of §5, and that the comparison has to start from the action, since no layout names an ability |
 | Do merge bases have a completed push run? | This repository's last 60 merged pull requests | 60 of 60, at most four days before the merge | That the runs exist. Not that their records would be comparable, and not stacked pull requests, of which there were none |
