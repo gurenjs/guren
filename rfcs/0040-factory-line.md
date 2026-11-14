@@ -621,7 +621,9 @@ tables (the other four carry an `id` or timestamps the plan does not list).
 
 So §3 gains two rules from this, stated there: a file the plan added stays
 the plan's addition in every task, and a file a plan's command writes is
-declared by that command. With those and the plan sections below, 13 of the
+declared by that command (**decided 2026-11-14** by the maintainer, over
+leaving both out, which gives 7 low: no route of the 13 low tasks has a
+weaker security record). With those and the plan sections below, 13 of the
 43 are low, 22 medium and 8 high.
 
 Counting tasks overstates what a person does. A floor is the highest lane
@@ -1811,7 +1813,7 @@ does for the dependency reports.
 
 ### 14. Phasing
 
-Seven deliverables. The first is the smallest thing that is useful by itself
+Eight deliverables. The first is the smallest thing that is useful by itself
 and produces the data the rest is judged on. Each later one names what it
 needs first.
 
