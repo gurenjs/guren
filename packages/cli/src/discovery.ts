@@ -33,7 +33,7 @@ async function readDirectory(directory: string) {
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
 const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
-const TEST_FILE_PATTERN = /\.test\.(ts|tsx|mts|js|jsx|mjs)$/
+export const TEST_FILE_PATTERN = /\.test\.(ts|tsx|mts|js|jsx|mjs)$/
 
 // Directories that never contain a project's own source/test files — skipped
 // when scanning from the project root (not needed for the scoped app/**
