@@ -3,7 +3,8 @@
  * document, and writes only when every document can be rewritten safely. A file with no feature
  * any more is reported and kept, since it holds author text. Once `guren add browser-tests` has
  * written its config, the specs under `tests/browser/generated/` are kept here too (§6): a
- * generated spec nothing produces any more is removed, since no author text lives in one.
+ * generated spec nothing produces any more is removed, since no author text lives in one. The
+ * behaviour specs (§13.5) are kept the same way, for an app that declares the runner and has its config.
  */
 
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
@@ -14,6 +15,9 @@ import {
   BROWSER_MAP_DIR, BROWSER_MAP_INDEX, buildBrowserMap, renderFeatureDoc, renderIndexDoc,
   type ApprovedPlanInput, type BrowserMap,
 } from './browser-map'
+import {
+  BEHAVIOUR_PACKAGES, BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP, buildBehaviourSpecs, GENERATED_BEHAVIOURS_DIR,
+} from './browser-behaviour-specs'
 import {
   A11Y_OPTIONS_FILE, A11Y_SPEC_FILE, AXE_PACKAGE, BROWSER_TESTS_CONFIG, BROWSER_TESTS_SETUP, buildA11ySpec, buildPlanSpecs, buildSmokeSpec,
   GENERATED_HEADER, GENERATED_SPECS_DIR, SMOKE_SPEC_FILE, type SpecOptions,
@@ -37,6 +41,10 @@ interface BrowserMapRun {
   specsHeld?: string
   /** Why the generated specs this run writes leave out the accessibility spec (RFC 0033 §12.2). */
   accessibilityOff?: string
+  /** Why no behaviour spec is written, for an app that shows a sign of having asked for them (RFC 0033 §13.5). */
+  behavioursOff?: string
+  /** Input keys a behaviour test sets that its view's form does not label, as `plan: id: key`. */
+  unlabelledInputs: string[]
 }
 
 /**
@@ -86,6 +94,27 @@ interface GeneratedSpecs {
   onDisk: Map<string, string>
   held?: string
   accessibilityOff?: string
+  behavioursOff?: string
+  unlabelledInputs?: string[]
+}
+
+/**
+ * Why no behaviour spec is written, on positive evidence only: both packages in the manifest, the
+ * runner's config, and the given file every spec imports. `asked` is whether the app shows any of
+ * them, so an app that never opted in is told nothing.
+ */
+async function behavioursOff(cwd: string): Promise<{ off?: string; asked: boolean }> {
+  const [declared, config, given] = await Promise.all([
+    Promise.all(BEHAVIOUR_PACKAGES.map((name) => appDependsOn(cwd, name))),
+    pathExists(join(cwd, BEHAVIOURS_CONFIG)),
+    pathExists(join(cwd, BEHAVIOURS_GIVEN_FILE)),
+  ])
+  const asked = config || given || declared.some((entry) => entry === true)
+  if (declared.includes(null)) return { off: 'package.json is missing or does not parse', asked }
+  const missing = BEHAVIOUR_PACKAGES.filter((_, index) => !declared[index])
+  if (missing.length > 0) return { off: `${missing.join(' and ')} ${missing.length > 1 ? 'are' : 'is'} not in package.json`, asked }
+  const absent = [...(config ? [] : [BEHAVIOURS_CONFIG]), ...(given ? [] : [BEHAVIOURS_GIVEN_FILE])]
+  return absent.length > 0 ? { off: `${absent.join(' and ')} ${absent.length > 1 ? 'do' : 'does'} not exist`, asked } : { asked }
 }
 
 /** Positive evidence only: the package in the manifest and the author's options file beside the specs. */
@@ -111,13 +140,28 @@ async function generatedSpecs(cwd: string, map: BrowserMap, planned: SpecOptions
   const options = planned ?? { signIn: await pathExists(join(cwd, BROWSER_TESTS_SETUP)) }
   const discovery = await discoverPlanFiles(cwd)
   const sharedSlugs = new Map([...discovery.sharedSlugs].map(([slug, files]) => [slug, files.map((file) => toPosixRelative(cwd, file))]))
+  const behavioursOnDisk = await readExisting(cwd, GENERATED_BEHAVIOURS_DIR, '.e2e.ts')
+  const behaviours = await behavioursOff(cwd)
+  const written = behaviours.off
+    ? undefined
+    : buildBehaviourSpecs(map, (await approvedPlans(cwd)).plans, { signIn: await pathExists(join(cwd, BEHAVIOURS_SETUP)) }, sharedSlugs)
   const outputs = new Map([
     [SMOKE_SPEC_FILE, buildSmokeSpec(map, options)],
     ...(off ? [] : [[A11Y_SPEC_FILE, buildA11ySpec(map, options)] as [string, string]]),
     ...buildPlanSpecs(map, options, sharedSlugs).map((entry): [string, string] => [entry.path, entry.contents]),
+    ...(written?.files ?? []).map((entry): [string, string] => [entry.path, entry.contents]),
   ])
-  const onDisk = new Map([...await readExisting(cwd, GENERATED_SPECS_DIR, '.browser.ts'), ...await readExisting(cwd, `${GENERATED_SPECS_DIR}/plans`, '.browser.ts')])
-  return { outputs, onDisk, ...(off ? { accessibilityOff: off } : {}) }
+  const onDisk = new Map([
+    ...await readExisting(cwd, GENERATED_SPECS_DIR, '.browser.ts'),
+    ...await readExisting(cwd, `${GENERATED_SPECS_DIR}/plans`, '.browser.ts'),
+    ...behavioursOnDisk,
+  ])
+  return {
+    outputs, onDisk,
+    ...(off ? { accessibilityOff: off } : {}),
+    ...(behaviours.off && (behaviours.asked || behavioursOnDisk.size > 0) ? { behavioursOff: behaviours.off } : {}),
+    ...(written ? { unlabelledInputs: written.unlabelled } : {}),
+  }
 }
 
 /** Every document as a run would leave it; refuses, writing nothing, when any document's markers are unsafe. */
@@ -153,7 +197,7 @@ export async function runBrowserMap(options: { cwd: string; write: boolean; map?
     const other = byCase.get(file.toLowerCase())
     if (other !== undefined && other !== file) problems.push(`${other}: it differs from ${file} only by case; rename or move it`)
     const current = specs.onDisk.get(file)
-    if (current !== undefined && !generated(current)) problems.push(`${file}: it has no generated header, so it is yours; move it out of ${GENERATED_SPECS_DIR}/`)
+    if (current !== undefined && !generated(current)) problems.push(`${file}: it has no generated header, so it is yours; move it out of ${file.startsWith(`${GENERATED_BEHAVIOURS_DIR}/`) ? GENERATED_BEHAVIOURS_DIR : GENERATED_SPECS_DIR}/`)
     outputs.set(file, content)
     if (current !== undefined) existing.set(file, current)
   }
@@ -174,5 +218,7 @@ export async function runBrowserMap(options: { cwd: string; write: boolean; map?
     map, changed, orphans, removed,
     ...(specs.held ? { specsHeld: specs.held } : {}),
     ...(specs.accessibilityOff ? { accessibilityOff: specs.accessibilityOff } : {}),
+    ...(specs.behavioursOff ? { behavioursOff: specs.behavioursOff } : {}),
+    unlabelledInputs: specs.unlabelledInputs ?? [],
   }
 }

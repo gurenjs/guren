@@ -1163,6 +1163,10 @@ file per approved plan, only when the manifest declares `e2e` and
 `@e2e-dev/web` and `e2e.browser.config.ts` exists. Otherwise it writes none,
 removes what it wrote before, and prints why, as for the accessibility spec.
 The rules for a file it does not own (§6) apply unchanged.
+**Amended in implementation:** `tests/browser/behaviours/given.ts` has to exist
+too, since every generated spec imports it, as the accessibility spec waits for
+its options file (§12.2). An app that shows none of the four is told nothing:
+most apps never opt in.
 
 **Which behaviours.** Those of kind `success` or `validation` whose route is
 not a `GET` and which a view of the plan sends: the view whose `form.submitsTo`
@@ -1178,7 +1182,7 @@ skipped test naming why, never left out and never passed:
 | a signed-in route with no password sign-in | as §6 |
 | no outcome a browser can check | every expectation is a status or a database row, an `errors` key has no labelled field, or the view `expect.inertia` names has no label and no action |
 | an input that is not a string, a number or a boolean | nothing says how a control takes it |
-| a `validation` behaviour whose input leaves empty a key that the route's form contract (RFC 0036 §2.1) renders with `required` | the browser stops the submit, so no request is sent and no error is rendered (§13.1); `TestApp` pins it |
+| a `validation` behaviour whose input leaves empty a key that ~~the route's form contract (RFC 0036 §2.1) renders with `required`~~ the validator of the view's form marks `required` (**amended in implementation:** the generator reads the plan, as for every other rule here, and the plan's validator states `required` where the contract would) | the browser stops the submit, so no request is sent and no error is rendered (§13.1); `TestApp` pins it |
 
 **One test per behaviour.** For `AC-comments-store-1`, sent by the form of a
 view on `GET /posts/:post`:
@@ -1244,8 +1248,13 @@ test('AC-comments-store-1 (9c41f2): a signed-in user comments on a post', { sess
   (Open Question 15).
 
 A signed-in route runs under the session `browser`, the seeded account of §6;
-any other route runs signed out. Which account a behaviour's `actor` means is
-still Open Question 5.
+~~any other route runs signed out~~. **Amended in implementation:** every other
+route runs under that session too when the app has the sign-in setup, except a
+route the graph reads as guest-only. The graph reads authentication from
+middleware, and the scaffold's own actions refuse a guest in their body
+(`this.auth.userOrFail()`), so on the measurement app `POST /posts` read as
+public and would have been driven as a guest into a 401. Which account a
+behaviour's `actor` means is still Open Question 5.
 
 #### 13.6 Recordings
 
