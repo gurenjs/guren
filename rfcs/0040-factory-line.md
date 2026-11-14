@@ -230,12 +230,21 @@ among them.
 **Per-route security records.** `authorization-removed` and
 `validation-removed` are not read off graph edges, which start at the
 controller and keep a middleware's name without its capabilities. For each
-route the reader builds one record from the introspection manifest and the
-action evidence: the route's middleware entries with their `capabilities`
-(authentication, and authorization with its `abilities` and `mode`), the
-contract schemas the route declares, and, through `handles` and the
-`controller:<action>` evidence, the validators and policies its action
-consults. Records are compared between base and head.
+route the reader builds one record, and a prototype built it for every
+commit of the ten measured histories (4,676 route records) to see what each
+field holds.
+
+| Field | Read from | In the measured applications |
+| --- | --- | --- |
+| The route's middleware entries with their `capabilities` | The introspection manifest | Authentication reads for `requireAuthenticated`, `requireGuest` and an `auth` alias. No entry carries an authorization capability. A role middleware of the application's own and every throttle carry no capability, and are not marked unresolved either |
+| The contract schemas, and the validator export each one is | The manifest for the schema, the graph run for the export (`guren introspect --json` does not print it) | Every one of 1,729 schemas resolved to one export |
+| The action's own `this.authorize()` and `this.can()` calls, with ability and subject | The action body. This field was missing from the first text, and it is how these applications authorize | 751 records, every ability a literal |
+| The validators the action calls | The graph's `validates` edges | Twelve records. An action that calls `this.validated()` relies on the contract above |
+
+The graph gives no policy for any of this: it lists every `authorize()` call
+as unresolved, since a policy is bound at boot, and no record holds a
+policy's body, a helper method the action calls, or the arguments of a
+middleware factory.
 
 A route is matched to its base counterpart by controller action first, then by
 method and path, so a rename or a move does not turn a removal into an
@@ -245,28 +254,55 @@ equal security:
 
 | Base to head | Verdict |
 | --- | --- |
-| The same capabilities, abilities and mode in the same order, and the same validators | Same |
-| An authentication or authorization capability absent at the head; an ability dropped from an `all` list or added to an `any` list; a validator absent | Weaker: the fact |
-| Authorization `mixed` on either side, an ability resolved at request time, a middleware the manifest marks unresolved, a changed order, one validator replaced by another | Incomparable: `unjudged` at high |
-| A capability, an ability in an `all` list or a validator added | Stronger: no fact |
+| The same capabilities, abilities and mode in the same order over the whole chain, the same `authorize()` calls, and the same validators with the same schema | Same |
+| An authentication or authorization capability absent at the head; an ability dropped from an `all` list or added to an `any` list; an `authorize()` call absent; a contract or a validator absent | Weaker: the fact |
+| Authorization `mixed` on either side, an ability resolved at request time, a middleware the manifest marks unresolved, a changed order, an `authorize()` call for another ability, one validator replaced by another, a middleware with no capability removed or renamed, a schema that lost a property, a required key or a bound | Incomparable: `unjudged` at high |
+| A capability, an ability in an `all` list, an `authorize()` call or a validator added; a schema that only gained properties, required keys or bounds | Stronger: no fact |
+| A validator whose source changed and whose schema did not | `validation-edited`, medium: the schema does not render a `.refine()` or a transform, so a person reads the hunk |
+| `requireGuest` removed | No fact: a guest-only guard keeps nobody out |
 
-A new mutating route with no authorization is `audit-warn-changed` already. An
-ambiguous match, and an action whose authorization the graph lists as
-unresolved, are `unjudged` at high: unreadable authorization is not a medium
-question.
+A new mutating route with no authorization is `audit-warn-changed` already,
+and an added route to an action that has others is compared with them, so a
+second path with fewer guards is Weaker. An ambiguous match is `unjudged` at
+high: unreadable authorization is not a medium question. The graph's listing
+of an `authorize()` call as unresolved is not such a verdict. Read as one, as
+the first text had it, 16 to 30 of the 43 measured tasks would be high for a
+call that did not change.
 
-**The base is never rebuilt.** Each commit's records are computed while that
-commit is the head, in an environment prepared for it. Every run of the
-workflow, on a pull request's head or on a push to the default branch, writes
-them into the record of §4 and uploads it under that commit's SHA. A later run
-fetches the record of its merge base and passes it as `--base-record`.
+On those tasks the records raise nothing. Over 1,146 matched routes in the
+tasks' 65 ranges, 1,141 records are identical, none is Weaker, one is
+Stronger and four are a profile or registration schema that gained a
+required field. The floors stand where they stood with the records assumed
+the same, and every low task stays low. The comparison can fail: 21
+mutations of real trees (a dropped `auth` alias, a dropped `authorize()`
+call, a swapped ability, a replaced validator, a reordered chain) each read
+as the table says. What it cannot see is stated above, and one case was
+found in the histories: an action that authorizes inside a private helper
+shows no call, so removing that check reads Same. The audit's policy rule
+(`authorization-audit.ts`) is what reports such an action.
+
+**The base is rebuilt where the head's install serves it.** Every commit of
+the ten histories introspected, 249 of 249, in a median of 242 ms, from a
+tree exported with `git archive`, once it had an install and its generated
+files (`guren codegen`, 0.2 s, where `.guren/` is not committed). The
+lockfile differs between base and head in 1 of the 65 ranges. So where the
+base's lockfile is the head's, the run exports the base, links the head's
+install and computes the base's records itself. Otherwise it uses the stored
+record: every run of the workflow, on a pull request's head or on a push to
+the default branch, writes its records into the record of §4 and uploads it
+under that commit's SHA, and a later run fetches the record of its merge
+base and passes it as `--base-record`.
 
 - **Compatibility.** A record carries `recordVersion` for the format of its
   security records, the `@guren/cli` and `@guren/server` versions that
   produced it, and the deploy target and environment the introspection ran
-  under. A base record that differs from the head's in any of these is not
-  compared: the facts are `unjudged`, and the report names the fix, which is
-  to run the workflow on the base commit again.
+  under. A stored record whose `recordVersion`, target or environment
+  differs from the head's is not compared: the facts are `unjudged`, and the
+  report names the fix, which is to run the workflow on the base commit
+  again. A differing package version is named in the report and does not
+  stop the comparison, or every change after a framework upgrade would be
+  unjudged: the records of 94 commits were identical under server 2.34.0 and
+  2.37.0, the only two compared.
 - **Where the merge base is.** For a pull request cut from the default branch
   it is a default-branch commit, whose push run stored a record. For a stacked
   pull request it is its parent's head, whose own run stored one. When the
@@ -278,8 +314,9 @@ fetches the record of its merge base and passes it as `--base-record`.
   expired) the two facts are `unjudged` for any change that touches a routes
   file, a controller, a policy or a middleware, and at medium: a missing
   record says nothing against the change, where an incomparable one does. It
-  is still most changes: 38 of the 43 measured tasks touch such a file, so
-  until base records exist one of the 43 is low. On this repository's last 60
+  would be most changes, since 38 of the 43 measured tasks touch such a file
+  and one of the 43 would be low, which is why the run rebuilds the base
+  where it can and this case is left to a base with another lockfile. On this repository's last 60
   merged pull requests every merge base was a default-branch commit whose push
   run of CI had completed, at most four days before the merge. That shows the
   runs exist, not yet that their records would be comparable.
@@ -567,8 +604,8 @@ code (20). These are upper bounds: declarations, security records, evidence
 and review can only lower them.
 
 A prototype of `change:lane` then read the same 43 tasks with the
-declaration matcher of §3, and they did. With every security record taken to
-compare the same, 5 tasks are low, 30 medium and 8 high. Paths had counted
+declaration matcher of §3, and they did. With the security records computed
+and compared as §3 has them, 5 tasks are low, 30 medium and 8 high. Paths had counted
 only files from before the plan, and two things they could not see hold most
 tasks. Nineteen tasks edit a file an earlier task of the same plan added (a
 model in 12, a controller in 7), which exists at their base. And 24 add at
@@ -687,8 +724,8 @@ sides of every edit by a prototype reader:
 | and navigation | 28 | 24 | not run |
 | and edits a changed element owns, if they could be accounted for (§3) | 35 | 28 | not run |
 
-The last column is the prototype of `change:lane` described above, with every
-security record taken to compare the same. A section seldom frees a task by
+The last column is the prototype of `change:lane` described above, with the
+security records computed. A section seldom frees a task by
 itself, because the task has another reason to be read: the five foundation
 tasks that add an environment key also add config modules and providers no
 element owns. Every entry the sections would have declared had a source in
@@ -1863,10 +1900,11 @@ measured is listed at the end, with the deliverable that measures it.
 
 1. ~~**Reading the base.** Can the base graph be rebuilt in a temporary
    worktree, statically or by introspection?~~
-   **Resolved (2026-11-14):** it is never rebuilt. Static mode cannot give
-   route facts, and introspecting an old commit needs its dependencies,
-   `codegen` and environment. Each commit's records are computed while it is
-   the head and fetched by SHA as the base record (§3).
+   **Resolved (2026-11-14):** by introspection, where the head's install
+   serves the base: every measured commit introspected from an exported tree
+   in a quarter of a second. Static mode cannot give route facts. Where the
+   lockfile differs, the base's record is the one computed while it was the
+   head and fetched by SHA (§3).
 2. ~~**Reproducing red runs.** Cost, and the share of histories where a
    test's first commit holds no implementation.~~
    **Resolved (2026-11-14):** only a test that first appears in the change is
@@ -1996,6 +2034,7 @@ which for a later task is not that task's own merge base.
 | Which step brings the defects a person has to see? | The 80 task defects by the kind of step whose commit introduced them | Pages 27 (13 user experience, 11 accessibility, 2 performance, 1 correctness), http 36, scaffold 14, tests 2, data 1. Every accessibility defect came from a pages step | Why the screens come before approval (§5) |
 | What do the tasks look like without their pages? | The same paths with each task's pages step left out (23 steps) | 13 could be low today, 25 with the application entry, 30 with environment keys, of 43 | The bound screens first would give the tasks that remain. The screens task is a person's |
 | Does the navigation design cover what the plans did to the layout? | The nine layout edits read against §5: entries added, changed or removed, the account controls and their labels, the brand, `<Layout wide>` | 7 of 9 are declared entries alone; the other 2 also change the page's vertical padding. Of the five tasks that only the layout kept out of low, 4 fit: 27 of 43 | The layout, the width and the declared removal are part of the module, not additions to it |
+| Do the security records change the floors, and can they be computed? | A prototype: every commit of the ten histories exported with `git archive` and introspected by the checkout's CLI, a record per route, the tasks' 65 ranges compared by the table of §3, and 21 mutations of real trees to see the comparison fail | 249 of 249 commits introspect, median 242 ms. 1,146 matched routes: 1,141 identical, 0 Weaker, 1 Stronger, 4 schemas that gained a required field; 112 added, 4 removed. The floors do not move (5 / 30 / 8 and 13 / 22 / 8) and all 13 low tasks stay low. No middleware entry carries an authorization capability; 751 records authorize in the action. Read literally, the first text's "unresolved" sentence made 16 to 30 tasks high. An action that authorizes in a private helper reads as having no check | The fields and rows §3 gained, the base rebuilt on the head's install, and that the floors measured earlier hold. The applications had no install, so the framework came from the checkout; two server versions gave identical records |
 | What floor do the facts of §3 give the measured tasks? | A prototype of `change:lane` over the 43 tasks: the path facts, `judgeMigrations()`, the schema and routes files read on both sides, and a matcher against the plan at the head (change kind, identity, planned properties), checked by 20 cases that mutate a plan and expect the match to fail. Security records, audit facts and advisories were not computed | 5 low, 30 medium, 8 high where paths gave 11. 7 low with `env`, `providers` and `config`; 13 with a plan's commands declaring what they write and a plan-added file staying an addition. 1 low while base records are missing. Matched: 112 of 112 routes, 24 of 24 policies, 194 of 261 added files, 23 of 27 added tables, 24 of 28 migrations. 19 of 43 tasks were not contiguous in these histories and were read run by run | The floor paths could only bound, and the rules §3 was missing: what "existed" means in a stack, files a command writes, generated files, a deleted file, a missing base record |
 | How much of a medium task does a person read? | The reading list of each of the 43 tasks under the rules of §3, against every changed line of the task (lockfiles, generated files and binary uploads left out), first as the files behind the facts above low, then as what those facts point at | Medium, 22 tasks, 11,196 changed lines with migration snapshots left out. By target: 642 changed lines in existing files (median 20 a task, at most 90), 13 undeclared columns and statements, 19 added files (960 lines), 9 deletions. By file the same facts cover 3,618 lines, half of them snapshots. High, 8 tasks, 5,236 lines. Low, 13 tasks, 2,405 lines, none to read | That the lane counts tasks and the person reads targets (§5, §12): 6% of a medium task's diff, 14% with every added file opened |
 | Would a smaller unit be a readable one? | Each task cut along its step commits into slices (commands; scaffold; tests, data and http; pages) and into single steps, a unit stopping when it touches a file behind one of its task's facts above low | Tasks: 43, median 338 lines, 30 stop, holding 17,538 of 20,161 lines. Slices: 89, median 194, 48 stop, 13,903 lines. Steps: 170, median 121, 70 stop, 11,094 lines | Why the task stays the unit that merges and the reading list is the unit a person reads (§5). The lanes of slices and steps are read from files, not from facts recomputed per unit |
@@ -2047,8 +2086,9 @@ How long the gate takes on a real application was not measured.
 
 - **Deliverable 1, in use.** The shadow comparison: the floor against the
   person's `lane:` label, and what became of the low ones.
-- **Deliverable 5.** The same task and defect counts on real merge units with
-  the security records in place (the declaration matcher has run, above); the share of red
+- **Deliverable 5.** The same task and defect counts on real merge units
+  (the declaration matcher and the security records have run on the measured
+  histories, above); the share of red
   runs that are `reproduced` under the rule of §4; cold preparation time.
 - **Deliverable 6, on a repository.** The lane job end to end, including
   whether GitHub's auto-merge applies to a stacked pull request, and the
