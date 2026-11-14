@@ -865,12 +865,21 @@ Three rules keep this from weakening what is already decided.
   base, since a fixture authorizes and validates nothing. The record is
   judged as an added route's (§3), not compared with the fixture's.
 - **The release holds while a route is on its fixture.** The application
-  refuses to boot in production with a `prototype` route, and `guren doctor`
-  reports it; the release record (§9) reads that check and the line page
-  lists the routes left, which is the plan's progress in a form a person can
-  read. Leaving such routes unmounted in production would keep the default
-  branch releasable throughout, and reverses RFC 0021's refusal; it is not
-  proposed here.
+  refuses to boot in production with a `prototype` route (RFC 0021 §4: a
+  fixture's state is shared by every request of the process). Nothing ahead
+  of that boot stops such a release today: `guren gate` does not run
+  `guren doctor`, whose `prototype-routes` check is the one that fails, and
+  no deploy build reads the handler, so an application that deploys on merge
+  would find out at its first start, which on Lambda or Workers is after the
+  new version is live. So the deploy workflow of §9 runs that check before it
+  deploys, the release record carries the result, and the line page lists
+  the routes left, which is the plan's progress in a form a person can read.
+  What the hold costs depends on the application. Before its first release,
+  nothing. After it, every release waits from the plan's merge to its last
+  promotion, a fix that has nothing to do with the plan among them. Leaving
+  such routes unmounted in production would remove that wait and still serve
+  no fixture, at the price of a 404 where the refusal is loud; it changes
+  RFC 0021's behaviour and is not decided here.
 
 What this buys the lanes, by paths on the same 43 tasks with each task's
 pages step taken out: 13 could be low today, 25 with the application entry
