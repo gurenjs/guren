@@ -896,14 +896,15 @@ what the walk cannot show.
 
 - **A fixture never stands in for a behaviour.** The screens task mounts
   every route ahead of the tests that request it, so a test that asserts only
-  a page would pass on fixture data before any action exists. One contract
-  covers every run of the tests: under a `TestApp` a `prototype` route
-  answers 501, with its middleware and its contract still applied and its
-  fixture never imported, unless the test asks for fixtures. `plan:verify`,
-  the replay of red runs in §4 and the gate all run the application's tests,
-  which request routes through a `TestApp`, so the three see the same route.
-  Today a route dispatched without its fixture throws, which §4 would read as
-  a load failure and not as a red run. `planMayPassNow` and the test
+  a page would pass on fixture data before any action exists. So a plan's
+  tests run with the fixtures off, and the switch is in the test file: the
+  skeleton `plan:scaffold` writes boots its `TestApp` with an option under
+  which a `prototype` route answers 501, with its middleware and its contract
+  still applied and its fixture never imported. `plan:verify`, the replay of
+  red runs in §4 and the gate all run that file, so the three see the same
+  route, and no existing test changes: a `TestApp` booted without the option
+  renders fixtures as it does today. Today a route dispatched without its
+  fixture throws, which §4 would read as a load failure and not as a red run. `planMayPassNow` and the test
   skeletons treat a route on its fixture as one that does not answer yet.
 - **Promotion keeps the route's guards.** A route on its fixture already runs
   its middleware and validates its contract: the router builds the same chain
@@ -1553,7 +1554,7 @@ needs first.
 | 5. Structural evidence and delegation | Per-route security records and base records; a fresh-clone `plan:verify` with red runs from the change's commits; the browser aggregate and behaviour specs; the declaration matcher; the forecast; the plan sections `env`, `providers` and `config`, and the navigation module with its layout and the `navigation` section (§5) | 1, and for approval standing 3 | Evidence complete enough for a low lane, measured on real histories: the share `unjudged`, the share `unobserved`, declarations matched |
 | 6. Enforcement | The lane job and the GitHub settings of §8 | 5, and the shadow bar met | Low changes merging without a person |
 | 7. Release and sweeps | The release record, `browser:doctor --landmarks-only`, the sweep template, the monthly numbers | 1 | The line closed from production back to intake |
-| 8. Screens first | `screens: 'first'` in the plan and its task derivation, the screens task under the `proposed` standing, the two owners in the task derivation, fixtures off under `TestApp`, the prototype artifact and the Dev Center's walk, the deploy workflow's `prototype-routes` check, and `inProduction: 'skip'` (§5) | 3, and RFC 0021 as shipped | A plan approved on its prototype through the loop, with the page defects found at the walk counted against those found after |
+| 8. Screens first | `screens: 'first'` in the plan and its task derivation, the screens task under the `proposed` standing, the two owners in the task derivation, the `TestApp` option that turns fixtures off, the prototype artifact and the Dev Center's walk, the deploy workflow's `prototype-routes` check, and `inProduction: 'skip'` (§5) | 3, and RFC 0021 as shipped | A plan approved on its prototype through the loop, with the page defects found at the walk counted against those found after |
 
 Until deliverable 5, a plan's evidence is reported as unavailable and a change
 under a plan is held, so nothing is called low on evidence that was not
