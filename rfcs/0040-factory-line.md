@@ -77,6 +77,7 @@ supply a much stronger floor than a path list.
 | Advisory keys | `audit --deps-baseline` (RFC 0039 §5) | The `dependency-advisory` fact |
 | Plan targets, approval standing, open plans | `plan/app-targets.ts`, `plan-approve.ts` (`readPlanApprovalStanding`), `plan/open-plan.ts` | The identities a declaration matcher starts from (§3) |
 | Plan verification | `plan/verify.ts` (`PlanVerifier`, which accepts the records a run starts from), `plan/state.ts`, `plan/verification.ts` (`behaviourShape`, `carriedRedRuns`) | The plan half of the evidence; where reproduced red runs enter (§4) |
+| Prototype mode | RFC 0021: the fixture module, `build:prototype`, the `prototype` route handler and its production refusal, `check --prototype`, the `prototype-routes` doctor check, the backlog in `guren context` | The screens a person walks before approving a plan, and the release hold while a route is on its fixture (§5) |
 | Acceptance ids in tests, requests per test case | `docs-acceptance.ts`, `test-requests.ts` | Acceptance tests removed or emptied |
 | Browser run and spec report | `browser-record.ts` (`browserRunSchema`), the run's `spec-report.json` | The browser half of the evidence. A run has steps and no result of its own, and `browser:record` does not read the spec report, so §4 defines the aggregate |
 | Gate report | `gate.ts` (`GateReport`) | The gate half of the evidence |
@@ -121,7 +122,7 @@ decision.
 | Stage | Record | Decided by | Added by this RFC |
 | --- | --- | --- | --- |
 | Intake | The issue (RFC 0018) | A person, or a sweep (§10) | Templates; what needs a plan (§6) |
-| Plan | `plan.json`, `approvals.json` | A person | The delegation forecast (§5) |
+| Plan | `plan.json`, `approvals.json`, and the prototype where the plan orders screens first | A person | The delegation forecast; the walk (§5) |
 | Implement | One commit per step | The agent | A procedure for a fix (§6) |
 | Verify | The evidence, recomputed in CI | The CLI | `change:evidence` (§4) |
 | Review | Findings on the pull request | A reviewer model, advisory | Review inputs (§7) |
@@ -806,6 +807,76 @@ revises the plan while its session is open and a person does not meet the
 edit first in a pull request. And an edit a changed element owns stays medium
 (§3).
 
+**Screens first.** RFC 0030 left pages out of the plan's scaffold and gave
+layout to prototype mode (its Open Question 4), and RFC 0021 ships that mode:
+a fixture module that answers each route by name, a static build with no
+server, and a `prototype` route handler that `plan:status` already reads as a
+route present and not yet wired to its action. The line uses none of it, and
+the measured histories show what that costs. Pages are the last step of each
+task, and nobody looks at them until an evaluation: 27 of the 80 defects a
+task introduced came from a pages step, among them every accessibility defect
+(11) and 13 of the 20 in user experience. No fact of §3 reads one of them.
+They are a person's to see, and the cheapest moment is before the backend
+exists.
+
+So a plan may order its screens first, with `screens: 'first'`. The task
+derivation then changes in two places.
+
+- **One screens task, ahead of every other.** Its one step writes each view's
+  page, the fixture entry for each route a view names, and those routes
+  registered with the `prototype` handler, with the validators their forms
+  need. `plan:scaffold` writes the fixture entries, the route registrations
+  and the page data types; the page components stay the agent's, as RFC 0030
+  decided. It verifies with `codegen`, the typecheck, `check --prototype`
+  and `build:prototype`, none of which needs a database or an environment,
+  so a cloud session with no services can build it.
+- **The other tasks lose their pages step and gain a promotion.** The `http`
+  step replaces the `prototype` handler with the planned action, and the
+  resource is typed against the data type the page was built on (RFC 0021
+  §6), so the typecheck is what holds the backend to the screens a person
+  walked.
+
+**The walk is part of approving the plan.** A plan with screens first is
+proposed as before (`plan:approve --propose`), and under the `proposed`
+standing `plan:next` hands out the screens task and nothing else: the only
+work that can be built before approval is work that cannot run in production.
+The pull request then carries the plan, the proposal and the screens. Its
+evidence names the static build as an artifact (`guren-prototype-<sha>`), and
+the Dev Center's "Plan to review" row opens it, built locally from the
+change's head. A comment made on the walk is saved against the view whose
+page was open, in the review the Dev Center already keeps. The agent reads it
+and revises the plan with `plan:revise`; a draft revises freely, so the plan
+changes before anyone has approved it. Merging the pull request approves the
+plan and the screens together. The person stops once, and what they approve
+is something they clicked.
+
+Three rules keep this from weakening what is already decided.
+
+- **A fixture never stands in for a behaviour.** The screens task mounts
+  every route ahead of the tests that request it, so a test that asserts only
+  a page would pass on fixture data before any action exists. `plan:verify`
+  runs a plan's tests with the fixtures off: a `prototype` route answers 501
+  there, as a scaffolded action stub does, and the red run of §4 is observed
+  against the route.
+- **A promoted route is a new route.** Its per-route security record has no
+  base, since a fixture authorizes and validates nothing. The record is
+  judged as an added route's (§3), not compared with the fixture's.
+- **The release holds while a route is on its fixture.** The application
+  refuses to boot in production with a `prototype` route, and `guren doctor`
+  reports it; the release record (§9) reads that check and the line page
+  lists the routes left, which is the plan's progress in a form a person can
+  read. Leaving such routes unmounted in production would keep the default
+  branch releasable throughout, and reverses RFC 0021's refusal; it is not
+  proposed here.
+
+What this buys the lanes, by paths on the same 43 tasks with each task's
+pages step taken out: 13 could be low today, 25 with the application entry
+and 30 with environment keys, where the same tasks with their pages gave 11,
+18 and 23. The screens task is one more unit per plan and always a person's.
+None of this has run through the plan loop: no measured history has a
+screens task, and the one application built prototype-first was built
+outside the loop.
+
 **Approval on the pull request.** At a terminal nothing changes: a person runs
 `plan:approve`, there or from the Dev Center (§12). For a plan that arrives as
 a pull request, merging it is the approval, by this protocol:
@@ -816,7 +887,8 @@ a pull request, merging it is the approval, by this protocol:
    bind. It never writes `approvals.json`, so a CLI that predates the
    proposal reads the plan as unapproved and not as approved. The standing is
    `proposed`, which every gated command refuses as it refuses `unapproved`:
-   nothing is implemented on that branch, and the plan lands first.
+   nothing is implemented on that branch but a screens task (above), and the
+   plan lands first.
 2. A person approves the pull request, from the Dev Center, bound to its head
    SHA. The change is `plan-record`, so it is high.
 3. After the merge, `plan:approve --from-merge` asks the store, not git: the
@@ -1190,7 +1262,7 @@ nothing else. It extends the attention model the plan page already has.
 
 | Item | Appears when | The decision |
 | --- | --- | --- |
-| Plan to review | A draft or an edited plan, in the working tree or in an open pull request | Approve it, or send the review back |
+| Plan to review | A draft or an edited plan, in the working tree or in an open pull request | Approve it, or send the review back. Where it has screens, walk the prototype first |
 | Stalled step | The Stop hook gave up on a step | Waive, revise the plan, or fix the environment |
 | Held change | A pull request whose floor is medium or high, or that carries a hold | Approve or request changes |
 | Plan ready to close | Every step verified and the last change merged | Close |
@@ -1376,6 +1448,7 @@ needs first.
 | 5. Structural evidence and delegation | Per-route security records and base records; a fresh-clone `plan:verify` with red runs from the change's commits; the browser aggregate and behaviour specs; the declaration matcher; the forecast; the plan sections `env`, `providers` and `config`, and the navigation module with its layout and the `navigation` section (§5) | 1, and for approval standing 3 | Evidence complete enough for a low lane, measured on real histories: the share `unjudged`, the share `unobserved`, declarations matched |
 | 6. Enforcement | The lane job and the GitHub settings of §8 | 5, and the shadow bar met | Low changes merging without a person |
 | 7. Release and sweeps | The release record, `browser:doctor --landmarks-only`, the sweep template, the monthly numbers | 1 | The line closed from production back to intake |
+| 8. Screens first | `screens: 'first'` in the plan and its task derivation, the screens task under the `proposed` standing, fixtures off in `plan:verify`'s test runs, the prototype artifact and the Dev Center's walk (§5) | 3, and RFC 0021 as shipped | A plan approved on its prototype through the loop, with the page defects found at the walk counted against those found after |
 
 Until deliverable 5, a plan's evidence is reported as unavailable and a change
 under a plan is held, so nothing is called low on evidence that was not
@@ -1578,6 +1651,8 @@ which for a later task is not that task's own merge base.
 | Does code owner review block with zero required approvals? | A public repository, a ruleset, three pull requests | Yes for an author who does not own the path, and it clears on the owner's approval. A pull request the owner opens is not blocked | §8 |
 | Can edits inside a file be matched to the plan? | A parse of each edited file's spans against the plan's declarations, over the 10 histories | 6 of 26 files, 48 of 134 lines | Not scheduled (§3) |
 | Do the list edits hold nothing but entries? | A prototype that parses both sides of every step commit's edit to the application entry, `config/env.ts`, the routes entry, the schema and the layout, checked against mutated copies of each | Application entry 25 of 25, environment keys 5 of 5, routes entry 27 of 27 (each one registrar call), schema 22 of 33 (the rest change an existing table), layout 1 of 9. Tasks that could be low: 18, 23, 24 of 43 where paths gave 18, 23, 28 | `env`, `providers` and `config` buy what paths promised. The navigation module alone buys one task (§5) |
+| Which step brings the defects a person has to see? | The 80 task defects by the kind of step whose commit introduced them | Pages 27 (13 user experience, 11 accessibility, 2 performance, 1 correctness), http 36, scaffold 14, tests 2, data 1. Every accessibility defect came from a pages step | Why the screens come before approval (§5) |
+| What do the tasks look like without their pages? | The same paths with each task's pages step left out (23 steps) | 13 could be low today, 25 with the application entry, 30 with environment keys, of 43 | The bound screens first would give the tasks that remain. The screens task is a person's |
 | Does the navigation design cover what the plans did to the layout? | The nine layout edits read against §5: entries added, changed or removed, the account controls and their labels, the brand, `<Layout wide>` | 7 of 9 are declared entries alone; the other 2 also change the page's vertical padding. Of the five tasks that only the layout kept out of low, 4 fit: 27 of 43 | The layout, the width and the declared removal are part of the module, not additions to it |
 | Can the navigation checks be read, and are they right? | A prototype over the 31 links the plans wrote, their routes, actions and policies, by syntax | Every link, route, action and policy method read. Sign-in mismatch: 4 warnings, 4 right. Role checks that restate an ability the action authorizes: 4 of 6, all nameable. Policy methods: 8 user only, 29 a required second parameter, 8 an optional one. 74 of 85 candidate routes make no `authorize()` call | The three readings of §5, and that the comparison has to start from the action, since no layout names an ability |
 | Do merge bases have a completed push run? | This repository's last 60 merged pull requests | 60 of 60, at most four days before the merge | That the runs exist. Not that their records would be comparable, and not stacked pull requests, of which there were none |
@@ -1632,6 +1707,10 @@ How long the gate takes on a real application was not measured.
   reviewer's check as it arrives on a real pull request: its conclusion and
   the severity line are taken from the vendors' documentation, and this
   repository has no reviewer installed to read them from.
+- **Screens first.** Nothing of it has run through the plan loop: whether a
+  session builds the screens task from a proposed plan, what the walk finds
+  that the evaluations found after, and whether the promoted tasks keep the
+  pages untouched as the paths assume.
 - **Lessons.** Whether a lesson delivered through `guren context` changes
   what the next session writes: the same task run with and without it.
 
