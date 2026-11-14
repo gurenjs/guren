@@ -362,6 +362,8 @@ export default defineReviewPolicy({
   },
   facts: { 'agent-tool': 'high' },      // raise a fact's lane
   review: { reviewer: 'claude-code-review' }, // or 'bugbot'; low needs it to report no finding (§8)
+  identities: 'auto',                   // or 'several' | 'one-owner': who can approve whom (§8)
+  merge: { low: 'lane-job' },           // or 'person': the lane then only informs (§8)
 })
 ```
 
@@ -807,8 +809,22 @@ your real credentials substituted". So there are two modes, and `factory:status
   low change itself and leaves every other one for the owner to merge, and
   that merge is the decision. Nothing separates the owner from the owner's
   agents in this mode, and none is claimed: an agent holding the owner's
-  credentials can merge today (**decided 2026-11-14** by the maintainer, over
-  setting up a bot identity for agents).
+  credentials can merge today (**decided 2026-11-14** by the maintainer as
+  the default, with the settings below).
+
+Both modes are settings in `guren.review.ts`, and neither is fixed for a
+repository:
+
+| Setting | Values | Effect |
+| --- | --- | --- |
+| `identities` | `auto` (default), `several`, `one-owner` | `auto` decides per pull request: one whose author owns a path it touches, or is the only person who could approve it, is handled as one-owner, and any other as several identities. A repository with both kinds of author gets both |
+| `merge.low` | `lane-job` (default), `person` | Who merges a low change. `person` leaves every merge to a person, and the lane is information only |
+| `approvals` | A count per lane | Used where someone other than the author can approve |
+
+So a team can start with `merge.low: 'person'` and the report alone, turn on
+merging for low changes later, and add a bot identity for its agents at any
+point: that identity's pull requests are simply not the owner's, and `auto`
+handles them as several identities with nothing else changed.
 
 A workflow cannot supply the second identity cheaply: a pull request opened
 with `GITHUB_TOKEN` creates workflow runs "that require approval" by a person
