@@ -270,7 +270,7 @@ describe('a behaviour the spec cannot write is skipped, naming why', () => {
     const validation = behaviour('AC-posts-store-3', 'store', { kind: 'validation', expect: { errors: ['title'] } })
     const stopped = [{ title: '' }, { title: null }, { body: 'x' }, { title: 'Hi', rating: 0 }, { title: 'Hi', rating: 1.5 }, { title: 'Hi', rating: '3' }, { title: 'Hi', email: 'nope' }, { title: 'a title past twelve' }]
     for (const values of stopped) {
-      expect(skipped({ ...validation, input: input(values) }, { views })).toContain("its input is one the form's own control may stop or change")
+      expect(skipped({ ...validation, input: input(values) }, { views })).toContain('its input is one a control of the form may stop or change')
     }
     const written = contentsOf([{ ...validation, input: input({ title: '   ', rating: 3, email: 'a@b.test' }) }], { views })
     expect(written).toContain("toHaveAttribute('aria-invalid', 'true')")

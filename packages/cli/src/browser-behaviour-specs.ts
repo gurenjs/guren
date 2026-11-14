@@ -55,7 +55,7 @@ const REASONS = {
   signIn: 'needs a signed-in user, and the app has no password sign-in for the setup test',
   outcome: 'no outcome a browser can check after the step: every expectation is a status or a database row, an errors key has no labelled field, or what it lands on already showed before the step',
   input: 'an input is not a string, a number or a boolean, and nothing says how a control takes it',
-  control: "its input is one the form's own control may stop or change before a request is sent (an empty, missing, out-of-range or malformed value), so no error would be rendered; TestApp pins it",
+  control: 'its input is one a control of the form may stop or change before a request is sent (an empty, missing, out-of-range or malformed value), so no error would be rendered; TestApp pins it',
 } as const
 
 interface PathParam {
