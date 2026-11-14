@@ -621,7 +621,7 @@ views: [{ /* … */ nav: { label: 'Jobs', auth: 'any' } }]
 | --- | --- | --- | --- |
 | `env` | The keys of the object given to `defineEnv()` in `config/env.ts`, in both versions of the file | `env-added`, low when declared. A key removed or changed is medium | Nothing. `env:example` already derives `.env.example` |
 | `providers`, `config` | The `providers` and `config` arrays of the `createApp()` literal, which `composeAppProviderRegistration()` already locates. A policy's provider is implied by its `policies` element, as `plan:scaffold` writes it | `provider-added` and `config-added`, low when declared or implied | Nothing for these two arrays. `app.use()` and the other options are not lists and stay medium |
-| `views[].nav` | The entries of a navigation module the layout renders from | `nav-added`, low when declared | The module. The scaffold's layout writes its links by hand with role checks inline, so it first needs `resources/js/navigation.ts` (a label, a route name and who sees it per entry), a template change that belongs with RFC 0036 |
+| `views[].nav` | The entries of a navigation module the layout renders from | `nav-added`, low when declared | The navigation module, below |
 
 One rule keeps all of them honest, the one the schema follows: an edit is the
 structural fact only when the file differs from its base by exactly those
@@ -632,7 +632,65 @@ Each section costs what any plan element costs: a check in `plan:render`, a
 state in `plan:status`, a line in the producer prompt, and an entry for
 `plan:scaffold` to write. The plan format's version moves, since an older CLI
 refuses a section it does not know. `env` and the two `createApp()` arrays
-need nothing else and go into deliverable 5; navigation waits for its module.
+need nothing else. All three go into deliverable 5, navigation with its
+module.
+
+**Navigation as a module.** Ten of the 11 measured plans edited the layout,
+each time in a `pages` step. They added 32 links, 31 of them by a literal
+path; six renamed the brand from "Guren"; three wrapped links in a check of
+the user's role and two in a signed-in check; and 41 of the added lines were
+no link at all (class names for a narrow screen, markup, the user's type in
+`usePage`). So a module has to remove four reasons to open the layout, not
+one.
+
+```typescript
+// resources/js/navigation.ts
+import { defineNavigation } from '@guren/inertia-client/navigation'
+import { routeManifest } from '@/.guren/routes.gen'
+
+export default defineNavigation(routeManifest, [
+  { label: 'Jobs', route: 'jobs.index' },
+  { label: 'My jobs', route: 'employer.jobs.index', show: { auth: 'required', where: { role: 'employer' } } },
+  { label: 'Dashboard', route: 'dashboard', show: { auth: 'required' } },
+])
+```
+
+- **An entry is data.** A literal label, a route name, and an optional `show`:
+  `auth` is `any`, `required` or `guest`, and `where` compares fields of the
+  shared `auth.user` by equality. There is no function, so the CLI reads the
+  file by its syntax and the layout decides who sees a link with no code of
+  its own. A spread, a computed value or a function makes the file
+  unreadable, and an edit to it `source-edited`.
+- **A route is named, not spelled.** The name is checked against the route
+  manifest at compile time, as `createTypedLink()` does, and by `guren check`:
+  the route exists, is a `GET` with no path parameter (`isParameterless()`,
+  the rule the browser map picks a landmark by) and renders a page.
+- **Showing is not authorizing.** Hiding a link protects nothing, and `guren
+  check` only warns when an entry guests see leads to a route that requires
+  sign-in. A `can: '<ability>'` condition waits until abilities are shared
+  with the client; today the framework shares `auth` and `_i18n`.
+- **The layout renders the module.** The layout the auth scaffold ships maps
+  the entries to links, marks the current one, wraps on a narrow screen and
+  keeps the sign-in and sign-out controls. The brand reads the application's
+  name from a shared prop (`app.name`, from `APP_NAME`, shared beside `auth`),
+  so naming the application is not a layout edit either.
+- **One writer.** `appendNavigationEntry()`, beside `appendTableToSchema()`.
+  `guren nav:add "<label>" --route <name> [--auth required] [--where
+  role=employer]` calls it, and is a generator, so a plan's `commands` may run
+  it; `make:feature` calls it for its index page; `plan:next` names the
+  command for a pages step whose views carry `nav`.
+- **Existing applications.** `guren add navigation` writes the module and
+  replaces the layout only when the layout is still byte for byte one the
+  framework shipped, the test `guren add ui` applies to its components.
+  Otherwise it writes the module, prints the lines the layout needs, and
+  leaves the layout alone; its edits stay medium.
+
+In a plan, `nav` is allowed on a view whose page a parameterless `GET` route
+renders, which `plan:render` checks. The fact is `nav-added`, read from the
+entries on both sides and low when a view declares the same label, route and
+`show`; an entry removed or changed is medium. Left out of this first shape:
+grouped or nested entries, labels as translation keys (a label is written in
+the default locale, as a plan's view labels are), and ability conditions.
 
 Two rows are not the format's to fix. The nine files with no element are
 plans that were incomplete: `plan:verify` already records the files a step
@@ -1208,7 +1266,7 @@ needs first.
 | 2. The Dev Center, read side | `guren dev-center` and the session-start hook that starts it; the inbox, the change page with its reading list, the line page and `factory:status`, reading local files and `gh` | 1 | One page that lists what waits on a person, cloud work included |
 | 3. Decisions and plan approval | The listener and the action set of §12; `plan:approve --propose` and `--from-merge`; the amendment to RFC 0030 §8 | 2 | A person who decides without a terminal, and a plan approved by merging it |
 | 4. Lessons | The `lesson` type, `make:lesson`, delivery through `context` and the harness, the `fix` skill, the canonical review contract, the tests step handed to `test-writer` | Nothing | The loop from a finding to a rule or a check |
-| 5. Structural evidence and delegation | Per-route security records and base records; a fresh-clone `plan:verify` with red runs from the change's commits; the browser aggregate and behaviour specs; the declaration matcher; the forecast; the plan sections `env`, `providers` and `config` (§5) | 1, and for approval standing 3 | Evidence complete enough for a low lane, measured on real histories: the share `unjudged`, the share `unobserved`, declarations matched |
+| 5. Structural evidence and delegation | Per-route security records and base records; a fresh-clone `plan:verify` with red runs from the change's commits; the browser aggregate and behaviour specs; the declaration matcher; the forecast; the plan sections `env`, `providers` and `config`, and the navigation module with `views[].nav` (§5) | 1, and for approval standing 3 | Evidence complete enough for a low lane, measured on real histories: the share `unjudged`, the share `unobserved`, declarations matched |
 | 6. Enforcement | The lane job and the GitHub settings of §8 | 5, and the shadow bar met | Low changes merging without a person |
 | 7. Release and sweeps | The release record, `browser:doctor --landmarks-only`, the sweep template, the monthly numbers | 1 | The line closed from production back to intake |
 
@@ -1220,8 +1278,8 @@ merges.
 Follow-up RFCs, named so they are not mistaken for done: cloud environments
 other than Claude's (an amendment to RFC 0008), feature flags, a
 production error reporter that files issues, the headless plan producer
-(RFC 0030 D1), reviewer eval cases, a navigation module with a plan field
-for it (§5), and `app.use()` in the introspection manifest.
+(RFC 0030 D1), reviewer eval cases, `app.use()` in the introspection
+manifest, and abilities shared with the client for navigation (§5).
 
 ## Alternatives Considered
 
@@ -1398,6 +1456,7 @@ which for a later task is not that task's own merge base.
 | Tasks editing only the schema and the routes entry beyond that | 7 more (13 of 48) | The same bound once both are judged by what they declare (§3) |
 | Tasks editing the application entry, existing client code, existing server code | 8, 6 and 21 | Where one person reads. The layout's navigation is edited in every application |
 | Tasks that could be low once the application entry, environment keys and navigation are judged structurally | 21, 26 and 32 of 48, cumulatively; 39 with edits a changed element owns | The upper bound the plan sections of §5 would buy. Paths alone, as above |
+| What the plans did to the layout | 10 of 11 edited it, always in a pages step: 32 links (31 by a literal path), the brand renamed in 6, a role check in 3, a signed-in check in 2, and 41 added lines that are no link | What the navigation module has to make unnecessary (§5) |
 | Step commits editing nothing existing; only the schema and routes entry | 95 and 43 of 195 | The per-step figures. A step is not a mergeable unit, since a tests step fails the gate |
 
 **Run.**
