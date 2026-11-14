@@ -329,10 +329,10 @@ those stays medium.
 target a span in its file (a controller action, a policy ability, a validator
 export, a model member) and let an edit flow when every changed line lies in
 the span of a target a matching `alter` declares. A prototype ran on the
-measured histories. Of the 27 existing server files a plan edited, 6 were
-fully accounted for (7 when imports are ignored), and 53 of 166 changed lines
+measured histories. Of the 26 existing server files a plan edited, 6 were
+fully accounted for (7 when imports are ignored), and 48 of 134 changed lines
 fell in a declared span or imported a file the plan added. What the plans left undeclared was not noise: the
-starter's dashboard action rewritten (66 lines), environment keys, a model's
+starter's dashboard action rewritten (39 lines), environment keys, a model's
 types. Those are edits a person should see, or that the plan should have
 declared. So an edit to existing source stays medium, and the evidence names
 the span each such edit fell in (`outside the plan:
@@ -543,12 +543,12 @@ not predict, and those keep their own lane.
 
 **The unit that flows is the task.** A plan's implementation arrives as one
 pull request per task (§4), stacked where one depends on another. Read from
-paths alone on the 11 plan implementations measured: taken whole, none could
-be low; of their 48 tasks, 6 edit nothing that existed before the plan and 7
-more edit only the schema and the routes entry, so 13 of 48 is the most the
-low lane could take once the routes entry is judged structurally. The other 35
-edit the application entry (8), existing client code (6) or existing server
-code (21). These are upper bounds: declarations, security records, evidence
+paths alone on the 10 plan implementations measured: taken whole, none could
+be low; of their 43 tasks, 5 edit nothing that existed before the plan and 6
+more edit only the schema and the routes entry, so 11 of 43 is the most the
+low lane could take once the routes entry is judged structurally. The other 32
+edit the application entry (7), existing client code (5) or existing server
+code (20). These are upper bounds: declarations, security records, evidence
 and review can only lower them. So on a new application most tasks are read by
 one person, and what the line gives that person first is the evidence and a
 reading list, not an empty queue.
@@ -579,36 +579,47 @@ are satisfied.
 
 **What a plan cannot declare yet.** The low lane is small because a plan has
 no way to state the commonest edits to existing files. Every existing source
-file the 48 measured tasks edited, by what the plan said about it (78 files,
+file the 43 measured tasks edited, by what the plan said about it (72 files,
 counted once per application):
 
 | What the plan said about the file | Files |
 | --- | --- |
-| It is the schema or the routes entry, read structurally already | 22 |
-| A changed element owns it: an `alter` on a controller, a model, a validator or a page | 14 |
-| The application entry: `providers` and `config` in `createApp()` | 11 |
-| The layout: navigation links | 10 |
+| It is the schema or the routes entry, read structurally already | 20 |
+| A changed element owns it: an `alter` on a controller, a model, a validator or a page | 13 |
+| The application entry: `providers` and `config` in `createApp()` | 10 |
+| The layout: navigation links | 9 |
 | `config/env.ts`: environment keys | 5 |
 | A page, a validator or a controller with no element in the plan | 9 |
-| An element the plan called `existing` | 3 |
+| An element the plan called `existing` | 2 |
 | Middleware, or a routes file beside the entry | 4 |
 
 Three of these rows are a list with an entry added: a provider or a config
 module in `createApp()`, a key in `defineEnv()`, a link in the navigation. A
 plan that could declare them, and a reader that could tell an added entry from
 any other edit, would make them declarable facts, as the schema is. On the
-same 48 tasks, by paths alone:
+same 43 tasks, first by paths alone, then with the rule below applied to both
+sides of every edit by a prototype reader:
 
-| Judged structurally | Tasks that could be low |
-| --- | --- |
-| The schema and the routes entry (today) | 13 |
-| and the application entry | 21 |
-| and environment keys | 26 |
-| and navigation | 32 |
-| and edits a changed element owns, if they could be accounted for (§3) | 39 |
+| Judged structurally | By paths | Nothing but the entries |
+| --- | --- | --- |
+| The schema and the routes entry (today) | 11 | 11 |
+| and the application entry | 18 | 18 |
+| and environment keys | 23 | 23 |
+| and navigation | 28 | 24 |
+| and edits a changed element owns, if they could be accounted for (§3) | 35 | 28 |
 
-So three sections move the upper bound from about a quarter of the tasks to
-two thirds. Proposed, as an amendment to RFC 0030's plan format:
+The application entry and the environment keys keep the whole of their bound:
+all 25 edits to `src/app.ts` and all 5 to `config/env.ts` added entries and
+the imports they need, and nothing else. So did all 27 edits to the routes
+entry, each one registrar call. Navigation keeps one task of five, for the
+reasons under the module below. The schema is read by what the plan declares:
+22 of its 33 edits add tables only, and the other 11 change a table that
+exists (six add columns, most to `users`), which is low only where the plan
+declares that column (§3).
+
+So two sections move the bound from a quarter of the tasks to a half, and
+navigation adds little until the layout stops holding more than links.
+Proposed, as an amendment to RFC 0030's plan format:
 
 ```typescript
 env: [{ id: 'env.queueConnection', change: { kind: 'add' }, key: 'QUEUE_CONNECTION', type: 'string', default: 'sync', required: false }]
@@ -635,23 +646,35 @@ refuses a section it does not know. `env` and the two `createApp()` arrays
 need nothing else. All three go into deliverable 5, navigation with its
 module.
 
-**Navigation as a module.** Ten of the 11 measured plans edited the layout,
-each time in a `pages` step. They added 32 links, 31 of them by a literal
-path; six renamed the brand from "Guren"; four wrapped links in a check of
-the user's role or of being signed in; and 41 of the added lines were no link
-at all (class names for a narrow screen, markup, the user's type in
-`usePage`). So a module has to remove four reasons to open the layout, not
-one.
+**Navigation as a module.** Nine of the 10 measured plans edited the layout,
+each time in a `pages` step. They added 26 links, 25 of them by a literal
+path, and removed 14 the starter shipped; six renamed the brand from "Guren".
+Of the 26, 7 are shown to everyone, 12 to a signed-in user, 1 to a guest and
+6 behind a check of the user's role or an admin flag.
 
-Who may see a link is the harder half. None of the 11 applications
-authorizes at the route: `authorizeMiddleware` is used in none, against 86
-calls of `this.authorize()` and `this.can()` in controllers. So a link's
-visibility cannot be derived from its route's middleware, and the role checks
-in the layouts restate by hand what a policy already says (`JobPolicy.create`:
-employers only). Four applications also pass a page a boolean such as
-`canApply` that a controller computed from the gate. The gate is on the
-server, so the navigation is defined there and the client receives only what
-the current user may see.
+Only one of the nine edits was links, their conditions and the brand alone.
+Seven also changed the width of the page, three added a `wide` prop for it,
+three typed the user for a role check and two named a class constant for the
+links; and seven removed or relabelled a link the starter shipped (Home,
+Dashboard). The module removes the user's type and the class constant. It
+does not remove the width, which belongs to a page and not to the layout, and
+a removed entry is medium as specified below. So the module moves one task of
+the five the paths promised, and two things outside it decide the rest: a
+layout whose width a page sets without editing it, and a plan that can
+declare an entry removed. Neither is designed here.
+
+Who may see a link is the harder half. `authorizeMiddleware` is used in none
+of the 10 applications, against 73 calls of `this.authorize()` and
+`this.can()` in controllers; one application guards two route groups with a
+role middleware of its own. So a link's visibility can seldom be derived from
+its route's middleware, and the role checks in the layouts restate by hand
+what the server already says: of the six, four restate an ability the route's
+action authorizes with the bare class (`JobPolicy.create`: employers only),
+one a role middleware on the route, and one has nothing on the server behind
+it. Four applications also pass a page a boolean such as `canApply` that a
+controller computed from the gate. The gate is on the server, so the
+navigation is defined there and the client receives only what the current
+user may see.
 
 ```typescript
 // config/navigation.ts
@@ -676,8 +699,13 @@ export default defineNavigation([
   `gate.forUser(user).allows('create', Job)`, the call `this.authorize()`
   makes with the bare class. It is the policy's own rule, written once. A
   navigation entry has no record, so only an ability that needs none can be
-  named: `guren check` warns when the policy's method takes one. A check that
-  denies or throws hides the entry.
+  named. `guren check` reads the method's parameters: it warns on a required
+  second parameter, since the gate would call the method without it, and
+  reports an optional one as unverifiable. Of the 45 policy methods in the
+  measured applications, all read by syntax, 8 take the user alone, 29
+  require a second parameter and 8 make it optional; of those 8, 2 mean
+  something without a record and 6 return a constant. A check that denies or
+  throws hides the entry.
 - **The server filters, the client renders.** The module is a config
   definition, bound through `createApp({ config })` like the others, so
   adding it is the `config-added` fact above. It shares `navigation` as
@@ -700,15 +728,29 @@ export default defineNavigation([
   path parameter (`isParameterless()`, the rule the browser map picks a
   landmark by) and renders a page.
 - **Showing is not authorizing.** Hiding a link protects nothing. `guren
-  check` compares an entry with what its route does, advisory only: an entry
-  everyone sees whose route requires sign-in, and an entry whose `can`
-  differs from the `this.authorize()` the route's action is read to make (the
-  action-body scan, reported unverifiable where the body cannot be read).
+  check` compares an entry with what its route does, advisory only, in three
+  readings. An entry everyone sees whose route requires sign-in, read from
+  the route's resolved middleware in the manifest: the applications attach
+  sign-in through an alias, a local constant and an inline call, which a
+  reading by syntax would have to know one by one. An action that authorizes
+  an ability an entry could name (`this.authorize()` with a literal ability
+  and the bare class, on a method that takes the user alone) while the entry
+  does not name it: the direction that finds a role check restated in
+  `where`. And an entry whose `can` names another ability than that call.
+  `this.can()` is not read as a requirement, since a controller also calls it
+  to compute a prop, and a body that cannot be read is unverifiable. A
+  prototype ran the three on the measured links: the first warns on 4 of 31,
+  each rightly (the layout is also served to guests on the sign-in pages),
+  and on the starter's own Dashboard link in a fresh application; the second
+  finds the four restated checks; and 74 of the 85 routes an entry could name
+  make no `authorize()` call, so on most entries there is nothing to compare.
 - **The layout the auth scaffold ships** renders the prop, marks the current
-  entry, wraps on a narrow screen and keeps the sign-in and sign-out
-  controls. The brand reads the application's name from a shared prop
-  (`app.name`, from `APP_NAME`), so naming the application is not a layout
-  edit either.
+  entry, wraps on a narrow screen and keeps the account controls, which no
+  entry can hold: sign-in, sign-out (a `POST`) and the profile link labelled
+  with the user's name. The brand reads the application's name from a shared
+  prop (`app.name`, from `APP_NAME`), so naming the application is not a
+  layout edit either. The starter's home route gets a name, which it lacks
+  today and an entry needs.
 - **One writer.** `appendNavigationEntry()`, beside `appendTableToSchema()`.
   `guren nav:add "<label>" --route <name> [--auth required] [--can
   create:Job]` calls it, and is a generator, so a plan's `commands` may run
@@ -820,7 +862,7 @@ carries when present.
 **A review the implementer has to ask for does not happen.** The
 `plan-implement` skill tells the session to call the `code-review` agent after
 each task. In the 52 implementation runs of the two dogfooding nights the
-agent was called in four, and in none of the 11 that went through the plan
+agent was called in four, and in none of the 10 that went through the plan
 loop step by step. So the review does not rest on the session: it runs on the
 pull request, by the platform's reviewer, and the lane job reads its result
 (§8).
@@ -1477,28 +1519,30 @@ measured is listed at the end, with the deliverable that measures it.
 Each row says what was counted and what that supports. None is a measurement
 of the design in use: the commands do not exist yet.
 
-**From git histories.** The 11 applications, out of two dogfooding runs, that
+**From git histories.** The 10 applications, out of two dogfooding runs, that
 headless sessions built through the plan loop with commits naming their
-steps: 195 step commits in 48 tasks, and 423 acceptance ids. The plan
-composition is over every plan of both runs, 3,216 elements with a change
-kind. No test was run for these: they are counts over commits, diffs and plan
+steps: 170 step commits in 43 tasks, and 364 acceptance ids. An eleventh
+history repeats one application's task commits and then makes a change
+request outside the loop; it is counted once, under that application. The
+plan composition is over every plan of both runs, 3,144 elements with a
+change kind. No test was run for these: they are counts over commits, diffs and plan
 files. "Existing" means present at the commit before the plan's first step,
 which for a later task is not that task's own merge base.
 
 | Counted | Result | What it supports |
 | --- | --- | --- |
-| Commits after a plan's approval named `task/…` | 195 of 238; the rest are the driver's own | The convention holds unenforced. Nothing here depends on it |
-| Ids whose first commit touches no controller, routes file or policy | 403 of 423 (95%) | Candidates for reproducing a red run. It does not show the test failed there, or why |
-| Step commits changing `bun.lock` | 1 of 195; 185 have the lockfile of the plan's last step | The head's install can usually be reused (§4) |
-| Plan elements by change kind | add 2,949, alter 131, existing 119, drop 17 | 92% additions, in applications built from a starter |
-| Whole plans editing nothing but new files | 0 of 11 | A plan is not the unit that flows (§5) |
-| Tasks editing nothing existing | 6 of 48 | An upper bound, by paths alone, on what could be low as first specified |
-| Tasks editing only the schema and the routes entry beyond that | 7 more (13 of 48) | The same bound once both are judged by what they declare (§3) |
-| Tasks editing the application entry, existing client code, existing server code | 8, 6 and 21 | Where one person reads. The layout's navigation is edited in every application |
-| Tasks that could be low once the application entry, environment keys and navigation are judged structurally | 21, 26 and 32 of 48, cumulatively; 39 with edits a changed element owns | The upper bound the plan sections of §5 would buy. Paths alone, as above |
-| What the plans did to the layout | 10 of 11 edited it, always in a pages step: 32 links (31 by a literal path), the brand renamed in 6, a role or signed-in check in 4, and 41 added lines that are no link | What the navigation module has to make unnecessary (§5) |
-| Where the applications authorize | `authorizeMiddleware` in 0 of 11; 86 calls of `this.authorize()` or `this.can()` in controllers; a `can…` boolean passed to a page in 4 | A link's visibility cannot come from its route, so the navigation is filtered on the server by the gate (§5) |
-| Step commits editing nothing existing; only the schema and routes entry | 95 and 43 of 195 | The per-step figures. A step is not a mergeable unit, since a tests step fails the gate |
+| Commits after a plan's approval named `task/…` | 170 of 207; the rest are the driver's own | The convention holds unenforced. Nothing here depends on it |
+| Ids whose first commit touches no controller, routes file or policy | 364 of 364. The 20 ids of the change request made outside the loop all arrive with their implementation | Candidates for reproducing a red run. It does not show the test failed there, or why. Outside the loop nothing orders the test first |
+| Step commits changing `bun.lock` | 1 of 170; 160 have the lockfile of the plan's last step | The head's install can usually be reused (§4) |
+| Plan elements by change kind | add 2,881, alter 130, existing 116, drop 17 | 92% additions, in applications built from a starter |
+| Whole plans editing nothing but new files | 0 of 10 | A plan is not the unit that flows (§5) |
+| Tasks editing nothing existing | 5 of 43 | An upper bound, by paths alone, on what could be low as first specified |
+| Tasks editing only the schema and the routes entry beyond that | 6 more (11 of 43) | The same bound once both are judged by what they declare (§3) |
+| Tasks editing the application entry, existing client code, existing server code | 7, 5 and 20 | Where one person reads. The layout's navigation is edited in nine of the ten applications |
+| Tasks that could be low once the application entry, environment keys and navigation are judged structurally | 18, 23 and 28 of 43, cumulatively; 35 with edits a changed element owns | The upper bound the plan sections of §5 would buy. Paths alone, as above; the prototype under **Run** applies the rule |
+| What the plans did to the layout | 9 of 10 edited it, always in a pages step: 26 links added (25 by a literal path) and 14 of the starter's removed, the brand renamed in 6; of the 26, 7 for everyone, 12 for a signed-in user, 1 for a guest, 6 behind a role or admin check | What the navigation module has to make unnecessary (§5) |
+| Where the applications authorize | `authorizeMiddleware` in 0 of 10; 73 calls of `this.authorize()` or `this.can()` in controllers; a role middleware of the application's own on two route groups in 1; a `can…` boolean passed to a page in 4 | A link's visibility can seldom come from its route, so the navigation is filtered on the server by the gate (§5) |
+| Step commits editing nothing existing; only the schema and routes entry | 80 and 38 of 170 | The per-step figures. A step is not a mergeable unit, since a tests step fails the gate |
 
 **Run.**
 
@@ -1507,41 +1551,43 @@ which for a later task is not that task's own merge base.
 | What does reproducing red runs cost? | One history (42 behaviours) in GitHub Actions, Bun 1.4.4: a worktree per commit that first carries an id, the head's install linked in, `codegen`, that commit's test files | Three commits, 0.3 s to prepare and 0.1 to 0.7 s to run each | A warm run with identical lockfiles. Not the cost of a cold preparation or of a commit with another lockfile |
 | Is a failure there a red run? | The same run | Two commits failed on assertions (a 404 where the plan expects a redirect). One failed loading a helper that imports a model a later step adds. A first run with no application key failed every case at the head too | Why a load failure is `unobserved` and the head is the control (§4). Under that rule one of the three would not have counted |
 | Does code owner review block with zero required approvals? | A public repository, a ruleset, three pull requests | Yes for an author who does not own the path, and it clears on the owner's approval. A pull request the owner opens is not blocked | §8 |
-| Can edits inside a file be matched to the plan? | A parse of each edited file's spans against the plan's declarations, over the 11 histories | 6 of 27 files, 53 of 166 lines | Not scheduled (§3) |
+| Can edits inside a file be matched to the plan? | A parse of each edited file's spans against the plan's declarations, over the 10 histories | 6 of 26 files, 48 of 134 lines | Not scheduled (§3) |
+| Do the list edits hold nothing but entries? | A prototype that parses both sides of every step commit's edit to the application entry, `config/env.ts`, the routes entry, the schema and the layout, checked against mutated copies of each | Application entry 25 of 25, environment keys 5 of 5, routes entry 27 of 27 (each one registrar call), schema 22 of 33 (the rest change an existing table), layout 1 of 9. Tasks that could be low: 18, 23, 24 of 43 where paths gave 18, 23, 28 | `env`, `providers` and `config` buy what paths promised. The navigation module alone buys one task (§5) |
+| Can the navigation checks be read, and are they right? | A prototype over the 31 links the plans wrote, their routes, actions and policies, by syntax | Every link, route, action and policy method read. Sign-in mismatch: 4 warnings, 4 right. Role checks that restate an ability the action authorizes: 4 of 6, all nameable. Policy methods: 8 user only, 29 a required second parameter, 8 an optional one. 74 of 85 candidate routes make no `authorize()` call | The three readings of §5, and that the comparison has to start from the action, since no layout names an ability |
 | Do merge bases have a completed push run? | This repository's last 60 merged pull requests | 60 of 60, at most four days before the merge | That the runs exist. Not that their records would be comparable, and not stacked pull requests, of which there were none |
 | Does storing and fetching a record work? | A workflow on a test repository: the push run uploads `guren-record-<sha>`, the pull request run asks the artifacts API for its merge base's, with a read-only token | Found for a branch cut from a commit that had a push run; reported missing for one cut before the workflow existed | The mechanism of §3 |
 | Can an application page reach a decisions listener? | A prototype on its own port and an application page on another, driven in a browser from `localhost` and from `127.0.0.1` | Every read, frame, script load and post refused; a foreign `Host` and a request with no `Origin` refused; the click on the confirmation accepted. A script can open the confirmation and cannot answer it | The isolation of §12 from page scripts. Nothing about an agent that drives the browser |
 | What does filtering the navigation cost? | The gate alone, a policy with two synchronous abilities, ten checks per visit | 12 microseconds per visit; a guest is denied | The framework's share of the cost (§5). Of the 8 `create` and `viewAny` methods in the measured applications, the 3 that take the user alone are synchronous; the 5 that take a context cannot be named in navigation, and 4 of those query (1 or 2 queries) |
-| Does the harness's own review run? | The implementation logs of 52 runs | The `code-review` agent was called in 4, and in none of the 11 step-by-step runs | §7 |
+| Does the harness's own review run? | The implementation logs of 52 runs | The `code-review` agent was called in 4, and in none of the 10 step-by-step runs | §7 |
 
-**From the independent evaluations.** Each of the 11 applications was walked
+**From the independent evaluations.** Each of the 10 applications was walked
 and probed by a separate evaluating session, whose report lists the defects
 of the application's own code. Three read-only agents located every such
-defect in the code and blamed the line to a commit: 110 defects, each then
+defect in the code and blamed the line to a commit: 97 defects, each then
 joined to the path class of the task that commit belongs to.
 
 | Where the defect came from | Defects | High, medium, low |
 | --- | --- | --- |
-| A task that edits existing server code | 39 | 1, 12, 26 |
-| A task that edits existing client code | 21 | 0, 8, 13 |
-| A task that edits the application entry | 14 | 0, 4, 10 |
-| A task that adds files only, or edits only the schema and routes entry | 8 | 0, 3, 5 |
+| A task that edits existing server code | 38 | 1, 12, 25 |
+| A task that edits existing client code | 20 | 0, 8, 12 |
+| A task that edits the application entry | 16 | 0, 6, 10 |
+| A task that adds files only, or edits only the schema and routes entry | 6 | 0, 1, 5 |
 | The starter, left as scaffolded | 13 | 0, 7, 6 |
-| After the steps (the driver's verification, or a squashed history) | 14 | 0, 4, 10 |
+| After the steps (the driver's verification, or a squashed history) | 3 | 0, 1, 2 |
 | A task whose class did not resolve | 1 | 0, 1, 0 |
 
-So of the 82 defects a task introduced, 8 sit in the 13 tasks that paths
-alone would let be low: none high, three medium. That is about 0.6 per such
-task against about 2.1 per task among the other 35. It is a first estimate
+So of the 80 defects a task introduced, 6 sit in the 11 tasks that paths
+alone would let be low: none high, one medium. That is about 0.5 per such
+task against about 2.3 per task among the other 32. It is a first estimate
 and no more: the defects are what one evaluator noticed, a model located
 them, and a blamed line is a best fit for defects like a missing check. What
-the 82 are also says what the floor does not see: 22 are user experience, 18
+the 80 are also says what the floor does not see: 20 are user experience, 18
 performance, 14 correctness, 11 accessibility, 8 validation and 7 security,
 and no fact of §3 reads any of them. They are the reviewer's and the reading
 person's, which is why low requires a review (§8).
 
 **Cost.** Not measured, and stated so that it is not guessed. A plan here has
-about four tasks (48 in 11), so about five pull requests with the plan's own.
+about four tasks (43 in 10), so about five pull requests with the plan's own.
 The platform reviewer is priced by the vendor per review and by depth; at the
 15 to 25 dollars a review that Anthropic gives as its own average, that is
 roughly 75 to 125 dollars a plan before any second round. The evidence adds
@@ -1556,7 +1602,12 @@ How long the gate takes on a real application was not measured.
   the declaration matcher and the security records in place; the share of red
   runs that are `reproduced` under the rule of §4; cold preparation time.
 - **Deliverable 6, on a repository.** The lane job end to end, including
-  whether GitHub's auto-merge applies to a stacked pull request.
+  whether GitHub's auto-merge applies to a stacked pull request, and the
+  reviewer's check as it arrives on a real pull request: its conclusion and
+  the severity line are taken from the vendors' documentation, and this
+  repository has no reviewer installed to read them from.
+- **Lessons.** Whether a lesson delivered through `guren context` changes
+  what the next session writes: the same task run with and without it.
 
 ## Sources (verified 2026-11)
 
