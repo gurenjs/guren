@@ -4,7 +4,8 @@
 **Date:** 2026-10-14
 **Status:** Accepted (2026-10-15; the deciding maintainer asked for implementation to start
 and shortened the standard discussion period.) The amendment in §12 (accessibility checks and
-visual change between runs) was accepted on 2026-10-31.
+visual change between runs) was accepted on 2026-10-31. The amendment in §13 (behaviour specs
+through an agent runner) was proposed on 2026-11-14 and is not accepted.
 
 ## Problem
 
@@ -916,6 +917,335 @@ a failing test is the advisory form.
 **Check accessibility in `browser:doctor`.** The doctor opens no browser (§4),
 and axe needs a rendered DOM.
 
+### 13. Proposed amendment (2026-11-14): behaviour specs through an agent runner
+
+**Proposed, not accepted.** Nothing in §§1 to 12 changes until it is; §13.8
+lists what would.
+
+The generated specs open a page and check that a view's labels and actions are
+visible (§6). None performs a behaviour: fills the form, submits it and looks at
+where the browser lands. A plan's behaviours are tested through `TestApp`, over
+HTTP, which sees no hydration, no client-side form state and no `confirm()`
+dialog. The live drive (§5) does perform them, once per session, and leaves a
+record but no test that a later change runs again.
+
+A plan states a behaviour as a route, an input and an outcome. A view's
+`form.submitsTo` and `actions[].route` name the page that sends the request, and
+its field labels name most inputs. Nothing states how a `select`, a file input
+or a date control takes its value, or that a delete button asks first. An agent
+step fills that gap once, and a recorded step replays with no model. This
+amendment adds such specs as an option an app chooses, on
+[e2e](https://github.com/e2e-inc/e2e), the runner the Alternatives section
+names as tester-army/e2e.
+
+#### 13.1 What was measured
+
+On 2026-11-12, against `examples/blog` started by `browser:serve` on a local
+database made for the run, with `e2e` 0.23.0 on Node 22.23.5 and agent steps
+run by Claude Code under a subscription login (`claudeCode({ model: 'sonnet' })`
+from `@e2e-dev/acp`, no API key). The test created, retitled and deleted a post
+in three agent steps, each followed by a locator assertion.
+
+| Measured | Result |
+| --- | --- |
+| One agent step, live | 8 to 30 s; 40,000 to 80,000 tokens, 85 to 95% of them cache reads |
+| Three steps, live | 34 to 57 s |
+| Three steps, replayed | 2.3 s, no model call |
+| A recording | one JSON file per step under `.e2e/cache/`, about 3 KB |
+| CI mode, no login, every step replayed | passes in 2.7 s |
+| CI mode, no login, one step with no recording | fails: `MODEL_PROVIDER_FAILED`, authentication required |
+| No agent in the config | `MODEL_UNAVAILABLE` before any replay, so the agent stays configured in CI |
+| `e2e` 0.23.0 on Bun 1.4.4 | does not start: Bun has no `module.registerHooks` |
+| `e2e` 0.23.1 nightly on Bun 1.4.4 | the same tests pass, live and replayed |
+
+"No login" was an empty Claude configuration directory. `e2e` 0.23.1, released
+on 2026-11-13, carries the Bun loader (e2e-inc/e2e#1616); its CLI starts under
+Bun 1.4.4 (checked 2026-11-14), and the test run has not been repeated on the
+released version.
+
+Four things went wrong, and §13.5 is shaped by them:
+
+- **A recorded URL.** The edit page is reached by URL only, so the agent
+  navigated to `/posts/3/edit` and the recording kept that path. The next run's
+  post had another id, the replay opened a 404, and the agent took the step over
+  on every run. With the test opening the path and the agent given only the goal
+  on that page, the step replayed.
+- **A shared key.** A recording is keyed by the test's title, the instruction
+  and its parameters. After the test was rewritten under the same title, the old
+  recording was repaired run after run and grew to eight actions, seven of them
+  navigations to posts that no longer existed.
+- **A dialog.** `confirm()` stops a step (`AUTOMATION_UNSUPPORTED`) unless the
+  test registers `browser.onDialog('accept')` first.
+- **A policy failure.** One of nine live runs failed with `POLICY_DENIED`: the
+  agent used a tool of its own named `navigate`. The cause was not found.
+
+The first run also downloaded a Chromium build without asking (99 MiB, 216 MB on
+disk), since `@e2e-dev/web` pins its own `playwright-core`.
+
+#### 13.2 Why this is an amendment
+
+- §11 names an agentic test runner as a non-goal.
+- §6 lists what the blueprint installs. Three more devDependencies, a second
+  `playwright-core` and a second browser download are new dependencies in the
+  RFC process's sense.
+- The Alternatives section set the runner aside for two reasons. A model key
+  for agent steps in CI: a committed recording replays with none, and a
+  subscription login runs the live steps on a developer's machine. Node engines
+  only: the manifest still declares Node alone, and 0.23.1 runs on Bun 1.4.3 or
+  later for web tests.
+- §9's measurement covers the Playwright specs. A second suite needs its own
+  rule before anything may depend on it.
+
+#### 13.3 The runner and its packages
+
+As read on 2026-11-12 and 2026-11-14: `e2e-inc/e2e` is public, Apache-2.0, not
+archived, created on 2026-07-22, pushed to on the day it was read, with 13,755
+stars and 73 open issues. It released 0.23.0 on 2026-11-05 and 0.23.1 on 2026-11-13. It is four
+months old and has no 1.0, so its configuration and its recording format may
+change in a patch: the cache guide says an upgrade can give every recording a
+new key.
+
+| Package | Version | Role |
+| --- | --- | --- |
+| `e2e` | 0.23.1 | the runner and CLI |
+| `@e2e-dev/web` | 0.16.0 | the browser engine; depends on `playwright-core` 1.65.0, exactly |
+| `@e2e-dev/acp` | 0.1.2 | runs agent steps on Claude Code or Codex over the Agent Client Protocol |
+| `@agentclientprotocol/claude-agent-acp` or `@agentclientprotocol/codex-acp` | as installed | the adapter for the chosen agent |
+
+**Range.** Exact versions, the ones `@guren/cli` declares as its own
+devDependencies (it needs them to typecheck the config template). A new version
+reaches an app when `@guren/cli` moves them, in a release whose changeset says
+whether recordings have to be made again.
+
+**No runtime dependency.** No `@guren/*` package depends on any of these at
+run time, and Guren's own code still calls no model. The runner asks the
+developer's coding agent, under that agent's login.
+
+**Two Playwright copies.** `@playwright/test` (the app's range) and
+`playwright-core` 1.65.0 sit side by side, each with its own Chromium build.
+The blueprint prints the download before the first run makes it.
+
+**Telemetry.** The CLI sends usage counts by default. The script the blueprint
+writes sets `E2E_TELEMETRY_DISABLED=1`; an app that wants to send them removes
+it.
+
+**Runtime.** `bunx --bun e2e run` needs no Node. The Playwright specs still
+do (Open Question 3).
+
+#### 13.4 Installation
+
+`guren add browser-tests --behaviours --agent <claude-code|codex>`, on an app
+that already has the blueprint or in the same run. `--behaviours` without
+`--agent` refuses and names both: whose login runs the steps is the person's
+choice, and there is no default. It writes, once:
+
+- `e2e.browser.config.ts`: the target on `http://127.0.0.1:4319`, started by
+  `app.command` as `guren browser:serve --port 4319` with `reuseExisting: false`,
+  so every launch passes §3's checks and none attaches to a server it did not
+  start; `web({ locale })` pinned as the Playwright config pins it (RFC 0036
+  §5); `tests: 'tests/browser/behaviours/**/*.e2e.ts'`; the executor for the
+  chosen agent; the browser account as an `e2e` credential (§13.7);
+- `tests/browser/behaviours/auth.setup.e2e.ts`, on the same evidence of a
+  password sign-in as §6, saving the session `browser`;
+- `tests/browser/behaviours/given.ts` (author-owned, like `a11y.ts`):
+
+```ts
+/** Read by tests/browser/behaviours/generated/. One entry per behaviour that needs data or a path parameter. */
+export const given: Record<string, (fixtures: GivenFixtures) => Promise<Record<string, string> | void>> = {
+  // 'AC-comments-store-1': async () => ({ post: '1' }),   // the values of the start page's path parameters
+}
+```
+
+`GivenFixtures` is the test's `app` and `browser` fixtures, typed in that file.
+
+- `test:behaviours` in `scripts` (`E2E_TELEMETRY_DISABLED=1 bunx --bun e2e run
+  --config e2e.browser.config.ts`, so the suite runs on Bun whether or not Node
+  is installed), and `test:behaviours:ci`, the same with `--strict-cache`;
+- ignore entries for `.e2e/` except `.e2e/cache/`.
+
+`bun test` collects no `*.e2e.ts` file, and the Playwright config matches only
+`*.browser.ts`, so neither runner reads the other's specs. The plan command
+allowlist already classes `add browser-tests` as `dependencies`, so no plan step
+can run this.
+
+#### 13.5 The generated specs
+
+`browser:map` writes `tests/browser/behaviours/generated/<slug>.e2e.ts`, one
+file per approved plan, only when the manifest declares `e2e` and
+`@e2e-dev/web` and `e2e.browser.config.ts` exists. Otherwise it writes none,
+removes what it wrote before, and prints why, as for the accessibility spec.
+The rules for a file it does not own (§6) apply unchanged.
+
+**Which behaviours.** Those of kind `success` or `validation` whose route is
+not a `GET` and which a view of the plan sends: the view whose `form.submitsTo`
+or `actions[].route` names the route. Every other behaviour is written as a
+skipped test naming why, never left out and never passed:
+
+| Not written | Reason given |
+| --- | --- |
+| `unauthenticated`, `forbidden`, `not-found`, `state` | needs a second actor, a missing record or a state the plan words in prose; `TestApp` pins it |
+| a `GET` route | the smoke and view specs open it |
+| no view of the plan sends the route | nothing says which page to start on |
+| the route, or the page's route, is not registered yet | as §6 |
+| a signed-in route with no password sign-in | as §6 |
+
+**One test per behaviour.** For `AC-comments-store-1`, sent by the form of a
+view on `GET /posts/:post`:
+
+```ts
+test('AC-comments-store-1 (9c41f2): a signed-in user comments on a post', { session: 'browser' }, async ({ app, agent, screen, browser }) => {
+  const start = await begin('AC-comments-store-1', { app, browser })
+  await app.open(start.path('/posts/:post'))
+  await expectDefaultLocale(browser)
+  const off = await browser.onDialog('accept')
+  await agent.act('set "Comment" to {body}, then use "Post comment"', { params: { body: 'First!' } })
+  await off()
+  await expect(browser).toHaveURL(start.path('/posts/:post'))
+  expect(await landedComponent(browser)).toBe('posts/Show')
+})
+```
+
+- **The start page is opened by the test.** The path is the first `GET` route
+  rendering the view's page, the rule the view specs use, with its parameters
+  filled from `given.ts`. No instruction carries a URL, which is what keeps a
+  record's id out of a recording (§13.1).
+- **`begin()`** is in the generated file, not in a file written once. It calls
+  the behaviour's entry in `given.ts` and returns the parameter values. A
+  behaviour with `given` text or a path parameter and no entry is skipped from
+  the body with that reason. An entry prepares its data however the app can: a
+  seeder that runs at boot, or the app's own pages.
+- **The instruction is built from the plan.** Each key of the behaviour's
+  first `input` that the view's form labels becomes `set "<label>" to {key}`,
+  its value a parameter. The step ends with the label of the view action whose
+  route is the behaviour's, or with "submit the form" when no action names it.
+  An input key with no labelled field is listed by `browser:map` and left to
+  the agent.
+- **A dialog is accepted** for the length of the step.
+- **The outcome is pinned by locators, never by the agent.** `expect.redirect`
+  becomes a URL assertion (a `:param` the test does not know matches one
+  segment), `expect.inertia` the landed page's component read as
+  `support.ts` reads it, and each `expect.errors` key with a labelled field
+  `aria-invalid="true"` on that control, which `@guren/inertia-client/forms`
+  sets. `agent.assert` is never generated: it calls the model on every run, so
+  a spec holding one cannot run in CI without a login.
+- **Not pinned:** `expect.status` (an Inertia visit shows a page, not a
+  status) and `expect.database` (no browser run reads the database, §7). Both
+  stay with the `TestApp` test of the same behaviour.
+- **The title** holds the behaviour's id without brackets, as §6 keeps a
+  browser spec from reading as a plan's test, and a digest of what was
+  generated (start route, instruction, pins). A regenerated test that differs
+  gets a new title, so a new recording, and never repairs an old one (§13.1).
+  The recording of the previous title stays on disk until `e2e cache clear`
+  (Open Question 15).
+
+A signed-in route runs under the session `browser`, the seeded account of §6;
+any other route runs signed out. Which account a behaviour's `actor` means is
+still Open Question 5.
+
+#### 13.6 Recordings
+
+- **Committed.** `.e2e/cache/` is test data. A recording changes only when a
+  step records for the first time or is repaired, so a diff there accompanies
+  the page change that caused it and is reviewed with it.
+- **Recording needs a login, replaying does not.** A developer, or the agent
+  that changed the page, runs `test:behaviours`: a step with no recording, or
+  one whose recording no longer matches, runs live under the Claude Code or
+  Codex login and records.
+- **CI runs `test:behaviours:ci`.** Under `--strict-cache` a recording that
+  does not replay fails its step with `REPLAY_STALE` and makes no model call,
+  by the runner's documentation; M6 checks it. CI needs no key and no login.
+- **A stale recording is not a defect in the app.** The skill tells the agent
+  to run `test:behaviours` after changing a page a behaviour starts on, to
+  commit the changed recordings with the change, and to report `REPLAY_STALE`
+  as a recording to make again.
+- **An upgrade** of the runner may re-key every recording (§13.3). The
+  `@guren/cli` release that moves the versions says so.
+
+#### 13.7 What the agent can reach
+
+- The `@e2e-dev/acp` presets give the agent the step tools only: no built-in
+  tools, no user or project settings, no MCP servers, a session in an empty
+  temporary directory, and `POLICY_DENIED` on any tool of its own.
+- The config loads no `.env`. The app is started by `browser:serve`, which
+  loads the app's own, and `app.command` passes the child only `PATH`, `HOME`
+  and what `inheritEnv` names. The agent's process therefore holds the shell's
+  variables and none of the app's.
+- The runner withholds `E2E_USER_*` and `E2E_SECRET_*` from the agent and
+  types a credential itself. The browser account's password is read from
+  `E2E_USER_BROWSER_PASSWORD`, else from `BROWSER_TEST_PASSWORD` in the app's
+  env files, parsed and never exported. With neither set the signed-in tests
+  are skipped with that reason and no default password is seeded (§6); the
+  config then registers no credential, since the runner refuses a password
+  under six characters when it loads.
+- Screenshots the runner sends the model mask password fields only. The
+  account exists only in a database `browser:serve` judged local, which is what
+  bounds what a screenshot can show.
+
+#### 13.8 What changes in §§5 to 11
+
+| Section | Change |
+| --- | --- |
+| §5 skill | When `e2e.browser.config.ts` exists: run `test:behaviours` after changing a page a behaviour starts on, commit changed recordings, report `REPLAY_STALE` as a stale recording. The live drive is unchanged, and the skill still registers no MCP server |
+| §6 blueprint | `--behaviours --agent`; `browser:map` owns `tests/browser/behaviours/generated/` under §13.5's conditions |
+| §7 evidence | Unchanged. The runner's `.e2e/report.json` stays where it writes it, and `browser:record` reads none of it |
+| §8 gates | Unchanged: no gate reads a behaviour spec |
+| §9 delivery | M6: the acceptance below holds on the measurement app |
+| §11 non-goals | "no agentic test runner" becomes "no agentic test runner in the default install, in any `@guren/*` package or in any gate"; "No model calls from Guren" stands |
+| Alternatives | The tester-army/e2e paragraph gains a note pointing here |
+
+#### 13.9 Acceptance for this amendment
+
+- `browser:map` writes a behaviour spec only when the manifest declares `e2e`
+  and `@e2e-dev/web` and `e2e.browser.config.ts` exists, removes it when either
+  goes, and prints why.
+- On the measurement app with one approved plan, on Bun 1.4.4 and the released
+  runner: a behaviour's test records in one live run under a Claude Code login,
+  and the next run replays every step with no model call.
+- With no login and the recordings present, `test:behaviours:ci` passes. After
+  a form label changes, it fails that step with `REPLAY_STALE` and makes no
+  model call.
+- A behaviour whose start page has a path parameter and no `given.ts` entry is
+  skipped with that reason. A behaviour of a kind §13.5 leaves out is a skipped
+  test naming why.
+- A regenerated test whose start route or instruction changed has another
+  title, and its first run records rather than repairs.
+- No generated instruction holds a URL, and no generated spec holds
+  `agent.assert`.
+- After a run that ends, fails or is interrupted, no process of the app or of
+  `browser:serve` is left: the runner force-kills after `shutdownTimeout`, and
+  §6 found that a kill of that kind leaves the app's own group alive under
+  Playwright.
+- The agent's environment holds no value from the app's env files.
+- `POLICY_DENIED` is counted over at least fifty live steps before the
+  blueprint ships, and its cause is named or its rate stated in the guide.
+
+#### 13.10 Alternatives considered
+
+**Write the Playwright steps from the plan.** Where the view's form labels
+every input key, `getByLabel(label).fill(value)` and a click on the named
+action need no agent and no second runner. It breaks on what the plan does not
+say: a `select`'s option, a checkbox, a date or file control, a `confirm()`, a
+form that appears after a click. Each needs a rule in the generator and a
+`fixme` where the rule runs out, and every markup change is a failing test
+someone edits by hand. It remains the fallback if this amendment is rejected,
+and is the stronger choice for an app whose forms are all plain text.
+
+**Make the runner the engine of every spec.** The smoke, view and
+accessibility specs need no agent, were measured for M4 on Playwright's runner,
+and `@axe-core/playwright` runs there. Moving them would restart that
+measurement for no gain.
+
+**Leave behaviours to the live drive.** It already performs them, with evidence
+(§7). It runs when an agent is asked to, not on every change.
+
+**An API key in CI in place of recordings.** It lets a stale recording repair
+itself, and it makes every CI run of a changed page a paid call whose result
+depends on a model. A failing `REPLAY_STALE` is the cheaper signal.
+
+**Start the app through `reuseExisting` and a session's `browser:serve`.**
+Faster locally, but a run would then attach to a server it did not start,
+which §6 rules out for the Playwright config for the same reason.
+
 ## Alternatives Considered
 
 **Adopt tester-army/e2e as the engine.** Its replayed agent steps suit flows that
@@ -1008,3 +1338,20 @@ changes behaviour.
     `views[].states` names (a form showing its 422 errors, an empty list)? A
     visit reaches only the landing state; another state needs a drive the map
     does not describe yet.
+13. (§13) How is replay measured nightly with no model key? The measurement
+    app is scaffolded fresh each night and has no recordings. Committing its
+    recordings as a fixture makes every scaffold change read as a stale
+    recording; giving the nightly a key makes it a paid run.
+14. (§13) Should the generator write plain Playwright steps where the view's
+    form labels every input (§13.10) and an agent step only where that rule
+    runs out? One suite would then hold two kinds of step, and the app would
+    still install the runner for the second.
+15. (§13) Nothing removes the recording of a title `browser:map` no longer
+    generates, and `e2e cache clear` removes every recording. Should
+    `browser:map` delete them, which means reading the runner's own cache
+    format, or is that the runner's to offer?
+16. (§13) No other agent runner was measured. Is a comparison needed before a
+    blueprint names a dependency this young?
+17. (§13) `e2e explore`, its bug bash and `e2e mcp` were not measured. Should
+    the skill name any of them as a live-drive option, as the Alternatives
+    section allowed for?
