@@ -689,8 +689,12 @@ export default defineNavigation([
   browser that should not see them, and no ability has to be shared with the
   client. The cost is one gate check per distinct ability and model on
   a visit: ten such checks took 12 microseconds measured on the gate alone.
-  A policy that queries decides the real cost, and three of the eight
-  `create` and `viewAny` methods in the measured applications are `async`.
+  Of the eight `create` and `viewAny` methods in the measured applications,
+  the three that take the user alone are synchronous and read only the user.
+  The other five take a second argument (`{ teamId }`, `{ projectId }`, the
+  state of a job) and are called as `[Model, context]`; four of them query,
+  once or twice. Those are the abilities the warning above keeps out of the
+  navigation, so no ability these applications could name there queries.
 - **A route is named, not spelled.** The name is checked against the route
   manifest's type, and by `guren check`: the route exists, is a `GET` with no
   path parameter (`isParameterless()`, the rule the browser map picks a
@@ -1507,7 +1511,7 @@ which for a later task is not that task's own merge base.
 | Do merge bases have a completed push run? | This repository's last 60 merged pull requests | 60 of 60, at most four days before the merge | That the runs exist. Not that their records would be comparable, and not stacked pull requests, of which there were none |
 | Does storing and fetching a record work? | A workflow on a test repository: the push run uploads `guren-record-<sha>`, the pull request run asks the artifacts API for its merge base's, with a read-only token | Found for a branch cut from a commit that had a push run; reported missing for one cut before the workflow existed | The mechanism of §3 |
 | Can an application page reach a decisions listener? | A prototype on its own port and an application page on another, driven in a browser from `localhost` and from `127.0.0.1` | Every read, frame, script load and post refused; a foreign `Host` and a request with no `Origin` refused; the click on the confirmation accepted. A script can open the confirmation and cannot answer it | The isolation of §12 from page scripts. Nothing about an agent that drives the browser |
-| What does filtering the navigation cost? | The gate alone, a policy with two synchronous abilities, ten checks per visit | 12 microseconds per visit; a guest is denied | The framework's share of the cost (§5). A policy that queries adds its own, and 3 of the 8 class-level abilities in the measured applications are `async` |
+| What does filtering the navigation cost? | The gate alone, a policy with two synchronous abilities, ten checks per visit | 12 microseconds per visit; a guest is denied | The framework's share of the cost (§5). Of the 8 `create` and `viewAny` methods in the measured applications, the 3 that take the user alone are synchronous; the 5 that take a context cannot be named in navigation, and 4 of those query (1 or 2 queries) |
 | Does the harness's own review run? | The implementation logs of 52 runs | The `code-review` agent was called in 4, and in none of the 11 step-by-step runs | §7 |
 
 **From the independent evaluations.** Each of the 11 applications was walked
