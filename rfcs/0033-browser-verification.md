@@ -1174,6 +1174,13 @@ still Open Question 5.
   (§13.1). The step waits for the recorded control first, 14 s in the
   measurement, so a stale suite is slow as well as red. CI needs no key and no
   login.
+- **A step that was never recorded is not stale.** By the runner's
+  documentation it runs live even under `--strict-cache`: a new behaviour, or
+  one whose regenerated title is new (§13.5), whose recording was not
+  committed. With no login in CI that step fails with `MODEL_PROVIDER_FAILED`,
+  as the run without the flag did in §13.1. It is red either way, and the
+  error names a login where the remedy is a recording to commit. Not measured
+  under the flag.
 - **A stale recording is not a defect in the app.** The skill tells the agent
   to run `test:behaviours` after changing a page a behaviour starts on, to
   commit the changed recordings with the change, and to report `REPLAY_STALE`
@@ -1207,7 +1214,7 @@ still Open Question 5.
 | --- | --- |
 | §5 skill | When `e2e.browser.config.ts` exists: run `test:behaviours` after changing a page a behaviour starts on, commit changed recordings, report `REPLAY_STALE` as a stale recording. The live drive is unchanged, and the skill still registers no MCP server |
 | §6 blueprint | `--behaviours --agent`; `browser:map` owns `tests/browser/behaviours/generated/` under §13.5's conditions |
-| §7 evidence | Unchanged. The runner's `.e2e/report.json` stays where it writes it, and `browser:record` reads none of it |
+| §7 evidence | Unchanged. The runner's `.e2e/report.json` stays where it writes it, and `browser:record` reads none of it. The file is the runner's own document (`schemaVersion: "report-1"` in 0.23.1, its JSON schema shipped in the package), so anything that reads it later checks that field: the format moves with the runner's version, which §13.3 pins |
 | §8 gates | Unchanged: no gate reads a behaviour spec |
 | §9 delivery | M6: the acceptance below holds on the measurement app |
 | §11 non-goals | "no agentic test runner" becomes "no agentic test runner in the default install, in any `@guren/*` package or in any gate"; "No model calls from Guren" stands |
@@ -1223,7 +1230,9 @@ still Open Question 5.
   and the next run replays every step with no model call.
 - With no login and the recordings present, `test:behaviours:ci` passes. After
   a form label changes, it fails that step with `REPLAY_STALE` and makes no
-  model call.
+  model call. A behaviour with no recording fails there as well, with the
+  agent's authentication error, and the guide says that this means a recording
+  to make.
 - A behaviour whose start page has a path parameter and no `given.ts` entry is
   skipped with that reason. A behaviour of a kind §13.5 leaves out is a skipped
   test naming why.
