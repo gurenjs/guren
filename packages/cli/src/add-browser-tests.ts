@@ -3,6 +3,8 @@
  * `guren browser:serve`, and, where the app signs in with a password, a setup project and a
  * guarded seeder for one browser account. These files are written once; the specs under
  * `tests/browser/generated/` are `guren browser:map`'s, which this runs once at the end.
+ * `--behaviours --agent` (§13.4) adds the e2e runner's config, sign-in setup and `given.ts`
+ * the same way, and `browser:map` then keeps `tests/browser/behaviours/generated/` too.
  */
 
 import { writeFile } from 'node:fs/promises'
@@ -11,6 +13,7 @@ import { consola } from 'consola'
 
 import { readAppLocale } from './app-locale'
 import { assertNotApiOnly } from './app-surface'
+import { BEHAVIOUR_PACKAGES, BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP } from './browser-behaviour-specs'
 import { loadBrowserMap, runBrowserMap } from './browser-map-files'
 import type { BrowserMap } from './browser-map'
 import {
@@ -32,9 +35,29 @@ const DEV_PACKAGES = [PLAYWRIGHT_PACKAGE, AXE_PACKAGE] as const
 export const BROWSER_TEST_SCRIPT = { name: 'test:browser', command: `playwright test -c ${BROWSER_TESTS_CONFIG}` } as const
 const GITIGNORE_ENTRIES = ['test-results/', 'playwright-report/', 'tests/browser/.auth/'] as const
 
+/** `--agent` values (RFC 0033 §13.4): whose login runs the steps. `codex` refuses until §13.9 measures it. */
+export const BEHAVIOUR_AGENTS = ['claude-code', 'codex'] as const
+export type BehaviourAgent = (typeof BEHAVIOUR_AGENTS)[number]
+/** Installed at the exact versions package.json declares, the copies the config template is typechecked against. */
+export const BEHAVIOUR_DEV_PACKAGES = [...BEHAVIOUR_PACKAGES, '@e2e-dev/acp'] as const
+/** The adapter the runner starts Claude Code through. Nothing here imports it, so its range has no manifest entry to come from. */
+export const CLAUDE_CODE_ADAPTER = { name: '@agentclientprotocol/claude-agent-acp', range: '^0.107.0' } as const
+const BEHAVIOURS_RUN = `E2E_TELEMETRY_DISABLED=1 bunx --bun e2e run --config ${BEHAVIOURS_CONFIG}`
+/** `--bun`, so the suite needs no Node; `--strict-cache` fails a stale recording with no model call. */
+export const BEHAVIOUR_SCRIPTS = [
+  { name: 'test:behaviours', command: BEHAVIOURS_RUN },
+  { name: 'test:behaviours:ci', command: `${BEHAVIOURS_RUN} --strict-cache` },
+] as const
+// `.e2e/*`, not `.e2e/`: git never looks inside an ignored directory, so the recordings could not be re-included.
+const BEHAVIOUR_GITIGNORE_ENTRIES = ['.e2e/*', '!.e2e/cache/'] as const
+
 export interface AddBrowserTestsOptions extends WriterOptions {
   /** Run `bun add -d` for Playwright and axe; false prints the command instead. */
   install?: boolean
+  /** Also set up the behaviour specs the e2e runner performs (RFC 0033 §13.4); needs `agent`. */
+  behaviours?: boolean
+  /** The `--agent` value as typed; checked against {@link BEHAVIOUR_AGENTS} before anything is read. */
+  agent?: string
   /** The test seam: how the browser map is read before anything is written. */
   loadMap?: (cwd: string) => Promise<BrowserMap>
 }
@@ -43,7 +66,9 @@ export interface AddBrowserTestsResult {
   /** Files written once, by this run. */
   created: string[]
   /** What the closing `browser:map` run wrote and removed, app-relative. */
-  mapped: { changed: string[]; removed: string[]; held?: string; accessibilityOff?: string }
+  mapped: { changed: string[]; removed: string[]; held?: string; accessibilityOff?: string; behavioursOff?: string; unlabelledInputs?: string[] }
+  /** The agent the behaviour specs were set up for, when `--behaviours` was passed. */
+  behaviours?: BehaviourAgent
   /** A setup project signs in as the seeded browser account. */
   signIn: boolean
   map: BrowserMap
@@ -60,7 +85,7 @@ function passwordSignIn(users: SchemaTable | undefined, map: BrowserMap): Browse
   return { name: columns.has('name'), emailVerifiedAt: columns.has('emailVerifiedAt') }
 }
 
-/** The config template's locale line; `guren add browser-tests` writes the app's default locale there. */
+/** The locale line of both config templates; `guren add browser-tests` writes the app's default locale there. */
 export const CONFIG_LOCALE_LINE = "const LOCALE = 'en'\n"
 
 /**
@@ -68,7 +93,7 @@ export const CONFIG_LOCALE_LINE = "const LOCALE = 'en'\n"
  * read keeps `en`, the locale the server falls back to without `i18n`; a plan spec names a mismatch.
  */
 export function pinConfigLocale(config: ScaffoldFileEntry, locale: string | undefined): ScaffoldFileEntry {
-  if (config.contents.split(CONFIG_LOCALE_LINE).length !== 2) throw new Error(`${BROWSER_TESTS_CONFIG} has no single ${CONFIG_LOCALE_LINE.trim()} line to write the app's locale on.`)
+  if (config.contents.split(CONFIG_LOCALE_LINE).length !== 2) throw new Error(`${config.path} has no single ${CONFIG_LOCALE_LINE.trim()} line to write the app's locale on.`)
   if (locale === undefined) return config
   return { ...config, contents: config.contents.replace(CONFIG_LOCALE_LINE, () => `const LOCALE = ${quoteString(locale)}\n`) }
 }
@@ -78,24 +103,53 @@ interface Manifest {
   [key: string]: unknown
 }
 
-/** The script runs this blueprint's config; one of the same name running anything else is not taken over. */
-async function readManifest(cwd: string, force: boolean): Promise<Manifest | undefined> {
+type Script = { readonly name: string; readonly command: string }
+
+/** Each script runs this blueprint's config; one of the same name running anything else is not taken over. */
+async function readManifest(cwd: string, scripts: readonly Script[], force: boolean): Promise<Manifest | undefined> {
   const raw = await readIfExists(cwd, 'package.json')
   if (raw === null) return undefined
   const manifest = JSON.parse(raw) as Manifest
-  const existing = manifest.scripts?.[BROWSER_TEST_SCRIPT.name]
-  if (existing !== undefined && existing !== BROWSER_TEST_SCRIPT.command && !force) {
-    throw new CliError(`package.json already has a ${BROWSER_TEST_SCRIPT.name} script (${existing}), which would not run these specs. Rename it, or pass --force to replace it with "${BROWSER_TEST_SCRIPT.command}". Nothing was written.`)
+  for (const script of scripts) {
+    const existing = manifest.scripts?.[script.name]
+    if (existing !== undefined && existing !== script.command && !force) {
+      throw new CliError(`package.json already has a ${script.name} script (${existing}), which would not run these specs. Rename it, or pass --force to replace it with "${script.command}". Nothing was written.`)
+    }
   }
   return manifest
 }
 
+/**
+ * `--behaviours` and `--agent` name each other: whose login runs the steps is the person's choice,
+ * so there is no default, and `--agent` alone would set up nothing.
+ */
+export function behaviourAgent(options: Pick<AddBrowserTestsOptions, 'behaviours' | 'agent'>): BehaviourAgent | undefined {
+  const choices = BEHAVIOUR_AGENTS.map((agent) => `--agent ${agent}`).join(' or ')
+  if (!options.behaviours) {
+    if (options.agent !== undefined) throw new CliError(`--agent chooses whose login runs the behaviour specs, so it goes with --behaviours. Nothing was written.`)
+    return undefined
+  }
+  if (options.agent === undefined) {
+    throw new CliError(`--behaviours needs ${choices}: the steps run under that agent's login on this machine, and there is no default. Nothing was written.`)
+  }
+  const agent = BEHAVIOUR_AGENTS.find((name) => name === options.agent)
+  if (agent === undefined) throw new CliError(`--agent ${options.agent} names no agent the behaviour specs run on; pass ${choices}. Nothing was written.`)
+  if (agent === 'codex') {
+    throw new CliError('--agent codex is not available yet: the generated specs have been measured on Claude Code only (RFC 0033 §13.9). Pass --agent claude-code. Nothing was written.')
+  }
+  return agent
+}
+
 /** Only what the manifest does not declare, so a rerun on an app that has Playwright adds axe alone. */
-async function installDevPackages(cwd: string, install: boolean): Promise<void> {
+async function installDevPackages(cwd: string, install: boolean, behaviours: boolean): Promise<void> {
+  const wanted = [
+    ...DEV_PACKAGES.map((name) => ({ name, range: cliDependencyRange('devDependencies', name) })),
+    ...(behaviours ? [...BEHAVIOUR_DEV_PACKAGES.map((name) => ({ name, range: cliDependencyRange('devDependencies', name) })), CLAUDE_CODE_ADAPTER] : []),
+  ]
   const missing: string[] = []
-  for (const name of DEV_PACKAGES) {
+  for (const { name, range } of wanted) {
     // An unreadable manifest answers null; installing then is what the user asked for.
-    if ((await appDependsOn(cwd, name)) !== true) missing.push(`${name}@${cliDependencyRange('devDependencies', name)}`)
+    if ((await appDependsOn(cwd, name)) !== true) missing.push(`${name}@${range}`)
   }
   if (missing.length === 0) return
   if (install) await runCommand('bun', ['add', '-d', ...missing], { cwd })
@@ -104,6 +158,8 @@ async function installDevPackages(cwd: string, install: boolean): Promise<void> 
 
 export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Promise<AddBrowserTestsResult> {
   assertCwdUnsupported(options, 'guren add browser-tests')
+  const agent = behaviourAgent(options)
+  const scripts: Script[] = [BROWSER_TEST_SCRIPT, ...(agent ? BEHAVIOUR_SCRIPTS : [])]
   const cwd = process.cwd()
   await assertNotApiOnly(cwd, {
     does: 'guren add browser-tests drives the Inertia pages of the app in a browser',
@@ -114,35 +170,48 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
   const [map, users, manifest, database, locale] = await Promise.all([
     (options.loadMap ?? loadBrowserMap)(cwd),
     findDeclaredTable(cwd, 'users'),
-    readManifest(cwd, options.force === true),
+    readManifest(cwd, scripts, options.force === true),
     readIfExists(cwd, 'config/database.ts'),
     readAppLocale(cwd),
   ])
   const account = passwordSignIn(users, map)
   // The closing browser:map run, written nowhere: its refusals (a slug two plans share, a spec of
   // the author's at a generated path, broken markers) come before anything else is written.
-  await runBrowserMap({ cwd, write: false, map, specs: { signIn: account !== undefined, accessibility: true } })
+  await runBrowserMap({
+    cwd, write: false, map,
+    specs: { signIn: account !== undefined, accessibility: true },
+    ...(agent ? { behaviours: { signIn: account !== undefined } } : {}),
+  })
 
+  const pinned = locale.kind === 'locale' ? locale.locale : undefined
   const files: ScaffoldFileEntry[] = [
-    pinConfigLocale(scaffoldTemplateFile('browser-tests', BROWSER_TESTS_CONFIG), locale.kind === 'locale' ? locale.locale : undefined),
+    pinConfigLocale(scaffoldTemplateFile('browser-tests', BROWSER_TESTS_CONFIG), pinned),
     scaffoldTemplateFile('browser-tests', 'tests/browser/support.ts'),
     scaffoldTemplateFile('browser-tests', A11Y_OPTIONS_FILE),
     ...(account && users
       ? [scaffoldTemplateFile('browser-tests', BROWSER_TESTS_SETUP), { path: BROWSER_SEEDER_FILE, contents: buildBrowserSeeder(users.dialect, account) }]
       : []),
+    ...(agent
+      ? [
+          pinConfigLocale(scaffoldTemplateFile('browser-tests', BEHAVIOURS_CONFIG), pinned),
+          scaffoldTemplateFile('browser-tests', BEHAVIOURS_GIVEN_FILE),
+          ...(account ? [scaffoldTemplateFile('browser-tests', BEHAVIOURS_SETUP)] : []),
+        ]
+      : []),
   ]
   const created = await writeScaffoldFiles(files, { force: options.force, overwritten: options.overwritten, skipExisting: true })
-  if (locale.kind === 'unknown' && created.includes(resolve(cwd, BROWSER_TESTS_CONFIG))) {
-    consola.warn(`The app's default locale could not be read from createApp({ i18n }), so ${BROWSER_TESTS_CONFIG} sends en. If the app falls back to another locale, set LOCALE there; the plan specs fail until it matches.`)
+  const unpinned = [BROWSER_TESTS_CONFIG, BEHAVIOURS_CONFIG].filter((config) => created.includes(resolve(cwd, config)))
+  if (locale.kind === 'unknown' && unpinned.length > 0) {
+    consola.warn(`The app's default locale could not be read from createApp({ i18n }), so ${unpinned.join(' and ')} send${unpinned.length > 1 ? '' : 's'} en. If the app falls back to another locale, set LOCALE there; the plan specs fail until it matches.`)
   }
 
   if (manifest) {
-    manifest.scripts = { ...manifest.scripts, [BROWSER_TEST_SCRIPT.name]: BROWSER_TEST_SCRIPT.command }
+    manifest.scripts = { ...manifest.scripts, ...Object.fromEntries(scripts.map((script) => [script.name, script.command])) }
     await writeFile(resolve(cwd, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
   } else {
-    consola.warn(`package.json not found; add "${BROWSER_TEST_SCRIPT.name}": "${BROWSER_TEST_SCRIPT.command}" to its scripts by hand.`)
+    consola.warn(`package.json not found; add ${scripts.map((script) => `"${script.name}": "${script.command}"`).join(' and ')} to its scripts by hand.`)
   }
-  for (const entry of GITIGNORE_ENTRIES) await ensureGitignoreEntry(entry)
+  for (const entry of [...GITIGNORE_ENTRIES, ...(agent ? BEHAVIOUR_GITIGNORE_ENTRIES : [])]) await ensureGitignoreEntry(entry)
   if (account) {
     await appendEnvEntry(
       'BROWSER_TEST_PASSWORD',
@@ -150,7 +219,7 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
       { declare: { secret: true } },
     )
   }
-  await installDevPackages(cwd, options.install ?? true)
+  await installDevPackages(cwd, options.install ?? true, agent !== undefined)
 
   const mapped = await runBrowserMap({ cwd, write: true, map })
   return {
@@ -159,7 +228,10 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
       changed: mapped.changed, removed: mapped.removed,
       ...(mapped.specsHeld ? { held: mapped.specsHeld } : {}),
       ...(mapped.accessibilityOff ? { accessibilityOff: mapped.accessibilityOff } : {}),
+      ...(mapped.behavioursOff ? { behavioursOff: mapped.behavioursOff } : {}),
+      ...(mapped.unlabelledInputs ? { unlabelledInputs: mapped.unlabelledInputs } : {}),
     },
+    ...(agent ? { behaviours: agent } : {}),
     signIn: account !== undefined,
     map,
     seedsOnBoot: database?.includes('seedOnBoot') === true,

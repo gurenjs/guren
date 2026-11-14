@@ -37,7 +37,7 @@ describe('cooldownExclusions', () => {
 })
 
 describe('scaffoldThirdPartyRanges', () => {
-  it('reads the templates, the database drivers, guren add ai and the scaffolded @guren packages', async () => {
+  it('reads the templates, the database drivers, what guren add installs and the scaffolded @guren packages', async () => {
     const ranges = await scaffoldThirdPartyRanges(await templateManifests())
     const sources = (name: string) => ranges.filter((entry) => entry.name === name).map((entry) => entry.source)
 
@@ -45,6 +45,9 @@ describe('scaffoldThirdPartyRanges', () => {
     expect(sources('mysql2')).toContain('create-guren-app --db mysql')
     expect(sources('ai')).toContain('guren add ai')
     expect(sources('@ai-sdk/anthropic')).toEqual(['guren add ai'])
+    for (const name of ['e2e', '@e2e-dev/web', '@e2e-dev/acp', '@agentclientprotocol/claude-agent-acp']) {
+      expect(sources(name)).toEqual(['guren add browser-tests --behaviours'])
+    }
     expect(sources('hono')).toContain('@guren/server')
     expect(ranges.some((entry) => entry.name.startsWith('@guren/'))).toBe(false)
   })

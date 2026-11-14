@@ -376,6 +376,25 @@ describe('the spec files', () => {
     }
   })
 
+  test('a blueprint about to write the files and install the runner is answered as if the four conditions held', async () => {
+    const workspace = await createTempWorkspace('guren-browser-map-behaviours-planned-')
+    try {
+      const plan = planOf([STORE])
+      const ask = (): ReturnType<typeof runBrowserMap> => runBrowserMap({ cwd: workspace.dir, write: false, map: mapOf(plan), plans: [{ file: FILE, plan }], behaviours: { signIn: true } })
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': '{ "name": "app" }\n' })
+
+      const asked = await ask()
+      expect(asked.behavioursOff).toBeUndefined()
+      expect(asked.changed).toContain(SPEC)
+      expect(await Bun.file(join(workspace.dir, SPEC)).exists()).toBe(false)
+
+      await writeWorkspaceFiles(workspace.dir, { [SPEC]: '// mine\n' })
+      await expect(ask()).rejects.toThrow(`${SPEC}: it has no generated header, so it is yours`)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   test('browser:map refuses an author\'s spec that differs from a generated one only by the case of its suffix', async () => {
     const workspace = await createTempWorkspace('guren-browser-map-behaviours-case-')
     try {

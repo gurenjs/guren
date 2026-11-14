@@ -1095,6 +1095,12 @@ devDependencies (it needs them to typecheck the config template). A new version
 reaches an app when `@guren/cli` moves them, in a release whose changeset says
 whether recordings have to be made again.
 
+**Amended in implementation:** the adapter is installed at `^0.107.0`, the
+version the measurements ran on. No template imports it, so `@guren/cli` does
+not declare it and the blueprint holds the range. The release check that every
+range a scaffold installs has cleared the three-day gate (RFC 0039 §2) reads
+these four, so no release ships a pin an app's own gate would refuse.
+
 **No runtime dependency.** No `@guren/*` package depends on any of these at
 run time, and Guren's own code still calls no model. The runner asks the
 developer's coding agent, under that agent's login.
@@ -1132,7 +1138,10 @@ item is measured. It writes, once:
   from the shell adds the name to `inheritEnv` in this file, which is the
   author's after it is written. It also parses the names the app's env files
   set, deletes each from `process.env`, and passes each to the executor as an
-  empty string, since Bun would otherwise load them into the agent (§13.7);
+  empty string, since Bun would otherwise load them into the agent (§13.7).
+  **Amended in implementation:** `NODE_ENV`, `PATH` and `HOME` are left as they
+  are when an env file sets them: the app's command inherits the first, and
+  the adapter does not start without the other two;
 - `tests/browser/behaviours/auth.setup.e2e.ts`, on the same evidence of a
   password sign-in as §6, saving the session `browser`;
 - `tests/browser/behaviours/given.ts` (author-owned, like `a11y.ts`):
@@ -1345,9 +1354,16 @@ behaviour's `actor` means is still Open Question 5.
   files again (§13.1); the empty value above does. The runner's
   own `E2E_USER_BROWSER_PASSWORD` override is not supported: it changes what
   is typed and not what is seeded.
-- With the password unset the signed-in tests are skipped with that reason and
-  no default is seeded (§6); the config then registers no credential, since
-  the runner refuses a password under six characters when it loads.
+- With the password unset ~~the signed-in tests are skipped with that reason
+  and~~ no default is seeded (§6); the config then registers no credential,
+  since the runner refuses a password under six characters when it loads.
+  **Amended in implementation:** the runner refuses `test.skip` inside a setup
+  test, since other tests depend on its session. The setup therefore fails
+  naming `BROWSER_TEST_PASSWORD`, the runner skips every test that needs the
+  session with the cause `setup-failed`, and the run exits 1. A password
+  shorter than six characters is handled the same way, so the config still
+  loads. Measured on the measurement app: the setup failed, the four signed-in
+  tests were skipped for it, and the run exited 1.
 - A behaviour's input is the plan's. It is committed with the plan and with
   its `TestApp` test, the spec passes it to the agent as ordinary parameters,
   and a recording stores what was typed. A plan therefore holds test values

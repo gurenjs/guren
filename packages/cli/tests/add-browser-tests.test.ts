@@ -1,13 +1,17 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { consola } from 'consola'
 
-import { addBrowserTests, BROWSER_TEST_SCRIPT, CONFIG_LOCALE_LINE, pinConfigLocale } from '../src/add-browser-tests'
+import {
+  addBrowserTests, BEHAVIOUR_DEV_PACKAGES, BEHAVIOUR_SCRIPTS, behaviourAgent, BROWSER_TEST_SCRIPT, CLAUDE_CODE_ADAPTER, CONFIG_LOCALE_LINE, pinConfigLocale,
+} from '../src/add-browser-tests'
 import { readAppLocale, type AppLocaleReading } from '../src/app-locale'
+import { BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP } from '../src/browser-behaviour-specs'
 import { isParameterless, type BrowserFeature, type BrowserMap, type BrowserMapRoute, type BrowserMapView } from '../src/browser-map'
 import { runBrowserMap } from '../src/browser-map-files'
 import { BROWSER_RUN_NAME } from '../src/browser-record'
+import { cliDependencyRange } from '../src/cli-manifest'
 import {
   A11Y_OPTIONS_FILE, A11Y_SPEC_FILE, BROWSER_ACCOUNT_EMAIL, BROWSER_SEEDER_FILE, BROWSER_TESTS_CONFIG, buildA11ySpec, buildBrowserSeeder, buildPlanSpecs,
   buildSmokeSpec, GENERATED_HEADER, LOCALE_COOKIE, SMOKE_SPEC_FILE,
@@ -336,6 +340,55 @@ describe('what the templates restate', () => {
   })
 })
 
+describe('what the behaviour templates restate', () => {
+  test('the config names the account the seeder writes and sends the locale add browser-tests writes', async () => {
+    const config = await template(BEHAVIOURS_CONFIG)
+    expect(config).toContain(`const BROWSER_ACCOUNT_EMAIL = '${BROWSER_ACCOUNT_EMAIL}'`)
+    expect(config.split(CONFIG_LOCALE_LINE)).toHaveLength(2)
+    expect(config).toContain('engine: web({ locale: LOCALE }),')
+  })
+
+  test('the config starts the app through browser:serve on a port of its own and attaches to no server', async () => {
+    const config = await template(BEHAVIOURS_CONFIG)
+    const port = /const PORT = (\d+)\n/u.exec(config)?.[1]
+    expect(port).toBeDefined()
+    expect(/const PORT = (\d+)\n/u.exec(await template(BROWSER_TESTS_CONFIG))?.[1]).not.toBe(port)
+    expect(config).toContain("args: ['guren', 'browser:serve', '--port', String(PORT)],")
+    expect(config).toContain('reuseExisting: false,')
+    // browser:serve refuses production on the caller's NODE_ENV, which the runner passes only when named.
+    expect(config).toContain("inheritEnv: ['NODE_ENV'],")
+  })
+
+  test('the config hands the agent every env-file name empty, and the password with them', async () => {
+    const config = await template(BEHAVIOURS_CONFIG)
+    expect(config).toContain("const emptied = Object.fromEntries([...fromFiles.keys(), 'BROWSER_TEST_PASSWORD'].map((name) => [name, '']))")
+    expect(config).toContain("executor: claudeCode({ model: 'sonnet', env: emptied })")
+    expect(config).toContain('delete process.env.BROWSER_TEST_PASSWORD')
+  })
+
+  test('the config and the scripts name the tests and the config file browser:map checks for', async () => {
+    expect(await template(BEHAVIOURS_CONFIG)).toContain("tests: 'tests/browser/behaviours/**/*.e2e.ts',")
+    for (const script of BEHAVIOUR_SCRIPTS) expect(script.command).toContain(`bunx --bun e2e run --config ${BEHAVIOURS_CONFIG}`)
+    expect(BEHAVIOUR_SCRIPTS.map((script) => script.command.endsWith(' --strict-cache'))).toEqual([false, true])
+  })
+
+  test('the setup signs in through the labels make:auth writes and clears the locale cookie', async () => {
+    const setup = await template(BEHAVIOURS_SETUP)
+    for (const label of ['Email', 'Password']) expect(setup).toContain(`screen.getByLabel('${label}')`)
+    expect(setup).toContain("screen.getByRole('button', 'Sign in')")
+    expect(setup).toContain(`await browser.clearCookies({ name: '${LOCALE_COOKIE}' })`)
+    expect(setup).toContain("test.setup('sign in as the browser account', { sessions: ['browser'] }")
+    expect(setup).toContain("credentials.user('browser')")
+    expect(await template(BEHAVIOURS_CONFIG)).toContain('credentials: { browser: {')
+  })
+
+  test('given.ts exports what a generated spec imports', async () => {
+    const given = await template(BEHAVIOURS_GIVEN_FILE)
+    expect(given).toContain('export interface GivenFixtures {')
+    expect(given).toContain('export const given: Record<string, (fixtures: GivenFixtures) => Promise<Record<string, string> | void>> = {')
+  })
+})
+
 const USERS_SCHEMA = `import { pgTable, serial, text } from '@guren/orm/drizzle/pg'
 
 export const users = pgTable('users', {
@@ -468,6 +521,127 @@ describe('guren add browser-tests', () => {
     try {
       await writeWorkspaceFiles(workspace.dir, { 'package.json': '{ "name": "api" }\n', 'routes/api.ts': 'export default () => {}\n' })
       await expect(addBrowserTests({ install: false, loadMap: async () => mapOf([]) })).rejects.toThrow('no @guren/inertia-client dependency')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('guren add browser-tests --behaviours', () => {
+  test('needs an agent, since whose login runs the steps has no default', () => {
+    expect(behaviourAgent({})).toBeUndefined()
+    expect(behaviourAgent({ behaviours: true, agent: 'claude-code' })).toBe('claude-code')
+    expect(() => behaviourAgent({ behaviours: true })).toThrow('--behaviours needs --agent claude-code or --agent codex')
+    expect(() => behaviourAgent({ agent: 'claude-code' })).toThrow('it goes with --behaviours')
+    expect(() => behaviourAgent({ behaviours: true, agent: 'codex' })).toThrow('--agent codex is not available yet')
+    expect(() => behaviourAgent({ behaviours: true, agent: 'cursor' })).toThrow('--agent cursor names no agent')
+  })
+
+  test('refuses an agent it cannot set up before writing anything', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-agent-')
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST })
+      await expect(addBrowserTests({ install: false, behaviours: true, agent: 'codex', loadMap: async () => mapOf([POSTS]) })).rejects.toThrow('Nothing was written')
+      expect(await readFile(join(workspace.dir, 'package.json'), 'utf8')).toBe(INERTIA_MANIFEST)
+      expect(await Bun.file(join(workspace.dir, BROWSER_TESTS_CONFIG)).exists()).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('writes the config, given.ts, both scripts and the ignores beside the Playwright files, and names what to install', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-')
+    const info = spyOn(consola, 'info').mockImplementation((() => {}) as never)
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST })
+      const result = await addBrowserTests({ install: false, behaviours: true, agent: 'claude-code', loadMap: async () => mapOf([POSTS]) })
+
+      expect(result.behaviours).toBe('claude-code')
+      for (const file of [BROWSER_TESTS_CONFIG, BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE]) {
+        expect(await readFile(join(workspace.dir, file), 'utf8')).toBe(await template(file))
+      }
+      // No password sign-in, so no setup that would fail every run.
+      expect(await Bun.file(join(workspace.dir, BEHAVIOURS_SETUP)).exists()).toBe(false)
+      const manifest = JSON.parse(await readFile(join(workspace.dir, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
+      for (const script of [BROWSER_TEST_SCRIPT, ...BEHAVIOUR_SCRIPTS]) expect(manifest.scripts[script.name]).toBe(script.command)
+      // The negation has to follow the pattern it re-includes from, and `.e2e/` would hide the recordings from it.
+      const ignored = (await readFile(join(workspace.dir, '.gitignore'), 'utf8')).split('\n')
+      expect(ignored.indexOf('.e2e/*')).toBeGreaterThanOrEqual(0)
+      expect(ignored.indexOf('!.e2e/cache/')).toBeGreaterThan(ignored.indexOf('.e2e/*'))
+      expect(ignored).not.toContain('.e2e/')
+
+      const install = info.mock.calls.map((call) => String(call[0])).find((line) => line.startsWith('Run: bun add -d '))
+      for (const name of BEHAVIOUR_DEV_PACKAGES) expect(install).toContain(` ${name}@${cliDependencyRange('devDependencies', name)}`)
+      expect(install).toContain(` ${CLAUDE_CODE_ADAPTER.name}@${CLAUDE_CODE_ADAPTER.range}`)
+      // Not installed (--no-install), so no behaviour spec that would fail to import.
+      expect(result.mapped.behavioursOff).toBe('e2e and @e2e-dev/web are not in package.json')
+    } finally {
+      info.mockRestore()
+      await workspace.cleanup()
+    }
+  })
+
+  test('pins the runner to exact versions, since a patch may give every recording a new key', () => {
+    for (const name of BEHAVIOUR_DEV_PACKAGES) expect(cliDependencyRange('devDependencies', name)).toMatch(/^\d+\.\d+\.\d+$/u)
+  })
+
+  test('adds the sign-in setup on a password sign-in, and on an app that already has the Playwright files', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-auth-')
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST, 'db/schema.ts': USERS_SCHEMA })
+      const loadMap = async (): Promise<BrowserMap> => mapOf([POSTS, AUTH])
+      await addBrowserTests({ install: false, loadMap })
+      expect(await Bun.file(join(workspace.dir, BEHAVIOURS_CONFIG)).exists()).toBe(false)
+
+      const result = await addBrowserTests({ install: false, behaviours: true, agent: 'claude-code', loadMap })
+      expect(result.signIn).toBe(true)
+      expect(result.created.map((file) => relative(process.cwd(), file)).sort()).toEqual([BEHAVIOURS_CONFIG, BEHAVIOURS_SETUP, BEHAVIOURS_GIVEN_FILE].sort())
+      expect(await readFile(join(workspace.dir, BEHAVIOURS_SETUP), 'utf8')).toBe(await template(BEHAVIOURS_SETUP))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('leaves the author\'s given.ts as it is on a second run', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-rerun-')
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST, [BEHAVIOURS_GIVEN_FILE]: '// mine\n' })
+      await addBrowserTests({ install: false, behaviours: true, agent: 'claude-code', loadMap: async () => mapOf([POSTS]) })
+      expect(await readFile(join(workspace.dir, BEHAVIOURS_GIVEN_FILE), 'utf8')).toBe('// mine\n')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('refuses a test:behaviours script running something else, writing nothing', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-script-')
+    try {
+      await seedInertiaApp(workspace.dir)
+      const manifest = '{ "name": "app", "scripts": { "test:behaviours:ci": "e2e run" } }\n'
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': manifest })
+      await expect(addBrowserTests({ install: false, behaviours: true, agent: 'claude-code', loadMap: async () => mapOf([POSTS]) })).rejects.toThrow('already has a test:behaviours:ci script')
+      expect(await readFile(join(workspace.dir, 'package.json'), 'utf8')).toBe(manifest)
+      expect(await Bun.file(join(workspace.dir, BEHAVIOURS_CONFIG)).exists()).toBe(false)
+      // Without the option the same manifest is no obstacle: the script is none of the Playwright blueprint's.
+      await addBrowserTests({ install: false, loadMap: async () => mapOf([POSTS]) })
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('writes the behaviour specs once the app declares the runner', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-declared-')
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, {
+        'package.json': '{ "name": "app", "dependencies": { "@guren/inertia-client": "*" }, "devDependencies": { "e2e": "0.23.1", "@e2e-dev/web": "0.16.0" } }\n',
+      })
+      const result = await addBrowserTests({ install: false, behaviours: true, agent: 'claude-code', loadMap: async () => mapOf([POSTS]) })
+      expect(result.mapped.behavioursOff).toBeUndefined()
     } finally {
       await workspace.cleanup()
     }

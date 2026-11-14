@@ -17,6 +17,7 @@ import {
 } from './browser-map'
 import {
   BEHAVIOUR_PACKAGES, BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP, buildBehaviourSpecs, GENERATED_BEHAVIOURS_DIR,
+  type BehaviourSpecOptions,
 } from './browser-behaviour-specs'
 import {
   A11Y_OPTIONS_FILE, A11Y_SPEC_FILE, AXE_PACKAGE, BROWSER_TESTS_CONFIG, BROWSER_TESTS_SETUP, buildA11ySpec, buildPlanSpecs, buildSmokeSpec,
@@ -138,16 +139,19 @@ const HELD = 'the browser map is incomplete, a plan could not be read, or the pl
 /**
  * The generated specs a run writes, and the specs on disk beside them. The Playwright specs: none
  * until the browser-tests config exists, or as `planned` says when `add browser-tests` asks before
- * writing that config. The behaviour specs: on `behavioursOff()`'s evidence, whatever that config.
+ * writing that config. The behaviour specs: on `behavioursOff()`'s evidence, whatever that config,
+ * or as `plannedBehaviours` says when `add browser-tests --behaviours` asks before it writes and installs.
  */
 async function generatedSpecs(
   cwd: string,
   map: BrowserMap,
   planned: SpecOptions | undefined,
   plans: readonly ApprovedPlanInput[] | undefined,
+  plannedBehaviours: BehaviourSpecOptions | undefined,
 ): Promise<GeneratedSpecs> {
   const playwright = planned !== undefined || await pathExists(join(cwd, BROWSER_TESTS_CONFIG))
-  const [behaviours, behavioursOnDisk] = await Promise.all([behavioursOff(cwd), readExisting(cwd, GENERATED_BEHAVIOURS_DIR, '.e2e.ts')])
+  const behaviours: { off?: string; asked: boolean } = plannedBehaviours ? { asked: true } : await behavioursOff(cwd)
+  const behavioursOnDisk = await readExisting(cwd, GENERATED_BEHAVIOURS_DIR, '.e2e.ts')
   const leftOnDisk = [...behavioursOnDisk.values()].some((content) => content.startsWith(GENERATED_HEADER))
   const behavioursNoted = behaviours.off !== undefined && (behaviours.asked || leftOnDisk)
   if (!playwright && behaviours.off !== undefined && !behavioursNoted) return { outputs: new Map(), onDisk: new Map() }
@@ -177,7 +181,7 @@ async function generatedSpecs(
     const read = plans ? { plans, unreadable: [] } : await approvedPlans(cwd)
     const files = read.plans.map((entry) => entry.file).sort(compareStrings)
     if (read.unreadable.length > 0 || files.join('\0') !== map.plans.join('\0')) return { outputs: new Map(), onDisk: new Map(), held: HELD }
-    const written = buildBehaviourSpecs(map, read.plans, { signIn: await pathExists(join(cwd, BEHAVIOURS_SETUP)) }, sharedSlugs)
+    const written = buildBehaviourSpecs(map, read.plans, plannedBehaviours ?? { signIn: await pathExists(join(cwd, BEHAVIOURS_SETUP)) }, sharedSlugs)
     for (const entry of written.files) outputs.set(entry.path, entry.contents)
     unlabelled = written.unlabelled
   }
@@ -190,7 +194,15 @@ async function generatedSpecs(
 }
 
 /** Every document as a run would leave it; refuses, writing nothing, when any document's markers are unsafe. */
-export async function runBrowserMap(options: { cwd: string; write: boolean; map?: BrowserMap; plans?: readonly ApprovedPlanInput[]; specs?: SpecOptions }): Promise<BrowserMapRun> {
+export async function runBrowserMap(options: {
+  cwd: string
+  write: boolean
+  map?: BrowserMap
+  plans?: readonly ApprovedPlanInput[]
+  specs?: SpecOptions
+  /** The behaviour specs as they will be once the blueprint has written its files and installed the runner. */
+  behaviours?: BehaviourSpecOptions
+}): Promise<BrowserMapRun> {
   const cwd = resolve(options.cwd)
   const [loaded, existing] = await Promise.all([
     options.map ? { map: options.map, plans: options.plans } : loadMapInputs(cwd),
@@ -217,7 +229,7 @@ export async function runBrowserMap(options: { cwd: string; write: boolean; map?
   for (const feature of map.features) add(feature.file, renderFeatureDoc(existing.get(feature.file), feature, map))
   add(BROWSER_MAP_INDEX, renderIndexDoc(existing.get(BROWSER_MAP_INDEX), map, orphans))
 
-  const specs = await generatedSpecs(cwd, map, options.specs, loaded.plans)
+  const specs = await generatedSpecs(cwd, map, options.specs, loaded.plans, options.behaviours)
   // A spec without the header is the author's, whatever directory it sits in: never rewritten or removed.
   const generated = (content: string): boolean => content.startsWith(GENERATED_HEADER)
   // On a case-insensitive filesystem a name differing only by case is the same file.
