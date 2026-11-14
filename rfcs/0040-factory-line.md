@@ -422,9 +422,15 @@ whenever the change edits a page or a route that renders one.
 **Behaviour specs (RFC 0033 §13, proposed).** If that amendment is accepted
 and the application has `e2e.browser.config.ts`, the evidence also runs
 `test:behaviours:ci` and counts the cases of the runner's `.e2e/report.json`
-in the same aggregate. A case that does not pass there (a step that fails to
-replay, `REPLAY_STALE`, no recording under `--strict-cache`, an outcome the
-locators do not find) is a hold and never makes `ok` false. §13 keeps
+in the same aggregate. The report is the runner's own document, so its
+`schemaVersion` is checked first (`report-1` in the version §13 pins), and one
+the CLI does not know is `unjudged`, never read on a guess. A case that does
+not pass there is a hold and never makes `ok` false. It shows in three ways:
+`REPLAY_STALE`, a recording that no longer replays; `MODEL_PROVIDER_FAILED`,
+which in CI means a step with no recording, since by the runner's
+documentation such a step runs live even under `--strict-cache` and CI has no
+login (the fix is to commit the recording, not to give CI a login); and an
+outcome the locators do not find. §13 keeps
 behaviour specs out of every gate, and this keeps to it: the change is not
 failed, it is read by a person. A stale recording means a page a behaviour
 starts on changed and nobody recorded it again. These specs are generated from
