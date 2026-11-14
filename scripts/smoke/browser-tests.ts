@@ -74,7 +74,8 @@ type ActionInput = NonNullable<PlanInput['controllers']>[number]['actions'][numb
 
 /**
  * Every element `existing`: the plan describes what `add resource posts` wrote, so it approves
- * against the app as it stands. A field's label is its name, which is what the scaffold writes.
+ * against the app as it stands. A field's label is what the scaffolded `<Field>` shows with no
+ * translation: `humanizeFieldName()` of its name in `@guren/inertia-client/forms`.
  */
 function measurementPlan(): PlanInput {
   const existing = { kind: 'existing' } as const
@@ -106,7 +107,7 @@ function measurementPlan(): PlanInput {
       },
       {
         id: 'view.posts.new', change: existing, page: 'posts/New', purpose: 'Writes a post.', props: [],
-        form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [{ field: 'title', label: 'title', input: 'text' }] },
+        form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [{ field: 'title', label: 'Title', input: 'text' }] },
         actions: [{ label: 'Create', route: 'route.posts.store' }], states: {},
       },
     ],
