@@ -11,7 +11,8 @@ function factLine(fact: ChangeFact): string {
 
 export function renderChangeLane(report: ChangeLaneReport): string {
   const lines = [`Change ${short(report.mergeBase)}..${short(report.head)}: floor ${report.floor}`]
-  if (report.base !== report.mergeBase) lines.push(`  read from the merge base of ${short(report.base)} and the head`)
+  if (report.mergeBase === report.head && report.base !== report.head) lines.push('  the head is an ancestor of the base, so no commit is ahead of it: were --base and --head swapped?')
+  else if (report.base !== report.mergeBase) lines.push(`  read from the merge base of ${short(report.base)} and the head`)
   if (report.facts.length === 0) lines.push('', 'No path changed.')
   for (const lane of ['high', 'medium', 'low'] satisfies Lane[]) {
     const facts = report.facts.filter((fact) => fact.lane === lane)

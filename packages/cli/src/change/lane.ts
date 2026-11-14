@@ -5,11 +5,15 @@
  */
 import { posix } from 'node:path'
 
+import type { File } from '@babel/types'
+
 import { formatDestructiveFinding, judgeMigrations, readMigrationSources } from '@guren/orm/internal/migration-guard'
 
 import { parseSourceFile } from '../parse-cache'
 import { bracketedTokens, isAcceptanceId } from '../plan/acceptance-status'
-import { toPosixRelative } from '../discovery'
+import { topLevelDeclaration } from '../ast-walk'
+import { TEST_FILE_PATTERN, toPosixRelative } from '../discovery'
+import { extractClassDeclaration } from '../model-parser'
 import { isPlanRevisionsDirName, planSlug } from '../plan/beside'
 import { readPolicyAbilities } from '../plan/policy-abilities'
 import { discoverPlanFiles, isPlanFileName, isPlanInput } from '../plan-check'
@@ -79,17 +83,22 @@ const AMBIENT: ReadonlyArray<{ target: string; test: (path: string) => boolean }
   { target: 'translation catalogs', test: (path) => path.startsWith('lang/') },
 ]
 const AUDIT_IGNORE_MARKER = 'guren-audit-ignore'
+const AUDIT_CONFIG_FILES = new Set(['config/audit.ts', 'config/audit.js', 'config/audit.mjs'])
 const ACCEPTANCE_NEEDLE = '[AC-'
 
 const MODULE = String.raw`(?:modules/[^/]+/)?`
-const TEST_FILE = /\.(?:test|spec|browser|e2e)\.[cm]?[jt]sx?$/
+// What a run collects, wider than discovery's `.test.` rule: bun also takes `_test`, `.spec` and `_spec`.
+const TEST_FILE = /[._](?:test|spec)\.[cm]?[jt]sx?$/
+const BROWSER_SPEC = new RegExp(`^${MODULE}tests/.+\\.browser\\.[cm]?[jt]s$`)
+const TESTS_DIR = new RegExp(`^${MODULE}tests/`)
 const SOURCE_FILE = /\.[cm]?[jt]sx?$/
 const SCHEMA_FILE = new RegExp(`^${MODULE}db/schema\\.ts$`)
-const POLICY_FILE = new RegExp(`^${MODULE}app/Policies/[^/]+\\.[cm]?[jt]s$`)
+const POLICY_FILE = new RegExp(`^${MODULE}app/Policies/.+\\.[cm]?[jt]s$`)
 const SECURITY_SURFACE = new RegExp(`^${MODULE}(?:routes(?:/.+)?\\.[cm]?[jt]s|app/Policies/|app/Http/(?:Controllers|Middleware)/)`)
 
-const isTestFile = (path: string): boolean => TEST_FILE.test(path)
-const isPolicyFile = (path: string): boolean => POLICY_FILE.test(path) && !isTestFile(path)
+const isTestFile = (path: string): boolean => TEST_FILE.test(path) || BROWSER_SPEC.test(path)
+// The files `discoverPolicyFiles()` reads: every source under the directory but a `.test.` sibling.
+const isPolicyFile = (path: string): boolean => POLICY_FILE.test(path) && !TEST_FILE_PATTERN.test(path)
 const isPlanRecord = (path: string): boolean => isPlanInput(path) || path.split('/').slice(0, -1).some(isPlanRevisionsDirName)
 const isAmbient = (path: string): boolean => AMBIENT.some((ambient) => ambient.test(path))
 const moduleOf = (path: string): string | null => /^modules\/([^/]+)\//.exec(path)?.[1] ?? null
@@ -146,6 +155,23 @@ function tableDifferences(before: SchemaTable, after: SchemaTable): string[] {
   return differences
 }
 
+/** A suppression covers its own line and the next, so one is told from another by both. */
+function auditSuppressions(text: string | null): string[] {
+  const lines = (text ?? '').split('\n')
+  return lines.flatMap((line, index) => (line.includes(AUDIT_IGNORE_MARKER) ? [`${line.trim()}\n${lines[index + 1]?.trim() ?? ''}`] : []))
+}
+
+/** The policies a file declares at its top level: classes, and `definePolicy()` definitions. */
+function policyNames(ast: File): string[] {
+  return ast.program.body.flatMap((node) => {
+    const declared = extractClassDeclaration(node)
+    if (declared) return [declared.id?.name ?? 'default']
+    return (topLevelDeclaration(node)?.declarations ?? []).flatMap((declarator) =>
+      declarator.id.type === 'Identifier' && declarator.init?.type === 'CallExpression' && declarator.init.callee.type === 'Identifier' && declarator.init.callee.name === 'definePolicy' ? [declarator.id.name] : [],
+    )
+  })
+}
+
 /**
  * Judges a resolved change from its two revisions. Every changed path ends in at least one fact,
  * and the floor is the highest lane among the facts and the readers that could not read.
@@ -163,63 +189,72 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   const touches = (entry: ChangedPath, test: (path: string) => boolean): boolean => Object.values(sides(entry)).some(test)
 
   const isGatePath = (path: string): boolean => GATE_FILES.has(path) || GATE_PREFIXES.some((prefix) => path.startsWith(prefix))
-  // A repository root above the application holds its CI and, in a monorepo, its harness.
-  const outside = change.paths.filter((entry) => entry.outsideApp)
-  for (const entry of outside) {
-    if (touches(entry, isGatePath)) fact([entry], { code: 'gate-input', lane: 'high', evidence: 'path', message: `${entry.path} ${entry.status}, at the repository root: what CI, the gate or the harness runs` })
-  }
-  const elsewhere = outside.filter((entry) => !claimed.has(entry))
-  if (elsewhere.length > 0) fact(elsewhere, { code: 'outside-app', lane: 'medium', evidence: 'path', message: `${elsewhere.length} ${elsewhere.length === 1 ? 'path' : 'paths'} outside the application root, which no reader here judges` })
+  const fromRoot = (entry: ChangedPath, path: string): string => (entry.outsideApp ? path : `${change.appPrefix}${path}`)
+  const readEntry = (entry: ChangedPath, side: ChangeSide, path: string | undefined): Promise<string | null> =>
+    path === undefined ? Promise.resolve(null) : entry.outsideApp ? reader.readOutside(side, path) : reader.read(side, path)
 
   for (const entry of inApp) {
     if (touches(entry, isPlanRecord)) fact([entry], { code: 'plan-record', lane: 'high', evidence: 'path', message: `${entry.path} ${entry.status}: a plan, its approvals, its decision log or its closing document` })
   }
 
-  const manifests = { base: parseManifest(await reader.read('base', 'package.json')), head: parseManifest(await reader.read('head', 'package.json')) }
   const trees = { base: await reader.paths('base'), head: await reader.paths('head') }
-  const scriptFiles = new Set<string>()
-  for (const side of ['base', 'head'] as const) {
-    for (const script of Object.values(scriptsOf(manifests[side]))) {
-      for (const token of script.split(/[\s"'=]+/)) {
-        const path = posix.normalize(token)
-        if (trees.base.has(path) || trees.head.has(path)) scriptFiles.add(path)
+  // From the repository root: the application's manifest, the root's above it, and each one a script enters with `cd` or `--cwd`.
+  const gateManifests = [...new Set([`${change.appPrefix}package.json`, 'package.json'])]
+  const scriptNamed = new Set<string>()
+  const scriptsChanged = new Map<string, string[]>()
+  for (const manifest of gateManifests) {
+    const dir = posix.dirname(manifest) === '.' ? '' : `${posix.dirname(manifest)}/`
+    const [old, now] = [scriptsOf(parseManifest(await reader.readOutside('base', manifest))), scriptsOf(parseManifest(await reader.readOutside('head', manifest)))]
+    const names = [...new Set([...Object.keys(old), ...Object.keys(now)])].filter((name) => old[name] !== now[name])
+    if (names.length > 0) scriptsChanged.set(manifest, names)
+    for (const script of [...Object.values(old), ...Object.values(now)]) {
+      const tokens = script.split(/[\s"'=;|&()<>`]+/).filter((token) => token.length > 0)
+      const entered = tokens.filter((_, index) => ['cd', '--cwd', '-C'].includes(tokens[index - 1] ?? '')).map((token) => `${token.replace(/\/+$/, '')}/`)
+      for (const token of tokens) {
+        for (const from of ['', ...entered]) scriptNamed.add(posix.normalize(`${dir}${from}${token}`))
+      }
+      for (const from of entered) {
+        const nested = posix.normalize(`${dir}${from}package.json`)
+        if (!gateManifests.includes(nested)) gateManifests.push(nested)
       }
     }
   }
-  for (const entry of inApp) {
+  for (const entry of change.paths) {
     if (claimed.has(entry)) continue
-    const named = touches(entry, (path) => scriptFiles.has(path))
+    const named = touches(entry, (path) => scriptNamed.has(fromRoot(entry, path)))
     if (named || touches(entry, isGatePath)) {
-      fact([entry], { code: 'gate-input', lane: 'high', evidence: 'path', message: `${entry.path} ${entry.status}${named ? ': a package.json script names it' : ': what the gate or the harness runs'}` })
+      const why = named ? 'a package.json script names it' : entry.outsideApp ? 'at the repository root, what CI, the gate or the harness runs' : 'what the gate or the harness runs'
+      fact([entry], { code: 'gate-input', lane: 'high', evidence: 'path', message: `${entry.path} ${entry.status}: ${why}` })
     }
   }
 
-  for (const entry of inApp) {
+  const fallbackCode = (entry: ChangedPath): string => (entry.outsideApp ? 'outside-app' : entry.status === 'added' ? 'file-added' : entry.status === 'deleted' ? 'source-removed' : entry.status === 'renamed' ? 'source-renamed' : 'source-edited')
+  for (const entry of change.paths) {
     if (claimed.has(entry) || !touches(entry, (path) => posix.basename(path) === 'package.json')) continue
-    const root = entry.path === 'package.json' && entry.status !== 'renamed'
-    const before = root ? manifests.base : parseManifest(await read('base', sides(entry).base))
-    const after = root ? manifests.head : parseManifest(await read('head', sides(entry).head))
+    const located = Object.values(sides(entry)).map((path) => fromRoot(entry, path))
+    const scripts = [...new Set(located.flatMap((path) => scriptsChanged.get(path) ?? []))]
+    if (scripts.length > 0) fact([entry], { code: 'gate-input', lane: 'high', target: 'package.json scripts', evidence: 'static', message: `scripts changed: ${list(scripts)}` })
+    const before = parseManifest(await readEntry(entry, 'base', sides(entry).base))
+    const after = parseManifest(await readEntry(entry, 'head', sides(entry).head))
     if (before === undefined || after === undefined) {
       unjudged.push({ reader: 'manifest', reason: `${entry.path} does not parse on one side, so its scripts and dependencies were not compared`, lane: 'high', files: [entry.path] })
-      fact([entry], { code: 'source-edited', lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}` })
+      if (!claimed.has(entry)) fact([entry], { code: fallbackCode(entry), lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}` })
       continue
     }
     const differs = (key: string): boolean => JSON.stringify(before?.[key] ?? null) !== JSON.stringify(after?.[key] ?? null)
-    if (root && differs('scripts')) {
-      const [old, now] = [scriptsOf(before), scriptsOf(after)]
-      const names = [...new Set([...Object.keys(old), ...Object.keys(now)])].filter((name) => old[name] !== now[name])
-      fact([entry], { code: 'gate-input', lane: 'high', target: 'package.json scripts', evidence: 'static', message: `scripts changed: ${list(names) || 'the field itself'}` })
-    }
     const dependencies = DEPENDENCY_FIELDS.filter(differs)
     if (dependencies.length > 0) fact([entry], { code: 'dependencies-changed', lane: 'medium', evidence: 'static', message: `${entry.path}: ${list(dependencies)} changed` })
-    const other = [...new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})])].filter((key) => !DEPENDENCY_FIELDS.includes(key) && !(root && key === 'scripts') && differs(key))
+    const gated = located.some((path) => gateManifests.includes(path))
+    const other = [...new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})])].filter((key) => !DEPENDENCY_FIELDS.includes(key) && !(gated && key === 'scripts') && differs(key))
     if (other.length > 0 || !claimed.has(entry)) {
-      fact([entry], { code: entry.status === 'added' ? 'file-added' : entry.status === 'deleted' ? 'source-removed' : 'source-edited', lane: 'medium', evidence: 'static', message: `${entry.path}: ${other.length > 0 ? `${list(other)} changed` : 'no field changed'}` })
+      fact([entry], { code: fallbackCode(entry), lane: 'medium', evidence: 'static', message: `${entry.path}: ${other.length > 0 ? `${list(other)} changed` : 'no field changed'}` })
     }
   }
-  for (const entry of inApp) {
+  for (const entry of change.paths) {
     if (!claimed.has(entry) && touches(entry, (path) => LOCKFILES.has(posix.basename(path)))) fact([entry], { code: 'dependencies-changed', lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}` })
   }
+  const elsewhere = change.paths.filter((entry) => entry.outsideApp && !claimed.has(entry))
+  if (elsewhere.length > 0) fact(elsewhere, { code: 'outside-app', lane: 'medium', evidence: 'path', message: `${elsewhere.length} ${elsewhere.length === 1 ? 'path' : 'paths'} outside the application root, which no reader here judges` })
 
   const migrationDir = (path: string): string | undefined => {
     const dir = posix.dirname(path)
@@ -311,7 +346,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     } else if (wasTest && carried.length > 0 && beforeText !== afterText) {
       const lost = carried.filter((id) => !acceptanceIds(afterText).includes(id))
       fact([entry], { code: 'acceptance-changed', lane: 'high', evidence: 'static', message: `${entry.path}: an acceptance test edited${lost.length > 0 ? `; no longer carries ${list(lost)}` : ''}` })
-    } else if (!wasTest && entry.status === 'added') {
+    } else if (entry.status === 'added' && TESTS_DIR.test(entry.path)) {
       const existing = await idsAtBase()
       const repeated = acceptanceIds(afterText).filter((id) => existing.has(id))
       if (repeated.length > 0) fact([entry], { code: 'file-added', lane: 'medium', evidence: 'static', message: `${entry.path}: a test added under ${list(repeated)}, which an existing test carries` })
@@ -334,7 +369,9 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
       const text = await reader.read(side, path)
       const ast = text === null ? null : parseSourceFile(text, path)
       if (!ast) return `${path} does not parse at the ${side}`
-      const result = readPolicyAbilities(ast, posix.basename(path).replace(/\.[^.]+$/, ''))
+      const declared = policyNames(ast)
+      if (declared.length > 1) return `${path} declares ${declared.length} policies at the ${side} (${list(declared)}) and one is read per file`
+      const result = readPolicyAbilities(ast, declared[0] ?? posix.basename(path).replace(/\.[^.]+$/, ''))
       if ('unreadable' in result) return `${path} at the ${side}: ${result.unreadable}`
       if (result.open) return `${path} at the ${side}: ${result.open}`
       const names = [...result.declared, ...result.fields]
@@ -354,12 +391,20 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
 
   for (const entry of inApp) {
     const { base, head } = sides(entry)
-    if (head === undefined || !SOURCE_FILE.test(head) || isAmbient(head)) continue
-    const count = (text: string | null): number => (text === null ? 0 : text.split(AUDIT_IGNORE_MARKER).length - 1)
-    const after = count(await reader.read('head', head))
-    if (after > 0 && after > count(await read('base', base))) {
-      fact([entry], { code: 'audit-suppressed', lane: 'high', evidence: 'static', message: `${entry.path}: a ${AUDIT_IGNORE_MARKER} the base did not have` })
+    if (touches(entry, (path) => AUDIT_CONFIG_FILES.has(path))) {
+      fact([entry], { code: 'audit-suppressed', lane: 'high', evidence: 'path', message: `${entry.path} ${entry.status}: it holds the audit's ignore list` })
+      continue
     }
+    if (head === undefined || !SOURCE_FILE.test(head) || isAmbient(head)) continue
+    const suppressions = auditSuppressions(await reader.read('head', head))
+    if (suppressions.length === 0) continue
+    const existing = auditSuppressions(await read('base', base))
+    const added = suppressions.filter((suppression) => {
+      const at = existing.indexOf(suppression)
+      if (at !== -1) existing.splice(at, 1)
+      return at === -1
+    })
+    if (added.length > 0) fact([entry], { code: 'audit-suppressed', lane: 'high', evidence: 'static', message: `${entry.path}: a ${AUDIT_IGNORE_MARKER} the base did not have, on ${added.map((suppression) => `\`${suppression.split('\n')[1] || suppression.split('\n')[0]}\``).join(', ')}` })
   }
 
   for (const entry of inApp) {
@@ -370,10 +415,9 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     if (entries.length > 0) fact(entries, { code: 'ambient', lane: 'low', target: ambient.target, evidence: 'path', message: `${entries.length} ${entries.length === 1 ? 'file' : 'files'}: ${ambient.target}` })
   }
 
-  const FALLBACK = { added: 'file-added', modified: 'source-edited', deleted: 'source-removed', renamed: 'source-renamed' } as const
   for (const entry of inApp) {
     if (claimed.has(entry)) continue
-    fact([entry], { code: FALLBACK[entry.status], lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}${entry.oldPath ? ` from ${entry.oldPath}` : ''}` })
+    fact([entry], { code: fallbackCode(entry), lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}${entry.oldPath ? ` from ${entry.oldPath}` : ''}` })
   }
 
   const surface = inApp.filter((entry) => touches(entry, (path) => SECURITY_SURFACE.test(path)))

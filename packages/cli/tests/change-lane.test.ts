@@ -105,6 +105,12 @@ describe('resolveChange', () => {
     await expect(resolveChange(repo, base, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')).rejects.toThrow('is not in this clone')
   })
 
+  test('should refuse a ref whose name reads as a SHA', async () => {
+    const { repo, base } = await createRepo()
+    await git(repo, ['branch', 'deadbeef1'])
+    await expect(resolveChange(repo, 'deadbeef1', base)).rejects.toThrow('is not in this clone')
+  })
+
   test('should refuse two commits that share no history', async () => {
     const { repo, base } = await createRepo()
     await git(repo, ['checkout', '--orphan', 'other'])
@@ -156,6 +162,44 @@ describe('resolveChange', () => {
   })
 })
 
+const SUBDIRECTORY_APP: Record<string, string> = {
+  'package.json': JSON.stringify({ name: 'root', scripts: { test: 'bun run --cwd apps/web test' } }),
+  'bun.lock': '{}',
+  'apps/web/package.json': JSON.stringify({ name: 'web', scripts: { test: 'bun test' } }),
+  'apps/web/db/migrations/0001_users/migration.sql': 'CREATE TABLE "users" ("id" serial PRIMARY KEY);\n',
+  'apps/web/tests/posts.test.ts': "test('[AC-posts-1] lists posts', () => {})\n",
+}
+
+describe('openChange', () => {
+  test('should throw on a file the commit has and git cannot read, rather than read it as absent', async () => {
+    const { repo, base } = await createRepo()
+    const blob = await git(repo, ['rev-parse', `${base}:package.json`])
+    await rm(join(repo, '.git/objects', blob.slice(0, 2), blob.slice(2)))
+    const change = await resolveChange(repo, base, base)
+    const { reader } = openChange(repo, change)
+
+    await expect(reader.read('base', 'package.json')).rejects.toThrow('git could not read package.json')
+    expect(await reader.read('base', 'no/such/file.ts')).toBeNull()
+  })
+
+  test('should read an application below the repository root the same under diff.relative and grep.fullName', async () => {
+    const { repo, base } = await createRepo(SUBDIRECTORY_APP)
+    await git(repo, ['config', 'diff.relative', 'true'])
+    await git(repo, ['config', 'grep.fullName', 'true'])
+    const head = await commit(repo, {
+      'apps/web/db/migrations/0002_drop/migration.sql': 'DROP TABLE "users";\n',
+      'apps/web/tests/posts-again.test.ts': "test('[AC-posts-1] lists posts', () => {})\n",
+    })
+
+    const report = await laneOf(join(repo, 'apps/web'), base, head)
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane, fact.files])).toEqual([
+      ['migration-destructive', 'high', ['db/migrations/0002_drop/migration.sql']],
+      ['file-added', 'medium', ['tests/posts-again.test.ts']],
+    ])
+  })
+})
+
 describe('judgeChangeLane', () => {
   test('should put a documentation-only change in the low lane', async () => {
     const report = await laneAfter({ 'docs/guide.md': 'A longer guide.\n', 'docs/more.md': 'More.\n' })
@@ -184,6 +228,49 @@ describe('judgeChangeLane', () => {
     const report = await laneAfter({ 'lint/rules.json': '{"rules":{}}' })
 
     expect(factAt(report, 'gate-input')?.message).toContain('a package.json script names it')
+  })
+
+  test('should find a file a script names behind a separator or a directory it enters', async () => {
+    const scripts = { a: 'bun tools/a.ts; bun tools/b.ts', c: 'cd tools && bun c.ts', d: '(bun tools/d.ts)', e: 'bun tools/e.ts|tee log' }
+    const tools = (body: string): Record<string, string> => Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'unnamed'].map((name) => [`tools/${name}.ts`, body]))
+    const { repo, base } = await createRepo({ 'package.json': JSON.stringify({ scripts }), ...tools('export {}\n') })
+
+    const report = await laneOf(repo, base, await commit(repo, tools('export const edited = true\n')))
+
+    expect(report.facts.map((fact) => [fact.code, fact.files[0]])).toEqual([
+      ['gate-input', 'tools/a.ts'], ['gate-input', 'tools/b.ts'], ['gate-input', 'tools/c.ts'], ['gate-input', 'tools/d.ts'], ['gate-input', 'tools/e.ts'], ['source-edited', 'tools/unnamed.ts'],
+    ])
+  })
+
+  test('should call scripts that left the root package.json with a rename a gate input', async () => {
+    const { repo, base } = await createRepo()
+    await mkdir(join(repo, 'pkg'))
+    await git(repo, ['mv', 'package.json', 'pkg/package.json'])
+    const report = await laneOf(repo, base, await commit(repo, {}))
+
+    expect(factAt(report, 'gate-input')).toMatchObject({ target: 'package.json scripts', message: 'scripts changed: test, lint', files: ['pkg/package.json'] })
+  })
+
+  test('should read the scripts and the lockfile of a repository root above the application', async () => {
+    const { repo, base } = await createRepo(SUBDIRECTORY_APP)
+    const head = await commit(repo, { 'package.json': JSON.stringify({ name: 'root', scripts: { test: 'true' } }), 'bun.lock': '{ "changed": true }' })
+
+    const report = await laneOf(join(repo, 'apps/web'), base, head)
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane, fact.files])).toEqual([
+      ['gate-input', 'high', ['package.json']],
+      ['dependencies-changed', 'medium', ['bun.lock']],
+    ])
+    expect(report.unjudged.map((entry) => entry.reader)).toEqual(['dependency-advisory'])
+  })
+
+  test('should read the scripts of a package a root script enters with --cwd', async () => {
+    const { repo, base } = await createRepo(SUBDIRECTORY_APP)
+    const head = await commit(repo, { 'apps/web/package.json': JSON.stringify({ name: 'web', scripts: { test: 'true' } }) })
+
+    const report = await laneOf(repo, base, head)
+
+    expect(factAt(report, 'gate-input')).toMatchObject({ target: 'package.json scripts', files: ['apps/web/package.json'] })
   })
 
   test('should report changed dependencies and that their advisories were not read', async () => {
@@ -229,6 +316,23 @@ describe('judgeChangeLane', () => {
     expect(factAt(report, 'acceptance-changed')?.message).toContain('which no test run collects')
   })
 
+  test('should call a deleted test of a name only the runner collects an acceptance change', async () => {
+    const { repo, base } = await createRepo({ 'tests/posts_test.ts': "test('[AC-posts-2] shows a post', () => {})\n" })
+    const report = await laneOf(repo, base, await commit(repo, { 'tests/posts_test.ts': null }))
+
+    expect(report.facts).toEqual([expect.objectContaining({ code: 'acceptance-changed', lane: 'high' })])
+  })
+
+  test('should not call a test-named file low where the application loads it', async () => {
+    const report = await laneAfter({ 'app/Providers/Extra.test.ts': 'export class ExtraProvider {}\n', 'resources/js/lib/clipboard.browser.ts': 'export {}\n' })
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane, fact.files[0]])).toEqual([
+      ['file-added', 'medium', 'app/Providers/Extra.test.ts'],
+      ['file-added', 'medium', 'resources/js/lib/clipboard.browser.ts'],
+    ])
+    expect(report.floor).toBe('medium')
+  })
+
   test('should let an added test through as low unless it repeats an existing id', async () => {
     const fresh = await laneAfter({ 'tests/comments.test.ts': "test('[AC-comments-1] adds a comment', () => {})\n" })
     const repeated = await laneAfter({ 'tests/posts-again.test.ts': "test('[AC-posts-1] lists posts', () => {})\n" })
@@ -249,6 +353,22 @@ describe('judgeChangeLane', () => {
 
     expect(factAt(dropped, 'policy-removed')).toMatchObject({ lane: 'high', message: 'app/Policies/PostPolicy.ts: abilities removed: update' })
     expect(factAt(deleted, 'policy-removed')).toMatchObject({ lane: 'high' })
+  })
+
+  test('should read a policy in a subdirectory, and one named like a spec, as a policy', async () => {
+    const { repo, base } = await createRepo({ 'app/Policies/Admin/PostPolicy.ts': POLICY(['view']), 'app/Policies/Post.spec.ts': POLICY(['view', 'update']) })
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Policies/Admin/PostPolicy.ts': null, 'app/Policies/Post.spec.ts': POLICY(['view']) }))
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane])).toEqual([['policy-removed', 'high'], ['policy-removed', 'high']])
+  })
+
+  test('should not judge a file that declares two policies by the first', async () => {
+    const second = POLICY(['view', 'delete']).replace('class PostPolicy', 'class CommentPolicy').replace("import { Policy } from '@guren/core'\n", '')
+    const { repo, base } = await createRepo({ 'app/Policies/PostPolicy.ts': `${POLICY(['view'])}${second}` })
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Policies/PostPolicy.ts': `${POLICY(['view'])}${second.replace(/  delete\(\) \{\n    return true\n  \}\n/, '')}` }))
+
+    expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'policy', lane: 'high' }))
+    expect(report.floor).toBe('high')
   })
 
   test('should keep a policy edit that removes no ability at medium', async () => {
@@ -310,6 +430,16 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey() })
     expect(factAt(report, 'audit-suppressed')).toMatchObject({ lane: 'high' })
   })
 
+  test('should see a suppression moved onto another line, and an edit to the audit configuration', async () => {
+    const controller = (suppressed: string, plain: string): string => `export class PostController {\n  // guren-audit-ignore\n  ${suppressed}\n  ${plain}\n}\n`
+    const { repo, base } = await createRepo({ 'app/Http/Controllers/PostController.ts': controller('a() {}', 'b() {}'), 'config/audit.ts': 'export default {}\n' })
+    const moved = await laneOf(repo, base, await commit(repo, { 'app/Http/Controllers/PostController.ts': controller('b() {}', 'a() {}') }))
+    const configured = await laneOf(repo, base, await commit(repo, { 'app/Http/Controllers/PostController.ts': controller('a() {}', 'b() {}'), 'config/audit.ts': "export default { ignore: [{ key: 'x', reason: 'y' }] }\n" }))
+
+    expect(factAt(moved, 'audit-suppressed')?.message).toBe('app/Http/Controllers/PostController.ts: a guren-audit-ignore the base did not have, on `b() {}`')
+    expect(configured.facts).toEqual([expect.objectContaining({ code: 'audit-suppressed', lane: 'high', files: ['config/audit.ts'] })])
+  })
+
   test('should say what it did not judge for an edit to a controller', async () => {
     const report = await laneAfter({ 'app/Http/Controllers/PostController.ts': 'export class PostController {\n  index() {}\n}\n' })
 
@@ -359,6 +489,13 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey() })
 describe('change:lane', () => {
   test('should refuse to run without both commits', async () => {
     await expect(runCommand(builtinSubCommands['change:lane'], { rawArgs: ['--head', 'abc1234'] })).rejects.toThrow('needs both --base <sha> and --head <sha>')
+  })
+
+  test('should say when the head is behind the base', async () => {
+    const { repo, base } = await createRepo()
+    const ahead = await commit(repo, { 'README.md': '# ahead\n' })
+
+    expect(renderChangeLane(await laneOf(repo, ahead, base))).toContain('were --base and --head swapped?')
   })
 
   test('should render the floor, the facts by lane and what was not judged', async () => {
