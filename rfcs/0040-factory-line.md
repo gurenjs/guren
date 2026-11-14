@@ -2,7 +2,8 @@
 
 **Author:** Guren contributors
 **Date:** 2026-11-13
-**Status:** Draft
+**Status:** Accepted (2026-11-14; the deciding maintainer explicitly approved the
+proposal and shortened the standard discussion period before implementation.)
 
 ## Problem
 
@@ -535,8 +536,8 @@ Cases are read from the run's `spec-report.json`. A failed case, an
 (its spec is a `test.fixme`, or the application has no browser configuration)
 are each a hold whenever the change edits a page or a route that renders one.
 
-**Behaviour specs (RFC 0033 §13, proposed).** If that amendment is accepted
-and the application has `e2e.browser.config.ts`, the evidence also runs
+**Behaviour specs (RFC 0033 §13, accepted 2026-11-14).** If the application
+has `e2e.browser.config.ts`, the evidence also runs
 `test:behaviours:ci` and counts the cases of the runner's `.e2e/report.json`
 in the same aggregate. The report is the runner's own document, so its
 `schemaVersion` is checked first (`report-1` in the version §13 pins), and one
