@@ -1,5 +1,13 @@
 # @guren/testing
 
+## 1.15.1
+
+### Patch Changes
+
+- be6d386: Raise the `hono` floor to `^4.13.16`, the release that fixes five advisories (GHSA-4m76-xfj5-7975, GHSA-h7mg-cq63-vhpq, GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-3gg2-335m-rxc6). An installed app picks the fixed version up on its next `bun update`.
+
+  One of them reaches a Guren app: on earlier versions a request whose path holds an encoded line terminator (`/anything%0A`) that no route matches was answered by the 404 handler without the app's `*` middleware, so the response skipped the security headers and host authorization. No route handler ran on that path. The other four are in `app.mount()`, `csrf()`, `validator('form')` and the `css` helper, none of which the framework calls.
+
 ## 1.15.0
 
 ### Minor Changes
