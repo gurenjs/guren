@@ -807,7 +807,8 @@ your real credentials substituted". So there are two modes, and `factory:status
   low change itself and leaves every other one for the owner to merge, and
   that merge is the decision. Nothing separates the owner from the owner's
   agents in this mode, and none is claimed: an agent holding the owner's
-  credentials can merge today.
+  credentials can merge today (**decided 2026-11-14** by the maintainer, over
+  setting up a bot identity for agents).
 
 A workflow cannot supply the second identity cheaply: a pull request opened
 with `GITHUB_TOKEN` creates workflow runs "that require approval" by a person
