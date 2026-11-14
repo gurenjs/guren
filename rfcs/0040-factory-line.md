@@ -585,9 +585,28 @@ tables (the other four carry an `id` or timestamps the plan does not list).
 So §3 gains two rules from this, stated there: a file the plan added stays
 the plan's addition in every task, and a file a plan's command writes is
 declared by that command. With those and the plan sections below, 13 of the
-43 are low. So on a new application most tasks are read by one person, and
-what the line gives that person first is the evidence and a reading list,
-not an empty queue.
+43 are low, 22 medium and 8 high.
+
+Counting tasks overstates what a person does. A floor is the highest lane
+among a task's facts, a task here changes about 690 lines in 14 files, and
+one edit outside the plan makes the whole task medium. What the person reads
+is the reading list (§12), the files behind the facts above low, not the
+diff. On the 22 medium tasks that is 3,618 of 18,863 changed lines, 19%, in
+91 of 350 files, and half of the tasks list 61 lines or fewer. Over all 43
+tasks a person reads 15% of the lines. The lists are mostly the starter
+being rewired: 17 of the 22 edit a file from before the plan, the layout in
+9 and the `User` model in 9, and 14 add a file no element owns, 31 files of
+which 22 are helpers under `app/Support`, `app/Services` and
+`resources/js`.
+
+So on a new application about half the tasks stop for one person, who reads
+a fifth of each, and what the line gives that person first is the evidence
+and a reading list, not an empty queue. Three further readings would move
+tasks and are not adopted here: the layout's edits as navigation entries
+(15 low, at best), added helper files of a kind no plan section describes
+(16 with the layout), and a declared `alter` on a model taken for the whole
+file (18). With an edited test helper read as ambient as well it is 21 of
+43. Each trades a line a person would have read for one nobody reads.
 
 **A plan's tasks are a stack.** GitHub's stacked pull requests (public preview
 on Free and Enterprise Cloud, and enabled on this repository) are this unit:
@@ -1930,6 +1949,7 @@ which for a later task is not that task's own merge base.
 | What do the tasks look like without their pages? | The same paths with each task's pages step left out (23 steps) | 13 could be low today, 25 with the application entry, 30 with environment keys, of 43 | The bound screens first would give the tasks that remain. The screens task is a person's |
 | Does the navigation design cover what the plans did to the layout? | The nine layout edits read against §5: entries added, changed or removed, the account controls and their labels, the brand, `<Layout wide>` | 7 of 9 are declared entries alone; the other 2 also change the page's vertical padding. Of the five tasks that only the layout kept out of low, 4 fit: 27 of 43 | The layout, the width and the declared removal are part of the module, not additions to it |
 | What floor do the facts of §3 give the measured tasks? | A prototype of `change:lane` over the 43 tasks: the path facts, `judgeMigrations()`, the schema and routes files read on both sides, and a matcher against the plan at the head (change kind, identity, planned properties), checked by 20 cases that mutate a plan and expect the match to fail. Security records, audit facts and advisories were not computed | 5 low, 30 medium, 8 high where paths gave 11. 7 low with `env`, `providers` and `config`; 13 with a plan's commands declaring what they write and a plan-added file staying an addition. 1 low while base records are missing. Matched: 112 of 112 routes, 24 of 24 policies, 194 of 261 added files, 23 of 27 added tables, 24 of 28 migrations. 19 of 43 tasks were not contiguous in these histories and were read run by run | The floor paths could only bound, and the rules §3 was missing: what "existed" means in a stack, files a command writes, generated files, a deleted file, a missing base record |
+| How much of a medium task does a person read? | The reading list of each of the 43 tasks under the rules of §3: the files behind its facts above low, against every changed line of the task (lockfiles, generated files and binary uploads left out) | Medium, 22 tasks: 3,618 of 18,863 lines (19%), 91 of 350 files, a median of 61 lines. High, 8 tasks: 753 of 8,077 lines. Low, 13 tasks: none of 2,794. All 43: 4,371 of 29,734 lines (15%) | That the lane counts tasks and the person reads lists (§5, §12). The lines are those of whole files on the list, so an upper bound on what the facts point at |
 | Does the screens-first derivation work on real plans? | A prototype in a worktree: `screens: 'first'` in the schema and the derivation, run over the ten plans, and the approval, status, verification and revision functions called on a small application in its own repository | 43 tasks become 53. 45 views move; of 112 added routes a view names 66, 38 more only render one, 8 do neither, 4 return JSON; 35 of 36 validators move; 65 registrations bind a model not yet written. Approval after the screens settles all ten collisions as built. A view owned by the screens task alone never verifies. A route on its fixture reads `drifted`. `plan:revise` refuses a proposed plan, and a revision's added or renamed element is refused at approval. An unproposed draft passes `plan:next` and `plan:verify`. Today's scaffold writes no file of a screens step in any of the ten | The corrected table of owners in §5, the tests step of the screens task, the stamps beside the baseline, and the three checks that keep work before approval to screens |
 | Do `skip` and fixtures-off work on the framework as it is? | A prototype in a worktree, driven by probes on a minimal application, one process per scenario, and a bundle built with the production define | Under `skip` the boot succeeds, the fixture is never evaluated, a dark `/posts/new` answers 404 where the omitted route was answered by `/posts/:id`, and the refusal's read of `NODE_ENV` survives bundling. Fixtures off cannot be a boot setting on a shared application; carried per request by the `TestApp` it works in both orders, and a guard and a contract answer before the 501. A route on its fixture already redirects a guest and refuses an invalid body | The rules of §5 for `skip`, for the test switch, for promotion, and the behaviours that lose their red run |
 | Does the navigation module work on the framework as it is? | A prototype in a worktree: the definition, the filter, the lazy prop, a syntax reader and both writers, driven by probes on minimal applications with four identities | A config definition's `boot` hook can share the prop, with routes and gate in reach. A guest's payload carries no ability, hidden label, hidden route or denial message. The prop is skipped on partial reloads that do not ask for it and on JSON. A missing route name answers 500 on every page unless the entry is linked at boot. No type lists route names today. A policy that reads a `null` user throws for every guest. All 24 append round trips read back; 19 removals restored the bytes | The runtime rules of §5 that the first text left to `guren check` or did not state |
