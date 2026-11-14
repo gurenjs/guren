@@ -108,9 +108,9 @@ supply a much stronger floor than a path list.
 - **Platforms run the agents, the reviews, the merge and the deploy.** Guren
   owns what they cannot know: the application's meaning.
 
-Out of scope, each named as a follow-up in §14: provisioning a cloud
-environment for agents, feature flags, a production error reporter, and the
-headless plan producer.
+Out of scope, each named as a follow-up in §14: cloud environments other than
+Claude's, feature flags, a production error reporter, and the headless plan
+producer.
 
 ### 2. The line
 
@@ -147,9 +147,23 @@ plan records, which a person reads.
 lockfile, `codegen`, an application key in the environment (without one the
 application does not boot and every test fails), a database the application's
 test configuration reaches, and the Playwright browsers when the application
-has browser tests. That is
-the whole requirement on CI or on a cloud agent's sandbox. Providing it is the
-platform's (§14).
+has browser tests. That is the whole requirement on CI or on a cloud agent's
+sandbox.
+
+For Claude's cloud environments the pieces exist, by their documentation: a
+setup script (Bash, as root on Ubuntu 24.04, cached when it finishes within
+about five minutes), environment variables in `.env` format, and a network
+level that reaches package registries by default; PostgreSQL 16, Redis, Docker
+and Chrome for Testing are installed. Bun is installed too, "but has known
+proxy compatibility issues for package fetching", for which the documentation
+points to a session-start hook. So the harness ships one script,
+`bin/agent-setup.sh` (install, `codegen`, an `.env` from the example with a
+generated key, migrate), which is that environment's setup script and any
+other sandbox's first command. Two things differ in such a session and the
+harness skills have to follow: `gh pr` and `gh issue` are refused there, since
+GraphQL is blocked and only `gh api` on REST passes, and the dev MCP endpoint
+is loopback-only, so the agent reads the application through the CLI. Other
+vendors' environments were not read (§14).
 
 ### 3. Change facts and the lane floor
 
@@ -316,9 +330,9 @@ matching plan section first, and this RFC specifies neither.
 target a span in its file (a controller action, a policy ability, a validator
 export, a model member) and let an edit flow when every changed line lies in
 the span of a target a matching `alter` declares. A prototype ran on the
-measured histories. Of the 27 existing server files a plan edited, 4 were
-fully accounted for (7 when imports are ignored), and 24 of 166 changed lines
-fell in a declared span. What the plans left undeclared was not noise: the
+measured histories. Of the 27 existing server files a plan edited, 6 were
+fully accounted for (7 when imports are ignored), and 53 of 166 changed lines
+fell in a declared span or imported a file the plan added. What the plans left undeclared was not noise: the
 starter's dashboard action rewritten (66 lines), environment keys, a model's
 types. Those are edits a person should see, or that the plan should have
 declared. So an edit to existing source stays medium, and the evidence names
@@ -347,7 +361,7 @@ export default defineReviewPolicy({
     medium: ['config/**'],
   },
   facts: { 'agent-tool': 'high' },      // raise a fact's lane
-  review: { check: 'Claude Code Review', app: 'claude' }, // the reviewer's check; low needs it to pass (§8)
+  review: { reviewer: 'claude-code-review' }, // or 'bugbot'; low needs it to report no finding (§8)
 })
 ```
 
@@ -734,7 +748,7 @@ The lane job runs nothing from the change. What it believes, and from where:
 | Policy | `guren.review.ts` at the base | Lanes and required approvals |
 | The gate | The conclusion of the evidence workflow's check on the head SHA, from the checks API | Whether the gate passed. Never from the record |
 | The record | The artifact the evidence run uploaded | Raising the lane only: a fact or a hold in it counts, its absence proves nothing |
-| The review | The check run `guren.review.ts` names, produced by the app it names, `success` on the head SHA, the latest completed one | Low |
+| The review | The reviewer's check run on the head SHA, the latest completed one, by the app that reviewer is, read the way that reviewer reports (below) | Low |
 | Approvals | The reviews API | The lane's required count |
 
 It then sets the `guren/lane` status on the head SHA, which is the required
@@ -762,10 +776,42 @@ itself approved.
 
 A `workflow_run` is documented to run on the default branch's last commit with
 a write token "even if the previous workflow was not" privileged, which covers
-a pull request from a fork. What the documentation read so far does not
-settle, and deliverable 6 has to show on a repository: that a completed check
-run can trigger the lane job from the default branch, and that the checks API
-names the app that produced a check run.
+a pull request from a fork. `check_run`, `check_suite` and `status`
+events are documented to run the default branch's workflow as well, so the
+reviewer's check finishing can start the lane job, and a check run names the
+app that produced it (`app.slug`, read from this repository's own check runs).
+
+**How a reviewer reports.** Neither reviewer fails a check, so "the check
+passed" is not the question. Each has a documented result the lane job reads:
+
+| Reviewer | Its check run | Low needs |
+| --- | --- | --- |
+| Claude Code Review | Named `Claude Code Review`. It "concludes as neutral" and "never concludes as a failure". The last line of its details is `<!-- bughunter-severity: {"nit":1,"normal":2,"pre_existing":0} -->`, which its documentation gives for gating a merge from CI | `normal` is 0, and the title is not the one that says earlier findings are still open |
+| Cursor Bugbot | `success` with no finding. `neutral` when it found issues, was cancelled by a newer commit, or hit an internal error | `success` |
+
+Another reviewer is named by its check, its app and the conclusion that means
+no finding.
+
+**Who opens the pull request.** The floor on paths and the count of approvals
+both rest on the author not being the approver. On this repository the last
+100 pull requests were all opened under the owner's login, agent work
+included. A Claude cloud session is the same: its GitHub requests "go out with
+your real credentials substituted". So there are two modes, and `factory:status
+--remote` says which one a repository is in.
+
+- **Several identities.** Agents open pull requests as an app or a bot (Claude
+  Code in GitHub Actions does), or as members who are not the approver. The
+  design above applies as written.
+- **One owner.** Every pull request is the owner's, and GitHub lets nobody
+  approve it. Here `guren/lane` is not a required check. The lane job merges a
+  low change itself and leaves every other one for the owner to merge, and
+  that merge is the decision. Nothing separates the owner from the owner's
+  agents in this mode, and none is claimed: an agent holding the owner's
+  credentials can merge today.
+
+A workflow cannot supply the second identity cheaply: a pull request opened
+with `GITHUB_TOKEN` creates workflow runs "that require approval" by a person
+with write access.
 
 **Tried on a repository (2026-11-14).** A ruleset on the default branch
 requiring a pull request, zero approvals and code owner review:
@@ -1091,8 +1137,8 @@ under a plan is held, so nothing is called low on evidence that was not
 gathered. Until deliverable 6, the lane is information for the person who
 merges.
 
-Follow-up RFCs, named so they are not mistaken for done: provisioning a cloud
-environment for agents (an amendment to RFC 0008), feature flags, a
+Follow-up RFCs, named so they are not mistaken for done: cloud environments
+other than Claude's (an amendment to RFC 0008), feature flags, a
 production error reporter that files issues, the headless plan producer
 (RFC 0030 D1), reviewer eval cases, and a registration manifest with a plan
 section for providers (§3).
@@ -1280,28 +1326,55 @@ which for a later task is not that task's own merge base.
 | What does reproducing red runs cost? | One history (42 behaviours) in GitHub Actions, Bun 1.4.4: a worktree per commit that first carries an id, the head's install linked in, `codegen`, that commit's test files | Three commits, 0.3 s to prepare and 0.1 to 0.7 s to run each | A warm run with identical lockfiles. Not the cost of a cold preparation or of a commit with another lockfile |
 | Is a failure there a red run? | The same run | Two commits failed on assertions (a 404 where the plan expects a redirect). One failed loading a helper that imports a model a later step adds. A first run with no application key failed every case at the head too | Why a load failure is `unobserved` and the head is the control (§4). Under that rule one of the three would not have counted |
 | Does code owner review block with zero required approvals? | A public repository, a ruleset, three pull requests | Yes for an author who does not own the path, and it clears on the owner's approval. A pull request the owner opens is not blocked | §8 |
-| Can edits inside a file be matched to the plan? | A parse of each edited file's spans against the plan's declarations, over the 11 histories | 4 of 27 files, 24 of 166 lines | Not scheduled (§3) |
+| Can edits inside a file be matched to the plan? | A parse of each edited file's spans against the plan's declarations, over the 11 histories | 6 of 27 files, 53 of 166 lines | Not scheduled (§3) |
 | Do merge bases have a completed push run? | This repository's last 60 merged pull requests | 60 of 60, at most four days before the merge | That the runs exist. Not that their records would be comparable, and not stacked pull requests, of which there were none |
 | Does storing and fetching a record work? | A workflow on a test repository: the push run uploads `guren-record-<sha>`, the pull request run asks the artifacts API for its merge base's, with a read-only token | Found for a branch cut from a commit that had a push run; reported missing for one cut before the workflow existed | The mechanism of §3 |
 | Can an application page reach a decisions listener? | A prototype on its own port and an application page on another, driven in a browser from `localhost` and from `127.0.0.1` | Every read, frame, script load and post refused; a foreign `Host` and a request with no `Origin` refused; the click on the confirmation accepted. A script can open the confirmation and cannot answer it | The isolation of §12 from page scripts. Nothing about an agent that drives the browser |
 | Does the harness's own review run? | The implementation logs of 52 runs | The `code-review` agent was called in 4, and in none of the 11 step-by-step runs | §7 |
 
-**Could not be measured.** The independent evaluations of the 11 applications
-name a file for only six of the application defects they found (five of them
-in files the plan added), too few to say what share of defects a low lane
-would have let through. An evaluation that names `file:line` for each defect
-would make that countable.
+**From the independent evaluations.** Each of the 11 applications was walked
+and probed by a separate evaluating session, whose report lists the defects
+of the application's own code. Three read-only agents located every such
+defect in the code and blamed the line to a commit: 110 defects, each then
+joined to the path class of the task that commit belongs to.
+
+| Where the defect came from | Defects | High, medium, low |
+| --- | --- | --- |
+| A task that edits existing server code | 39 | 1, 12, 26 |
+| A task that edits existing client code | 21 | 0, 8, 13 |
+| A task that edits the application entry | 14 | 0, 4, 10 |
+| A task that adds files only, or edits only the schema and routes entry | 8 | 0, 3, 5 |
+| The starter, left as scaffolded | 13 | 0, 7, 6 |
+| After the steps (the driver's verification, or a squashed history) | 14 | 0, 4, 10 |
+| A task whose class did not resolve | 1 | 0, 1, 0 |
+
+So of the 82 defects a task introduced, 8 sit in the 13 tasks that paths
+alone would let be low: none high, three medium. That is about 0.6 per such
+task against about 2.1 per task among the other 35. It is a first estimate
+and no more: the defects are what one evaluator noticed, a model located
+them, and a blamed line is a best fit for defects like a missing check. What
+the 82 are also says what the floor does not see: 22 are user experience, 18
+performance, 14 correctness, 11 accessibility, 8 validation and 7 security,
+and no fact of §3 reads any of them. They are the reviewer's and the reading
+person's, which is why low requires a review (§8).
+
+**Cost.** Not measured, and stated so that it is not guessed. A plan here has
+about four tasks (48 in 11), so about five pull requests with the plan's own.
+The platform reviewer is priced by the vendor per review and by depth; at the
+15 to 25 dollars a review that Anthropic gives as its own average, that is
+roughly 75 to 125 dollars a plan before any second round. The evidence adds
+seconds to the gate for red runs, and a stack runs the workflow once per task.
+How long the gate takes on a real application was not measured.
 
 ### Still to be measured
 
 - **Deliverable 1, in use.** The shadow comparison: the floor against the
   person's `lane:` label, and what became of the low ones.
-- **Deliverable 5.** The same task counts on real merge units with the
-  declaration matcher and the security records in place; the share of red
+- **Deliverable 5.** The same task and defect counts on real merge units with
+  the declaration matcher and the security records in place; the share of red
   runs that are `reproduced` under the rule of §4; cold preparation time.
-- **Deliverable 6, on a repository.** That a completed check run can trigger
-  the lane job from the default branch, and that the checks API names the app
-  that produced a check run.
+- **Deliverable 6, on a repository.** The lane job end to end, including
+  whether GitHub's auto-merge applies to a stacked pull request.
 
 ## Sources (verified 2026-11)
 
@@ -1318,3 +1391,9 @@ would make that countable.
 - https://www.martinfowler.com/articles/exploring-gen-ai/harness-engineering-memo.html
 - https://simonwillison.net/2026/Feb/7/software-factory/
 - https://rewind.com/blog/ai-approve-pull-requests-safely/
+- https://code.claude.com/docs/en/code-review-pull-requests.md
+- https://code.claude.com/docs/en/cloud-environments.md
+- https://cursor.com/docs/bugbot.md
+- https://docs.github.com/en/pull-requests/reference/stacked-pull-requests
+- https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+- https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets
