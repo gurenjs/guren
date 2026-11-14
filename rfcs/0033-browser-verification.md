@@ -958,10 +958,28 @@ in three agent steps, each followed by a locator assertion.
 | `e2e` 0.23.0 on Bun 1.4.4 | does not start: Bun has no `module.registerHooks` |
 | `e2e` 0.23.1 nightly on Bun 1.4.4 | the same tests pass, live and replayed |
 
-"No login" was an empty Claude configuration directory. `e2e` 0.23.1, released
-on 2026-11-13, carries the Bun loader (e2e-inc/e2e#1616); its CLI starts under
-Bun 1.4.4 (checked 2026-11-14), and the test run has not been repeated on the
-released version.
+"No login" was an empty Claude configuration directory.
+
+On 2026-11-14 the test was repeated on the released `e2e` 0.23.1, which carries
+the Bun loader (e2e-inc/e2e#1616), under Bun 1.4.4. This time the runner started
+the app itself, through `app.command` running `browser:serve` on port 4319.
+
+| Measured on 0.23.1 under Bun | Result |
+| --- | --- |
+| Three steps, live | 33.6 s, 146,000 tokens, each step recorded |
+| Three steps, replayed | 3.2 s including the app's start, no model call |
+| `--strict-cache`, no login, recordings current | passes in 3.4 s |
+| `--strict-cache`, no login, the submit button renamed | fails after 14 s with `REPLAY_STALE` and no model call; the recordings are left as they were |
+| The same without `--strict-cache` | fails with `MODEL_PROVIDER_FAILED`, authentication required |
+| A run that passed, failed, or was interrupted (`SIGINT` to its group, `SIGTERM` to the runner) | no app process and no listener left |
+| `shutdownTimeout: 1`, six runs | none left |
+| `SIGKILL` to `browser:serve`'s group during a run | the app keeps both ports; the next run refuses with `APP_ALREADY_RUNNING` |
+
+The runner stops a command by sending `SIGTERM` to its process group and
+`SIGKILL` to that group once `shutdownTimeout` passes. `browser:serve` stops the
+app on `SIGTERM`, which is why nothing was left. The app runs in a group of its
+own (§3), so the `SIGKILL` never reaches it: a `browser:serve` killed before it
+handles `SIGTERM` leaves the app behind, as the last row shows.
 
 Four things went wrong, and §13.5 is shaped by them:
 
@@ -1152,8 +1170,10 @@ still Open Question 5.
   one whose recording no longer matches, runs live under the Claude Code or
   Codex login and records.
 - **CI runs `test:behaviours:ci`.** Under `--strict-cache` a recording that
-  does not replay fails its step with `REPLAY_STALE` and makes no model call,
-  by the runner's documentation; M6 checks it. CI needs no key and no login.
+  does not replay fails its step with `REPLAY_STALE` and makes no model call
+  (§13.1). The step waits for the recorded control first, 14 s in the
+  measurement, so a stale suite is slow as well as red. CI needs no key and no
+  login.
 - **A stale recording is not a defect in the app.** The skill tells the agent
   to run `test:behaviours` after changing a page a behaviour starts on, to
   commit the changed recordings with the change, and to report `REPLAY_STALE`
@@ -1212,9 +1232,10 @@ still Open Question 5.
 - No generated instruction holds a URL, and no generated spec holds
   `agent.assert`.
 - After a run that ends, fails or is interrupted, no process of the app or of
-  `browser:serve` is left: the runner force-kills after `shutdownTimeout`, and
-  §6 found that a kill of that kind leaves the app's own group alive under
-  Playwright.
+  `browser:serve` is left. The config leaves `shutdownTimeout` at the runner's
+  10 s, since a `browser:serve` that is force-killed before it handles
+  `SIGTERM` leaves the app running (§13.1). A run that finds the port answering
+  refuses with `APP_ALREADY_RUNNING` and attaches to nothing.
 - The agent's environment holds no value from the app's env files.
 - `POLICY_DENIED` is counted over at least fifty live steps before the
   blueprint ships, and its cause is named or its rate stated in the guide.
