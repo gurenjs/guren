@@ -474,11 +474,22 @@ and the application has `e2e.browser.config.ts`, the evidence also runs
 in the same aggregate. The report is the runner's own document, so its
 `schemaVersion` is checked first (`report-1` in the version §13 pins), and one
 the CLI does not know is `unavailable`, never read on a guess. A case that
-does not pass there is a hold. It shows in three ways: `REPLAY_STALE`, a
-recording that no longer replays; `MODEL_PROVIDER_FAILED`, which in CI means a
-step with no recording, since by the runner's documentation such a step runs
-live even under `--strict-cache` and CI has no login (the fix is to commit the
-recording, not to give CI a login); and an outcome the locators do not find.
+does not pass there is a hold, and the report says which of these it was:
+
+- `REPLAY_STALE`: a recording that no longer replays. It may be a page that
+  changed or a regression (the runner's documentation lists a replayed action
+  the application refused and an end state that does not match), which is why
+  a person reads it and nothing records it again unattended.
+- `MODEL_PROVIDER_FAILED`: a step that ran live where CI has no login, because
+  it was never recorded or because its recording has a gap the runner cannot
+  replay, such as a value the agent read off the screen. By the runner's
+  documentation both run live even under `--strict-cache`. The fix is a
+  recording, or a behaviour worded so that it replays, not a login for CI.
+- An outcome the locators do not find.
+
+A case the generated spec skips by design, with its reason (no outcome a
+locator or a URL can check, an input that is not a scalar), is not a hold: the
+behaviour's `TestApp` test covers it.
 §13 keeps behaviour specs out of every gate, and this keeps to it. These specs
 are generated from the plan and replayed with no model, so they are a check
 the implementing session did not write (Open Question 9).
