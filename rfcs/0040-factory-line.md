@@ -876,10 +876,35 @@ Three rules keep this from weakening what is already decided.
   the routes left, which is the plan's progress in a form a person can read.
   What the hold costs depends on the application. Before its first release,
   nothing. After it, every release waits from the plan's merge to its last
-  promotion, a fix that has nothing to do with the plan among them. Leaving
-  such routes unmounted in production would remove that wait and still serve
-  no fixture, at the price of a 404 where the refusal is loud; it changes
-  RFC 0021's behaviour and is not decided here.
+  promotion, a fix that has nothing to do with the plan among them.
+- **An application may leave such routes out of production instead.** The
+  refusal stays the default, and an application chooses otherwise in its
+  entry (**decided 2026-11-14** by the maintainer, as an amendment to
+  RFC 0021 §4):
+
+  ```typescript
+  createApp({
+    prototype: { fixture: () => import('../resources/js/prototype/index.js'), inProduction: 'skip' },
+  })
+  ```
+
+  Under `skip` a production boot does not mount a route on the `prototype`
+  handler, so it answers 404 like a route that was never registered, never
+  imports the fixture, and logs the routes it left out once. No fixture is
+  served, which is what the refusal was for. `GUREN_PROTOTYPE_ROUTES=1` still
+  serves fixtures on purpose, and the loader given alone keeps today's
+  meaning. Then the default branch can release at any commit, and a release
+  contains what has been promoted so far, which is what merging task by task
+  already gives a plan without screens.
+
+  What changes around it: `prototype-routes` in `guren doctor` becomes a
+  warning that lists the routes, the deploy workflow deploys and the release
+  record names the routes not served, and the navigation leaves out an entry
+  whose route is not mounted, since the server builds it. A link inside a
+  page is not filtered, so a promoted page can link to a 404 until its
+  target is promoted. A forgotten promotion is quiet where the refusal was
+  loud, and the release record is where it shows. Choosing `skip` is an edit
+  to the application entry outside its lists, so a person reads it (§3).
 
 What this buys the lanes, by paths on the same 43 tasks with each task's
 pages step taken out: 13 could be low today, 25 with the application entry
@@ -1460,7 +1485,7 @@ needs first.
 | 5. Structural evidence and delegation | Per-route security records and base records; a fresh-clone `plan:verify` with red runs from the change's commits; the browser aggregate and behaviour specs; the declaration matcher; the forecast; the plan sections `env`, `providers` and `config`, and the navigation module with its layout and the `navigation` section (§5) | 1, and for approval standing 3 | Evidence complete enough for a low lane, measured on real histories: the share `unjudged`, the share `unobserved`, declarations matched |
 | 6. Enforcement | The lane job and the GitHub settings of §8 | 5, and the shadow bar met | Low changes merging without a person |
 | 7. Release and sweeps | The release record, `browser:doctor --landmarks-only`, the sweep template, the monthly numbers | 1 | The line closed from production back to intake |
-| 8. Screens first | `screens: 'first'` in the plan and its task derivation, the screens task under the `proposed` standing, fixtures off in `plan:verify`'s test runs, the prototype artifact and the Dev Center's walk (§5) | 3, and RFC 0021 as shipped | A plan approved on its prototype through the loop, with the page defects found at the walk counted against those found after |
+| 8. Screens first | `screens: 'first'` in the plan and its task derivation, the screens task under the `proposed` standing, fixtures off in `plan:verify`'s test runs, the prototype artifact and the Dev Center's walk, the deploy workflow's `prototype-routes` check, and `inProduction: 'skip'` (§5) | 3, and RFC 0021 as shipped | A plan approved on its prototype through the loop, with the page defects found at the walk counted against those found after |
 
 Until deliverable 5, a plan's evidence is reported as unavailable and a change
 under a plan is held, so nothing is called low on evidence that was not
