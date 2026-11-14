@@ -693,8 +693,13 @@ async function parseSchemaFile(schemaPath: string, module: string | null): Promi
     return []
   }
 
+  return parseSchemaSource(source, schemaPath, module) ?? []
+}
+
+/** The tables one schema source declares, or `undefined` when it does not parse: a reader of two revisions must tell that from no tables. */
+export function parseSchemaSource(source: string, schemaPath: string, module: string | null): SchemaTable[] | undefined {
   const ast = parseSourceFile(source, schemaPath)
-  if (!ast) return []
+  if (!ast) return undefined
 
   const tables: SchemaTable[] = []
   const imports = collectDrizzleImports(ast.program.body)
