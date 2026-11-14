@@ -621,7 +621,7 @@ views: [{ /* … */ nav: { label: 'Jobs', auth: 'any' } }]
 | --- | --- | --- | --- |
 | `env` | The keys of the object given to `defineEnv()` in `config/env.ts`, in both versions of the file | `env-added`, low when declared. A key removed or changed is medium | Nothing. `env:example` already derives `.env.example` |
 | `providers`, `config` | The `providers` and `config` arrays of the `createApp()` literal, which `composeAppProviderRegistration()` already locates. A policy's provider is implied by its `policies` element, as `plan:scaffold` writes it | `provider-added` and `config-added`, low when declared or implied | Nothing for these two arrays. `app.use()` and the other options are not lists and stay medium |
-| `views[].nav` | The entries of a navigation module the layout renders from | `nav-added`, low when declared | The navigation module, below |
+| `views[].nav` | The entries of `config/navigation.ts`, which the server filters and the layout renders | `nav-added`, low when declared | The navigation module, below |
 
 One rule keeps all of them honest, the one the schema follows: an edit is the
 structural fact only when the file differs from its base by exactly those
@@ -637,48 +637,75 @@ module.
 
 **Navigation as a module.** Ten of the 11 measured plans edited the layout,
 each time in a `pages` step. They added 32 links, 31 of them by a literal
-path; six renamed the brand from "Guren"; three wrapped links in a check of
-the user's role and two in a signed-in check; and 41 of the added lines were
-no link at all (class names for a narrow screen, markup, the user's type in
+path; six renamed the brand from "Guren"; four wrapped links in a check of
+the user's role or of being signed in; and 41 of the added lines were no link
+at all (class names for a narrow screen, markup, the user's type in
 `usePage`). So a module has to remove four reasons to open the layout, not
 one.
 
-```typescript
-// resources/js/navigation.ts
-import { defineNavigation } from '@guren/inertia-client/navigation'
-import { routeManifest } from '@/.guren/routes.gen'
+Who may see a link is the harder half. None of the 11 applications
+authorizes at the route: `authorizeMiddleware` is used in none, against 86
+calls of `this.authorize()` and `this.can()` in controllers. So a link's
+visibility cannot be derived from its route's middleware, and the role checks
+in the layouts restate by hand what a policy already says (`JobPolicy.create`:
+employers only). Four applications also pass a page a boolean such as
+`canApply` that a controller computed from the gate. The gate is on the
+server, so the navigation is defined there and the client receives only what
+the current user may see.
 
-export default defineNavigation(routeManifest, [
+```typescript
+// config/navigation.ts
+import { defineNavigation } from '@guren/core'
+import { Job } from '@/app/Models/Job'
+
+export default defineNavigation([
   { label: 'Jobs', route: 'jobs.index' },
-  { label: 'My jobs', route: 'employer.jobs.index', show: { auth: 'required', where: { role: 'employer' } } },
+  { label: 'Post a job', route: 'employer.jobs.create', show: { can: ['create', Job] } },
   { label: 'Dashboard', route: 'dashboard', show: { auth: 'required' } },
 ])
 ```
 
-- **An entry is data.** A literal label, a route name, and an optional `show`:
-  `auth` is `any`, `required` or `guest`, and `where` compares fields of the
-  shared `auth.user` by equality. There is no function, so the CLI reads the
-  file by its syntax and the layout decides who sees a link with no code of
-  its own. A spread, a computed value or a function makes the file
-  unreadable, and an edit to it `source-edited`.
+- **An entry is data.** A literal label, a route name, and an optional `show`
+  with any of three conditions, all of which must hold: `auth` (`any`,
+  `required`, `guest`), `can` (an ability and the model class its policy is
+  bound to), and `where` (fields of the user compared by equality, for an
+  application with no policy to ask). There is no function, so the CLI reads
+  the file by its syntax; a spread, a computed value or a function makes the
+  file unreadable, and an edit to it `source-edited`.
+- **`can` asks the gate.** `['create', Job]` is evaluated as
+  `gate.forUser(user).allows('create', Job)`, the call `this.authorize()`
+  makes with the bare class. It is the policy's own rule, written once. A
+  navigation entry has no record, so only an ability that needs none can be
+  named: `guren check` warns when the policy's method takes one. A check that
+  denies or throws hides the entry.
+- **The server filters, the client renders.** The module is a config
+  definition, bound through `createApp({ config })` like the others, so
+  adding it is the `config-added` fact above. On each visit it shares
+  `navigation`, the entries the user may see with each one's path and whether
+  it is the current one. The layout maps that prop to links and holds no
+  condition. Ability names, hidden routes and the user's role never reach a
+  browser that should not see them, and no ability has to be shared with the
+  client. The cost is one gate check per `can` entry on a visit.
 - **A route is named, not spelled.** The name is checked against the route
-  manifest at compile time, as `createTypedLink()` does, and by `guren check`:
-  the route exists, is a `GET` with no path parameter (`isParameterless()`,
-  the rule the browser map picks a landmark by) and renders a page.
-- **Showing is not authorizing.** Hiding a link protects nothing, and `guren
-  check` only warns when an entry guests see leads to a route that requires
-  sign-in. A `can: '<ability>'` condition waits until abilities are shared
-  with the client; today the framework shares `auth` and `_i18n`.
-- **The layout renders the module.** The layout the auth scaffold ships maps
-  the entries to links, marks the current one, wraps on a narrow screen and
-  keeps the sign-in and sign-out controls. The brand reads the application's
-  name from a shared prop (`app.name`, from `APP_NAME`, shared beside `auth`),
-  so naming the application is not a layout edit either.
+  manifest's type, and by `guren check`: the route exists, is a `GET` with no
+  path parameter (`isParameterless()`, the rule the browser map picks a
+  landmark by) and renders a page.
+- **Showing is not authorizing.** Hiding a link protects nothing. `guren
+  check` compares an entry with what its route does, advisory only: an entry
+  everyone sees whose route requires sign-in, and an entry whose `can`
+  differs from the `this.authorize()` the route's action is read to make (the
+  action-body scan, reported unverifiable where the body cannot be read).
+- **The layout the auth scaffold ships** renders the prop, marks the current
+  entry, wraps on a narrow screen and keeps the sign-in and sign-out
+  controls. The brand reads the application's name from a shared prop
+  (`app.name`, from `APP_NAME`), so naming the application is not a layout
+  edit either.
 - **One writer.** `appendNavigationEntry()`, beside `appendTableToSchema()`.
-  `guren nav:add "<label>" --route <name> [--auth required] [--where
-  role=employer]` calls it, and is a generator, so a plan's `commands` may run
-  it; `make:feature` calls it for its index page; `plan:next` names the
-  command for a pages step whose views carry `nav`.
+  `guren nav:add "<label>" --route <name> [--auth required] [--can
+  create:Job]` calls it, and is a generator, so a plan's `commands` may run
+  it; `make:feature` calls it for its index page, with the ability when it
+  also writes the policy; `plan:next` names the command for a pages step
+  whose views carry `nav`.
 - **Existing applications.** `guren add navigation` writes the module and
   replaces the layout only when the layout is still byte for byte one the
   framework shipped, the test `guren add ui` applies to its components.
@@ -686,11 +713,15 @@ export default defineNavigation(routeManifest, [
   leaves the layout alone; its edits stay medium.
 
 In a plan, `nav` is allowed on a view whose page a parameterless `GET` route
-renders, which `plan:render` checks. The fact is `nav-added`, read from the
-entries on both sides and low when a view declares the same label, route and
-`show`; an entry removed or changed is medium. Left out of this first shape:
-grouped or nested entries, labels as translation keys (a label is written in
-the default locale, as a plan's view labels are), and ability conditions.
+renders, which `plan:render` checks: `nav: { label, auth?, can?: { ability,
+policy } }`, where `policy` is the id of a policy element and the ability one
+it lists, so the reference is checked like any other. The fact is `nav-added`,
+read from the entries on both sides and low when a view declares the same
+label, route and `show`; an entry removed or changed is medium. Left out of
+this first shape: grouped or nested entries, a label as a translation key (a
+label is written in the default locale, as a plan's view labels are), and
+abilities for anything but navigation: a button on a page keeps receiving its
+boolean from the controller.
 
 Two rows are not the format's to fix. The nine files with no element are
 plans that were incomplete: `plan:verify` already records the files a step
@@ -1278,8 +1309,8 @@ merges.
 Follow-up RFCs, named so they are not mistaken for done: cloud environments
 other than Claude's (an amendment to RFC 0008), feature flags, a
 production error reporter that files issues, the headless plan producer
-(RFC 0030 D1), reviewer eval cases, `app.use()` in the introspection
-manifest, and abilities shared with the client for navigation (§5).
+(RFC 0030 D1), reviewer eval cases, and `app.use()` in the introspection
+manifest.
 
 ## Alternatives Considered
 
@@ -1456,7 +1487,8 @@ which for a later task is not that task's own merge base.
 | Tasks editing only the schema and the routes entry beyond that | 7 more (13 of 48) | The same bound once both are judged by what they declare (§3) |
 | Tasks editing the application entry, existing client code, existing server code | 8, 6 and 21 | Where one person reads. The layout's navigation is edited in every application |
 | Tasks that could be low once the application entry, environment keys and navigation are judged structurally | 21, 26 and 32 of 48, cumulatively; 39 with edits a changed element owns | The upper bound the plan sections of §5 would buy. Paths alone, as above |
-| What the plans did to the layout | 10 of 11 edited it, always in a pages step: 32 links (31 by a literal path), the brand renamed in 6, a role check in 3, a signed-in check in 2, and 41 added lines that are no link | What the navigation module has to make unnecessary (§5) |
+| What the plans did to the layout | 10 of 11 edited it, always in a pages step: 32 links (31 by a literal path), the brand renamed in 6, a role or signed-in check in 4, and 41 added lines that are no link | What the navigation module has to make unnecessary (§5) |
+| Where the applications authorize | `authorizeMiddleware` in 0 of 11; 86 calls of `this.authorize()` or `this.can()` in controllers; a `can…` boolean passed to a page in 4 | A link's visibility cannot come from its route, so the navigation is filtered on the server by the gate (§5) |
 | Step commits editing nothing existing; only the schema and routes entry | 95 and 43 of 195 | The per-step figures. A step is not a mergeable unit, since a tests step fails the gate |
 
 **Run.**
