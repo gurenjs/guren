@@ -276,7 +276,10 @@ fetches the record of its merge base and passes it as `--base-record`.
   request is updated against it, which starts a new run.
 - **Missing.** With no base record (the run never happened, or the artifact
   expired) the two facts are `unjudged` for any change that touches a routes
-  file, a controller, a policy or a middleware. On this repository's last 60
+  file, a controller, a policy or a middleware, and at medium: a missing
+  record says nothing against the change, where an incomparable one does. It
+  is still most changes: 38 of the 43 measured tasks touch such a file, so
+  until base records exist one of the 43 is low. On this repository's last 60
   merged pull requests every merge base was a default-branch commit whose push
   run of CI had completed, at most four days before the merge. That shows the
   runs exist, not yet that their records would be comparable.
@@ -292,7 +295,7 @@ only when a declaration in an approved, open plan matches it.
 | `policy-added` | A new `policy` node | low |
 | `policy-changed` | An existing policy file edited | medium |
 | `agent-tool` | A route gaining or changing `.agent()` | low |
-| `file-added` | A source file the change adds | low, when an `add` element owns the file |
+| `file-added` | A source file the change adds | low, when an `add` element owns the file: it is at the path the element's generator gives it and exports the element's name, or it is a policy's provider. Low too when a generator the plan's `commands` name writes it, as `PLAN_GENERATOR_TARGETS` lists what each one writes |
 | `dependencies-changed` | `bun.lock` or a manifest's dependency fields | medium |
 
 **What a declaration is.** `listPlanAppTargets()` gives identities, and a
@@ -310,6 +313,14 @@ lists the files whose change expires a verification, shared controllers and
 route files among them, and says nothing about which edits in those files were
 planned or exercised. So a plan that adds a feature in new files can flow, and
 a plan that alters existing code is read by one person.
+
+"Existed" is judged against the plan and not against the change. In a stack
+a later task's base holds the files earlier tasks added, and read against
+that base their edits would all be `source-edited`: on the measured tasks 19
+of 43 edit such a file. So a file that is absent at the plan's baseline and
+owned by an `add` element of that plan is that element's addition in every
+task that touches it. A source file deleted is `source-removed`, medium, and
+low when a `drop` element owns it.
 
 **The schema and the routes entry are judged by what they declare.** Every
 plan measured (see Measurements) edited `db/schema.ts` and the routes entry to
@@ -342,8 +353,11 @@ plan's author what to declare next time.
 
 **Ambient.** Low: documentation outside `docs/plans/` and `docs/lessons/`,
 `lang/` catalogs, added tests that carry no existing id, and generated files a
-drift gate already judges (`docs/spec/`, the browser specs `browser:map`
-writes). Under RFC 0033 §13 the recordings in `.e2e/cache/` are ambient too:
+drift gate already judges or the gate regenerates (`docs/spec/`, the browser
+specs `browser:map` writes, `.guren/`, `.env.example`). Without the last two
+named, 2 of the 43 measured tasks would be low, since 38 change them. A
+helper under `tests/` that carries no id is not ambient: an edit to one can
+change what an acceptance test asserts, so it is `source-edited`. Under RFC 0033 §13 the recordings in `.e2e/cache/` are ambient too:
 a recording asserts nothing, the generated spec does, and the evidence replays
 both (§4). A file under `docs/lessons/` is
 `lesson`, medium: a person reads a rule before the agents follow it.
@@ -550,9 +564,30 @@ more edit only the schema and the routes entry, so 11 of 43 is the most the
 low lane could take once the routes entry is judged structurally. The other 32
 edit the application entry (7), existing client code (5) or existing server
 code (20). These are upper bounds: declarations, security records, evidence
-and review can only lower them. So on a new application most tasks are read by
-one person, and what the line gives that person first is the evidence and a
-reading list, not an empty queue.
+and review can only lower them.
+
+A prototype of `change:lane` then read the same 43 tasks with the
+declaration matcher of §3, and they did. With every security record taken to
+compare the same, 5 tasks are low, 30 medium and 8 high. Paths had counted
+only files from before the plan, and two things they could not see hold most
+tasks. Nineteen tasks edit a file an earlier task of the same plan added (a
+model in 12, a controller in 7), which exists at their base. And 24 add at
+least one file no element owns: 67 files, among them 21 service and support
+modules, 9 client components, 8 config modules and 7 providers, 29 of them
+written by a generator the plan's `commands` name. The eight high are two
+edits to `bin/serve.ts`, three edits to an acceptance test an earlier task
+wrote, and three policies whose `make:policy` stub the plan's own step
+rewrote with fewer abilities, a plan that RFC 0030's `plan:command-target`
+check now refuses. Where the facts could be matched they matched: all 112
+added routes, all 24 added policies, 194 of 261 added files, 23 of 27 added
+tables (the other four carry an `id` or timestamps the plan does not list).
+
+So §3 gains two rules from this, stated there: a file the plan added stays
+the plan's addition in every task, and a file a plan's command writes is
+declared by that command. With those and the plan sections below, 13 of the
+43 are low. So on a new application most tasks are read by one person, and
+what the line gives that person first is the evidence and a reading list,
+not an empty queue.
 
 **A plan's tasks are a stack.** GitHub's stacked pull requests (public preview
 on Free and Enterprise Cloud, and enabled on this repository) are this unit:
@@ -601,13 +636,22 @@ any other edit, would make them declarable facts, as the schema is. On the
 same 43 tasks, first by paths alone, then with the rule below applied to both
 sides of every edit by a prototype reader:
 
-| Judged structurally | By paths | Nothing but the entries |
-| --- | --- | --- |
-| The schema and the routes entry (today) | 11 | 11 |
-| and the application entry | 18 | 18 |
-| and environment keys | 23 | 23 |
-| and navigation | 28 | 24 |
-| and edits a changed element owns, if they could be accounted for (§3) | 35 | 28 |
+| Judged structurally | By paths | Nothing but the entries | By the facts of §3 |
+| --- | --- | --- | --- |
+| The schema and the routes entry (today) | 11 | 11 | 5 |
+| and the application entry | 18 | 18 | 7 |
+| and environment keys | 23 | 23 | 7, and 13 with the two rules of §3 |
+| and navigation | 28 | 24 | not run |
+| and edits a changed element owns, if they could be accounted for (§3) | 35 | 28 | not run |
+
+The last column is the prototype of `change:lane` described above, with every
+security record taken to compare the same. A section seldom frees a task by
+itself, because the task has another reason to be read: the five foundation
+tasks that add an environment key also add config modules and providers no
+element owns. Every entry the sections would have declared had a source in
+the plan: 20 providers a policy element implies, and 9 providers, 8 config
+modules and 8 keys that an `add queue`, `add schedule` or `add storage`
+command explains.
 
 The application entry and the environment keys keep the whole of their bound:
 all 25 edits to `src/app.ts` and all 5 to `config/env.ts` added entries and
@@ -619,9 +663,11 @@ designed under the module below (27 of 43). The schema is read by what the plan 
 exists (six add columns, most to `users`), which is low only where the plan
 declares that column (§3).
 
-So two sections move the bound from a quarter of the tasks to a half, and
-navigation adds four more once the layout holds nothing but what the module
-gives it. Proposed, as an amendment to RFC 0030's plan format:
+So by paths two sections move the bound from a quarter of the tasks to a
+half, and by the facts from 5 tasks to 7, or to 13 once a command declares
+what it writes. Navigation adds up to four more once the layout holds nothing
+but what the module gives it. Proposed, as an amendment to RFC 0030's plan
+format:
 
 ```typescript
 env: [{ id: 'env.queueConnection', change: { kind: 'add' }, key: 'QUEUE_CONNECTION', type: 'string', default: 'sync', required: false }]
@@ -1882,6 +1928,7 @@ which for a later task is not that task's own merge base.
 | Which step brings the defects a person has to see? | The 80 task defects by the kind of step whose commit introduced them | Pages 27 (13 user experience, 11 accessibility, 2 performance, 1 correctness), http 36, scaffold 14, tests 2, data 1. Every accessibility defect came from a pages step | Why the screens come before approval (§5) |
 | What do the tasks look like without their pages? | The same paths with each task's pages step left out (23 steps) | 13 could be low today, 25 with the application entry, 30 with environment keys, of 43 | The bound screens first would give the tasks that remain. The screens task is a person's |
 | Does the navigation design cover what the plans did to the layout? | The nine layout edits read against §5: entries added, changed or removed, the account controls and their labels, the brand, `<Layout wide>` | 7 of 9 are declared entries alone; the other 2 also change the page's vertical padding. Of the five tasks that only the layout kept out of low, 4 fit: 27 of 43 | The layout, the width and the declared removal are part of the module, not additions to it |
+| What floor do the facts of §3 give the measured tasks? | A prototype of `change:lane` over the 43 tasks: the path facts, `judgeMigrations()`, the schema and routes files read on both sides, and a matcher against the plan at the head (change kind, identity, planned properties), checked by 20 cases that mutate a plan and expect the match to fail. Security records, audit facts and advisories were not computed | 5 low, 30 medium, 8 high where paths gave 11. 7 low with `env`, `providers` and `config`; 13 with a plan's commands declaring what they write and a plan-added file staying an addition. 1 low while base records are missing. Matched: 112 of 112 routes, 24 of 24 policies, 194 of 261 added files, 23 of 27 added tables, 24 of 28 migrations. 19 of 43 tasks were not contiguous in these histories and were read run by run | The floor paths could only bound, and the rules §3 was missing: what "existed" means in a stack, files a command writes, generated files, a deleted file, a missing base record |
 | Does the screens-first derivation work on real plans? | A prototype in a worktree: `screens: 'first'` in the schema and the derivation, run over the ten plans, and the approval, status, verification and revision functions called on a small application in its own repository | 43 tasks become 53. 45 views move; of 112 added routes a view names 66, 38 more only render one, 8 do neither, 4 return JSON; 35 of 36 validators move; 65 registrations bind a model not yet written. Approval after the screens settles all ten collisions as built. A view owned by the screens task alone never verifies. A route on its fixture reads `drifted`. `plan:revise` refuses a proposed plan, and a revision's added or renamed element is refused at approval. An unproposed draft passes `plan:next` and `plan:verify`. Today's scaffold writes no file of a screens step in any of the ten | The corrected table of owners in §5, the tests step of the screens task, the stamps beside the baseline, and the three checks that keep work before approval to screens |
 | Do `skip` and fixtures-off work on the framework as it is? | A prototype in a worktree, driven by probes on a minimal application, one process per scenario, and a bundle built with the production define | Under `skip` the boot succeeds, the fixture is never evaluated, a dark `/posts/new` answers 404 where the omitted route was answered by `/posts/:id`, and the refusal's read of `NODE_ENV` survives bundling. Fixtures off cannot be a boot setting on a shared application; carried per request by the `TestApp` it works in both orders, and a guard and a contract answer before the 501. A route on its fixture already redirects a guest and refuses an invalid body | The rules of §5 for `skip`, for the test switch, for promotion, and the behaviours that lose their red run |
 | Does the navigation module work on the framework as it is? | A prototype in a worktree: the definition, the filter, the lazy prop, a syntax reader and both writers, driven by probes on minimal applications with four identities | A config definition's `boot` hook can share the prop, with routes and gate in reach. A guest's payload carries no ability, hidden label, hidden route or denial message. The prop is skipped on partial reloads that do not ask for it and on JSON. A missing route name answers 500 on every page unless the entry is linked at boot. No type lists route names today. A policy that reads a `null` user throws for every guest. All 24 append round trips read back; 19 removals restored the bytes | The runtime rules of §5 that the first text left to `guren check` or did not state |
@@ -1931,7 +1978,7 @@ How long the gate takes on a real application was not measured.
 - **Deliverable 1, in use.** The shadow comparison: the floor against the
   person's `lane:` label, and what became of the low ones.
 - **Deliverable 5.** The same task and defect counts on real merge units with
-  the declaration matcher and the security records in place; the share of red
+  the security records in place (the declaration matcher has run, above); the share of red
   runs that are `reproduced` under the rule of §4; cold preparation time.
 - **Deliverable 6, on a repository.** The lane job end to end, including
   whether GitHub's auto-merge applies to a stacked pull request, and the
