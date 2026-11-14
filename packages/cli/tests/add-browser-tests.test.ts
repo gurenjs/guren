@@ -395,23 +395,29 @@ async function evaluateConfig(files: Record<string, string>, env: Record<string,
 }
 
 describe('the behaviour config, loaded', () => {
-  // A file saved with CRLF, the key shapes Bun accepts, and the two files Bun loads beside .env in another mode.
+  // Shapes Bun loads that a line parser reads otherwise: CRLF and lone CR line ends, a dashed key, `KEY: value`,
+  // a key on the line above its `=`, and a multi-line value holding a line that looks like an assignment.
   const FILES = {
-    '.env': 'APP_KEY=app\r\nexport SMTP_PASS="smtp"\r\nMY-DASH=dash\r\nYAML_STYLE: yaml\r\nBROWSER_TEST_PASSWORD=\r\nANTHROPIC_MODEL=other\r\nDATABASE_URL=file\r\n',
+    '.env': 'APP_KEY=app\r\nexport SMTP_PASS="smtp"\r\nMY-DASH=dash\r\nYAML_STYLE: yaml\r\nBROWSER_TEST_PASSWORD=\r\nANTHROPIC_MODEL=other\r\nDATABASE_URL=file\r\n'
+      + 'PUBLIC=one\rCR_SECRET=secret\rAFTER=x\nSPLIT_SECRET\n=split\nMULTI="first\nEMBEDDED_NAME=/example\nlast"\n',
     '.env.development.local': 'LOCAL_ONLY=x\n',
     '.env.production': 'PROD_ONLY=y\n',
   }
+  const SHELL = { BROWSER_TEST_PASSWORD: 'shellpw123', DATABASE_URL: 'shell', EMBEDDED_NAME: 'shell' }
 
   test('hands the agent every name an env file sets as an empty string, and keeps the model the executor names', async () => {
-    const loaded = await evaluateConfig(FILES, { BROWSER_TEST_PASSWORD: 'shellpw123', DATABASE_URL: 'shell' })
-    expect(Object.keys(loaded.agentEnv).sort()).toEqual(['APP_KEY', 'BROWSER_TEST_PASSWORD', 'DATABASE_URL', 'LOCAL_ONLY', 'MY-DASH', 'PROD_ONLY', 'SMTP_PASS', 'YAML_STYLE'])
+    const loaded = await evaluateConfig(FILES, SHELL)
+    // Every mode's files, and no EMBEDDED_NAME: Bun reads that line as part of MULTI, so the shell's value stays the agent's.
+    expect(Object.keys(loaded.agentEnv).sort()).toEqual([
+      'AFTER', 'APP_KEY', 'BROWSER_TEST_PASSWORD', 'CR_SECRET', 'DATABASE_URL', 'LOCAL_ONLY', 'MULTI', 'MY-DASH', 'PROD_ONLY', 'PUBLIC', 'SMTP_PASS', 'SPLIT_SECRET', 'YAML_STYLE',
+    ])
     expect(new Set(Object.values(loaded.agentEnv))).toEqual(new Set(['']))
     // The preset spreads these over ANTHROPIC_MODEL, so an emptied one would start the agent on no model.
     expect(loaded.model).toBe('sonnet')
   }, TSC_TIMEOUT)
 
   test('takes a password the shell exports, and a worker loading the config again reads the same one', async () => {
-    const loaded = await evaluateConfig(FILES, { BROWSER_TEST_PASSWORD: 'shellpw123', DATABASE_URL: 'shell' })
+    const loaded = await evaluateConfig(FILES, SHELL)
     expect(loaded.credential).toBe('shellpw123')
     expect(loaded.commandEnv).toEqual({ BROWSER_TEST_PASSWORD: 'shellpw123' })
     expect(loaded.worker).toEqual({ ...loaded, worker: undefined })
@@ -754,6 +760,15 @@ describe('guren add browser-tests --behaviours', () => {
       await addBrowserTests({ install: false, behaviours: true, agent: 'claude-code', loadMap: async () => mapOf([POSTS]) })
       expect(older()).toHaveLength(1)
       expect(older()[0]).toContain('Run: bun add -d @playwright/test@^1.65.0')
+
+      // A workspace install hoists a package above the app; Node's lookup still finds it there.
+      warn.mockClear()
+      await writeWorkspaceFiles(workspace.dir, { 'packages/app/package.json': INERTIA_MANIFEST })
+      await seedInertiaApp(join(workspace.dir, 'packages/app'))
+      process.chdir(join(workspace.dir, 'packages/app'))
+      await addBrowserTests({ install: false, behaviours: true, agent: 'claude-code', loadMap: async () => mapOf([POSTS]) })
+      expect(older()).toHaveLength(1)
+      process.chdir(workspace.dir)
 
       // The same or a newer Playwright shares its Page with the runner's copy, or adds to it.
       for (const version of ['1.65.0', '1.66.2']) {

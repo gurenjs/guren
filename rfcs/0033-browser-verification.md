@@ -1156,10 +1156,13 @@ item is measured. It writes, once:
   in an env file, the worker typed that one while the app was seeded with the
   shell's. Deleting also removed the shell's value of any name the author
   adds to `inheritEnv`. The empty string is what keeps a name from the agent,
-  so the deletion bought nothing. The names are read from every env file Bun
-  can load in any mode (`.env`, `.env.local`, the three mode files and their
-  `.local` twins), with the keys Bun accepts, since a name the config misses
-  reaches the agent with its value. `PATH`, `HOME`, `NODE_ENV` and
+  so the deletion bought nothing. The config does not parse the files either:
+  it starts Bun on an otherwise empty environment under each of the three
+  modes and takes the names that Bun then holds. A parser of its own read some
+  lines otherwise (measured): it missed names Bun loads after a lone CR or
+  from a key on the line above its `=`, which then reached the agent with
+  their values, and it took a line inside a multi-line value for a name, which
+  emptied a variable the shell had set for the agent. `PATH`, `HOME`, `NODE_ENV` and
   `ANTHROPIC_MODEL` are never emptied: the adapter does not start without the
   first two, and the executor sets the last, which an empty value would
   replace;

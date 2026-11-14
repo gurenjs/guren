@@ -8,7 +8,7 @@
  */
 
 import { readFile, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { consola } from 'consola'
 
 import { readAppLocale } from './app-locale'
@@ -149,11 +149,18 @@ export function behaviourAgent(options: Pick<AddBrowserTestsOptions, 'behaviours
  * hands it a `page` of the older one, which stops typechecking. Unreadable versions answer nothing.
  */
 async function olderPlaywright(cwd: string): Promise<{ installed: string; pinned: string } | undefined> {
+  // Node's lookup, each node_modules from the app up: a workspace install hoists either package above the app.
   const manifestOf = async (name: string): Promise<{ version?: unknown; dependencies?: Record<string, unknown> } | undefined> => {
-    try {
-      return JSON.parse(await readFile(join(cwd, 'node_modules', name, 'package.json'), 'utf8')) as { version?: unknown; dependencies?: Record<string, unknown> }
-    } catch {
-      return undefined
+    for (let dir = resolve(cwd); ; dir = dirname(dir)) {
+      const text = await readFile(join(dir, 'node_modules', name, 'package.json'), 'utf8').catch(() => undefined)
+      if (text !== undefined) {
+        try {
+          return JSON.parse(text) as { version?: unknown; dependencies?: Record<string, unknown> }
+        } catch {
+          return undefined
+        }
+      }
+      if (dirname(dir) === dir) return undefined
     }
   }
   const [test, web] = await Promise.all([manifestOf(PLAYWRIGHT_PACKAGE), manifestOf('@e2e-dev/web')])
