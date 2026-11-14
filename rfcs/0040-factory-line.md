@@ -680,12 +680,17 @@ export default defineNavigation([
   denies or throws hides the entry.
 - **The server filters, the client renders.** The module is a config
   definition, bound through `createApp({ config })` like the others, so
-  adding it is the `config-added` fact above. On each visit it shares
-  `navigation`, the entries the user may see with each one's path and whether
-  it is the current one. The layout maps that prop to links and holds no
+  adding it is the `config-added` fact above. It shares `navigation` as
+  a lazy prop: the entries the user may see, each with its path from
+  `Router.route(name)` and whether it is the current one. The engine resolves
+  a lazy prop on a full visit and skips it on a partial reload that does not
+  ask for it. The layout maps that prop to links and holds no
   condition. Ability names, hidden routes and the user's role never reach a
   browser that should not see them, and no ability has to be shared with the
-  client. The cost is one gate check per `can` entry on a visit.
+  client. The cost is one gate check per distinct ability and model on
+  a visit: ten such checks took 12 microseconds measured on the gate alone.
+  A policy that queries decides the real cost, and three of the eight
+  `create` and `viewAny` methods in the measured applications are `async`.
 - **A route is named, not spelled.** The name is checked against the route
   manifest's type, and by `guren check`: the route exists, is a `GET` with no
   path parameter (`isParameterless()`, the rule the browser map picks a
@@ -1502,6 +1507,7 @@ which for a later task is not that task's own merge base.
 | Do merge bases have a completed push run? | This repository's last 60 merged pull requests | 60 of 60, at most four days before the merge | That the runs exist. Not that their records would be comparable, and not stacked pull requests, of which there were none |
 | Does storing and fetching a record work? | A workflow on a test repository: the push run uploads `guren-record-<sha>`, the pull request run asks the artifacts API for its merge base's, with a read-only token | Found for a branch cut from a commit that had a push run; reported missing for one cut before the workflow existed | The mechanism of §3 |
 | Can an application page reach a decisions listener? | A prototype on its own port and an application page on another, driven in a browser from `localhost` and from `127.0.0.1` | Every read, frame, script load and post refused; a foreign `Host` and a request with no `Origin` refused; the click on the confirmation accepted. A script can open the confirmation and cannot answer it | The isolation of §12 from page scripts. Nothing about an agent that drives the browser |
+| What does filtering the navigation cost? | The gate alone, a policy with two synchronous abilities, ten checks per visit | 12 microseconds per visit; a guest is denied | The framework's share of the cost (§5). A policy that queries adds its own, and 3 of the 8 class-level abilities in the measured applications are `async` |
 | Does the harness's own review run? | The implementation logs of 52 runs | The `code-review` agent was called in 4, and in none of the 11 step-by-step runs | §7 |
 
 **From the independent evaluations.** Each of the 11 applications was walked
