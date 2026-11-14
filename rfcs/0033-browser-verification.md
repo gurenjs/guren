@@ -1062,7 +1062,14 @@ choice, and there is no default. It writes, once:
   so every launch passes §3's checks and none attaches to a server it did not
   start; `web({ locale })` pinned as the Playwright config pins it (RFC 0036
   §5); `tests: 'tests/browser/behaviours/**/*.e2e.ts'`; the executor for the
-  chosen agent; the browser account as an `e2e` credential (§13.7);
+  chosen agent; the browser account as an `e2e` credential (§13.7). The runner
+  passes a command only `PATH`, `HOME` and what the config names, and refuses a
+  bare `*`, so the config sets `inheritEnv: ['NODE_ENV']`: §3 refuses
+  production on the caller's `NODE_ENV`, which would otherwise never arrive.
+  Any other variable the shell sets is not passed, so `browser:serve` judges
+  and starts the app on its env files alone; an app that selects its database
+  from the shell adds the name to `inheritEnv` in this file, which is the
+  author's after it is written;
 - `tests/browser/behaviours/auth.setup.e2e.ts`, on the same evidence of a
   password sign-in as §6, saving the session `browser`;
 - `tests/browser/behaviours/given.ts` (author-owned, like `a11y.ts`):
@@ -1106,6 +1113,8 @@ skipped test naming why, never left out and never passed:
 | no view of the plan sends the route | nothing says which page to start on |
 | the route, or the page's route, is not registered yet | as §6 |
 | a signed-in route with no password sign-in | as §6 |
+| no outcome a browser can check | every expectation is a status or a database row, an `errors` key has no labelled field, or the view `expect.inertia` names has no label and no action |
+| an input that is not a string, a number or a boolean | nothing says how a control takes it |
 
 **One test per behaviour.** For `AC-comments-store-1`, sent by the form of a
 view on `GET /posts/:post`:
@@ -1119,33 +1128,45 @@ test('AC-comments-store-1 (9c41f2): a signed-in user comments on a post', { sess
   await agent.act('set "Comment" to {body}, then use "Post comment"', { params: { body: 'First!' } })
   await off()
   await expect(browser).toHaveURL(start.path('/posts/:post'))
-  expect(await landedComponent(browser)).toBe('posts/Show')
+  await expect(screen.getByRole('button', 'Post comment')).toBeVisible()
 })
 ```
 
 - **The start page is opened by the test.** The path is the first `GET` route
-  rendering the view's page, the rule the view specs use, with its parameters
-  filled from `given.ts`. No instruction carries a URL, which is what keeps a
-  record's id out of a recording (§13.1).
+  with no path parameter that renders the view's page, the rule the view specs
+  use. Where every such route takes a parameter, it is the first of them, with
+  its parameters filled from `given.ts`; the view specs stop there with a
+  `fixme`. No instruction carries a URL, which is what keeps a record's id out
+  of a recording (§13.1).
 - **`begin()`** is in the generated file, not in a file written once. It calls
   the behaviour's entry in `given.ts` and returns the parameter values. A
   behaviour with `given` text or a path parameter and no entry is skipped from
   the body with that reason. An entry prepares its data however the app can: a
   seeder that runs at boot, or the app's own pages.
-- **The instruction is built from the plan.** Each key of the behaviour's
-  first `input` that the view's form labels becomes `set "<label>" to {key}`,
-  its value a parameter. The step ends with the label of the view action whose
-  route is the behaviour's, or with "submit the form" when no action names it.
-  An input key with no labelled field is listed by `browser:map` and left to
-  the agent.
+- **The instruction is built from the plan.** A behaviour's `input` is a list
+  of `{ name, json }` entries, one per field. Every entry becomes a parameter
+  holding its decoded value, as the `TestApp` skeleton builds its body from
+  all of them. An entry whose name the view's form labels reads
+  `set "<label>" to {name}`; one the form does not label reads
+  `set the field for <name> to {name}`, so the agent still has the value, and
+  `browser:map` lists it as a field the plan's view lacks. The step ends with
+  the label of the view action whose route is the behaviour's, or with "submit
+  the form" when no action names it.
 - **A dialog is accepted** for the length of the step.
 - **The outcome is pinned by locators, never by the agent.** `expect.redirect`
   becomes a URL assertion (a `:param` the test does not know matches one
-  segment), `expect.inertia` the landed page's component read as
-  `support.ts` reads it, and each `expect.errors` key with a labelled field
+  segment). `expect.inertia` becomes the labels and action names of the view
+  it names, located as the view spec locates them. The landed component is not
+  read: `window.__INERTIA_PAGE__` and the initial-page element are written by
+  a full load only, and after a client-side visit they still name the first
+  page. Each `expect.errors` key with a labelled field becomes
   `aria-invalid="true"` on that control, which `@guren/inertia-client/forms`
   sets. `agent.assert` is never generated: it calls the model on every run, so
   a spec holding one cannot run in CI without a login.
+- **At least one pin, or no test.** The runner saves a recording only after a
+  locator or URL assertion passes behind the step; an assertion on a plain
+  value does not count. A behaviour with none of the pins above could neither
+  fail nor record, so it is skipped (the table above).
 - **Not pinned:** `expect.status` (an Inertia visit shows a page, not a
   status) and `expect.database` (no browser run reads the database, §7). Both
   stay with the `TestApp` test of the same behaviour.
@@ -1181,10 +1202,20 @@ still Open Question 5.
   as the run without the flag did in §13.1. It is red either way, and the
   error names a login where the remedy is a recording to commit. Not measured
   under the flag.
-- **A stale recording is not a defect in the app.** The skill tells the agent
-  to run `test:behaviours` after changing a page a behaviour starts on, to
-  commit the changed recordings with the change, and to report `REPLAY_STALE`
-  as a recording to make again.
+- **A stale recording is not a verdict.** `REPLAY_STALE` covers a control that
+  was renamed and also an action the app now rejects or an end state it no
+  longer reaches, which the runner's guide calls a possible regression. The
+  skill tells the agent to run the test live before anything else. A live run
+  that passes records again, and the changed recording is committed with the
+  page change. A live run that fails is a finding under §5's rule, and no
+  recording is replaced to make it pass.
+- **A recording with a gap never replays whole.** An action the runner cannot
+  repeat (a value the agent read off the screen or a screenshot, or worked out
+  from the date) runs live on every run, under `--strict-cache` too, and so
+  does a truncated recording. Such a test cannot pass in CI without a login.
+  The instruction rule of §13.5 puts every value in a parameter, which the
+  runner replays; a behaviour that still records a gap is reworded or left
+  out of CI, and the run's summary names it.
 - **An upgrade** of the runner may re-key every recording (§13.3). The
   `@guren/cli` release that moves the versions says so.
 
@@ -1194,16 +1225,27 @@ still Open Question 5.
   tools, no user or project settings, no MCP servers, a session in an empty
   temporary directory, and `POLICY_DENIED` on any tool of its own.
 - The config loads no `.env`. The app is started by `browser:serve`, which
-  loads the app's own, and `app.command` passes the child only `PATH`, `HOME`
-  and what `inheritEnv` names. The agent's process therefore holds the shell's
-  variables and none of the app's.
-- The runner withholds `E2E_USER_*` and `E2E_SECRET_*` from the agent and
-  types a credential itself. The browser account's password is read from
-  `E2E_USER_BROWSER_PASSWORD`, else from `BROWSER_TEST_PASSWORD` in the app's
-  env files, parsed and never exported. With neither set the signed-in tests
-  are skipped with that reason and no default password is seeded (§6); the
-  config then registers no credential, since the runner refuses a password
-  under six characters when it loads.
+  loads the app's own, so no value from the app's env files reaches the
+  agent. That is the whole guarantee: the agent's process inherits the shell's
+  environment, so a secret the shell exports under any name but `E2E_USER_*`
+  or `E2E_SECRET_*` reaches it, as the runner documents.
+- The runner types a credential itself and gives the agent its name only.
+  The browser account's password has one source, `BROWSER_TEST_PASSWORD`, the
+  variable the seeder of §6 reads: from the shell when it is set there, else
+  parsed from the app's env files and never exported. The config hands that
+  value to the app through `command.env`, so the seeded hash and the typed
+  password cannot differ, and registers it as the credential. When the shell
+  exported it, the config also deletes it from `process.env`; whether that
+  reaches every process the runner starts is for M6 to check. The runner's
+  own `E2E_USER_BROWSER_PASSWORD` override is not supported: it changes what
+  is typed and not what is seeded.
+- With the password unset the signed-in tests are skipped with that reason and
+  no default is seeded (§6); the config then registers no credential, since
+  the runner refuses a password under six characters when it loads.
+- A behaviour's input is the plan's. It is committed with the plan and with
+  its `TestApp` test, the spec passes it to the agent as ordinary parameters,
+  and a recording stores what was typed. A plan therefore holds test values
+  only, as it already must.
 - Screenshots the runner sends the model mask password fields only. The
   account exists only in a database `browser:serve` judged local, which is what
   bounds what a screenshot can show.
@@ -1212,7 +1254,7 @@ still Open Question 5.
 
 | Section | Change |
 | --- | --- |
-| §5 skill | When `e2e.browser.config.ts` exists: run `test:behaviours` after changing a page a behaviour starts on, commit changed recordings, report `REPLAY_STALE` as a stale recording. The live drive is unchanged, and the skill still registers no MCP server |
+| §5 skill | When `e2e.browser.config.ts` exists: run `test:behaviours` after changing a page a behaviour starts on; on `REPLAY_STALE` run the test live first, commit the new recording when it passes, and report a finding under §5's rule when it fails (§13.6). The live drive is unchanged, and the skill still registers no MCP server |
 | §6 blueprint | `--behaviours --agent`; `browser:map` owns `tests/browser/behaviours/generated/` under §13.5's conditions |
 | §7 evidence | Unchanged. The runner's `.e2e/report.json` stays where it writes it, and `browser:record` reads none of it. The file is the runner's own document (`schemaVersion: "report-1"` in 0.23.1, its JSON schema shipped in the package), so anything that reads it later checks that field: the format moves with the runner's version, which §13.3 pins |
 | §8 gates | Unchanged: no gate reads a behaviour spec |
@@ -1228,11 +1270,15 @@ still Open Question 5.
 - On the measurement app with one approved plan, on Bun 1.4.4 and the released
   runner: a behaviour's test records in one live run under a Claude Code login,
   and the next run replays every step with no model call.
-- With no login and the recordings present, `test:behaviours:ci` passes. After
-  a form label changes, it fails that step with `REPLAY_STALE` and makes no
-  model call. A behaviour with no recording fails there as well, with the
-  agent's authentication error, and the guide says that this means a recording
-  to make.
+- With no login and the recordings present, `test:behaviours:ci` passes, and
+  its summary shows every step replayed and none run live. After a control is
+  renamed on the page with the plan unchanged, it fails that step with
+  `REPLAY_STALE` and makes no model call. After the plan's label changes and
+  the spec is regenerated, the test has another title and no recording, so it
+  fails with the agent's authentication error, as any behaviour with no
+  recording does; the guide says that this means a recording to make.
+- A behaviour with no pin of §13.5 is a skipped test naming why.
+- `NODE_ENV=production bun run test:behaviours` starts no app.
 - A behaviour whose start page has a path parameter and no `given.ts` entry is
   skipped with that reason. A behaviour of a kind §13.5 leaves out is a skipped
   test naming why.
@@ -1245,7 +1291,8 @@ still Open Question 5.
   10 s, since a `browser:serve` that is force-killed before it handles
   `SIGTERM` leaves the app running (§13.1). A run that finds the port answering
   refuses with `APP_ALREADY_RUNNING` and attaches to nothing.
-- The agent's environment holds no value from the app's env files.
+- The agent's environment holds no value from the app's env files, and no
+  `BROWSER_TEST_PASSWORD` when the shell exported one.
 - `POLICY_DENIED` is counted over at least fifty live steps before the
   blueprint ships, and its cause is named or its rate stated in the guide.
 
