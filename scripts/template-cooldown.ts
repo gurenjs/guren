@@ -10,6 +10,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AI_PROVIDERS } from '../packages/cli/src/add-ai'
+import { BEHAVIOUR_DEV_PACKAGES, CLAUDE_CODE_ADAPTER } from '../packages/cli/src/add-browser-tests'
 import { RELEASE_AGE_SECONDS } from '../packages/cli/src/release-age'
 import { DATABASE_DEFAULTS } from '../packages/create-app/src/blueprints'
 import { collectLocalPackages, type DependencyManifest } from './smoke/local-packages'
@@ -41,8 +42,8 @@ async function readManifest(path: string): Promise<DependencyManifest> {
 /**
  * The third-party ranges a scaffolded app asks Bun to resolve at the top of its
  * tree: the templates' own, the driver `create-guren-app --db` adds, what `guren add
- * ai` pins from the CLI's devDependencies, and the dependencies and required peers
- * of each `@guren/*` package a scaffold installs (the gate still applies to those).
+ * ai` and `add browser-tests --behaviours` install (the adapter included), and the
+ * dependencies and required peers of each `@guren/*` package a scaffold installs.
  * Deeper ranges are left to `smoke:starter:npm`, which installs from the registry.
  */
 export async function scaffoldThirdPartyRanges(templates: readonly string[]): Promise<ResolvedRange[]> {
@@ -66,6 +67,13 @@ export async function scaffoldThirdPartyRanges(templates: readonly string[]): Pr
     if (range === undefined) throw new Error(`packages/cli/package.json declares no devDependency on ${name}, which guren add ai installs at that range.`)
     ranges.push({ name, range, source: 'guren add ai' })
   }
+  // Exact pins, so each is young for three days after the runner releases: no release ships them before then.
+  for (const name of BEHAVIOUR_DEV_PACKAGES) {
+    const range = cli.devDependencies?.[name]
+    if (range === undefined) throw new Error(`packages/cli/package.json declares no devDependency on ${name}, which guren add browser-tests --behaviours installs at that version.`)
+    ranges.push({ name, range, source: 'guren add browser-tests --behaviours' })
+  }
+  ranges.push({ ...CLAUDE_CODE_ADAPTER, source: 'guren add browser-tests --behaviours' })
   for (const pkg of await collectLocalPackages()) {
     const manifest = await readManifest(join(pkg.sourceDir, 'package.json'))
     const optional = manifest.peerDependenciesMeta ?? {}

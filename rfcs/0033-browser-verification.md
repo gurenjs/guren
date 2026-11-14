@@ -1095,6 +1095,12 @@ devDependencies (it needs them to typecheck the config template). A new version
 reaches an app when `@guren/cli` moves them, in a release whose changeset says
 whether recordings have to be made again.
 
+**Amended in implementation:** the adapter is installed at `^0.107.0`, the
+version the measurements ran on. No template imports it, so `@guren/cli` does
+not declare it and the blueprint holds the range. The release check that every
+range a scaffold installs has cleared the three-day gate (RFC 0039 §2) reads
+these four, so no release ships a pin an app's own gate would refuse.
+
 **No runtime dependency.** No `@guren/*` package depends on any of these at
 run time, and Guren's own code still calls no model. The runner asks the
 developer's coding agent, under that agent's login.
@@ -1102,6 +1108,16 @@ developer's coding agent, under that agent's login.
 **Two Playwright copies.** `@playwright/test` (the app's range) and
 `playwright-core` 1.65.0 sit side by side, each with its own Chromium build.
 The blueprint prints the download before the first run makes it.
+
+**Amended in implementation:** the two copies share types as well as disk.
+Bun may hoist the runner's `playwright-core`, and `@axe-core/playwright`'s
+types then name that copy while the accessibility spec of §12 hands it a `page`
+of the app's. With the app's Playwright older (1.62.1 beside 1.65.0, measured
+in this repository and in the measurement app) the spec stops typechecking,
+and the app's `typecheck` covers `tests/`. `@guren/cli` therefore declares
+`@playwright/test` at `^1.65.0`, which is what an app without Playwright gets,
+and the blueprint warns an app whose installed Playwright is older than the
+runner's pin, naming the command that raises it.
 
 **Telemetry.** The CLI sends usage counts by default. The script the blueprint
 writes sets `E2E_TELEMETRY_DISABLED=1`; an app that wants to send them removes
@@ -1131,8 +1147,25 @@ item is measured. It writes, once:
   and starts the app on its env files alone; an app that selects its database
   from the shell adds the name to `inheritEnv` in this file, which is the
   author's after it is written. It also parses the names the app's env files
-  set, deletes each from `process.env`, and passes each to the executor as an
-  empty string, since Bun would otherwise load them into the agent (§13.7);
+  set, ~~deletes each from `process.env`,~~ and passes each to the executor as
+  an empty string, since Bun would otherwise load them into the agent (§13.7).
+  **Amended in implementation:** nothing is deleted from `process.env`. The
+  runner forks each worker from that environment and the worker loads the
+  config again, so a password only the shell exported was gone by then: the
+  run ended with `CONFIG_NOT_DETERMINISTIC` (measured), or, with another value
+  in an env file, the worker typed that one while the app was seeded with the
+  shell's. Deleting also removed the shell's value of any name the author
+  adds to `inheritEnv`. The empty string is what keeps a name from the agent,
+  so the deletion bought nothing. The config does not parse the files either:
+  it starts Bun on an otherwise empty environment under each of the three
+  modes and takes the names that Bun then holds. A parser of its own read some
+  lines otherwise (measured): it missed names Bun loads after a lone CR or
+  from a key on the line above its `=`, which then reached the agent with
+  their values, and it took a line inside a multi-line value for a name, which
+  emptied a variable the shell had set for the agent. `PATH`, `HOME`, `NODE_ENV` and
+  `ANTHROPIC_MODEL` are never emptied: the adapter does not start without the
+  first two, and the executor sets the last, which an empty value would
+  replace;
 - `tests/browser/behaviours/auth.setup.e2e.ts`, on the same evidence of a
   password sign-in as §6, saving the session `browser`;
 - `tests/browser/behaviours/given.ts` (author-owned, like `a11y.ts`):
@@ -1327,9 +1360,12 @@ behaviour's `actor` means is still Open Question 5.
 - The config loads no `.env`, and under Bun that is not enough: Bun loads the
   app's env files into the runner and again into the agent's adapter, so the
   agent was started with the app's key and its mail and database settings
-  (§13.1). The config therefore parses the names those files set, deletes each
-  from `process.env`, and gives the executor each name as an empty string,
-  which Bun's loader does not replace. A name the shell also exports is
+  (§13.1). The config therefore parses the names those files set~~, deletes
+  each from `process.env`,~~ and gives the executor each name as an empty
+  string (amended in §13.4), which Bun's loader does not replace. An app's
+  `ANTHROPIC_API_KEY` is among them: emptied, Claude Code ran the step under
+  its login (measured), where the app's key would otherwise have paid for it.
+  A name the shell also exports is
   emptied with the rest; the agent needs none of them. The app is unaffected:
   `browser:serve` starts it, and it loads its own files. That is the whole
   guarantee: the agent's process inherits the rest of the shell's environment,
@@ -1338,16 +1374,23 @@ behaviour's `actor` means is still Open Question 5.
 - The runner types a credential itself and gives the agent its name only.
   The browser account's password has one source, `BROWSER_TEST_PASSWORD`, the
   variable the seeder of §6 reads: from the shell when it is set there, else
-  parsed from the app's env files and never exported. The config hands that
+  parsed from the app's env files ~~and never exported~~. The config hands that
   value to the app through `command.env`, so the seeded hash and the typed
   password cannot differ, and registers it as the credential. Deleting it from
   `process.env` did not keep it from the agent, since the adapter loads the env
   files again (§13.1); the empty value above does. The runner's
   own `E2E_USER_BROWSER_PASSWORD` override is not supported: it changes what
   is typed and not what is seeded.
-- With the password unset the signed-in tests are skipped with that reason and
-  no default is seeded (§6); the config then registers no credential, since
-  the runner refuses a password under six characters when it loads.
+- With the password unset ~~the signed-in tests are skipped with that reason
+  and~~ no default is seeded (§6); the config then registers no credential,
+  since the runner refuses a password under six characters when it loads.
+  **Amended in implementation:** the runner refuses `test.skip` inside a setup
+  test, since other tests depend on its session. The setup therefore fails
+  naming `BROWSER_TEST_PASSWORD`, the runner skips every test that needs the
+  session with the cause `setup-failed`, and the run exits 1. A password
+  shorter than six characters is handled the same way, so the config still
+  loads. Measured on the measurement app: the setup failed, the four signed-in
+  tests were skipped for it, and the run exited 1.
 - A behaviour's input is the plan's. It is committed with the plan and with
   its `TestApp` test, the spec passes it to the agent as ordinary parameters,
   and a recording stores what was typed. A plan therefore holds test values

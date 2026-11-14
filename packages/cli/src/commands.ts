@@ -1444,27 +1444,41 @@ const addPrototypeCommand = defineCommand({
 const addBrowserTestsCommand = defineCommand({
   meta: {
     name: 'browser-tests',
-    description: 'Install Playwright browser tests (RFC 0033): a config that starts the app through browser:serve, a seeded browser account where the app signs in with a password, and the specs browser:map generates from then on.',
+    description: 'Install Playwright browser tests (RFC 0033): a config that starts the app through browser:serve, a seeded browser account where the app signs in with a password, and the specs browser:map generates from then on. With --behaviours --agent, also the e2e runner set up to perform approved plans\' behaviours under that agent\'s login.',
   },
   args: {
     force: {
       type: 'boolean',
-      description: 'Overwrite the files written once (config, support, sign-in setup, seeder) and an existing test:browser script.',
+      description: 'Overwrite the files written once (configs, support, sign-in setups, seeder; never given.ts) and an existing test:browser or test:behaviours script.',
     },
     install: {
       type: 'boolean',
       default: true,
-      description: 'Run bun add -d for @playwright/test and @axe-core/playwright when either is missing (--no-install prints the command instead).',
+      description: 'Run bun add -d for the packages that are missing: @playwright/test and @axe-core/playwright, and with --behaviours the e2e runner (--no-install prints the command instead).',
+    },
+    behaviours: {
+      type: 'boolean',
+      description: 'Also set up behaviour specs (RFC 0033 §13): e2e.browser.config.ts, a sign-in setup, tests/browser/behaviours/given.ts and the test:behaviours scripts. Needs --agent.',
+    },
+    agent: {
+      type: 'string',
+      description: 'With --behaviours: the coding agent whose login runs the steps. claude-code; codex is not available yet.',
     },
   },
   async run({ args }) {
     const { addBrowserTests } = await import('./add-browser-tests')
     const overwritten: string[] = []
-    const result = await addBrowserTests({ force: Boolean(args.force), install: args.install, overwritten })
+    const result = await addBrowserTests({
+      force: Boolean(args.force), install: args.install, overwritten,
+      behaviours: Boolean(args.behaviours),
+      ...(args.agent === undefined ? {} : { agent: args.agent }),
+    })
     announceWrittenFiles(result.created, overwritten)
     if (result.mapped.changed.length > 0) consola.success(`browser:map wrote ${result.mapped.changed.join(', ')}`)
     if (result.mapped.removed.length > 0) consola.success(`browser:map removed ${result.mapped.removed.join(', ')}`)
     if (result.mapped.accessibilityOff) consola.info(`browser:map wrote no accessibility spec: ${result.mapped.accessibilityOff}. Run bunx guren browser:map once it is installed.`)
+    if (result.behaviours && result.mapped.behavioursOff) consola.info(`browser:map wrote no behaviour spec: ${result.mapped.behavioursOff}. Run bunx guren browser:map once it is installed.`)
+    if (result.mapped.unlabelledInputs) consola.warn(`A behaviour sets a field its view's form does not label: ${result.mapped.unlabelledInputs.join('; ')}`)
     if (result.mapped.held) consola.warn(`browser:map wrote no specs: ${result.mapped.held}. Run bunx guren browser:map once it reads the whole app.`)
     if (!result.map.complete) consola.warn(`The browser map is incomplete (${result.map.gaps.map((gap) => gap.section).join(', ')}), so the specs may miss features; run bunx guren browser:map --check for the reasons.`)
     if (result.signIn) {
@@ -1472,6 +1486,9 @@ const addBrowserTestsCommand = defineCommand({
       consola.info('Set BROWSER_TEST_PASSWORD in .env: the browser account is seeded with it.')
     }
     consola.info('Next: bunx playwright install chromium, then bun run test:browser. After approving a plan, run bunx guren browser:map to regenerate the specs.')
+    if (result.behaviours) {
+      consola.info('Behaviour specs: bun run test:behaviours runs each step under your Claude Code login and records it; the first run downloads the Chromium build the runner pins, beside the one Playwright has. Commit .e2e/cache/, and run bun run test:behaviours:ci in CI, where a recorded step replays with no login.')
+    }
   },
 })
 
