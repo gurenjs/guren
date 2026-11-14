@@ -982,7 +982,8 @@ shell can already run `plan:approve`: the harness rule that forbids it, and
 the decisions log that shows it, are the same guard there as here.
 
 This reverses a choice RFC 0030 made on purpose (**decided 2026-11-13** by the
-maintainer, Open Question 14). It ships as its own deliverable, and RFC 0030
+maintainer, and confirmed 2026-11-14 with the limit above stated, Open
+Question 14). It ships as its own deliverable, and RFC 0030
 §8 is amended in place when it does. The page keeps showing the command it
 will run, so a person who prefers the terminal loses nothing.
 
