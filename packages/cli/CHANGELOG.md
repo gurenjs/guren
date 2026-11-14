@@ -1,5 +1,16 @@
 # @guren/cli
 
+## 2.36.4
+
+### Patch Changes
+
+- 13339a6: `guren make:view <path> --module <name>` now writes the page to `resources/js/pages/<name>/<path>.tsx`, where `make:feature --module` puts a module's pages and `make:controller --module` looks for them. The flag was accepted and ignored, so the page landed at `resources/js/pages/<path>.tsx`. The next step `make:controller --module` prints names the command with the flag.
+- bb90613: `guren check` and `guren audit` no longer read `createHash(algo).update(data)`, `storage.disk().delete(path)`, `cache().store().delete(key)` or `new PostPolicy().delete(user, post)` as a record write. A chained `update()`, `delete()`, `forceDelete()` or (in an in-process agent's local tool) `create()` counts only when the chain starts at a model: a PascalCase name, a local the body binds off one without awaiting it (`const query = Post.newQuery()`), or the scope a `Post.transaction()` callback receives. `increment()` and `decrement()` follow the same rule. The annotation rules for agent routes (`readOnlyHint`, `destructiveHint: false`) and the local-tool listing read through it. A chain written with `?.` (`Post.where(…)?.update(…)`) is now counted.
+- Updated dependencies [be6d386]
+- Updated dependencies [4501ef4]
+  - @guren/server@2.37.1
+  - @guren/orm@2.16.1
+
 ## 2.36.3
 
 ### Patch Changes

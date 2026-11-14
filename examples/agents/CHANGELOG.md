@@ -1,5 +1,17 @@
 # @guren/example-agents
 
+## 0.1.34
+
+### Patch Changes
+
+- Updated dependencies [be6d386]
+- Updated dependencies [13339a6]
+- Updated dependencies [bb90613]
+- Updated dependencies [4501ef4]
+  - @guren/testing@1.15.1
+  - @guren/cli@2.36.4
+  - @guren/orm@2.16.1
+
 ## 0.1.33
 
 ### Patch Changes
