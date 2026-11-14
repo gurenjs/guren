@@ -1669,6 +1669,9 @@ headless sessions built through the plan loop with commits naming their
 steps: 170 step commits in 43 tasks, and 364 acceptance ids. An eleventh
 history repeats one application's task commits and then makes a change
 request outside the loop; it is counted once, under that application. The
+10 are five application ideas: one built once, three built twice and one
+three times, each time by a separate session from the same brief, so they
+are less than ten independent samples, and all are new applications. The
 plan composition is over every plan of both runs, 3,144 elements with a
 change kind. No test was run for these: they are counts over commits, diffs and plan
 files. "Existing" means present at the commit before the plan's first step,
