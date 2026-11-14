@@ -197,7 +197,7 @@ among them.
 
 | Fact | Read from |
 | --- | --- |
-| `gate-input` | What the gate itself runs. The gate's stages are the app's own scripts, so this is `package.json` scripts, every file a script names, `scripts/`, `bin/`, `.oxlintrc.json`, `tsconfig.json`, `guren.arch.ts`, `guren.review.ts`, `.github/**`, the harness hooks and settings, and `playwright.browser.config.ts`. A change that rewrites `scripts.test`, or the file it runs, passes the gate it disabled |
+| `gate-input` | What the gate itself runs. The gate's stages are the app's own scripts, so this is `package.json` scripts, every file a script names, `scripts/`, `bin/`, `.oxlintrc.json`, `tsconfig.json`, `guren.arch.ts`, `guren.review.ts`, `.github/**`, the harness hooks and settings, `playwright.browser.config.ts` and, under RFC 0033 §13, `e2e.browser.config.ts`. A change that rewrites `scripts.test`, or the file it runs, passes the gate it disabled |
 | `plan-record` | A plan file, its approvals or its decision log. An approval that arrives with its implementation is a claim, so the plan lands first, in a change a person reads (§5) |
 | `migration-destructive` | `judgeMigrations()` on the migrations the change adds, acknowledged findings included; an existing migration edited or deleted |
 | `authorization-removed` | Per-route security records, below |
@@ -298,7 +298,10 @@ plan's author what to declare next time.
 
 **Ambient.** Low: documentation outside `docs/plans/` and `docs/lessons/`,
 `lang/` catalogs, added tests that carry no existing id, and generated files a
-drift gate already judges (`docs/spec/`). A file under `docs/lessons/` is
+drift gate already judges (`docs/spec/`, the browser specs `browser:map`
+writes). Under RFC 0033 §13 the recordings in `.e2e/cache/` are ambient too:
+a recording asserts nothing, the generated spec does, and the evidence replays
+both (§4). A file under `docs/lessons/` is
 `lesson`, medium: a person reads a rule before the agents follow it.
 
 **Policy file.** `guren.review.ts` is optional and exported through a new
@@ -415,6 +418,18 @@ Cases are read from the run's `spec-report.json`. A failed case makes `ok`
 false. A feature the change touches that is `uncovered`, because its spec is a
 `test.fixme` or the application has no browser configuration at all, is a hold
 whenever the change edits a page or a route that renders one.
+
+**Behaviour specs (RFC 0033 §13, proposed).** If that amendment is accepted
+and the application has `e2e.browser.config.ts`, the evidence also runs
+`test:behaviours:ci` and counts the cases of the runner's `.e2e/report.json`
+in the same aggregate. A case that does not pass there (a step that fails to
+replay, `REPLAY_STALE`, no recording under `--strict-cache`, an outcome the
+locators do not find) is a hold and never makes `ok` false. §13 keeps
+behaviour specs out of every gate, and this keeps to it: the change is not
+failed, it is read by a person. A stale recording means a page a behaviour
+starts on changed and nobody recorded it again. These specs are generated from
+the plan and replayed with no model, so they are a check the implementing
+session did not write (Open Question 9).
 
 **The record.** `record.json` is what outlives the run: base, head, the
 classifier version, the fact codes with their lanes, the floor, the holds,
@@ -990,7 +1005,9 @@ measured is listed at the end, with the deliverable that measures it.
    high. Where the harness has a `test-writer` agent, `plan-implement` hands
    it the tests step, so the bodies are written in a context that holds the
    plan step and the skeleton only. A holdout cannot be kept from an agent
-   with a checkout, and an external scenario store is out of scope.
+   with a checkout, and an external scenario store is out of scope. RFC 0033
+   §13, if accepted, adds behaviour specs generated from the plan and
+   replayed in CI, which the evidence counts (§4).
 10. ~~**A circuit breaker.**~~
     **Resolved (2026-11-14):** none. A revert of a low change is shown at the
     top of the numbers, and a person edits `guren.review.ts` (§11).
