@@ -1143,7 +1143,8 @@ pages step taken out: 13 could be low today, 25 with the application entry
 and 30 with environment keys, where the same tasks with their pages gave 11,
 18 and 23. That is the bound for a plan whose screens are all new, and it
 assumes the matcher reads a promotion as the plan's addition; an altered
-screen keeps its task as it was. The screens task is one more unit per plan
+screen keeps its task as it was. Paths overstate: the 11 they gave was 5 by
+the facts, so this shows the direction and not the count. The screens task is one more unit per plan
 and always a person's. None of this has run through the plan loop: no
 measured history has a screens task, and the one application built
 prototype-first was built outside the loop.
