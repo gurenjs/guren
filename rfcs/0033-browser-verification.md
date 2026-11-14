@@ -1000,6 +1000,59 @@ Four things went wrong, and §13.5 is shaped by them:
 The first run also downloaded a Chromium build without asking (99 MiB, 216 MB on
 disk), since `@e2e-dev/web` pins its own `playwright-core`.
 
+Later on 2026-11-14 the acceptance of §13.9 was run on the measurement app
+(`smoke:browser-tests` at `@guren/cli` 2.36.4: `add auth` and a posts resource
+on SQLite), on Bun 1.4.4 and `e2e` 0.23.1. No generator exists yet, so the
+config and four tests were written by hand to §13.4 and §13.5: create a post, a
+title of spaces refused, retitle a post, delete a post. Each test holds one
+agent step.
+
+| Measured on the measurement app | Result |
+| --- | --- |
+| Four steps, live | 55 s, 164,000 tokens, each step recorded |
+| Four steps, replayed | 7 s including the app's start, no model call |
+| One live step, over 65 | 8.8 to 15.9 s, median 10.4 s; about 41,000 tokens, 88% of them cache reads |
+| `--strict-cache`, no login, recordings current | passes in 8 s; the summary reads `4 replayed` |
+| The same, the submit button renamed | the two tests that use it fail with `REPLAY_STALE` after 14 s each and no model call, exit code 2; the other two replay |
+| The same, one test under a new title, so with no recording | that test fails with `MODEL_PROVIDER_FAILED`, authentication required, exit code 3; the other three replay |
+| Logged in, the test under the new title | one recording is added; the four earlier files are byte for byte what they were |
+| `NODE_ENV=production` | `APP_UNREACHABLE`: `browser:serve` exits before any app starts, and the runner prints its refusal |
+| Another server already answering on 4319 | `APP_ALREADY_RUNNING`; the run attaches to nothing |
+| A run that passed or failed; `SIGINT` or `SIGTERM` to the runner | no app process and no listener left |
+| `POLICY_DENIED` | none in 65 live steps of the four tests |
+
+The policy failure above was not reproduced. Ten more live steps were given a
+goal the start page has no control for (the profile page, from the posts
+list), the shape of the step that failed on 2026-11-12, and none was denied. The
+tests of that day held three agent steps in one agent session; these hold one.
+The cause is still not named.
+
+Three more things were found. They change §13.4, §13.5 and §13.7:
+
+- **Bun hands the app's env files to the agent.** Bun loads `.env` into every
+  Bun process started in the app's directory. Under `bunx --bun e2e run` the
+  runner held all sixteen names of the app's `.env`. The runner starts the
+  agent's adapter as a second Bun process in the same directory, which loads
+  the files again, so the Claude Code process was started with `APP_KEY`,
+  `SMTP_PASS`, `DATABASE_URL` and `BROWSER_TEST_PASSWORD` in its environment,
+  the last of them after the config had deleted it from `process.env`.
+  `--no-env-file` on the runner does not reach the adapter, and `env = false`
+  in `bunfig.toml` stops the app from reading its own files. With the runner
+  under Node 22.23.5, neither process held any of them. What worked under Bun:
+  the config deletes every name the env files set from `process.env` and gives
+  the executor each name as an empty string. Bun's loader leaves a variable
+  that is already set, so both processes were started with empty values only,
+  and twenty live steps passed that way. This reads the environment a process
+  is started with; what a process loads afterwards was not observed.
+- **An empty value on a required control.** With the title empty, the browser's
+  own validation stops the submit: no request is sent, the server renders no
+  error, and the control never gets `aria-invalid`. The test failed on that
+  pin, where the `TestApp` test of the same behaviour passes.
+- **A one-segment pattern matches a sibling route.** A redirect to `/posts/:id`
+  read as "one segment after `/posts/`" is satisfied by a browser still on
+  `/posts/create`, the start page, so a submit that did nothing passes the URL
+  assertion.
+
 #### 13.2 Why this is an amendment
 
 - §11 names an agentic test runner as a non-goal.
@@ -1069,7 +1122,9 @@ choice, and there is no default. It writes, once:
   Any other variable the shell sets is not passed, so `browser:serve` judges
   and starts the app on its env files alone; an app that selects its database
   from the shell adds the name to `inheritEnv` in this file, which is the
-  author's after it is written;
+  author's after it is written. It also parses the names the app's env files
+  set, deletes each from `process.env`, and passes each to the executor as an
+  empty string, since Bun would otherwise load them into the agent (§13.7);
 - `tests/browser/behaviours/auth.setup.e2e.ts`, on the same evidence of a
   password sign-in as §6, saving the session `browser`;
 - `tests/browser/behaviours/given.ts` (author-owned, like `a11y.ts`):
@@ -1115,6 +1170,7 @@ skipped test naming why, never left out and never passed:
 | a signed-in route with no password sign-in | as §6 |
 | no outcome a browser can check | every expectation is a status or a database row, an `errors` key has no labelled field, or the view `expect.inertia` names has no label and no action |
 | an input that is not a string, a number or a boolean | nothing says how a control takes it |
+| a `validation` behaviour whose input leaves empty a key that the route's form contract (RFC 0036 §2.1) renders with `required` | the browser stops the submit, so no request is sent and no error is rendered (§13.1); `TestApp` pins it |
 
 **One test per behaviour.** For `AC-comments-store-1`, sent by the form of a
 view on `GET /posts/:post`:
@@ -1154,8 +1210,10 @@ test('AC-comments-store-1 (9c41f2): a signed-in user comments on a post', { sess
   the form" when no action names it.
 - **A dialog is accepted** for the length of the step.
 - **The outcome is pinned by locators, never by the agent.** `expect.redirect`
-  becomes a URL assertion (a `:param` the test does not know matches one
-  segment). `expect.inertia` becomes the labels and action names of the view
+  becomes a URL assertion. A `:param` the test does not know matches one
+  segment, except a literal that another registered route has in that place:
+  `/posts/:id` is not satisfied by a browser still on `/posts/create` (§13.1).
+  `expect.inertia` becomes the labels and action names of the view
   it names, located as the view spec locates them. The landed component is not
   read: `window.__INERTIA_PAGE__` and the initial-page element are written by
   a full load only, and after a client-side visit they still name the first
@@ -1195,13 +1253,12 @@ still Open Question 5.
   (§13.1). The step waits for the recorded control first, 14 s in the
   measurement, so a stale suite is slow as well as red. CI needs no key and no
   login.
-- **A step that was never recorded is not stale.** By the runner's
-  documentation it runs live even under `--strict-cache`: a new behaviour, or
-  one whose regenerated title is new (§13.5), whose recording was not
-  committed. With no login in CI that step fails with `MODEL_PROVIDER_FAILED`,
-  as the run without the flag did in §13.1. It is red either way, and the
-  error names a login where the remedy is a recording to commit. Not measured
-  under the flag.
+- **A step that was never recorded is not stale.** It runs live even under
+  `--strict-cache`: a new behaviour, or one whose regenerated title is new
+  (§13.5), whose recording was not committed. With no login in CI that step
+  fails with `MODEL_PROVIDER_FAILED` (§13.1). It is red either way, and the
+  error names a login where the remedy is a recording to commit. The run's exit
+  code tells the two apart: 3 for this, 2 for `REPLAY_STALE`.
 - **A stale recording is not a verdict.** `REPLAY_STALE` covers a control that
   was renamed and also an action the app now rejects or an end state it no
   longer reaches, which the runner's guide calls a possible regression. The
@@ -1224,19 +1281,25 @@ still Open Question 5.
 - The `@e2e-dev/acp` presets give the agent the step tools only: no built-in
   tools, no user or project settings, no MCP servers, a session in an empty
   temporary directory, and `POLICY_DENIED` on any tool of its own.
-- The config loads no `.env`. The app is started by `browser:serve`, which
-  loads the app's own, so no value from the app's env files reaches the
-  agent. That is the whole guarantee: the agent's process inherits the shell's
-  environment, so a secret the shell exports under any name but `E2E_USER_*`
-  or `E2E_SECRET_*` reaches it, as the runner documents.
+- The config loads no `.env`, and under Bun that is not enough: Bun loads the
+  app's env files into the runner and again into the agent's adapter, so the
+  agent was started with the app's key and its mail and database settings
+  (§13.1). The config therefore parses the names those files set, deletes each
+  from `process.env`, and gives the executor each name as an empty string,
+  which Bun's loader does not replace. A name the shell also exports is
+  emptied with the rest; the agent needs none of them. The app is unaffected:
+  `browser:serve` starts it, and it loads its own files. That is the whole
+  guarantee: the agent's process inherits the rest of the shell's environment,
+  so a secret the shell exports under a name no env file sets, other than
+  `E2E_USER_*` or `E2E_SECRET_*`, reaches it, as the runner documents.
 - The runner types a credential itself and gives the agent its name only.
   The browser account's password has one source, `BROWSER_TEST_PASSWORD`, the
   variable the seeder of §6 reads: from the shell when it is set there, else
   parsed from the app's env files and never exported. The config hands that
   value to the app through `command.env`, so the seeded hash and the typed
-  password cannot differ, and registers it as the credential. When the shell
-  exported it, the config also deletes it from `process.env`; whether that
-  reaches every process the runner starts is for M6 to check. The runner's
+  password cannot differ, and registers it as the credential. Deleting it from
+  `process.env` did not keep it from the agent, since the adapter loads the env
+  files again (§13.1); the empty value above does. The runner's
   own `E2E_USER_BROWSER_PASSWORD` override is not supported: it changes what
   is typed and not what is seeded.
 - With the password unset the signed-in tests are skipped with that reason and
@@ -1291,10 +1354,18 @@ still Open Question 5.
   10 s, since a `browser:serve` that is force-killed before it handles
   `SIGTERM` leaves the app running (§13.1). A run that finds the port answering
   refuses with `APP_ALREADY_RUNNING` and attaches to nothing.
-- The agent's environment holds no value from the app's env files, and no
-  `BROWSER_TEST_PASSWORD` when the shell exported one.
+- The agent's adapter and the agent are started with no value from the app's
+  env files: each name those files set is absent or empty in their
+  environment, `BROWSER_TEST_PASSWORD` included, whether or not the shell
+  exported it, under Bun as under Node.
+- A `validation` behaviour that leaves a required key empty is a skipped test
+  naming why, and a redirect to `/posts/:id` fails while the browser is on
+  `/posts/create`.
 - `POLICY_DENIED` is counted over at least fifty live steps before the
   blueprint ships, and its cause is named or its rate stated in the guide.
+  Counted on 2026-11-14 (§13.1): none in 65 live steps of the generated shape,
+  which by the rule of three puts the rate under 4.6% at 95% confidence. The
+  cause of the one earlier failure is not named, so the guide states the rate.
 
 #### 13.10 Alternatives considered
 
