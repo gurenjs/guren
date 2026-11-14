@@ -846,8 +846,8 @@ edit first in a pull request. And an edit a changed element owns stays medium
 **Screens first.** RFC 0030 left pages out of the plan's scaffold and gave
 layout to prototype mode (its Open Question 4), and RFC 0021 ships that mode:
 a fixture module that answers each route by name, a static build with no
-server, and a `prototype` route handler that `plan:status` already reads as a
-route present and not yet wired to its action. The line uses none of it, and
+server, and a `prototype` route handler that `plan:status` already
+recognises by name. The line uses none of it, and
 the measured histories show what that costs. Pages are the last step of each
 task, and nobody looks at them until an evaluation: 27 of the 80 defects a
 task introduced came from a pages step, among them every accessibility defect
@@ -863,34 +863,75 @@ before approval would change a route that is live. On an application that is
 already released, screens first reaches its new screens only.
 
 The task derivation then gives an element two owners where it has one today:
-the step that creates it and the step that completes it.
+the step that creates it and the step that completes it. A prototype of the
+derivation ran over the ten measured plans and corrected the first table,
+which gave the view one owner and took only the routes a view names.
 
-| Element the plan adds | Created by | Completed by |
+| Element the plan adds | Created by the screens task | Completed by |
 | --- | --- | --- |
-| A view and its page | The screens task | The screens task |
-| A route a view names | The screens task, registered on the `prototype` handler | The `http` step of its task, which replaces the handler with the planned action |
-| A validator a form needs | The screens task | The `http` step, where the action validates with it |
-| A navigation entry with no `can` | The screens task | The screens task |
-| A navigation entry with `can` | The `http` step of the task that adds its policy | The same step |
+| A view and its page | The page, judged at `present` | The `http` step whose action renders it, at `wired`. `plan:status` calls a view wired only when a controller action returns its page, so with one owner the screens task could never verify |
+| A route a fixture can answer: one that renders a view, redirects or returns errors | Registered on the `prototype` handler, without its `bind` and `.agent()`, which name a model no task has written | The `http` step of its task, which replaces the handler with the planned action and adds the binding |
+| A route that returns JSON | Not created: a fixture has no such answer | Its task, as today |
+| A validator a screens route's contract or form names | The validator. It reads `wired` from that commit, through the route's contract | Nothing more |
+| The page's data type | Written from the fields of the resource the view shows | The resource, in its task, typed against it |
+| A navigation entry with no `can` | The entry | The screens task |
+| A navigation entry with `can` | Not created | The `http` step of the task that adds its policy |
 
-- **One screens task, ahead of every other.** `plan:scaffold` writes the
-  fixture entries, the route registrations and the page data types; the page
-  components stay the agent's, as RFC 0030 decided. It verifies with
-  `codegen`, the typecheck, `check --prototype` and `build:prototype`. The
-  last two join the closed list of verify commands. None needs a database or
-  an environment, so a cloud session with no services can build it.
+Over the ten plans that moves 45 added views into the screens task. Of the
+112 routes the plans add, a view names 66 as a link or a form's target, 38
+more only render a view, and 8 do neither, most of them the update route of
+a form that create and edit share. The screens task takes them by routes
+file and not by what a view names: no screen opens without the route that
+renders it, and a file two tasks write is a file the second is refused. Four
+routes return JSON and stay behind. 35 of the 36 added validators move. The
+43 tasks become 53, one more per plan, and the steps 174 become 177.
+
+- **One screens task, after the foundation and ahead of every entity.** It
+  waits for the foundation's commands, since a route can carry a middleware
+  one of them creates. Where the application has no fixture module yet, it
+  runs `guren add prototype` first: a `prototype` route does not boot without
+  the loader in `createApp()` and an entry in the fixture. `plan:scaffold`
+  writes the fixture entries, the route registrations and their mount, and
+  the page data types; the page components stay the agent's, as RFC 0030
+  decided. Today's emitter writes none of this: it names a validator file
+  after the model its step adds and writes a route only beside the action it
+  writes, and the screens step has neither.
+- **Its steps are tests, then pages.** A route registered with its
+  middleware and its contract already answers some behaviours with no action
+  behind it: a guest is redirected to sign in, an invalid body is refused.
+  RFC 0030 puts a behaviour in the task whose work makes it hold, so those
+  move to the screens task, whose tests step fails before the routes are
+  registered and passes after. Of the 325 behaviours on the routes the
+  screens task registers in the ten plans, a guard answers 99 and a contract
+  46. Their red runs are kept, and the screens task needs what any tests step
+  needs. The pages step then verifies with `codegen`, the typecheck,
+  `guren check`, which already runs the prototype checks, and
+  `build:prototype`, which joins the closed list of verify commands. The
+  static build needs no database or environment, so a cloud session with no
+  services can build what the person walks.
 - **The other tasks lose their pages step and gain a promotion.** Their
-  scaffold step reuses the validators and the routes file the screens task
-  wrote, where today it refuses a name that exists. The `http` step replaces
-  the `prototype` handler with the planned action, and the resource is typed
-  against the data type the page was built on (RFC 0021 §6), so the typecheck
-  is what holds the backend to the screens a person walked.
+  scaffold step writes no routes file. The `http` step edits the one the
+  screens task wrote: the handler, the controller's import and the binding.
+  The resource is typed against the page's data type (RFC 0021 §6), which
+  `make:feature` does at promotion and the plan scaffold does not yet, so
+  the typecheck is what holds the backend to the screens a person walked.
+- **A promotion is the plan's addition, completed.** At the task's base the
+  route exists, on its fixture, so the fact is a changed route and the plan's
+  element says `add`. The declaration matcher of §3 reads a route whose base
+  handler is `prototype` and whose head is the planned action as that
+  addition. Without this the promoted routes file is an edit to existing
+  source, and every task that promotes is medium.
+- **`plan:status` says a route awaits promotion.** Today a route on its
+  fixture reads `drifted`, the state of work that went wrong, because its
+  action differs. The difference is withheld as a mount is: the route is
+  present and waits for its `http` step.
 - **An entry with `can` waits for its policy.** It imports a model and names
   an ability that no task has written when the screens are built.
 
 This is the largest change this RFC asks of RFC 0030. Today `plan/tasks.ts`
-gives each element one completing step, the scaffold refuses a target that
-exists, and a verification's fingerprint follows that one owner.
+gives each element one completing step, the scaffold only creates files and
+refuses a target that exists, and a verification's fingerprint follows that
+one owner.
 
 **The walk is part of approving the plan.** A plan with screens first is
 proposed as before (`plan:approve --propose`), and under the `proposed`
@@ -898,7 +939,14 @@ standing the screens task and nothing else can be worked: `plan:next`,
 `plan:scaffold` and `plan:verify` accept a proposed plan for that task alone,
 and the Stop hook verifies it. `plan:waive` and `plan:close` refuse as
 before. The only work that can be built before approval is work that cannot
-run in production.
+run in production, and three checks hold it to that, none of which exists
+today. A draft with `screens: 'first'` is refused until it is proposed,
+where other drafts keep their behaviour: a prototype ran `plan:verify` on an
+entity step of an unproposed draft and it recorded `verified`. Each command
+tests the task of the step it is given, and a whole-plan `plan:verify` under
+`proposed` runs the screens task only. And the screens task does not verify
+while an element outside it has left `planned` or one of its routes is off
+the `prototype` handler, so a full implementation cannot pass as screens.
 (**Decided 2026-11-14** by the maintainer, over building the screens after
 approval, which stops the person twice and makes every change after the walk
 a revision to approve again.)
@@ -914,14 +962,30 @@ something they clicked.
 **A revision made on the walk.** The baseline is stamped at the proposal,
 before any screen exists, which is how approval tells the plan's own work
 from a collision: an added element absent at the stamp and present now reads
-as built (RFC 0030 §4). A revision keeps that baseline, so an element it adds
-has no stamp, and once the screens task had built it, approval would read a
-collision. So under `proposed` the order is the rule: revise, then build.
-`plan:revise` stamps each element the revision adds from the tree as it
-stands and refuses one that is already there; `--propose` runs again and
-writes the proposal at the new hash; and the screens task's record, taken at
-the old digest, is stale and is verified again. Nothing is restamped, and no
-collision is let through.
+as built (RFC 0030 §4). A prototype confirmed it on a small application:
+after the screens commit the checks found ten collisions (two validators,
+two pages, three route names and three endpoints), all ten were settled as
+built, and the approval was accepted.
+
+A revision is where it breaks. Today `plan:revise` refuses a proposed plan,
+since no approval or revision record names its hash. Carried past that, the
+baseline is kept, so a view and a route the revision adds have no stamp, and
+once built the approval refuses them as collisions. A rename is the same: a
+page renamed on the walk and then built reads as fresh and not as built, and
+the approval refuses it. And the stamps cannot simply be added to the
+baseline: a revision is required to carry it unchanged, and its digest is
+the key an `alter`'s readings carry over by.
+
+So under `proposed` the order is the rule, revise and then build, and the
+stamps live beside the baseline and not in it. `plan:revise` accepts a
+proposed parent. For each element whose target names differ from the
+parent's, added or renamed, it writes a stamp in a separate field of the
+plan, and refuses unless the tree reads as that element's start: an added
+name absent, a renamed one still under its old name. `--propose` runs again
+and writes the proposal at the new hash, and the screens task's record,
+taken at the old digest, is stale and is verified again. The baseline is
+never restamped, an approved plan gains no stamp, and a stamp taken after
+the element was built settles nothing, so no collision is let through.
 
 Four rules keep this from weakening what is already decided, and a fifth says
 what the walk cannot show.
@@ -943,16 +1007,12 @@ what the walk cannot show.
   as it does today. A prototype showed both orders working on one shared
   application.
 
-  What the 501 does not cover is a behaviour the route already satisfies
-  without an action: a guest sent to sign in by the route's middleware, an
-  invalid body refused by its contract. Their tests pass as soon as the
-  screens task registers the route, so no red run of theirs can be observed,
-  and `planMayPassNow` reports them before approval as RFC 0030's
-  `alreadyHolds` behaviours. In the measured plans 82 of the 364 behaviours
-  expect a guest to be redirected to sign in, and 67 more expect a 422, which
-  holds early wherever the route carries the validator as its contract.
-  Screens first gives up those red runs. A behaviour that needs the action,
-  a write or a 403 from a policy, keeps its own.
+  The 501 comes after the route's middleware and its contract, so it does
+  not cover a behaviour those two answer without an action. Those are the
+  behaviours the screens task's own tests step holds (above), where their
+  red run is observed before the route is registered. A behaviour that needs
+  the action, a write or a 403 from a policy, meets the 501 and keeps its
+  red run in its entity's task.
 - **Promotion keeps the route's guards.** A route on its fixture already runs
   its middleware, and the `prototype` handler enforces the contract's params,
   query and body itself (not its output): a prototype saw a guest redirected
@@ -1035,7 +1095,8 @@ what the walk cannot show.
 What this buys the lanes, by paths on the same 43 tasks with each task's
 pages step taken out: 13 could be low today, 25 with the application entry
 and 30 with environment keys, where the same tasks with their pages gave 11,
-18 and 23. That is the bound for a plan whose screens are all new; an altered
+18 and 23. That is the bound for a plan whose screens are all new, and it
+assumes the matcher reads a promotion as the plan's addition; an altered
 screen keeps its task as it was. The screens task is one more unit per plan
 and always a person's. None of this has run through the plan loop: no
 measured history has a screens task, and the one application built
@@ -1821,6 +1882,7 @@ which for a later task is not that task's own merge base.
 | Which step brings the defects a person has to see? | The 80 task defects by the kind of step whose commit introduced them | Pages 27 (13 user experience, 11 accessibility, 2 performance, 1 correctness), http 36, scaffold 14, tests 2, data 1. Every accessibility defect came from a pages step | Why the screens come before approval (§5) |
 | What do the tasks look like without their pages? | The same paths with each task's pages step left out (23 steps) | 13 could be low today, 25 with the application entry, 30 with environment keys, of 43 | The bound screens first would give the tasks that remain. The screens task is a person's |
 | Does the navigation design cover what the plans did to the layout? | The nine layout edits read against §5: entries added, changed or removed, the account controls and their labels, the brand, `<Layout wide>` | 7 of 9 are declared entries alone; the other 2 also change the page's vertical padding. Of the five tasks that only the layout kept out of low, 4 fit: 27 of 43 | The layout, the width and the declared removal are part of the module, not additions to it |
+| Does the screens-first derivation work on real plans? | A prototype in a worktree: `screens: 'first'` in the schema and the derivation, run over the ten plans, and the approval, status, verification and revision functions called on a small application in its own repository | 43 tasks become 53. 45 views move; of 112 added routes a view names 66, 38 more only render one, 8 do neither, 4 return JSON; 35 of 36 validators move; 65 registrations bind a model not yet written. Approval after the screens settles all ten collisions as built. A view owned by the screens task alone never verifies. A route on its fixture reads `drifted`. `plan:revise` refuses a proposed plan, and a revision's added or renamed element is refused at approval. An unproposed draft passes `plan:next` and `plan:verify`. Today's scaffold writes no file of a screens step in any of the ten | The corrected table of owners in §5, the tests step of the screens task, the stamps beside the baseline, and the three checks that keep work before approval to screens |
 | Do `skip` and fixtures-off work on the framework as it is? | A prototype in a worktree, driven by probes on a minimal application, one process per scenario, and a bundle built with the production define | Under `skip` the boot succeeds, the fixture is never evaluated, a dark `/posts/new` answers 404 where the omitted route was answered by `/posts/:id`, and the refusal's read of `NODE_ENV` survives bundling. Fixtures off cannot be a boot setting on a shared application; carried per request by the `TestApp` it works in both orders, and a guard and a contract answer before the 501. A route on its fixture already redirects a guest and refuses an invalid body | The rules of §5 for `skip`, for the test switch, for promotion, and the behaviours that lose their red run |
 | Does the navigation module work on the framework as it is? | A prototype in a worktree: the definition, the filter, the lazy prop, a syntax reader and both writers, driven by probes on minimal applications with four identities | A config definition's `boot` hook can share the prop, with routes and gate in reach. A guest's payload carries no ability, hidden label, hidden route or denial message. The prop is skipped on partial reloads that do not ask for it and on JSON. A missing route name answers 500 on every page unless the entry is linked at boot. No type lists route names today. A policy that reads a `null` user throws for every guest. All 24 append round trips read back; 19 removals restored the bytes | The runtime rules of §5 that the first text left to `guren check` or did not state |
 | Can the navigation checks be read, and are they right? | A prototype over the 31 links the plans wrote, their routes, actions and policies, by syntax | Every link, route, action and policy method read. Sign-in mismatch: 4 warnings, 4 right. Role checks that restate an ability the action authorizes: 4 of 6, all nameable. Policy methods: 8 user only, 29 a required second parameter, 8 an optional one. 74 of 85 candidate routes make no `authorize()` call | The three readings of §5, and that the comparison has to start from the action, since no layout names an ability |
