@@ -697,8 +697,10 @@ export default defineNavigation([
 - **An entry is data.** A literal label, a route name, and an optional `show`
   with any of three conditions, all of which must hold: `auth` (`any`,
   `required`, `guest`), `can` (an ability and the model class its policy is
-  bound to), and `where` (fields of the user compared by equality, for an
-  application with no policy to ask). There is no function, so the CLI reads
+  bound to), and `where` (fields of the user compared by strict equality, so
+  a string never matches a numeric id, for an application with no policy to
+  ask). `auth` and `where` are judged first, so an entry that requires
+  sign-in never asks the gate for a guest. There is no function, so the CLI reads
   the file by its syntax; a spread, a computed value or a function makes the
   file unreadable, and an edit to it `source-edited`.
 - **`can` asks the gate.** `['create', Job]` is evaluated as
@@ -711,18 +713,36 @@ export default defineNavigation([
   measured applications, all read by syntax, 8 take the user alone, 29
   require a second parameter and 8 make it optional; of those 8, 2 mean
   something without a record and 6 return a constant. A check that denies or
-  throws hides the entry.
+  throws hides the entry, and a throw is logged once per ability and model
+  for the life of the process: a guest is asked with a `null` user, as
+  `this.authorize()` asks, so a policy that reads the user without a guard
+  throws on every guest visit. Two things the runtime cannot see are left to
+  that warning: a method that requires a record and never reads it shows its
+  entry to everyone, and an ability the policy lacks falls through to a gate
+  of the same name defined with `gate.define()`.
 - **The server filters, the client renders.** The module is a config
-  definition, bound through `createApp({ config })` like the others, so
-  adding it is the `config-added` fact above. It shares `navigation` as
-  a lazy prop: the entries the user may see, each with its path from
-  `Router.route(name)` and whether it is the current one. The engine resolves
-  a lazy prop on a full visit and skips it on a partial reload that does not
-  ask for it. The layout maps that prop to links and holds no
-  condition. Ability names, hidden routes and the user's role never reach a
-  browser that should not see them, and no ability has to be shared with the
-  client. The cost is one gate check per distinct ability and model on
-  a visit: ten such checks took 12 microseconds measured on the gate alone.
+  definition, given to `createApp({ config })` like the others, so adding it
+  is the `config-added` fact above. Unlike the others it works in the
+  definition's `boot` hook and not in `bind`: by then the routes are
+  registered and the gate is bound, so it links every entry once and
+  registers the shared prop for that application. It shares `navigation` as
+  a lazy prop: for each entry the user may see, its label, its path and
+  whether it is the current one, and nothing else of the entry. The engine
+  resolves a lazy prop on a full visit and skips it on a partial reload that
+  does not ask for it and on a JSON response. The layout maps that prop to
+  links and holds no condition. Ability names, hidden routes, `where` fields
+  and a denial's message never reach a browser: a prototype's guest payload
+  held none of them. The current entry is the one whose path equals the
+  request's, else the longest that is a prefix of it by whole segments, among
+  the entries the user may see; `/` is a prefix of nothing.
+
+  The cost is one gate check per distinct ability and model each time the
+  prop is resolved, asked together and not in turn: ten abilities whose
+  policy waits 5 ms added 5.8 ms to a visit asked together and 56.5 ms asked
+  in turn. It is once per resolution and not once per request, since an
+  action that authorizes the same ability asks again, and a `gate.after()`
+  callback runs for every navigation check. Ten checks took 12 microseconds
+  measured on the gate alone.
   Of the eight `create` and `viewAny` methods in the measured applications,
   the three that take the user alone are synchronous and read only the user.
   The other five take a second argument (`{ teamId }`, `{ projectId }`, the
@@ -730,10 +750,17 @@ export default defineNavigation([
   once or twice. In these applications no ability an entry could name
   queries. That is a count and not a bound: a warning keeps nothing out, and
   a `before` hook or an ability that takes the user alone may query too.
-- **A route is named, not spelled.** The name is checked against the route
-  manifest's type, and by `guren check`: the route exists, is a `GET` with no
-  path parameter (`isParameterless()`, the rule the browser map picks a
-  landmark by) and renders a page.
+- **A route is named, not spelled.** The route must exist, be a `GET` with
+  no path parameter (`isParameterless()`, the rule the browser map picks a
+  landmark by) and render a page. Three readers hold it to that. Codegen
+  writes the names an entry may use into `.guren/routes.gen.ts` as a type the
+  definition is checked against, which it does not write today; the config
+  imports nothing generated, so there is no cycle, and until codegen has run
+  any name passes. The runtime links each entry at boot and hides one whose
+  route is missing, is not a `GET` or has a parameter, with a warning: left
+  to the request, `Router.route()` throws on a missing name and every page
+  of the application answers 500. `guren check` reports the same three and
+  the one the runtime cannot see, a route that renders no page.
 - **Showing is not authorizing.** Hiding a link protects nothing. `guren
   check` compares an entry with what its route does, advisory only, in three
   readings. An entry everyone sees whose route requires sign-in, read from
@@ -776,7 +803,11 @@ export default defineNavigation([
   the first for its index page, with the ability when it also writes the
   policy, and passes `wide` to the index page it writes; `plan:next` names
   the commands for the step that owns a navigation element: a task's pages
-  step, or under screens first the steps named there.
+  step, or under screens first the steps named there. The writer adds the
+  model's import for a `can` and refuses when the model's file does not
+  exist, since the application entry imports this file and would fail to
+  start. Removing an entry removes that import only when nothing else in the
+  file uses the name.
 - **Existing applications.** `guren add navigation` writes the module and
   replaces the layout only when the layout is still byte for byte one the
   framework shipped, judged by a hash of every version it shipped, as
@@ -799,7 +830,8 @@ declares it: the same route, label and `show` for an addition or a change,
 the route for a removal. Undeclared, each is medium. A declared removal can
 be low because an entry grants nothing: what a wrong one costs is a missing
 link, and the person who approved the plan saw it listed. Left out of
-this first shape: grouped or nested entries, a label as a translation key (a
+this first shape: entries a module contributes (an application has one
+navigation, and its file may name a module's route), grouped or nested entries, a label as a translation key (a
 label is written in the default locale, as a plan's view labels are), and
 abilities for anything but navigation: a button on a page keeps receiving its
 boolean from the controller.
@@ -1763,6 +1795,7 @@ which for a later task is not that task's own merge base.
 | Which step brings the defects a person has to see? | The 80 task defects by the kind of step whose commit introduced them | Pages 27 (13 user experience, 11 accessibility, 2 performance, 1 correctness), http 36, scaffold 14, tests 2, data 1. Every accessibility defect came from a pages step | Why the screens come before approval (§5) |
 | What do the tasks look like without their pages? | The same paths with each task's pages step left out (23 steps) | 13 could be low today, 25 with the application entry, 30 with environment keys, of 43 | The bound screens first would give the tasks that remain. The screens task is a person's |
 | Does the navigation design cover what the plans did to the layout? | The nine layout edits read against §5: entries added, changed or removed, the account controls and their labels, the brand, `<Layout wide>` | 7 of 9 are declared entries alone; the other 2 also change the page's vertical padding. Of the five tasks that only the layout kept out of low, 4 fit: 27 of 43 | The layout, the width and the declared removal are part of the module, not additions to it |
+| Does the navigation module work on the framework as it is? | A prototype in a worktree: the definition, the filter, the lazy prop, a syntax reader and both writers, driven by probes on minimal applications with four identities | A config definition's `boot` hook can share the prop, with routes and gate in reach. A guest's payload carries no ability, hidden label, hidden route or denial message. The prop is skipped on partial reloads that do not ask for it and on JSON. A missing route name answers 500 on every page unless the entry is linked at boot. No type lists route names today. A policy that reads a `null` user throws for every guest. All 24 append round trips read back; 19 removals restored the bytes | The runtime rules of §5 that the first text left to `guren check` or did not state |
 | Can the navigation checks be read, and are they right? | A prototype over the 31 links the plans wrote, their routes, actions and policies, by syntax | Every link, route, action and policy method read. Sign-in mismatch: 4 warnings, 4 right. Role checks that restate an ability the action authorizes: 4 of 6, all nameable. Policy methods: 8 user only, 29 a required second parameter, 8 an optional one. 74 of 85 candidate routes make no `authorize()` call | The three readings of §5, and that the comparison has to start from the action, since no layout names an ability |
 | Do merge bases have a completed push run? | This repository's last 60 merged pull requests | 60 of 60, at most four days before the merge | That the runs exist. Not that their records would be comparable, and not stacked pull requests, of which there were none |
 | Does storing and fetching a record work? | A workflow on a test repository: the push run uploads `guren-record-<sha>`, the pull request run asks the artifacts API for its merge base's, with a read-only token | Found for a branch cut from a commit that had a push run; reported missing for one cut before the workflow existed | The mechanism of §3 |
