@@ -1,6 +1,7 @@
 import { defineCommand } from '../define-command'
 import { judgeChangeLane, type ChangeFact, type ChangeLaneReport, type Lane } from '../change/lane'
 import { openChange, resolveChange } from '../change/resolve'
+import { auditChangeRevisions } from '../change/revision-audit'
 import { CliError } from '../cli-error'
 
 const short = (sha: string): string => sha.slice(0, 12)
@@ -28,11 +29,13 @@ export function renderChangeLane(report: ChangeLaneReport): string {
 }
 
 export const changeLaneCommand = defineCommand({
-  meta: { name: 'change:lane', description: 'Print the facts of a change and the review lane they set as a floor (RFC 0040). Reads git objects; writes nothing.' },
+  meta: { name: 'change:lane', description: 'Print the facts of a change and the review lane they set as a floor (RFC 0040). Reads git objects; writes nothing in the repository.' },
   args: {
     base: { type: 'string', description: 'The commit the change is measured against, by SHA; the merge base with --head is what is read.' },
     head: { type: 'string', description: 'The last commit of the change, by SHA.' },
     json: { type: 'boolean', description: 'Print the report as JSON.' },
+    // Positive on purpose, so citty's negation lands on this key; `default: true` prints `--no-audit`.
+    audit: { type: 'boolean', default: true, description: "Audit both sides of the change, which runs the application's code as `guren audit` does. Disable with --no-audit." },
     app: { type: 'string', description: 'Application root directory.' },
   },
   async run({ args }) {
@@ -41,7 +44,7 @@ export const changeLaneCommand = defineCommand({
     const change = await resolveChange(cwd, String(args.base), String(args.head))
     const { reader, dispose } = openChange(cwd, change)
     try {
-      const report = await judgeChangeLane(change, reader)
+      const report = await judgeChangeLane(change, reader, args.audit === false ? {} : { audit: () => auditChangeRevisions(cwd, change, reader) })
       console.log(args.json ? JSON.stringify(report) : renderChangeLane(report))
     } finally {
       await dispose()

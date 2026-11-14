@@ -18,7 +18,9 @@ import { isPlanRevisionsDirName, planSlug } from '../plan/beside'
 import { readPolicyAbilities } from '../plan/policy-abilities'
 import { discoverPlanFiles, isPlanFileName, isPlanInput } from '../plan-check'
 import { parseSchemaSource, type SchemaTable } from '../schema-parser'
+import { auditFacts } from './audit-facts'
 import type { ChangedPath, ChangeReader, ChangeSide, ResolvedChange } from './resolve'
+import type { ChangeAudits } from './revision-audit'
 
 export type Lane = 'low' | 'medium' | 'high'
 
@@ -201,7 +203,12 @@ function policyNames(ast: File): string[] {
  * Judges a resolved change from its two revisions. Every changed path ends in at least one fact,
  * and the floor is the highest lane among the facts and the readers that could not read.
  */
-export async function judgeChangeLane(change: ResolvedChange, reader: ChangeReader): Promise<ChangeLaneReport> {
+export interface JudgeChangeLaneOptions {
+  /** Audits both sides; asked only when the change touches a file the audit reads. Without it the audit facts are not judged. */
+  audit?: () => Promise<ChangeAudits>
+}
+
+export async function judgeChangeLane(change: ResolvedChange, reader: ChangeReader, options: JudgeChangeLaneOptions = {}): Promise<ChangeLaneReport> {
   const facts: ChangeFact[] = []
   const unjudged: ChangeUnjudged[] = []
   const claimed = new Set<ChangedPath>()
@@ -467,7 +474,18 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   }
   const audited = inApp.filter((entry) => touches(entry, (path) => (SOURCE_FILE.test(path) || posix.basename(path) === 'package.json') && !isTestFile(path) && !isAmbient(path)))
   if (audited.length > 0) {
-    unjudged.push({ reader: 'audit', reason: 'the audit was not compared with the base by this version, so audit-fail, audit-warn-changed, csrf-exemption and sensitive-exposure were not judged', lane: 'medium', files: audited.map((entry) => entry.path) })
+    const notJudged = (why: string): void => {
+      unjudged.push({ reader: 'audit', reason: `${why}, so audit-fail, audit-warn-changed, csrf-exemption and sensitive-exposure were not judged`, lane: 'medium', files: audited.map((entry) => entry.path) })
+    }
+    const audits = await options.audit?.()
+    if (!audits) notJudged('the audit was not run on the two sides')
+    else if ('unavailable' in audits.head) notJudged(`the head was not audited: ${audits.head.unavailable}`)
+    else if ('unavailable' in audits.base) notJudged(`the base was not audited: ${audits.base.unavailable}`)
+    else {
+      facts.push(...(await auditFacts(change, reader, audits.base.report, audits.head.report)))
+      // Without its routes the head's route rules found nothing, which is not the same as nothing to find.
+      if (!audits.head.report.routesAnalyzed) unjudged.push({ reader: 'audit-routes', reason: 'the routes did not load at the head, so the route-level audit rules did not run there', lane: 'medium', files: audited.map((entry) => entry.path) })
+    }
   }
   const dependencies = facts.filter((entry) => entry.code === 'dependencies-changed').flatMap((entry) => entry.files)
   if (dependencies.length > 0) {
