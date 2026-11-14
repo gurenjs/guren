@@ -1461,7 +1461,12 @@ Three items were added at acceptance. Nothing in §13.1 covers them:
   live steps. Until then `--agent codex` refuses and says it is not measured.
 - **A CI runner.** Every run in §13.1 was on macOS. On the Linux runner CI
   uses, `test:behaviours:ci` replays recordings made on macOS with no model
-  call and no login.
+  call and no login. Measured on 2026-11-14 on Linux, not on that runner: in a
+  Debian 13 container (`oven/bun:1.4.4`, arm64) with no Claude Code login, the
+  measurement app's four recordings, made on macOS, replayed with no model
+  call (exit 0, 9 s). Without Chromium's system libraries
+  (`playwright-core install-deps chromium`) the browser did not start and the
+  run exited 3. The hosted x64 runner is still to be measured.
 - **The agent's environment after it starts.** §13.1 read the environment each
   process is started with. Either what the agent's process loads afterwards is
   checked too, or the guide says that it was not. The guide says that it was

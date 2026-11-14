@@ -186,13 +186,13 @@ bun run test:behaviours:ci    # replays only (--strict-cache)
 
 Run `bun run test:behaviours` after approving a plan or changing a page, and commit `.e2e/cache/`. A recording is test data, so its diff belongs in the commit that changed the page. Measured on a small app with `sonnet`, a step run on the model took about ten seconds and 41,000 tokens (88% of them cache reads), and four recorded tests replayed in seven seconds. The first run downloads the Chromium build the runner pins, beside the one Playwright installed.
 
-CI runs `bun run test:behaviours:ci`, which needs no login and no API key. The exit code says what happened:
+CI runs `bun run test:behaviours:ci`, which needs no login and no API key. A recording made on macOS replays on Linux (measured in a Debian container). On a slim Linux image, install Chromium's system libraries first with `bunx playwright-core install-deps chromium`; without them the browser does not start and the run exits 3. The exit code says what happened:
 
 | Exit code | Meaning | What to do |
 |-----------|---------|------------|
 | 0 | Every step replayed | Nothing |
 | 1 | A test failed | A check after the step did not hold: the page does something other than what the plan says |
-| 2 | `REPLAY_STALE`: a recording no longer matches the page | Run `bun run test:behaviours` on your machine. If it passes, commit the new recording. If it fails, the page no longer does what the plan says |
+| 2 | `REPLAY_STALE`: a recording no longer matches the page | Run `bun run test:behaviours` on your machine. If it passes, commit the new recording. If it fails, the page no longer does what the plan says. The failed run deletes the recording that no longer matched, so leave `.e2e/cache/` uncommitted until the page or the plan is corrected |
 | 3 | A step could not run | A step with no recording tried to call the model and found no login (`MODEL_PROVIDER_FAILED`). Run `bun run test:behaviours` on your machine and commit the recording. A test that `browser:map` regenerated after its plan changed has a new title, and so has no recording yet. The same code means the app did not start |
 
 The agent gets the step's own tools and nothing else: no shell, no files, no MCP servers. Across 65 steps of the generated shape run on the model, the agent was never refused a tool of its own (`POLICY_DENIED`), which puts the rate under 4.6% at 95% confidence. The config passes every variable your env files set to the agent as an empty string, `BROWSER_TEST_PASSWORD` included, because Bun would otherwise load those files into the agent's process too. The runner types the password itself, and the agent never receives it. A variable that only your shell exports does reach the agent, so export no secret in the shell you run these tests from. What the agent's process reads after it has started was not checked.

@@ -24,7 +24,57 @@ map, run `bunx guren browser:map` and commit the regenerated blocks with your
 change. When it reports the map incomplete, tell the person which sections it
 names before going on.
 
-## 2. Start one instance
+## 2. Run the tests the app already has
+
+These start their own instance, on the same local database, so they need
+neither the instance of §3 nor the doctor's result of §4. Run them after
+changing a page, whatever the doctor says later.
+Let each run finish: one cut short (a pipe that closes early, such as
+`grep -m1` or `head`) leaves its app listening on the port, and the next run
+refuses to start.
+
+When the app has `guren add browser-tests` (a `test:browser` script), run
+`bun run test:browser` (port 4317). A test titled `a11y …` runs axe on a page
+and fails on a WCAG A or AA violation; report one with the rule ids its message
+names. Fix the page rather than adding a rule to `tests/browser/a11y.ts`, which
+is the person's call. A spec file ends in `.browser.ts`, since `bun test`
+collects `*.spec.ts`. Write your own beside `tests/browser/generated/`, which
+`guren browser:map` rewrites. Without that setup, write no spec files.
+
+When the app has `e2e.browser.config.ts` (`guren add browser-tests
+--behaviours`), `tests/browser/behaviours/generated/` holds one test per
+behaviour of an approved plan: it opens the start page, performs the behaviour
+in one agent step, and checks the outcome with locators. A step replays from
+its recording under `.e2e/cache/`. Only a step with no recording, or one whose
+recording no longer matches the page, runs live, under the person's Claude Code
+login, and records again.
+
+Run `bun run test:behaviours` (port 4319), then `git status --short .e2e/cache`:
+
+- It passes and no recording changed: nothing to do.
+- It passes and a recording is new or changed: that step ran live. Commit the
+  recording with the page change, and tell the person which tests recorded.
+- A test fails: the page no longer does what the plan says, or the plan no
+  longer describes the page. Report it as a finding with the test's title and
+  error. Never edit a recording, a generated spec or the plan to make it pass;
+  `tests/browser/behaviours/given.ts` is the person's, like `a11y.ts`. The
+  failed run deleted that test's recording and may have recorded others again:
+  list those files and commit none of them until the person decides.
+- It exits 3: an agent step could not run (`MODEL_PROVIDER_FAILED`, no Claude
+  Code login) or the runner could not start the app. Tell the person; that
+  test verified nothing.
+
+CI runs `bun run test:behaviours:ci`, which replays only. When it reports
+`REPLAY_STALE` (exit 2), that is no verdict yet: run `bun run test:behaviours`
+here before anything else and apply the list above. A test `browser:map`
+regenerated under another title has no recording; the same run records it.
+A skipped test names why in its title; a path parameter with no `given.ts`
+entry is the person's to add.
+
+Report what these runs showed beside the recorded steps, never as one:
+`browser:record` reads neither their reports nor their server errors.
+
+## 3. Start one instance
 
 Run this in the background for the whole session:
 
@@ -40,9 +90,9 @@ JSON. It refuses when it cannot show the database is local, under
 addressed to the person and wait. Never start the app another way, point it at
 another database or edit `.env` yourself: the refusal exists so a session
 cannot migrate or seed a database that is not theirs. When the person starts
-the app and gives you its loopback origin, continue at §3 with it.
+the app and gives you its loopback origin, continue at §4 with it.
 
-## 3. Open a run and check the instance
+## 4. Open a run and check the instance
 
 ```bash
 bunx guren browser:record --begin --url <origin> --feature <feature>
@@ -56,7 +106,7 @@ person and go on only if they agree: an incomplete map, a collector it could
 not read, or a landmark that needs a signed-in user (`auth-required`) all leave
 something unchecked.
 
-## 4. Drive each step, recorded
+## 5. Drive each step, recorded
 
 A step is an acceptance id from the feature's Plan section, or a charter named
 by its kind (`charter-validation`). Each is recorded once; to try again, use a
@@ -69,50 +119,8 @@ bunx guren browser:record <run> --step <id> --open
 Drive the page with the browser tools your client already has. Never install
 or register an MCP server for this.
 
-When the app has `guren add browser-tests` (a `test:browser` script),
 `GUREN_BROWSER_RUN=<run> bun run test:browser` files Playwright's report in the
-run as `spec-report.json`. That run starts its own instance on port 4317, on
-the same local database, and `browser:record` reads neither its report nor its
-server errors: report its result to the person beside the steps, never as one.
-A spec file ends in `.browser.ts`, since `bun test` collects `*.spec.ts`. Write
-your own beside `tests/browser/generated/`, which `guren browser:map` rewrites.
-Without that setup, write no spec files.
-
-After changing a page, run `bun run test:browser`. A test titled `a11y …` runs
-axe on a page and fails on a WCAG A or AA violation; report one with the rule
-ids its message names. Fix the page rather than adding a rule to
-`tests/browser/a11y.ts`, which is the person's call.
-
-When the app has `e2e.browser.config.ts` (`guren add browser-tests
---behaviours`), `tests/browser/behaviours/generated/` holds one test per
-behaviour of an approved plan: it opens the start page, performs the behaviour
-in one agent step, and checks the outcome with locators. A step replays from
-its recording under `.e2e/cache/`. Only a step with no recording, or one whose
-recording no longer matches the page, runs live, under the person's Claude Code
-login, and records again.
-
-After changing a page a behaviour starts on or lands on, run
-`bun run test:behaviours`, then `git status --short .e2e/cache`:
-
-- It passes and no recording changed: nothing to do.
-- It passes and a recording is new or changed: that step ran live. Commit the
-  recording with the page change, and tell the person which tests recorded.
-- A test fails: the page no longer does what the plan says, or the plan no
-  longer describes the page. Report it as a finding with the test's title and
-  error. Never edit a recording, a generated spec or the plan to make it pass;
-  `tests/browser/behaviours/given.ts` is the person's, like `a11y.ts`.
-- It exits 3: an agent step could not run (`MODEL_PROVIDER_FAILED`, no Claude
-  Code login) or the runner could not start the app. Tell the person; that
-  test verified nothing.
-
-CI runs `bun run test:behaviours:ci`, which replays only. When it reports
-`REPLAY_STALE` (exit 2), that is no verdict yet: run `bun run test:behaviours`
-here before anything else and apply the list above. A test `browser:map`
-regenerated under another title has no recording; the same run records it.
-
-That run starts its own instance on port 4319, like `test:browser` on 4317:
-report its result beside the steps, never as one. A skipped test names why in
-its title; a path parameter with no `given.ts` entry is the person's to add.
+run as `spec-report.json`; it is still no step.
 
 Save each screenshot under `.guren/browser/<run>/screenshots/`, then close the
 step. `result` and `action` are required; the rest is what you observed, and
