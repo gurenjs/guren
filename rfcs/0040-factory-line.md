@@ -595,9 +595,9 @@ diff. On the 22 medium tasks that is 3,618 of 18,863 changed lines, 19%, in
 91 of 350 files, and half of the tasks list 61 lines or fewer. Over all 43
 tasks a person reads 15% of the lines. The lists are mostly the starter
 being rewired: 17 of the 22 edit a file from before the plan, the layout in
-9 and the `User` model in 9, and 14 add a file no element owns, 31 files of
-which 22 are helpers under `app/Support`, `app/Services` and
-`resources/js`.
+9 and the `User` model in 9, and 14 add a file no element owns: 38 files,
+24 of them helpers under `app/Support`, `app/Services` and `resources/js`
+and 12 uploads a test left under `storage/`.
 
 So on a new application about half the tasks stop for one person, who reads
 a fifth of each, and what the line gives that person first is the evidence
