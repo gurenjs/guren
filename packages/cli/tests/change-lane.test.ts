@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import { runCommand } from 'citty'
@@ -148,6 +148,15 @@ describe('resolveChange', () => {
     expect(change.paths).toEqual([{ path: 'app/Models/Post.ts', status: 'added' }])
   })
 
+  test('should keep an application directory named with a leading space', async () => {
+    const { repo, base } = await createRepo({ ' web/app/Policies/PostPolicy.ts': POLICY(['view']) })
+    const head = await commit(repo, { ' web/app/Policies/PostPolicy.ts': null })
+
+    const report = await laneOf(join(repo, ' web'), base, head)
+
+    expect(report.facts).toEqual([expect.objectContaining({ code: 'policy-removed', lane: 'high', files: ['app/Policies/PostPolicy.ts'] })])
+  })
+
   test('should mark a path outside the application root and keep the rest app-relative', async () => {
     const { repo, base } = await createRepo({ 'apps/web/package.json': '{}', '.github/workflows/ci.yml': 'on: push\n', 'notes.txt': 'a\n' })
     const head = await commit(repo, { 'apps/web/app/Models/Post.ts': 'export class Post {}\n', '.github/workflows/ci.yml': 'on: pull_request\n', 'notes.txt': 'b\n' })
@@ -242,6 +251,16 @@ describe('judgeChangeLane', () => {
     ])
   })
 
+  test('should find a file a script names in quotes or behind two cds', async () => {
+    const scripts = { check: 'bun "tools/my check.ts"', deep: 'cd tools && cd checks && bun check.ts' }
+    const files = (body: string): Record<string, string> => ({ 'tools/my check.ts': body, 'tools/checks/check.ts': body })
+    const { repo, base } = await createRepo({ 'package.json': JSON.stringify({ scripts }), ...files('export {}\n') })
+
+    const report = await laneOf(repo, base, await commit(repo, files('export const edited = true\n')))
+
+    expect(report.facts.map((fact) => [fact.code, fact.files[0]])).toEqual([['gate-input', 'tools/checks/check.ts'], ['gate-input', 'tools/my check.ts']])
+  })
+
   test('should call scripts that left the root package.json with a rename a gate input', async () => {
     const { repo, base } = await createRepo()
     await mkdir(join(repo, 'pkg'))
@@ -331,6 +350,18 @@ describe('judgeChangeLane', () => {
       ['file-added', 'medium', 'resources/js/lib/clipboard.browser.ts'],
     ])
     expect(report.floor).toBe('medium')
+  })
+
+  test('should call an acceptance test renamed to a name another runner collects an acceptance change', async () => {
+    const { repo, base } = await createRepo({ 'tests/browser/posts.browser.ts': "test('[AC-posts-1] lists posts', () => {})\n", 'tests/browser/smoke.browser.ts': "test('opens', () => {})\n" })
+    await git(repo, ['mv', 'tests/browser/posts.browser.ts', 'tests/browser/posts.e2e.ts'])
+    await git(repo, ['mv', 'tests/browser/smoke.browser.ts', 'tests/browser/smoke.e2e.ts'])
+    const report = await laneOf(repo, base, await commit(repo, {}))
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane, fact.files])).toEqual([
+      ['acceptance-changed', 'high', ['tests/browser/posts.e2e.ts']],
+      ['test-removed', 'high', ['tests/browser/smoke.e2e.ts']],
+    ])
   })
 
   test('should let an added test through as low unless it repeats an existing id', async () => {
@@ -426,6 +457,27 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey() })
 
     expect(harmless.facts).toEqual([expect.objectContaining({ code: 'migration', lane: 'medium', target: 'db/migrations/0002_posts' })])
     expect(factAt(destructive, 'migration-destructive')).toMatchObject({ lane: 'high', target: 'db/migrations/0002_drop', evidence: 'static' })
+  })
+
+  test('should not judge a migration that is a link by the link target\'s path', async () => {
+    const { repo, base } = await createRepo({ ...BASE_FILES, 'db/drop.sql': 'DROP TABLE "users";\n' })
+    await mkdir(join(repo, 'db/migrations/0002_drop'), { recursive: true })
+    await symlink('../../drop.sql', join(repo, 'db/migrations/0002_drop/migration.sql'))
+    const report = await laneOf(repo, base, await commit(repo, {}))
+
+    expect(report.unjudged).toContainEqual({ reader: 'symlink', reason: expect.any(String), lane: 'high', files: ['db/migrations/0002_drop/migration.sql'] })
+    expect(report.floor).toBe('high')
+  })
+
+  test('should see a moved submodule pointer whatever diff.ignoreSubmodules says', async () => {
+    const { repo, base } = await createRepo()
+    await git(repo, ['config', 'diff.ignoreSubmodules', 'all'])
+    await git(repo, ['update-index', '--add', '--cacheinfo', `160000,${base},vendor/lib`])
+    await git(repo, ['commit', '-m', 'add a submodule pointer'])
+    const report = await laneOf(repo, base, await git(repo, ['rev-parse', 'HEAD']))
+
+    expect(report.facts).toEqual([expect.objectContaining({ code: 'file-added', lane: 'medium', files: ['vendor/lib'] })])
+    expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'submodule', lane: 'high', files: ['vendor/lib'] }))
   })
 
   test('should call an edit to an existing migration destructive', async () => {

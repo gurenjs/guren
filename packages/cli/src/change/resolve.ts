@@ -21,6 +21,8 @@ export interface ChangedPath {
   oldPath?: string
   /** The path is not under the application root the command ran in. */
   outsideApp?: true
+  /** Set when either side is not a regular file: git gives a link's target for its content, and a submodule has none. */
+  kind?: 'symlink' | 'submodule'
 }
 
 export interface ResolvedChange {
@@ -62,26 +64,31 @@ async function commitSha(cwd: string, role: string, value: string): Promise<stri
 
 const STATUS_BY_LETTER: Record<string, ChangeStatus> = { A: 'added', M: 'modified', T: 'modified', D: 'deleted', R: 'renamed' }
 
-/** `git diff --name-status -z`: a status, then one path, or two after a rename. */
-function parseNameStatus(output: string, prefix: string): ChangedPath[] {
+const KIND_BY_MODE: Record<string, ChangedPath['kind']> = { '120000': 'symlink', '160000': 'submodule' }
+
+/** `git diff --raw -z`: `:<mode> <mode> <sha> <sha> <status>`, then one path, or two after a rename. */
+function parseRawDiff(output: string, prefix: string): ChangedPath[] {
   const fields = output.split('\0')
   const paths: ChangedPath[] = []
   const place = (rootRelative: string): Pick<ChangedPath, 'path' | 'outsideApp'> =>
     rootRelative.startsWith(prefix) ? { path: rootRelative.slice(prefix.length) } : { path: rootRelative, outsideApp: true }
   for (let index = 0; index < fields.length; ) {
-    const letter = fields[index++]![0]
-    if (letter === undefined) continue
-    const status = STATUS_BY_LETTER[letter]
-    if (status === undefined) throw new CliError(`git reported a change status this reader does not know: ${letter}`)
+    const meta = fields[index++]!
+    if (meta.length === 0) continue
+    const [before, after, , , letters] = meta.slice(1).split(' ')
+    const status = STATUS_BY_LETTER[letters?.[0] ?? '']
+    if (!meta.startsWith(':') || status === undefined) throw new CliError(`git reported a change this reader does not know: ${meta}`)
+    const kind = KIND_BY_MODE[after ?? ''] ?? KIND_BY_MODE[before ?? '']
+    const special = kind ? { kind } : {}
     if (status !== 'renamed') {
-      paths.push({ ...place(fields[index++]!), status })
+      paths.push({ ...place(fields[index++]!), status, ...special })
       continue
     }
     const from = place(fields[index++]!)
     const to = place(fields[index++]!)
     // A move across the application's edge is a removal on one side and an addition on the other.
-    if (from.outsideApp === to.outsideApp) paths.push({ ...to, status, oldPath: from.path })
-    else paths.push({ ...from, status: 'deleted' }, { ...to, status: 'added' })
+    if (from.outsideApp === to.outsideApp) paths.push({ ...to, status, oldPath: from.path, ...special })
+    else paths.push({ ...from, status: 'deleted', ...special }, { ...to, status: 'added', ...special })
   }
   return paths
 }
@@ -96,11 +103,12 @@ export async function resolveChange(cwd: string, base: string, head: string): Pr
   if (!mergeBase) {
     throw new CliError(`${baseSha} and ${headSha} share no history in this clone, so the change between them cannot be read. A shallow clone does this: fetch the full history (fetch-depth: 0).`)
   }
-  const prefix = (await runGitRaw(cwd, ['rev-parse', '--show-prefix']))?.trim() ?? ''
-  // `diff.relative` would print these paths from the working directory and drop the ones outside it.
-  const diff = await runGitRaw(cwd, ['diff', '--name-status', '-z', '-M', '--no-relative', mergeBase, headSha])
+  // Only git's own newline goes: a directory may be named with a leading space.
+  const prefix = (await runGitRaw(cwd, ['rev-parse', '--show-prefix']))?.replace(/\n$/, '') ?? ''
+  // `diff.relative` would print these paths from the working directory, and `diff.ignoreSubmodules` drop a moved pointer.
+  const diff = await runGitRaw(cwd, ['diff', '--raw', '-z', '-M', '--abbrev=40', '--no-relative', '--ignore-submodules=none', mergeBase, headSha])
   if (diff === null) throw new CliError(`git could not list the changes between ${mergeBase} and ${headSha}.`)
-  return { base: baseSha, head: headSha, mergeBase, appPrefix: prefix, paths: parseNameStatus(diff, prefix) }
+  return { base: baseSha, head: headSha, mergeBase, appPrefix: prefix, paths: parseRawDiff(diff, prefix) }
 }
 
 /** Runs git and keeps its exit code, which `git grep` answers "no match" with. */
@@ -126,9 +134,11 @@ export function openChange(cwd: string, change: Pick<ResolvedChange, 'mergeBase'
   const fullTree = (side: ChangeSide): Promise<ReadonlySet<string>> => {
     let tree = fullTrees.get(side)
     if (!tree) {
-      tree = runGitRaw(cwd, ['ls-tree', '-r', '--name-only', '-z', '--full-tree', rev(side)]).then((output) => {
+      tree = runGitRaw(cwd, ['ls-tree', '-r', '-z', '--full-tree', rev(side)]).then((output) => {
         if (output === null) throw new CliError(`git could not list the files of ${rev(side)}.`)
-        return new Set(output.split('\0').filter((path) => path.length > 0))
+        // `<mode> <type> <sha>\t<path>`; a submodule's entry is a commit, which holds no file to read.
+        const files = output.split('\0').filter((entry) => entry.length > 0 && !entry.startsWith('160000 '))
+        return new Set(files.map((entry) => entry.slice(entry.indexOf('\t') + 1)))
       })
       fullTrees.set(side, tree)
     }

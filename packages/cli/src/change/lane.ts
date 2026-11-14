@@ -155,6 +155,31 @@ function tableDifferences(before: SchemaTable, after: SchemaTable): string[] {
   return differences
 }
 
+/** The words of a script as a shell splits them: a quoted or escaped space stays in its word. */
+function scriptWords(script: string): string[] {
+  const words: string[] = []
+  let word = ''
+  let quote: string | undefined
+  for (let index = 0; index < script.length; index++) {
+    const char = script[index]!
+    if (quote) {
+      if (char === quote) quote = undefined
+      else word += char
+    } else if (char === '"' || char === "'") {
+      quote = char
+    } else if (char === '\\' && index + 1 < script.length) {
+      word += script[++index]
+    } else if (/[\s=;|&()<>`]/.test(char)) {
+      if (word.length > 0) words.push(word)
+      word = ''
+    } else {
+      word += char
+    }
+  }
+  if (word.length > 0) words.push(word)
+  return words
+}
+
 /** A suppression covers its own line and the next, so one is told from another by both. */
 function auditSuppressions(text: string | null): string[] {
   const lines = (text ?? '').split('\n')
@@ -193,6 +218,11 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   const readEntry = (entry: ChangedPath, side: ChangeSide, path: string | undefined): Promise<string | null> =>
     path === undefined ? Promise.resolve(null) : entry.outsideApp ? reader.readOutside(side, path) : reader.read(side, path)
 
+  for (const [kind, reason] of [['symlink', "git gives a link's target as its content, so what it points at was not read"], ['submodule', 'a submodule pointer moved, and nothing inside the submodule was read']] as const) {
+    const files = change.paths.filter((entry) => entry.kind === kind).map((entry) => entry.path)
+    if (files.length > 0) unjudged.push({ reader: kind, reason, lane: 'high', files })
+  }
+
   for (const entry of inApp) {
     if (touches(entry, isPlanRecord)) fact([entry], { code: 'plan-record', lane: 'high', evidence: 'path', message: `${entry.path} ${entry.status}: a plan, its approvals, its decision log or its closing document` })
   }
@@ -208,8 +238,14 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     const names = [...new Set([...Object.keys(old), ...Object.keys(now)])].filter((name) => old[name] !== now[name])
     if (names.length > 0) scriptsChanged.set(manifest, names)
     for (const script of [...Object.values(old), ...Object.values(now)]) {
-      const tokens = script.split(/[\s"'=;|&()<>`]+/).filter((token) => token.length > 0)
-      const entered = tokens.filter((_, index) => ['cd', '--cwd', '-C'].includes(tokens[index - 1] ?? '')).map((token) => `${token.replace(/\/+$/, '')}/`)
+      const tokens = scriptWords(script)
+      const entered: string[] = []
+      let cwd = ''
+      tokens.forEach((token, index) => {
+        const flag = tokens[index - 1]
+        if (flag === 'cd') entered.push((cwd = posix.normalize(`${cwd}${token}/`)))
+        else if (flag === '--cwd' || flag === '-C') entered.push(posix.normalize(`${token}/`))
+      })
       for (const token of tokens) {
         for (const from of ['', ...entered]) scriptNamed.add(posix.normalize(`${dir}${from}${token}`))
       }
@@ -339,7 +375,12 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     const isTest = head !== undefined && isTestFile(head)
     const [beforeText, afterText] = [await read('base', base), await read('head', head)]
     const carried = wasTest ? acceptanceIds(beforeText) : []
-    if (wasTest && !isTest) {
+    // A browser spec and a behaviour spec have a runner each, and neither collects the other's name.
+    const runner = (path: string): string => /\.(browser|e2e)\.[^.]+$/.exec(path)?.[1] ?? 'test'
+    if (wasTest && isTest && entry.status === 'renamed' && (carried.length > 0 || runner(base!) !== runner(head!))) {
+      const why = carried.length > 0 ? `it carries ${list(carried)}, and a person checks a run still collects it` : 'another runner collects that name'
+      fact([entry], { code: carried.length > 0 ? 'acceptance-changed' : 'test-removed', lane: 'high', evidence: 'static', message: `${base} renamed to ${head}: ${why}` })
+    } else if (wasTest && !isTest) {
       const how = head === undefined ? 'deleted' : `renamed to ${head}, which no test run collects`
       if (carried.length > 0) fact([entry], { code: 'acceptance-changed', lane: 'high', evidence: 'static', message: `${base} ${how}; it carried ${list(carried)}` })
       else fact([entry], { code: 'test-removed', lane: 'high', evidence: 'path', message: `${base} ${how}` })
