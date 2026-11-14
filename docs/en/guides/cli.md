@@ -151,6 +151,54 @@ It adds a `test:browser` script (`playwright test -c playwright.browser.config.t
 
 Spec files end in `.browser.ts`, because `bun test` collects `*.spec.ts`. `guren gate` does not run browser tests.
 
+### Behaviour specs
+
+`add browser-tests --behaviours --agent claude-code` sets up tests that perform an approved plan's behaviours in the browser. A test opens the page the behaviour starts on, hands your coding agent one instruction built from the plan (`set "Title" to {title}, then use "Create"`), and then checks the outcome with ordinary locators: the redirect, the labels and actions of the page it lands on, and `aria-invalid` on each field the plan expects an error for. The tests run on the [e2e](https://github.com/e2e-inc/e2e) runner, which records what the agent did in each step. A recorded step replays without calling a model, so your Claude Code login is used only the first time a step runs and after the page has changed under its recording.
+
+`--agent` is required: it names the agent whose login runs the steps. `claude-code` is the only one on offer, and `codex` is refused until it has been measured. The command writes these files once:
+
+- `e2e.browser.config.ts`, which starts the app through `bunx guren browser:serve` on `127.0.0.1:4319` and never attaches to a server that is already running;
+- `tests/browser/behaviours/given.ts`, which is yours to edit (see below);
+- `tests/browser/behaviours/auth.setup.e2e.ts`, only when the app signs in with a password. It signs in as the seeded account the Playwright setup uses and saves the session the tests run under.
+
+It adds the `test:behaviours` and `test:behaviours:ci` scripts, installs `e2e`, `@e2e-dev/web` and `@e2e-dev/acp` at exact versions with the Claude Code adapter (`--no-install` prints the `bun add` command instead), and adds `.e2e/*` and `!.e2e/cache/` to `.gitignore`. From then on `bunx guren browser:map` keeps `tests/browser/behaviours/generated/<plan>.e2e.ts`, with one test per behaviour.
+
+A behaviour becomes a test when its kind is `success` or `validation`, its route is not a `GET`, and a view of the plan submits its form to that route or has an action for it. Every other behaviour becomes a skipped test whose title says why: a kind only `TestApp` can pin (a guest, a user without permission, a missing record), a behaviour that leaves nothing for a browser to check, or a validation input the form's own control stops before a request is sent. A behaviour whose start page takes a path parameter (`/posts/:id/edit`) needs an entry in `given.ts` that creates the record and returns the parameter's value. Without one the test is skipped when it runs, and the reason names the missing entry.
+
+```ts
+export const given: Record<string, (fixtures: GivenFixtures) => Promise<Record<string, string> | void>> = {
+  'AC-posts-update-1': async ({ browser }) => {
+    await browser.goto('/posts/create', { waitUntil: 'networkidle' })
+    await browser.locator('input[name="title"]').fill('Given post')
+    await browser.locator('button[type="submit"]').tap()
+    await browser.waitForURL(/\/posts\/\d+$/u)
+    return { id: new URL(await browser.url()).pathname.split('/').at(-1)! }
+  },
+}
+```
+
+Two scripts run the tests:
+
+```bash
+bun run test:behaviours       # replays recorded steps, runs the others on the model and records them
+bun run test:behaviours:ci    # replays only (--strict-cache)
+```
+
+Run `bun run test:behaviours` after approving a plan or changing a page, and commit `.e2e/cache/`. A recording is test data, so its diff belongs in the commit that changed the page. Measured on a small app with `sonnet`, a step run on the model took about ten seconds and 41,000 tokens (88% of them cache reads), and four recorded tests replayed in seven seconds. The first run downloads the Chromium build the runner pins, beside the one Playwright installed.
+
+CI runs `bun run test:behaviours:ci`, which needs no login and no API key. The exit code says what happened:
+
+| Exit code | Meaning | What to do |
+|-----------|---------|------------|
+| 0 | Every step replayed | Nothing |
+| 1 | A test failed | A check after the step did not hold: the page does something other than what the plan says |
+| 2 | `REPLAY_STALE`: a recording no longer matches the page | Run `bun run test:behaviours` on your machine. If it passes, commit the new recording. If it fails, the page no longer does what the plan says |
+| 3 | A step could not run | A step with no recording tried to call the model and found no login (`MODEL_PROVIDER_FAILED`). Run `bun run test:behaviours` on your machine and commit the recording. A test that `browser:map` regenerated after its plan changed has a new title, and so has no recording yet. The same code means the app did not start |
+
+The agent gets the step's own tools and nothing else: no shell, no files, no MCP servers. Across 65 steps of the generated shape run on the model, the agent was never refused a tool of its own (`POLICY_DENIED`), which puts the rate under 4.6% at 95% confidence. The config passes every variable your env files set to the agent as an empty string, `BROWSER_TEST_PASSWORD` included, because Bun would otherwise load those files into the agent's process too. The runner types the password itself, and the agent never receives it. A variable that only your shell exports does reach the agent, so export no secret in the shell you run these tests from. What the agent's process reads after it has started was not checked.
+
+With `BROWSER_TEST_PASSWORD` unset, the sign-in setup fails with a message naming the variable, and the tests that need a signed-in user are skipped. `--force` rewrites the config and the setup, never `given.ts`. When the installed `@playwright/test` is older than the `playwright-core` the runner pins, `tests/browser/generated/a11y.browser.ts` can stop typechecking; the command warns about it and prints the `bun add` command that raises the version. `guren gate` does not run these tests either.
+
 ### On an API-only app
 
 An app scaffolded from the `api` blueprint has no `@guren/inertia-client` dependency and no web routes entry (`routes/web.ts` or `routes/web.js`). Commands that would write Inertia pages react to those two signals:

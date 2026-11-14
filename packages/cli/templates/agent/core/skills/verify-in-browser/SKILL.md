@@ -83,6 +83,37 @@ axe on a page and fails on a WCAG A or AA violation; report one with the rule
 ids its message names. Fix the page rather than adding a rule to
 `tests/browser/a11y.ts`, which is the person's call.
 
+When the app has `e2e.browser.config.ts` (`guren add browser-tests
+--behaviours`), `tests/browser/behaviours/generated/` holds one test per
+behaviour of an approved plan: it opens the start page, performs the behaviour
+in one agent step, and checks the outcome with locators. A step replays from
+its recording under `.e2e/cache/`. Only a step with no recording, or one whose
+recording no longer matches the page, runs live, under the person's Claude Code
+login, and records again.
+
+After changing a page a behaviour starts on or lands on, run
+`bun run test:behaviours`, then `git status --short .e2e/cache`:
+
+- It passes and no recording changed: nothing to do.
+- It passes and a recording is new or changed: that step ran live. Commit the
+  recording with the page change, and tell the person which tests recorded.
+- A test fails: the page no longer does what the plan says, or the plan no
+  longer describes the page. Report it as a finding with the test's title and
+  error. Never edit a recording, a generated spec or the plan to make it pass;
+  `tests/browser/behaviours/given.ts` is the person's, like `a11y.ts`.
+- It exits 3: an agent step could not run (`MODEL_PROVIDER_FAILED`, no Claude
+  Code login) or the runner could not start the app. Tell the person; that
+  test verified nothing.
+
+CI runs `bun run test:behaviours:ci`, which replays only. When it reports
+`REPLAY_STALE` (exit 2), that is no verdict yet: run `bun run test:behaviours`
+here before anything else and apply the list above. A test `browser:map`
+regenerated under another title has no recording; the same run records it.
+
+That run starts its own instance on port 4319, like `test:browser` on 4317:
+report its result beside the steps, never as one. A skipped test names why in
+its title; a path parameter with no `given.ts` entry is the person's to add.
+
 Save each screenshot under `.guren/browser/<run>/screenshots/`, then close the
 step. `result` and `action` are required; the rest is what you observed, and
 no other field is accepted:

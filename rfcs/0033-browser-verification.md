@@ -1464,7 +1464,8 @@ Three items were added at acceptance. Nothing in §13.1 covers them:
   call and no login.
 - **The agent's environment after it starts.** §13.1 read the environment each
   process is started with. Either what the agent's process loads afterwards is
-  checked too, or the guide says that it was not.
+  checked too, or the guide says that it was not. The guide says that it was
+  not (`docs/en/guides/cli.md`, "Behaviour specs").
 
 #### 13.10 Alternatives considered
 
