@@ -1449,7 +1449,7 @@ const addBrowserTestsCommand = defineCommand({
   args: {
     force: {
       type: 'boolean',
-      description: 'Overwrite the files written once (configs, support, sign-in setups, seeder, given.ts) and an existing test:browser or test:behaviours script.',
+      description: 'Overwrite the files written once (configs, support, sign-in setups, seeder; never given.ts) and an existing test:browser or test:behaviours script.',
     },
     install: {
       type: 'boolean',

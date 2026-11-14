@@ -12,18 +12,25 @@ const PORT = 4319
 const LOCALE = 'en'
 /** The account db/seeders/browser-account.ts writes while `guren browser:serve` runs the app. */
 const BROWSER_ACCOUNT_EMAIL = 'browser@example.test'
-/** The runner refuses a shorter credential when it loads this file, for every command. */
+/** In code points. The runner refuses a shorter credential when it loads this file, for every command. */
 const MIN_PASSWORD_LENGTH = 6
-/** What the app's command inherits or the agent's adapter needs to start; never emptied below. */
-const KEPT = new Set(['NODE_ENV', 'PATH', 'HOME'])
+/** Never handed to the agent empty: its adapter starts on PATH and HOME, NODE_ENV is no secret, and the executor sets ANTHROPIC_MODEL itself. */
+const KEPT = new Set(['PATH', 'HOME', 'NODE_ENV', 'ANTHROPIC_MODEL'])
 
-// The files Bun loads for the app, most specific first; the first file to set a name wins.
-const mode = process.env.NODE_ENV || 'development'
+// Bun picks the app's env files by NODE_ENV, and reads any value but these two as development.
+const mode = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'test' ? process.env.NODE_ENV : 'development'
+// The files Bun loads for the app, most specific first, then every other mode's, whose names count too.
+const ENV_FILES = [
+  `.env.${mode}.local`, ...(mode === 'test' ? [] : ['.env.local']), `.env.${mode}`, '.env',
+  ...['development', 'production', 'test'].filter((other) => other !== mode).flatMap((other) => [`.env.${other}.local`, `.env.${other}`]),
+  ...(mode === 'test' ? ['.env.local'] : []),
+]
 const fromFiles = new Map<string, string>()
-for (const file of ['.env.local', `.env.${mode}`, '.env']) {
+for (const file of ENV_FILES) {
   if (!existsSync(file)) continue
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
-    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/u.exec(line)
+  for (const line of readFileSync(file, 'utf8').split(/\r?\n/u)) {
+    // The keys Bun accepts, `KEY: value` included. A line of a multi-line value may add a name nothing reads.
+    const match = /^\s*(?:export\s+)?([A-Za-z0-9_.-]+)\s*[=:]\s*(.*)$/u.exec(line)
     if (!match || KEPT.has(match[1]!) || fromFiles.has(match[1]!)) continue
     const raw = match[2]!.trim()
     const quoted = /^(['"`])(.*)\1$/u.exec(raw)
@@ -32,12 +39,11 @@ for (const file of ['.env.local', `.env.${mode}`, '.env']) {
 }
 
 // One source for the browser account's password: the shell when it exports it, else the app's env files.
+// Nothing is deleted from process.env: each worker loads this file again and has to read the same values.
 const password = process.env.BROWSER_TEST_PASSWORD || fromFiles.get('BROWSER_TEST_PASSWORD')
 
-// Bun loads the app's env files into this process and again into the agent's adapter. Deleting a name
-// here is not enough for the second load: an empty value is, since Bun's loader replaces no name already set.
-for (const name of fromFiles.keys()) delete process.env[name]
-delete process.env.BROWSER_TEST_PASSWORD
+// Bun loads the app's env files into this process and again into the agent's adapter, and replaces no name
+// already set. So each name goes to the agent as an empty string, over this process's value and the files'.
 const emptied = Object.fromEntries([...fromFiles.keys(), 'BROWSER_TEST_PASSWORD'].map((name) => [name, '']))
 
 export default {
@@ -63,5 +69,5 @@ export default {
   // Steps run under this machine's Claude Code login; a recorded step replays with no model call.
   agents: { default: { executor: claudeCode({ model: 'sonnet', env: emptied }) } },
   // Unset or too short, no credential is registered and the sign-in setup fails naming the variable.
-  ...(password && password.length >= MIN_PASSWORD_LENGTH ? { credentials: { browser: { username: BROWSER_ACCOUNT_EMAIL, password } } } : {}),
+  ...(password && [...password].length >= MIN_PASSWORD_LENGTH ? { credentials: { browser: { username: BROWSER_ACCOUNT_EMAIL, password } } } : {}),
 } satisfies E2EConfig

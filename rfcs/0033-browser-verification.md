@@ -1137,11 +1137,22 @@ item is measured. It writes, once:
   and starts the app on its env files alone; an app that selects its database
   from the shell adds the name to `inheritEnv` in this file, which is the
   author's after it is written. It also parses the names the app's env files
-  set, deletes each from `process.env`, and passes each to the executor as an
-  empty string, since Bun would otherwise load them into the agent (§13.7).
-  **Amended in implementation:** `NODE_ENV`, `PATH` and `HOME` are left as they
-  are when an env file sets them: the app's command inherits the first, and
-  the adapter does not start without the other two;
+  set, ~~deletes each from `process.env`,~~ and passes each to the executor as
+  an empty string, since Bun would otherwise load them into the agent (§13.7).
+  **Amended in implementation:** nothing is deleted from `process.env`. The
+  runner forks each worker from that environment and the worker loads the
+  config again, so a password only the shell exported was gone by then: the
+  run ended with `CONFIG_NOT_DETERMINISTIC` (measured), or, with another value
+  in an env file, the worker typed that one while the app was seeded with the
+  shell's. Deleting also removed the shell's value of any name the author
+  adds to `inheritEnv`. The empty string is what keeps a name from the agent,
+  so the deletion bought nothing. The names are read from every env file Bun
+  can load in any mode (`.env`, `.env.local`, the three mode files and their
+  `.local` twins), with the keys Bun accepts, since a name the config misses
+  reaches the agent with its value. `PATH`, `HOME`, `NODE_ENV` and
+  `ANTHROPIC_MODEL` are never emptied: the adapter does not start without the
+  first two, and the executor sets the last, which an empty value would
+  replace;
 - `tests/browser/behaviours/auth.setup.e2e.ts`, on the same evidence of a
   password sign-in as §6, saving the session `browser`;
 - `tests/browser/behaviours/given.ts` (author-owned, like `a11y.ts`):
@@ -1336,9 +1347,12 @@ behaviour's `actor` means is still Open Question 5.
 - The config loads no `.env`, and under Bun that is not enough: Bun loads the
   app's env files into the runner and again into the agent's adapter, so the
   agent was started with the app's key and its mail and database settings
-  (§13.1). The config therefore parses the names those files set, deletes each
-  from `process.env`, and gives the executor each name as an empty string,
-  which Bun's loader does not replace. A name the shell also exports is
+  (§13.1). The config therefore parses the names those files set~~, deletes
+  each from `process.env`,~~ and gives the executor each name as an empty
+  string (amended in §13.4), which Bun's loader does not replace. An app's
+  `ANTHROPIC_API_KEY` is among them: emptied, Claude Code ran the step under
+  its login (measured), where the app's key would otherwise have paid for it.
+  A name the shell also exports is
   emptied with the rest; the agent needs none of them. The app is unaffected:
   `browser:serve` starts it, and it loads its own files. That is the whole
   guarantee: the agent's process inherits the rest of the shell's environment,
@@ -1347,7 +1361,7 @@ behaviour's `actor` means is still Open Question 5.
 - The runner types a credential itself and gives the agent its name only.
   The browser account's password has one source, `BROWSER_TEST_PASSWORD`, the
   variable the seeder of §6 reads: from the shell when it is set there, else
-  parsed from the app's env files and never exported. The config hands that
+  parsed from the app's env files ~~and never exported~~. The config hands that
   value to the app through `command.env`, so the seeded hash and the typed
   password cannot differ, and registers it as the credential. Deleting it from
   `process.env` did not keep it from the agent, since the adapter loads the env

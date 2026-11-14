@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { z } from 'zod'
 
+import { addBrowserTests } from '../src/add-browser-tests'
 import {
   BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP, buildBehaviourSpecs, GENERATED_BEHAVIOURS_DIR,
 } from '../src/browser-behaviour-specs'
@@ -11,9 +12,11 @@ import { runBrowserMap } from '../src/browser-map-files'
 import { BROWSER_TESTS_CONFIG, GENERATED_HEADER } from '../src/browser-specs'
 import { PlanDraftSchema, type Plan, type PlanAcceptance } from '../src/plan/schema'
 import { PLAN_VERSION } from '../src/plan/version'
-import { createTempWorkspace, writeWorkspaceFiles } from './helpers'
+import { checkTypes, createTempWorkspace, seedInertiaApp, templateCompilerOptions, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
 
 const transpiler = new Bun.Transpiler({ loader: 'ts' })
+const CLI_ROOT = join(import.meta.dir, '..')
+const TEMPLATE_ROOT = join(CLI_ROOT, 'templates/scaffold/browser-tests')
 const FILE = 'docs/plans/posts/plan.json'
 const SPEC = `${GENERATED_BEHAVIOURS_DIR}/posts.e2e.ts`
 const existing = { kind: 'existing' } as const
@@ -371,6 +374,50 @@ describe('the spec files', () => {
       const oneMissing = await run()
       expect(oneMissing.behavioursOff).toBe('e2e is not in package.json')
       expect(oneMissing.removed).toEqual([SPEC])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('typechecks against the runner beside the config, the setup and the given.ts the blueprint writes', async () => {
+    const workspace = await createTempWorkspace('guren-behaviour-spec-types-')
+    try {
+      const contents = contentsOf([
+        STORE,
+        behaviour('AC-posts-store-2', 'store', { kind: 'validation', input: input({ title: '   ' }), expect: { errors: ['title'] } }),
+        behaviour('AC-posts-update-1', 'update', { input: input({ title: 'Again' }), expect: { redirect: '/posts/:id' } }),
+      ])
+      for (const written of ['landed([', "toHaveAttribute('aria-invalid'", "begin('AC-posts-update-1'"]) expect(contents).toContain(written)
+      const files: Record<string, string> = { [SPEC]: contents }
+      for (const file of [BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP]) files[file] = await readFile(join(TEMPLATE_ROOT, file), 'utf8')
+      await writeWorkspaceFiles(workspace.dir, files)
+      // The packages declare their types through `exports`, which a `paths` entry naming the directory does not read.
+      const runner = Object.fromEntries(['e2e', '@e2e-dev/web', '@e2e-dev/acp'].map((name) => [name, [join(CLI_ROOT, 'node_modules', name, 'dist/index.d.ts')]]))
+      const diagnostics = checkTypes(Object.keys(files).map((file) => join(workspace.dir, file)), { ...templateCompilerOptions(runner), types: ['bun-types', 'node'] })
+      expect(diagnostics).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  }, TSC_TIMEOUT)
+
+  test('add browser-tests --behaviours writes the spec its dry run announced, once the app declares the runner', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-spec-')
+    try {
+      const plan = planOf([STORE])
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, {
+        'package.json': '{ "name": "app", "dependencies": { "@guren/inertia-client": "*" }, "devDependencies": { "e2e": "0.23.1", "@e2e-dev/web": "0.16.0" } }\n',
+      })
+      const result = await addBrowserTests({ install: false, behaviours: true, agent: 'claude-code', loadMap: async () => mapOf(plan), plans: [{ file: FILE, plan }] })
+      expect(result.mapped.held).toBeUndefined()
+      expect(result.mapped.behavioursOff).toBeUndefined()
+      expect(result.mapped.changed).toContain(SPEC)
+      expect(await readFile(join(workspace.dir, SPEC), 'utf8')).toBe(contentsOf([STORE], { signIn: false }))
+
+      // A spec of the author's at that path refuses in the dry run, before the blueprint's own files are written.
+      await writeWorkspaceFiles(workspace.dir, { [SPEC]: '// mine\n', [BEHAVIOURS_CONFIG]: '// edited\n' })
+      await expect(addBrowserTests({ install: false, force: true, behaviours: true, agent: 'claude-code', loadMap: async () => mapOf(plan), plans: [{ file: FILE, plan }] })).rejects.toThrow('it has no generated header')
+      expect(await readFile(join(workspace.dir, BEHAVIOURS_CONFIG), 'utf8')).toBe('// edited\n')
     } finally {
       await workspace.cleanup()
     }

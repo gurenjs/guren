@@ -15,7 +15,7 @@ import { readAppLocale } from './app-locale'
 import { assertNotApiOnly } from './app-surface'
 import { BEHAVIOUR_PACKAGES, BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP } from './browser-behaviour-specs'
 import { loadBrowserMap, runBrowserMap } from './browser-map-files'
-import type { BrowserMap } from './browser-map'
+import type { ApprovedPlanInput, BrowserMap } from './browser-map'
 import {
   A11Y_OPTIONS_FILE, AXE_PACKAGE, BROWSER_SEEDER_FILE, BROWSER_TESTS_CONFIG, BROWSER_TESTS_SETUP, buildBrowserSeeder, type BrowserSeederColumns,
 } from './browser-specs'
@@ -50,9 +50,10 @@ export const BEHAVIOUR_SCRIPTS = [
 ] as const
 // `.e2e/*`, not `.e2e/`: git never looks inside an ignored directory, so the recordings could not be re-included.
 const BEHAVIOUR_GITIGNORE_ENTRIES = ['.e2e/*', '!.e2e/cache/'] as const
+const IGNORES_E2E_DIRECTORY = /^\/?\.e2e\/?$/u
 
 export interface AddBrowserTestsOptions extends WriterOptions {
-  /** Run `bun add -d` for Playwright and axe; false prints the command instead. */
+  /** Run `bun add -d` for the packages the app lacks; false prints the command instead. */
   install?: boolean
   /** Also set up the behaviour specs the e2e runner performs (RFC 0033 §13.4); needs `agent`. */
   behaviours?: boolean
@@ -60,6 +61,8 @@ export interface AddBrowserTestsOptions extends WriterOptions {
   agent?: string
   /** The test seam: how the browser map is read before anything is written. */
   loadMap?: (cwd: string) => Promise<BrowserMap>
+  /** The test seam: the approved plans `loadMap`'s map was built from. Omitted, `browser:map` reads them from disk. */
+  plans?: readonly ApprovedPlanInput[]
 }
 
 export interface AddBrowserTestsResult {
@@ -113,7 +116,7 @@ async function readManifest(cwd: string, scripts: readonly Script[], force: bool
   for (const script of scripts) {
     const existing = manifest.scripts?.[script.name]
     if (existing !== undefined && existing !== script.command && !force) {
-      throw new CliError(`package.json already has a ${script.name} script (${existing}), which would not run these specs. Rename it, or pass --force to replace it with "${script.command}". Nothing was written.`)
+      throw new CliError(`package.json already has a ${script.name} script (${existing}), which would not run these specs. Rename it, or pass --force to replace it with "${script.command}"; --force also rewrites the configs, setups, support files and seeder this command wrote once, edits included. Nothing was written.`)
     }
   }
   return manifest
@@ -179,6 +182,7 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
   // the author's at a generated path, broken markers) come before anything else is written.
   await runBrowserMap({
     cwd, write: false, map,
+    ...(options.plans ? { plans: options.plans } : {}),
     specs: { signIn: account !== undefined, accessibility: true },
     ...(agent ? { behaviours: { signIn: account !== undefined } } : {}),
   })
@@ -192,14 +196,14 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
       ? [scaffoldTemplateFile('browser-tests', BROWSER_TESTS_SETUP), { path: BROWSER_SEEDER_FILE, contents: buildBrowserSeeder(users.dialect, account) }]
       : []),
     ...(agent
-      ? [
-          pinConfigLocale(scaffoldTemplateFile('browser-tests', BEHAVIOURS_CONFIG), pinned),
-          scaffoldTemplateFile('browser-tests', BEHAVIOURS_GIVEN_FILE),
-          ...(account ? [scaffoldTemplateFile('browser-tests', BEHAVIOURS_SETUP)] : []),
-        ]
+      ? [pinConfigLocale(scaffoldTemplateFile('browser-tests', BEHAVIOURS_CONFIG), pinned), ...(account ? [scaffoldTemplateFile('browser-tests', BEHAVIOURS_SETUP)] : [])]
       : []),
   ]
   const created = await writeScaffoldFiles(files, { force: options.force, overwritten: options.overwritten, skipExisting: true })
+  // The entries in given.ts are the author's work, so --force never replaces it.
+  if (agent && (await readIfExists(cwd, BEHAVIOURS_GIVEN_FILE)) === null) {
+    created.push(...await writeScaffoldFiles([scaffoldTemplateFile('browser-tests', BEHAVIOURS_GIVEN_FILE)]))
+  }
   const unpinned = [BROWSER_TESTS_CONFIG, BEHAVIOURS_CONFIG].filter((config) => created.includes(resolve(cwd, config)))
   if (locale.kind === 'unknown' && unpinned.length > 0) {
     consola.warn(`The app's default locale could not be read from createApp({ i18n }), so ${unpinned.join(' and ')} send${unpinned.length > 1 ? '' : 's'} en. If the app falls back to another locale, set LOCALE there; the plan specs fail until it matches.`)
@@ -212,6 +216,10 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
     consola.warn(`package.json not found; add ${scripts.map((script) => `"${script.name}": "${script.command}"`).join(' and ')} to its scripts by hand.`)
   }
   for (const entry of [...GITIGNORE_ENTRIES, ...(agent ? BEHAVIOUR_GITIGNORE_ENTRIES : [])]) await ensureGitignoreEntry(entry)
+  const ignoredWhole = agent ? (await readIfExists(cwd, '.gitignore'))?.split(/\r?\n/u).find((line) => IGNORES_E2E_DIRECTORY.test(line.trim())) : undefined
+  if (ignoredWhole !== undefined) {
+    consola.warn(`.gitignore has the line ${ignoredWhole.trim()}, which ignores the whole directory, so git never reaches .e2e/cache/ and no recording can be committed. Remove that line; this command added .e2e/* and !.e2e/cache/ in its place.`)
+  }
   if (account) {
     await appendEnvEntry(
       'BROWSER_TEST_PASSWORD',
@@ -221,7 +229,7 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
   }
   await installDevPackages(cwd, options.install ?? true, agent !== undefined)
 
-  const mapped = await runBrowserMap({ cwd, write: true, map })
+  const mapped = await runBrowserMap({ cwd, write: true, map, ...(options.plans ? { plans: options.plans } : {}) })
   return {
     created,
     mapped: {
