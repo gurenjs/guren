@@ -44,7 +44,7 @@ interface BrowserMapRun {
   /** Why no behaviour spec is written, for an app that shows a sign of having asked for them (RFC 0033 §13.5). */
   behavioursOff?: string
   /** Input keys a behaviour test sets that its view's form does not label, as `plan: id: key`. */
-  unlabelledInputs: string[]
+  unlabelledInputs?: string[]
 }
 
 /**
@@ -83,10 +83,15 @@ async function readExisting(cwd: string, dir: string, suffix: string): Promise<M
   return files
 }
 
+/** The map with the plans it was built from, so the behaviour specs read the same plans the map placed. */
+async function loadMapInputs(cwd: string): Promise<{ map: BrowserMap; plans: ApprovedPlanInput[] }> {
+  const [graph, { plans, unreadable }] = await Promise.all([loadApplicationGraph({ cwd, introspect: true }), approvedPlans(cwd)])
+  return { map: buildBrowserMap(graph, plans, unreadable), plans }
+}
+
 /** The map as `browser:map`, `add browser-tests` and the generated specs read it: the introspected graph and the approved plans. */
 export async function loadBrowserMap(cwd: string): Promise<BrowserMap> {
-  const [graph, { plans, unreadable }] = await Promise.all([loadApplicationGraph({ cwd, introspect: true }), approvedPlans(cwd)])
-  return buildBrowserMap(graph, plans, unreadable)
+  return (await loadMapInputs(cwd)).map
 }
 
 interface GeneratedSpecs {
@@ -109,7 +114,8 @@ async function behavioursOff(cwd: string): Promise<{ off?: string; asked: boolea
     pathExists(join(cwd, BEHAVIOURS_CONFIG)),
     pathExists(join(cwd, BEHAVIOURS_GIVEN_FILE)),
   ])
-  const asked = config || given || declared.some((entry) => entry === true)
+  // `e2e` alone is no sign: an app may run the runner for a suite of its own.
+  const asked = config || given || declared[BEHAVIOUR_PACKAGES.indexOf('@e2e-dev/web')] === true
   if (declared.includes(null)) return { off: 'package.json is missing or does not parse', asked }
   const missing = BEHAVIOUR_PACKAGES.filter((_, index) => !declared[index])
   if (missing.length > 0) return { off: `${missing.join(' and ')} ${missing.length > 1 ? 'are' : 'is'} not in package.json`, asked }
@@ -126,48 +132,67 @@ async function accessibilityOff(cwd: string): Promise<string | undefined> {
   return undefined
 }
 
+const HELD = 'the browser map is incomplete or a plan could not be read'
+
 /**
- * The generated specs a run writes, and the specs on disk beside them: none until the browser-tests
- * config exists, or as `planned` says when `add browser-tests` asks before writing that config.
+ * The generated specs a run writes, and the specs on disk beside them. The Playwright specs: none
+ * until the browser-tests config exists, or as `planned` says when `add browser-tests` asks before
+ * writing that config. The behaviour specs: on `behavioursOff()`'s evidence, whatever that config.
  */
-async function generatedSpecs(cwd: string, map: BrowserMap, planned: SpecOptions | undefined): Promise<GeneratedSpecs> {
-  if (!planned && !(await pathExists(join(cwd, BROWSER_TESTS_CONFIG)))) return { outputs: new Map(), onDisk: new Map() }
+async function generatedSpecs(
+  cwd: string,
+  map: BrowserMap,
+  planned: SpecOptions | undefined,
+  plans: readonly ApprovedPlanInput[] | undefined,
+): Promise<GeneratedSpecs> {
+  const playwright = planned !== undefined || await pathExists(join(cwd, BROWSER_TESTS_CONFIG))
+  const [behaviours, behavioursOnDisk] = await Promise.all([behavioursOff(cwd), readExisting(cwd, GENERATED_BEHAVIOURS_DIR, '.e2e.ts')])
+  const behavioursNoted = behaviours.off !== undefined && (behaviours.asked || behavioursOnDisk.size > 0)
+  if (!playwright && behaviours.off !== undefined && !behavioursNoted) return { outputs: new Map(), onDisk: new Map() }
   // A partial map would regenerate the specs as fixme only, or delete an unread plan's: one failed read must not empty the suite.
-  if (!map.complete || map.unreadablePlans.length > 0) {
-    return { outputs: new Map(), onDisk: new Map(), held: 'the browser map is incomplete or a plan could not be read' }
-  }
-  const off = planned ? (planned.accessibility ? undefined : 'not requested') : await accessibilityOff(cwd)
-  const options = planned ?? { signIn: await pathExists(join(cwd, BROWSER_TESTS_SETUP)) }
+  if (!map.complete || map.unreadablePlans.length > 0) return { outputs: new Map(), onDisk: new Map(), held: HELD }
   const discovery = await discoverPlanFiles(cwd)
   const sharedSlugs = new Map([...discovery.sharedSlugs].map(([slug, files]) => [slug, files.map((file) => toPosixRelative(cwd, file))]))
-  const behavioursOnDisk = await readExisting(cwd, GENERATED_BEHAVIOURS_DIR, '.e2e.ts')
-  const behaviours = await behavioursOff(cwd)
-  const written = behaviours.off
-    ? undefined
-    : buildBehaviourSpecs(map, (await approvedPlans(cwd)).plans, { signIn: await pathExists(join(cwd, BEHAVIOURS_SETUP)) }, sharedSlugs)
-  const outputs = new Map([
-    [SMOKE_SPEC_FILE, buildSmokeSpec(map, options)],
-    ...(off ? [] : [[A11Y_SPEC_FILE, buildA11ySpec(map, options)] as [string, string]]),
-    ...buildPlanSpecs(map, options, sharedSlugs).map((entry): [string, string] => [entry.path, entry.contents]),
-    ...(written?.files ?? []).map((entry): [string, string] => [entry.path, entry.contents]),
-  ])
-  const onDisk = new Map([
-    ...await readExisting(cwd, GENERATED_SPECS_DIR, '.browser.ts'),
-    ...await readExisting(cwd, `${GENERATED_SPECS_DIR}/plans`, '.browser.ts'),
-    ...behavioursOnDisk,
-  ])
+  const outputs = new Map<string, string>()
+  const onDisk = new Map(behavioursOnDisk)
+
+  let off: string | undefined
+  if (playwright) {
+    off = planned ? (planned.accessibility ? undefined : 'not requested') : await accessibilityOff(cwd)
+    const options = planned ?? { signIn: await pathExists(join(cwd, BROWSER_TESTS_SETUP)) }
+    outputs.set(SMOKE_SPEC_FILE, buildSmokeSpec(map, options))
+    if (!off) outputs.set(A11Y_SPEC_FILE, buildA11ySpec(map, options))
+    for (const entry of buildPlanSpecs(map, options, sharedSlugs)) outputs.set(entry.path, entry.contents)
+    for (const dir of [GENERATED_SPECS_DIR, `${GENERATED_SPECS_DIR}/plans`]) {
+      for (const [file, content] of await readExisting(cwd, dir, '.browser.ts')) onDisk.set(file, content)
+    }
+  }
+
+  let unlabelled: string[] = []
+  if (behaviours.off === undefined) {
+    // A caller that passed its own map without its plans has them read here, under the same hold.
+    const read = plans ? { plans, unreadable: [] } : await approvedPlans(cwd)
+    if (read.unreadable.length > 0) return { outputs: new Map(), onDisk: new Map(), held: HELD }
+    const written = buildBehaviourSpecs(map, read.plans, { signIn: await pathExists(join(cwd, BEHAVIOURS_SETUP)) }, sharedSlugs)
+    for (const entry of written.files) outputs.set(entry.path, entry.contents)
+    unlabelled = written.unlabelled
+  }
   return {
     outputs, onDisk,
     ...(off ? { accessibilityOff: off } : {}),
-    ...(behaviours.off && (behaviours.asked || behavioursOnDisk.size > 0) ? { behavioursOff: behaviours.off } : {}),
-    ...(written ? { unlabelledInputs: written.unlabelled } : {}),
+    ...(behavioursNoted ? { behavioursOff: behaviours.off } : {}),
+    ...(unlabelled.length > 0 ? { unlabelledInputs: unlabelled } : {}),
   }
 }
 
 /** Every document as a run would leave it; refuses, writing nothing, when any document's markers are unsafe. */
-export async function runBrowserMap(options: { cwd: string; write: boolean; map?: BrowserMap; specs?: SpecOptions }): Promise<BrowserMapRun> {
+export async function runBrowserMap(options: { cwd: string; write: boolean; map?: BrowserMap; plans?: readonly ApprovedPlanInput[]; specs?: SpecOptions }): Promise<BrowserMapRun> {
   const cwd = resolve(options.cwd)
-  const [map, existing] = await Promise.all([options.map ?? loadBrowserMap(cwd), readExisting(cwd, BROWSER_MAP_DIR, '.md')])
+  const [loaded, existing] = await Promise.all([
+    options.map ? { map: options.map, plans: options.plans } : loadMapInputs(cwd),
+    readExisting(cwd, BROWSER_MAP_DIR, '.md'),
+  ])
+  const { map } = loaded
 
   // Compared without case: on a case-insensitive filesystem `readme.md` is the index.
   const claimed = new Set([BROWSER_MAP_INDEX.toLowerCase()])
@@ -188,7 +213,7 @@ export async function runBrowserMap(options: { cwd: string; write: boolean; map?
   for (const feature of map.features) add(feature.file, renderFeatureDoc(existing.get(feature.file), feature, map))
   add(BROWSER_MAP_INDEX, renderIndexDoc(existing.get(BROWSER_MAP_INDEX), map, orphans))
 
-  const specs = await generatedSpecs(cwd, map, options.specs)
+  const specs = await generatedSpecs(cwd, map, options.specs, loaded.plans)
   // A spec without the header is the author's, whatever directory it sits in: never rewritten or removed.
   const generated = (content: string): boolean => content.startsWith(GENERATED_HEADER)
   // On a case-insensitive filesystem a name differing only by case is the same file.
@@ -219,6 +244,6 @@ export async function runBrowserMap(options: { cwd: string; write: boolean; map?
     ...(specs.held ? { specsHeld: specs.held } : {}),
     ...(specs.accessibilityOff ? { accessibilityOff: specs.accessibilityOff } : {}),
     ...(specs.behavioursOff ? { behavioursOff: specs.behavioursOff } : {}),
-    unlabelledInputs: specs.unlabelledInputs ?? [],
+    ...(specs.unlabelledInputs ? { unlabelledInputs: specs.unlabelledInputs } : {}),
   }
 }
