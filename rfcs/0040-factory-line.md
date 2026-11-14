@@ -588,20 +588,40 @@ declared by that command. With those and the plan sections below, 13 of the
 43 are low, 22 medium and 8 high.
 
 Counting tasks overstates what a person does. A floor is the highest lane
-among a task's facts, a task here changes about 690 lines in 14 files, and
+among a task's facts, a task here changes about 440 lines in 13 files, and
 one edit outside the plan makes the whole task medium. What the person reads
 is the reading list (§12), which holds what each fact above low points at
-and not the file it is in. On the 22 medium tasks the files behind those
-facts hold 3,618 of 18,863 changed lines, and half of that is migration
-snapshots nobody reads. What the facts point at is 642 changed lines of
+and not the file it is in. The 22 medium tasks change 11,196 lines,
+migration snapshots aside. What their facts point at is 642 changed lines of
 existing files, a median of 20 a task and at most 90; 13 columns and
 statements the plan does not list; 19 added files, 960 lines if every one is
-opened; and 9 deletions, which are names. That is 3% of the diff to read and
-8% with every added file read through. The lists are mostly the starter
+opened; and 9 deletions, which are names. That is 6% of the diff to read and
+14% with every added file read through. The lists are mostly the starter
 being rewired: 17 of the 22 edit a file from before the plan, the layout in
 9 and the `User` model in 9, and 14 add a file no element owns: 38 files,
 24 of them helpers under `app/Support`, `app/Services` and `resources/js`
 and 12 uploads a test left under `storage/`.
+
+**A smaller unit is not a readable one.** The other way to give a person
+less to read is to cut the task. The same histories say what that buys, with
+each task cut along its steps into at most four slices (commands, scaffold,
+the tests with the data and http that make them pass, pages) and then into
+single steps, which the gate would not even let merge alone:
+
+| Unit | Units | Median size | Stop for a person | Lines in the units that stop |
+| --- | --- | --- | --- | --- |
+| Task | 43 | 338 lines | 30 | 17,538 of 20,161 |
+| Slice of a task | 89 | 194 | 48 | 13,903 |
+| Step | 170 | 121 | 70 | 11,094 |
+| Task, read by its targets | 43 | 338 | 30 | 642, and 19 added files |
+
+Cutting finer raises the stops from 30 to 48 to 70 and still leaves more
+than half the lines in a unit that stops, because the edits outside the plan
+are spread over the steps: 70 of 170 step commits touch one. A stop is what
+costs a person, and each unit is also a run of the workflow and a review by
+the platform's reviewer. So the task stays the unit that merges, since it is
+the smallest that passes the gate with its tests, and the reading list is
+the unit a person reads: it gathers what the cuts would scatter.
 
 So on a new application about half the tasks stop for one person, who reads
 a few dozen lines of each, and what the line gives that person first is the
@@ -1977,7 +1997,8 @@ which for a later task is not that task's own merge base.
 | What do the tasks look like without their pages? | The same paths with each task's pages step left out (23 steps) | 13 could be low today, 25 with the application entry, 30 with environment keys, of 43 | The bound screens first would give the tasks that remain. The screens task is a person's |
 | Does the navigation design cover what the plans did to the layout? | The nine layout edits read against §5: entries added, changed or removed, the account controls and their labels, the brand, `<Layout wide>` | 7 of 9 are declared entries alone; the other 2 also change the page's vertical padding. Of the five tasks that only the layout kept out of low, 4 fit: 27 of 43 | The layout, the width and the declared removal are part of the module, not additions to it |
 | What floor do the facts of §3 give the measured tasks? | A prototype of `change:lane` over the 43 tasks: the path facts, `judgeMigrations()`, the schema and routes files read on both sides, and a matcher against the plan at the head (change kind, identity, planned properties), checked by 20 cases that mutate a plan and expect the match to fail. Security records, audit facts and advisories were not computed | 5 low, 30 medium, 8 high where paths gave 11. 7 low with `env`, `providers` and `config`; 13 with a plan's commands declaring what they write and a plan-added file staying an addition. 1 low while base records are missing. Matched: 112 of 112 routes, 24 of 24 policies, 194 of 261 added files, 23 of 27 added tables, 24 of 28 migrations. 19 of 43 tasks were not contiguous in these histories and were read run by run | The floor paths could only bound, and the rules §3 was missing: what "existed" means in a stack, files a command writes, generated files, a deleted file, a missing base record |
-| How much of a medium task does a person read? | The reading list of each of the 43 tasks under the rules of §3, against every changed line of the task (lockfiles, generated files and binary uploads left out), first as the files behind the facts above low, then as what those facts point at | By file, medium, 22 tasks: 3,618 of 18,863 lines (19%), half of it migration snapshots. By target: 642 changed lines in existing files (median 20 a task, at most 90), 13 undeclared columns and statements, 19 added files (960 lines), 9 deletions. High, 8 tasks: 753 of 8,077 lines by file. Low, 13 tasks: none of 2,794 | That the lane counts tasks and the person reads targets (§5, §12): 3% of a medium task's diff, 8% with every added file opened |
+| How much of a medium task does a person read? | The reading list of each of the 43 tasks under the rules of §3, against every changed line of the task (lockfiles, generated files and binary uploads left out), first as the files behind the facts above low, then as what those facts point at | Medium, 22 tasks, 11,196 changed lines with migration snapshots left out. By target: 642 changed lines in existing files (median 20 a task, at most 90), 13 undeclared columns and statements, 19 added files (960 lines), 9 deletions. By file the same facts cover 3,618 lines, half of them snapshots. High, 8 tasks, 5,236 lines. Low, 13 tasks, 2,405 lines, none to read | That the lane counts tasks and the person reads targets (§5, §12): 6% of a medium task's diff, 14% with every added file opened |
+| Would a smaller unit be a readable one? | Each task cut along its step commits into slices (commands; scaffold; tests, data and http; pages) and into single steps, a unit stopping when it touches a file behind one of its task's facts above low | Tasks: 43, median 338 lines, 30 stop, holding 17,538 of 20,161 lines. Slices: 89, median 194, 48 stop, 13,903 lines. Steps: 170, median 121, 70 stop, 11,094 lines | Why the task stays the unit that merges and the reading list is the unit a person reads (§5). The lanes of slices and steps are read from files, not from facts recomputed per unit |
 | Does the screens-first derivation work on real plans? | A prototype in a worktree: `screens: 'first'` in the schema and the derivation, run over the ten plans, and the approval, status, verification and revision functions called on a small application in its own repository | 43 tasks become 53. 45 views move; of 112 added routes a view names 66, 38 more only render one, 8 do neither, 4 return JSON; 35 of 36 validators move; 65 registrations bind a model not yet written. Approval after the screens settles all ten collisions as built. A view owned by the screens task alone never verifies. A route on its fixture reads `drifted`. `plan:revise` refuses a proposed plan, and a revision's added or renamed element is refused at approval. An unproposed draft passes `plan:next` and `plan:verify`. Today's scaffold writes no file of a screens step in any of the ten | The corrected table of owners in §5, the tests step of the screens task, the stamps beside the baseline, and the three checks that keep work before approval to screens |
 | Do `skip` and fixtures-off work on the framework as it is? | A prototype in a worktree, driven by probes on a minimal application, one process per scenario, and a bundle built with the production define | Under `skip` the boot succeeds, the fixture is never evaluated, a dark `/posts/new` answers 404 where the omitted route was answered by `/posts/:id`, and the refusal's read of `NODE_ENV` survives bundling. Fixtures off cannot be a boot setting on a shared application; carried per request by the `TestApp` it works in both orders, and a guard and a contract answer before the 501. A route on its fixture already redirects a guest and refuses an invalid body | The rules of §5 for `skip`, for the test switch, for promotion, and the behaviours that lose their red run |
 | Does the navigation module work on the framework as it is? | A prototype in a worktree: the definition, the filter, the lazy prop, a syntax reader and both writers, driven by probes on minimal applications with four identities | A config definition's `boot` hook can share the prop, with routes and gate in reach. A guest's payload carries no ability, hidden label, hidden route or denial message. The prop is skipped on partial reloads that do not ask for it and on JSON. A missing route name answers 500 on every page unless the entry is linked at boot. No type lists route names today. A policy that reads a `null` user throws for every guest. All 24 append round trips read back; 19 removals restored the bytes | The runtime rules of §5 that the first text left to `guren check` or did not state |
