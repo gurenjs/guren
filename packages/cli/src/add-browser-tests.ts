@@ -7,8 +7,8 @@
  * the same way, and `browser:map` then keeps `tests/browser/behaviours/generated/` too.
  */
 
-import { writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { readFile, writeFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 import { consola } from 'consola'
 
 import { readAppLocale } from './app-locale'
@@ -143,6 +143,26 @@ export function behaviourAgent(options: Pick<AddBrowserTestsOptions, 'behaviours
   return agent
 }
 
+/**
+ * The installed `@playwright/test` when it is older than the `playwright-core` the runner pins. Bun
+ * may hoist the newer copy, `@axe-core/playwright`'s types then name it, and the accessibility spec
+ * hands it a `page` of the older one, which stops typechecking. Unreadable versions answer nothing.
+ */
+async function olderPlaywright(cwd: string): Promise<{ installed: string; pinned: string } | undefined> {
+  const manifestOf = async (name: string): Promise<{ version?: unknown; dependencies?: Record<string, unknown> } | undefined> => {
+    try {
+      return JSON.parse(await readFile(join(cwd, 'node_modules', name, 'package.json'), 'utf8')) as { version?: unknown; dependencies?: Record<string, unknown> }
+    } catch {
+      return undefined
+    }
+  }
+  const [test, web] = await Promise.all([manifestOf(PLAYWRIGHT_PACKAGE), manifestOf('@e2e-dev/web')])
+  const installed = test?.version
+  const pinned = web?.dependencies?.['playwright-core']
+  if (typeof installed !== 'string' || typeof pinned !== 'string') return undefined
+  return Bun.semver.order(installed, pinned) < 0 ? { installed, pinned } : undefined
+}
+
 /** Only what the manifest does not declare, so a rerun on an app that has Playwright adds axe alone. */
 async function installDevPackages(cwd: string, install: boolean, behaviours: boolean): Promise<void> {
   const wanted = [
@@ -228,6 +248,10 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
     )
   }
   await installDevPackages(cwd, options.install ?? true, agent !== undefined)
+  const older = agent ? await olderPlaywright(cwd) : undefined
+  if (older) {
+    consola.warn(`${PLAYWRIGHT_PACKAGE} ${older.installed} is older than the playwright-core ${older.pinned} the e2e runner pins. With both installed, the accessibility spec may stop typechecking, since ${AXE_PACKAGE}'s types can name the newer copy. Run: bun add -d ${PLAYWRIGHT_PACKAGE}@^${older.pinned}`)
+  }
 
   const mapped = await runBrowserMap({ cwd, write: true, map, ...(options.plans ? { plans: options.plans } : {}) })
   return {

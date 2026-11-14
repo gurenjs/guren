@@ -1109,6 +1109,16 @@ developer's coding agent, under that agent's login.
 `playwright-core` 1.65.0 sit side by side, each with its own Chromium build.
 The blueprint prints the download before the first run makes it.
 
+**Amended in implementation:** the two copies share types as well as disk.
+Bun may hoist the runner's `playwright-core`, and `@axe-core/playwright`'s
+types then name that copy while the accessibility spec of §12 hands it a `page`
+of the app's. With the app's Playwright older (1.62.1 beside 1.65.0, measured
+in this repository and in the measurement app) the spec stops typechecking,
+and the app's `typecheck` covers `tests/`. `@guren/cli` therefore declares
+`@playwright/test` at `^1.65.0`, which is what an app without Playwright gets,
+and the blueprint warns an app whose installed Playwright is older than the
+runner's pin, naming the command that raises it.
+
 **Telemetry.** The CLI sends usage counts by default. The script the blueprint
 writes sets `E2E_TELEMETRY_DISABLED=1`; an app that wants to send them removes
 it.

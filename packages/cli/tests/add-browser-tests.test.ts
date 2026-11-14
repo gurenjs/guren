@@ -740,6 +740,34 @@ describe('guren add browser-tests --behaviours', () => {
     }
   })
 
+  test('says so when the installed Playwright is older than the playwright-core the runner pins', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-playwright-')
+    const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
+    const older = (): string[] => warn.mock.calls.map((call) => String(call[0])).filter((line) => line.includes('is older than the playwright-core'))
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, {
+        'package.json': INERTIA_MANIFEST,
+        'node_modules/@playwright/test/package.json': '{ "version": "1.62.1" }\n',
+        'node_modules/@e2e-dev/web/package.json': '{ "dependencies": { "playwright-core": "1.65.0" } }\n',
+      })
+      await addBrowserTests({ install: false, behaviours: true, agent: 'claude-code', loadMap: async () => mapOf([POSTS]) })
+      expect(older()).toHaveLength(1)
+      expect(older()[0]).toContain('Run: bun add -d @playwright/test@^1.65.0')
+
+      // The same or a newer Playwright shares its Page with the runner's copy, or adds to it.
+      for (const version of ['1.65.0', '1.66.2']) {
+        warn.mockClear()
+        await writeWorkspaceFiles(workspace.dir, { 'node_modules/@playwright/test/package.json': `{ "version": "${version}" }\n` })
+        await addBrowserTests({ install: false, behaviours: true, agent: 'claude-code', loadMap: async () => mapOf([POSTS]) })
+        expect(older()).toEqual([])
+      }
+    } finally {
+      warn.mockRestore()
+      await workspace.cleanup()
+    }
+  })
+
   test('says so when .gitignore ignores the whole .e2e directory, which keeps the recordings out of git', async () => {
     const workspace = await createTempWorkspace('guren-add-behaviours-ignore-')
     const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
