@@ -193,7 +193,7 @@ export interface ChangeLaneReport {
 Every changed path ends in at least one fact. The floor is the highest lane
 among them.
 
-**Always high.** No plan lowers these.
+**Always high.** No plan and no policy lowers these.
 
 | Fact | Read from |
 | --- | --- |
@@ -213,32 +213,58 @@ among them.
 | `dependency-advisory` | A `deps:*` advisory key absent at the base |
 
 **Per-route security records.** `authorization-removed` and
-`validation-removed` are not read off graph edges. For each route the reader
-builds one record: the route's middleware and `authentication`, the contract
-`validates` edges that start at the route, and, through `handles` and the
+`validation-removed` are not read off graph edges, which start at the
+controller and keep a middleware's name without its capabilities. For each
+route the reader builds one record from the introspection manifest and the
+action evidence: the route's middleware entries with their `capabilities`
+(authentication, and authorization with its `abilities` and `mode`), the
+contract schemas the route declares, and, through `handles` and the
 `controller:<action>` evidence, the validators and policies its action
-consults. Records are compared between base and head:
+consults. Records are compared between base and head.
 
-- A route is matched to its base counterpart by controller action first, then
-  by method and path, so a rename or a move does not turn a removal into an
-  unrelated addition. A plan that declares the rename declares nothing about
-  its security.
-- A head record weaker than its counterpart is the fact. A new mutating route
-  with no authorization is `audit-warn-changed` already.
-- An ambiguous match, and an action whose authorization the graph lists as
-  unresolved, are `unjudged` at high: unreadable authorization is not a
-  medium question.
+A route is matched to its base counterpart by controller action first, then by
+method and path, so a rename or a move does not turn a removal into an
+unrelated addition. A plan that declares the rename declares nothing about its
+security. The comparison is conservative, and equal names are never taken for
+equal security:
+
+| Base to head | Verdict |
+| --- | --- |
+| The same capabilities, abilities and mode in the same order, and the same validators | Same |
+| An authentication or authorization capability absent at the head; an ability dropped from an `all` list or added to an `any` list; a validator absent | Weaker: the fact |
+| Authorization `mixed` on either side, an ability resolved at request time, a middleware the manifest marks unresolved, a changed order, one validator replaced by another | Incomparable: `unjudged` at high |
+| A capability, an ability in an `all` list or a validator added | Stronger: no fact |
+
+A new mutating route with no authorization is `audit-warn-changed` already. An
+ambiguous match, and an action whose authorization the graph lists as
+unresolved, are `unjudged` at high: unreadable authorization is not a medium
+question.
 
 **The base is never rebuilt.** Each commit's records are computed while that
-commit is the head, in an environment prepared for it. The workflow's run on a
-push to the default branch writes them into the record of §4 and uploads it
-under the commit's SHA; a pull request's run fetches the record of its merge
-base and passes it as `--base-record`. With no base record (the run never
-happened, or the artifact expired) these two facts are `unjudged` for any
-change that touches a routes file, a controller, a policy or a middleware, and
-the report names the fix: run the workflow once on that commit. On this
-repository's last 60 merged pull requests every merge base was a commit whose
-push run had completed, at most four days before the merge.
+commit is the head, in an environment prepared for it. Every run of the
+workflow, on a pull request's head or on a push to the default branch, writes
+them into the record of §4 and uploads it under that commit's SHA. A later run
+fetches the record of its merge base and passes it as `--base-record`.
+
+- **Compatibility.** A record carries `recordVersion` for the format of its
+  security records, the `@guren/cli` and `@guren/server` versions that
+  produced it, and the deploy target and environment the introspection ran
+  under. A base record that differs from the head's in any of these is not
+  compared: the facts are `unjudged`, and the report names the fix, which is
+  to run the workflow on the base commit again.
+- **Where the merge base is.** For a pull request cut from the default branch
+  it is a default-branch commit, whose push run stored a record. For a stacked
+  pull request it is its parent's head, whose own run stored one. When the
+  parent is squash-merged that commit is gone, the child is rebased, and its
+  merge base is a default-branch commit again. A force push makes a new head
+  and a new run. A base branch that moved changes nothing until the pull
+  request is updated against it, which starts a new run.
+- **Missing.** With no base record (the run never happened, or the artifact
+  expired) the two facts are `unjudged` for any change that touches a routes
+  file, a controller, a policy or a middleware. On this repository's last 60
+  merged pull requests every merge base was a default-branch commit whose push
+  run of CI had completed, at most four days before the merge. That shows the
+  runs exist, not yet that their records would be comparable.
 
 **Declarable.** Medium by default. A fact takes the lane in the last column
 only when a declaration in an approved, open plan matches it.
@@ -270,17 +296,21 @@ route files among them, and says nothing about which edits in those files were
 planned or exercised. So a plan that adds a feature in new files can flow, and
 a plan that alters existing code is read by one person.
 
-**Wiring files are judged by what they register.** Every plan measured (see
-Measurements) edited the same three files to wire its work in: `db/schema.ts`,
-the routes entry and the application entry. An edit there is not
-`source-edited`. The schema file is read by `schema-changed`, which needs only
-the two versions of the file and ships in deliverable 1. The routes entry is
-read by the route facts and the security records, and the application entry by
-`registration-changed` (the providers, middleware and options the introspected
-application reports, compared with the base record and declarable by the
-plan's policies and providers); both need a base record, so they stay medium
-until deliverable 4. A line in one of these files that changes nothing it
-registers is `source-edited` as anywhere else.
+**The schema and the routes entry are judged by what they declare.** Every
+plan measured (see Measurements) edited `db/schema.ts` and the routes entry to
+wire its work in. An edit there is not `source-edited`. The schema file is read
+by `schema-changed`, which needs only the two versions of the file and ships
+in deliverable 1. The routes entry is read by the route facts and the security
+records, which need a base record and ship in deliverable 5; until then it is
+medium. A line in either that changes nothing it declares is `source-edited`
+as anywhere else.
+
+The application entry stays medium. What it registers is not all in the
+manifest: providers and their outcomes are, while middleware added with
+`app.use()` goes straight to Hono and the options of `createApp()` are
+reported only in part, and a plan has no section that declares a provider.
+Judging the entry by what it registers needs a registration manifest and a
+matching plan section first, and this RFC specifies neither.
 
 **Accounting for an edit inside a file is not scheduled.** The idea: give each
 target a span in its file (a controller action, a policy ability, a validator
@@ -317,14 +347,16 @@ export default defineReviewPolicy({
     medium: ['config/**'],
   },
   facts: { 'agent-tool': 'high' },      // raise a fact's lane
-  review: { check: 'Claude Code Review' }, // the reviewer's check; low needs it to pass (§8)
+  review: { check: 'Claude Code Review', app: 'claude' }, // the reviewer's check; low needs it to pass (§8)
 })
 ```
 
-A fact may be lowered here too, and every report then prints
-`lowered by guren.review.ts` beside it. The policy that applies to a change is
-the base's: the file is a `gate-input`, so the change that edits it is high,
-and its new content takes effect only once merged.
+The policy may raise any fact. It may lower a declarable or an ambient one,
+and every report then prints `lowered by guren.review.ts` beside it. It cannot
+lower an always-high fact: those are the floor the rest stands on. The policy
+that applies to a change is the base's: the file is a `gate-input`, so the
+change that edits it is high, and its new content takes effect only once
+merged.
 
 ### 4. Change evidence
 
@@ -332,6 +364,13 @@ and its new content takes effect only once merged.
 place of the bare gate. It recomputes everything from the checkout and writes
 `evidence.json`, a compact `record.json`, and `evidence.md` for the job
 summary.
+
+Three things are kept apart. **The gate** is the exit code: the command fails
+exactly when `guren gate --deps` would, so adopting it changes no build's
+result. **Completeness** is what the evidence could not establish, each named
+as a hold. **Eligibility** is the conclusion: a change is eligible for low
+when its floor is low and it carries no hold. Nothing but the gate makes the
+command fail.
 
 ```typescript
 export interface ChangeEvidence {
@@ -341,15 +380,16 @@ export interface ChangeEvidence {
   plans: PlanEvidence[]
   browser: BrowserEvidence
   migrationImpact: 'none' | 'additive' | 'destructive'
-  /** What `low` would need and does not have; empty when nothing is missing. */
+  /** Why this change cannot be low, however low its facts are. */
   holds: { code: string; lane: Lane; message: string }[]
-  ok: boolean
 }
 
 export interface PlanEvidence {
   file: string
   hash: string
-  standing: 'approved' | 'unapproved' | 'baseline-removed' | 'unreadable'
+  standing: 'approved' | 'proposed' | 'unapproved' | 'baseline-removed' | 'unreadable'
+  /** The tasks this change contains, by the step ids its commits name. */
+  tasks: string[]
   steps: { id: string; outcome: 'verified' | 'failed' | 'blocked' | 'incomplete'; staleContext: boolean }[]
   redRuns: { id: string; state: 'reproduced' | 'landed' | 'exempt' | 'unobserved' | 'passed-before'; commit?: string }[]
   /** Elements the overlay did not lift, as `plan:close` would list them. */
@@ -357,19 +397,21 @@ export interface PlanEvidence {
 }
 ```
 
-`ok` is false when the gate fails, a plan step fails, a red run is
-`passed-before`, or a browser case fails. Everything short of that is a hold.
+**The change is a task, not a step.** A tests step fails by design, so a
+change holding it alone cannot pass the gate. The smallest change the evidence
+can judge is a task: its tests and its implementation, with the red commit
+kept inside it. The evidence asks for the steps and behaviours of the tasks
+the change contains, and never for the plan's later tasks.
 
-**What low requires of a plan.** One row short and the change is held at
-medium.
+**What low requires of a plan.** One row short and the change is held.
 
 | Condition | Otherwise |
 | --- | --- |
-| Standing is `approved` at the plan's current hash | `unapproved`, `baseline-removed`, `unreadable`: hold |
-| Every step the change's commits name is `verified` | `incomplete` or `blocked`: hold. `failed`: `ok` is false |
+| Standing is `approved` at the plan's current hash | `proposed`, `unapproved`, `baseline-removed`, `unreadable`: hold |
+| Every step of the change's tasks is `verified` | `incomplete`, `blocked` or `failed`: hold |
 | No step carries stale context | Hold |
 | No element of those steps is left open by the overlay | `waived`: hold (a person granted it, a person reads the result). `accepted`: no hold |
-| Every behaviour's red run is `reproduced`, `landed` or `exempt` | `unobserved`: hold. `passed-before`: `ok` is false |
+| Every behaviour's red run is `reproduced`, `landed` or `exempt` | `unobserved` or `passed-before`: hold |
 | The state file and decision log read | Hold |
 
 **Red runs.** A fresh clone has no carried red runs, so a `tests:fail` step
@@ -379,73 +421,82 @@ observation per behaviour, by the identity `carriedRedRuns()` uses (the id and
 as the records the run starts from, the input a local run fills from the state
 file.
 
-- `exempt`: the behaviour is marked `alreadyHolds`.
+- `exempt`: the behaviour is marked `alreadyHolds`. That is an exemption the
+  approval granted, not an observation.
 - `landed`: a test case titled with the id already requests its route at the
   merge base. Its red run was the business of the change that added it, which
   either reproduced it or was read by a person. No history older than the
-  change is ever searched.
+  change is searched.
 - Otherwise the test first appears in this change. The evidence finds the
   first commit of the change where the case exists and requests its route,
   checks that commit out in a temporary worktree, and runs that test file
-  there. A case that fails there and passes at the head, in the same runner
-  with the same environment, is `reproduced`. The head is the control: a
-  missing application key, or a helper importing a model that does not exist
-  yet, fails every case just as a missing implementation does, and only the
-  head passing tells them apart. A pass at the first commit is
-  `passed-before`: the test never proved anything. Measured on one plan of 42
-  behaviours, the three earlier commits took about two seconds in all.
-- `unobserved`: that first commit also holds the implementation (the change
-  was squashed before review), or it cannot be prepared. The worktree is
-  prepared from its own lockfile: the head's install is reused when the two
-  lockfiles are identical (95% of the step commits measured), and otherwise
-  `bun install --frozen-lockfile` runs there. `codegen` runs in the worktree
-  either way.
+  there. The case is `reproduced` when all of these hold: the junit report
+  marks that case failed; the file loaded, which is to say the output carries
+  no module-resolution error and not the skeleton's boot failure, as
+  `plan:verify` already reads for `tests:fail`; the text of the case is the
+  same at that commit and at the head; and the case passes at the head in the
+  same runner.
+- `passed-before`: the case passed at its first commit. The test never proved
+  anything.
+- `unobserved`: anything else. The file did not load there, the case was
+  edited between the two commits, the first commit also holds the
+  implementation (the change was squashed before review), or the commit could
+  not be prepared.
 
-**Browser.** A run has no result of its own, and `browser:record` reads
-neither Playwright's report nor its server's errors. The evidence defines the
-aggregate:
+The worktree is prepared from its own lockfile: the head's install is reused
+when the two lockfiles are identical, and otherwise `bun install
+--frozen-lockfile` runs there; `codegen` runs in the worktree either way.
+
+**Browser.** A run has no result of its own. `browser:record` measures each
+step's screenshots and runtime-error window, and reads neither Playwright's
+report nor the errors of the server Playwright started. The evidence defines
+the aggregate:
 
 ```typescript
 export interface BrowserEvidence {
   configured: boolean
+  /** `unavailable` when the runner did not finish or left no report the CLI can read. */
+  report: 'read' | 'unavailable'
   cases: { passed: number; failed: number; skipped: number; fixme: number }
   /** Features the change touches (by the browser map) with no passing case. */
   uncovered: string[]
 }
 ```
 
-Cases are read from the run's `spec-report.json`. A failed case makes `ok`
-false. A feature the change touches that is `uncovered`, because its spec is a
-`test.fixme` or the application has no browser configuration at all, is a hold
-whenever the change edits a page or a route that renders one.
+Cases are read from the run's `spec-report.json`. A failed case, an
+`unavailable` report, and a feature the change touches that is `uncovered`
+(its spec is a `test.fixme`, or the application has no browser configuration)
+are each a hold whenever the change edits a page or a route that renders one.
 
 **Behaviour specs (RFC 0033 §13, proposed).** If that amendment is accepted
 and the application has `e2e.browser.config.ts`, the evidence also runs
 `test:behaviours:ci` and counts the cases of the runner's `.e2e/report.json`
 in the same aggregate. The report is the runner's own document, so its
 `schemaVersion` is checked first (`report-1` in the version §13 pins), and one
-the CLI does not know is `unjudged`, never read on a guess. A case that does
-not pass there is a hold and never makes `ok` false. It shows in three ways:
-`REPLAY_STALE`, a recording that no longer replays; `MODEL_PROVIDER_FAILED`,
-which in CI means a step with no recording, since by the runner's
-documentation such a step runs live even under `--strict-cache` and CI has no
-login (the fix is to commit the recording, not to give CI a login); and an
-outcome the locators do not find. §13 keeps
-behaviour specs out of every gate, and this keeps to it: the change is not
-failed, it is read by a person. A stale recording means a page a behaviour
-starts on changed and nobody recorded it again. These specs are generated from
-the plan and replayed with no model, so they are a check the implementing
-session did not write (Open Question 9).
+the CLI does not know is `unavailable`, never read on a guess. A case that
+does not pass there is a hold. It shows in three ways: `REPLAY_STALE`, a
+recording that no longer replays; `MODEL_PROVIDER_FAILED`, which in CI means a
+step with no recording, since by the runner's documentation such a step runs
+live even under `--strict-cache` and CI has no login (the fix is to commit the
+recording, not to give CI a login); and an outcome the locators do not find.
+§13 keeps behaviour specs out of every gate, and this keeps to it. These specs
+are generated from the plan and replayed with no model, so they are a check
+the implementing session did not write (Open Question 9).
 
-**The record.** `record.json` is what outlives the run: base, head, the
-classifier version, the fact codes with their lanes, the floor, the holds,
-whether `ok`, and the head's per-route security records (§3). The workflow
-uploads it as an artifact named for the head SHA, with the longest retention
-the repository allows. It is the base record of later changes, the unit
-`change:stats` counts (§11) and the input to the shadow comparison (§8). The
-evidence is never committed, and nothing is lost when a record expires: a base
-record is recomputed by running the workflow on that commit, and the numbers
-are kept elsewhere (§11).
+**The record.** `record.json` is what outlives the run: `recordVersion`, the
+`@guren/cli` and `@guren/server` versions, the target and environment, base,
+merge base and head, the fact codes with their lanes, the floor, the holds,
+the gate's result, and the head's per-route security records (§3). The
+workflow uploads it whether or not the gate passed, as an artifact named for
+the head SHA with the longest retention the repository allows. It is the base
+record of later changes, the unit `change:stats` counts (§11) and the input to
+the shadow comparison (§8). The evidence is never committed.
+
+An expired record cannot be had again as it was. Running the workflow on that
+commit recovers its facts and security records, not what the reviewer or the
+person said at the time. Those live on the pull request, where the lane job
+writes its decision (§8), and so an incident can be traced for as long as the
+pull request exists, not for as long as the artifact does.
 
 ### 5. The plan as the delegation
 
@@ -464,33 +515,52 @@ Everything else this plan adds can merge on evidence once enforcement is on.
 The forecast is a lower bound: the implementation can add facts the plan did
 not predict, and those keep their own lane.
 
-**The unit that flows is the step.** Taken as one change, none of the 11 plan
-implementations measured would have been low: each edits the wiring files and
-the layout, and ten edit existing server code. Taken per step, 49% edit
-nothing that existed before the plan and 83% edit nothing but wiring files.
-So an implementation arrives as one pull request per step or per task,
-stacked where one depends on another, and the person is asked about the few
-that need it. Nothing in the lane depends on this: it is what makes the low
-lane worth having.
+**The unit that flows is the task.** A plan's implementation arrives as one
+pull request per task (§4), stacked where one depends on another. Read from
+paths alone on the 11 plan implementations measured: taken whole, none could
+be low; of their 48 tasks, 6 edit nothing that existed before the plan and 7
+more edit only the schema and the routes entry, so 13 of 48 is the most the
+low lane could take once the routes entry is judged structurally. The other 35
+edit the application entry (8), existing client code (6) or existing server
+code (21). These are upper bounds: declarations, security records, evidence
+and review can only lower them. So on a new application most tasks are read by
+one person, and what the line gives that person first is the evidence and a
+reading list, not an empty queue.
 
-The plan and its approval land in their own change, ahead of the
-implementation. That change is high (`plan-record`), so a person reads the
-rendered plan there. 
 **Approval on the pull request.** At a terminal nothing changes: a person runs
-`plan:approve`. For a plan that arrives as a pull request, the agent runs
-`plan:approve --propose`, which stamps the baseline and writes the approval
-entry with `proposed: true` and no approver. `readPlanApprovalStanding()`
-reads that entry as `proposed`, which every gated command refuses as it
-refuses `unapproved`, until the commit that introduced the entry is an
-ancestor of the default branch on the remote. From then on the standing is
-`approved`, and the approver is whoever GitHub records as having approved and
-merged that pull request. `docs/plans/` is an owned path, so the pull request
-does not merge without an owner, who approves it from the Dev Center (§12).
-No workflow writes to the branch and no token is involved. The
-`plan-implement` skill's rule becomes: never run `plan:approve`; `--propose`
-is the agent's, and it approves nothing. On a repository with no owner rule,
-merging the plan is still a person's act, and `factory:status --remote`
-reports the missing rule.
+`plan:approve`, there or from the Dev Center (§12). For a plan that arrives as
+a pull request, merging it is the approval, by this protocol:
+
+1. The agent runs `plan:approve --propose`. It stamps the baseline and writes
+   `proposal.json` beside the plan: the hash, the readings of each `alter`
+   and the elements accepted without a behaviour, which the approval will
+   bind. It never writes `approvals.json`, so a CLI that predates the
+   proposal reads the plan as unapproved and not as approved. The standing is
+   `proposed`, which every gated command refuses as it refuses `unapproved`:
+   nothing is implemented on that branch, and the plan lands first.
+2. A person approves the pull request, from the Dev Center, bound to its head
+   SHA. The change is `plan-record`, so it is high.
+3. After the merge, `plan:approve --from-merge` asks the store, not git: the
+   pull request is merged into the default branch, the plan and proposal in
+   the merge result have the proposed hash, and an approving review by a
+   person other than the pull request's author covers its last head. Then the
+   standing is `approved`, with that reviewer as the approver and the pull
+   request and merge commit as where it happened. The answer is cached under
+   `.guren/plans/` and recomputed on a fresh clone; nothing more is committed,
+   so approving takes no second change.
+
+An ancestor commit approves nothing. A proposal that reached the default
+branch by a direct push, by an owner merging their own unreviewed pull
+request, or by a local ref that was moved stays `proposed`, since no review
+covers it. Where there is no second person, as for a single owner whose agents
+open pull requests under the owner's account, GitHub lets nobody approve, and
+the person approves with `plan:approve`. Either way the approval reached the
+default branch through a `plan-record` change, which is always high, so a
+person merged it.
+
+The `plan-implement` skill's rule becomes: never run `plan:approve`.
+`--propose` and `--from-merge` are the agent's, and neither approves anything
+by itself.
 
 ### 6. Changes without a plan
 
@@ -554,44 +624,60 @@ left to the team: its entries name products and owners Guren does not know.
 
 ### 8. Merge
 
-This RFC ships the report and specifies what enforcement has to prove. It does
-not ship enforcement.
+Deliverable 1 ships the report. Enforcement is deliverable 6, and this section
+specifies what it has to prove first.
 
-**Report.** The scaffolded workflow runs on every pull request, never fails on
-the lane, and prints what each lane would have required.
+**Report.** The scaffolded workflow runs on every pull request and on every
+push to the default branch. It fails only when the gate fails, and prints
+what each lane would have required.
 
 ```yaml
 on:
   pull_request:
+  push:
+    branches: [main]
 
 jobs:
   change:
     runs-on: ubuntu-latest
-    permissions: { contents: read }
+    permissions: { contents: read, actions: read }
+    env:
+      BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v7
-        with: { fetch-depth: 0 }
+        with: { fetch-depth: 0, ref: '${{ env.HEAD }}' }
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
-      - run: bunx guren change:evidence --base "$BASE" --head "$HEAD" -o .guren/change
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-      - run: cat .guren/change/evidence.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with: { name: change-record, path: .guren/change/record.json, retention-days: 90 }
+      # Downloads guren-record-<merge base> into base/ when a run stored one.
+      - run: bunx guren change:base-record --base "$BASE" --head "$HEAD" -o base
+        env: { GH_TOKEN: '${{ github.token }}' }
+      - run: bunx guren change:evidence --base "$BASE" --head "$HEAD" --base-record base/record.json -o .guren/change
+      - if: always()
+        run: cat .guren/change/evidence.md >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: 'guren-record-${{ env.HEAD }}', path: .guren/change/record.json, retention-days: 90 }
 ```
 
-The job fails only when `ok` is false, which is what the gate step does today.
+The checkout names the head, so what the record attests is the commit it
+names and not GitHub's merge commit; the merge result is the merge queue's to
+test, or the rule that a branch be up to date. The summary and the upload run
+whether or not the gate passed. `change:base-record` is the one command here
+that speaks to GitHub, through `gh`.
 
-**Shadow.** During the report period a team compares, per pull request, the
-floor with what its reviewers did: approvals given, changes requested, and
-later reverts. `change:stats --remote` reads the records and the reviews
-through `gh` and prints the comparison, and whether the default bar is met:
-at least 50 pull requests over at least four weeks; among those the floor
-called low, no revert and no "changes requested" for a defect; and at least
-95% agreement overall. The bar is the team's to change, and the numbers it is
-judged from are printed with it.
+**Shadow.** During the report period two things are recorded per pull request:
+the floor, and what a person thought it needed. The pull request template
+asks the reviewer for one label, `lane:low`, `lane:medium` or `lane:high`.
+`change:stats --remote` reads the records, the labels, the reviews and later
+reverts through `gh`, and prints the table of floor against label. It also
+prints what the low lane would have let through: of the pull requests whose
+floor was low, how many a person labelled higher, how many drew "changes
+requested", and how many were reverted. The default bar for enforcement is at
+least 50 pull requests over at least four weeks, with none of the low ones
+reverted or labelled high and at most one in twenty labelled medium. The bar
+is the team's to change, and the numbers it is judged from are printed with
+it.
 
 **Enforcement.** A required check that the pull request itself can edit,
 computed by code the pull request supplies, is not a boundary. GitHub's
@@ -605,31 +691,46 @@ documentation (read 2026-11) gives the pieces for one that is.
 | An organization-level workflow | Ruleset workflows, at organization or enterprise level, on Enterprise Cloud and Server | Replaces the `pull_request_target` job where available |
 | A merge queue | Public repositories owned by an organization, and private ones on Enterprise Cloud; workflows need the `merge_group` trigger | Optional. Without it, the rule that a branch be up to date before merging |
 
-The lane job does four things, none of which runs the change: it recomputes
-the path facts from the pull request's file list, reads `guren.review.ts` at
-the base, reads the record the evidence run uploaded (as data), and counts
-approvals from the reviews API. It then sets the `guren/lane` status on the
-head SHA, which is the required check. A change that rewrote its own evidence
-still cannot hide a `gate-input` path and cannot count itself approved.
+The lane job runs nothing from the change. What it believes, and from where:
 
-Low also needs a review. `guren.review.ts` names the check the team's reviewer
-reports (`review: { check: 'Claude Code Review' }`), and the lane job requires
-it to have passed on the head SHA. With none named, low is not available, and
-the report says that this is why (**decided 2026-11-14** by the maintainer).
+| Input | Read from | Trusted for |
+| --- | --- | --- |
+| Path facts | The pull request's file list, recomputed | The always-high paths |
+| Policy | `guren.review.ts` at the base | Lanes and required approvals |
+| The gate | The conclusion of the evidence workflow's check on the head SHA, from the checks API | Whether the gate passed. Never from the record |
+| The record | The artifact the evidence run uploaded | Raising the lane only: a fact or a hold in it counts, its absence proves nothing |
+| The review | The check run `guren.review.ts` names, produced by the app it names, `success` on the head SHA, the latest completed one | Low |
+| Approvals | The reviews API | The lane's required count |
+
+It then sets the `guren/lane` status on the head SHA, which is the required
+check, and writes its decision as a comment on the pull request, where it
+outlives the artifact. A change that rewrote its own evidence still cannot
+hide a `gate-input` path, cannot pass the gate by saying so, and cannot count
+itself approved.
 
 - **What an approval is.** Bound to the head SHA, from a distinct person who
   is not the author; dismissed and stale approvals and a standing "changes
   requested" handled. A reviewer model's approval is never counted.
-- **When a review arrives.** A review event runs the pull request's own
-  workflow file, so it is used only as a signal: a `workflow_run` on its
-  completion runs the lane job from the default branch. A change that removes
-  the signal leaves the status unrefreshed and the merge blocked.
+- **When it runs again.** On every event that can change an input: the
+  evidence workflow finishing, the reviewer's check finishing, a review
+  arriving. A review event runs the pull request's own workflow file, so it is
+  used only as a signal: a `workflow_run` on its completion runs the lane job
+  from the default branch. A change that removes the signal leaves the status
+  unrefreshed and the merge blocked.
+- **A reviewer that never reports.** `review.timeoutMinutes` (60 by default)
+  after the head was pushed, the lane job stops waiting: the change is held at
+  medium with "the reviewer did not report", and a person reads it. With no
+  `review` named, low is not available at all, and the report says that this
+  is why (**decided 2026-11-14** by the maintainer).
 - **Refusal.** Approval data that cannot be read refuses the merge. It is
   never zero and never a previous success.
 
 A `workflow_run` is documented to run on the default branch's last commit with
 a write token "even if the previous workflow was not" privileged, which covers
-a pull request from a fork.
+a pull request from a fork. What the documentation read so far does not
+settle, and deliverable 6 has to show on a repository: that a completed check
+run can trigger the lane job from the default branch, and that the checks API
+names the app that produced a check run.
 
 **Tried on a repository (2026-11-14).** A ruleset on the default branch
 requiring a pull request, zero approvals and code owner review:
@@ -651,7 +752,7 @@ arranged, the `guren/lane` status is the only gate, which is why it is
 computed outside the change. A ruleset on a private repository needs a paid
 plan: on a free one the API answers 403 until the repository is public.
 
-Until deliverable 5 ships, the lane is information for the person who merges.
+Until deliverable 6 ships, the lane is information for the person who merges.
 
 ### 9. Release and operate
 
@@ -663,8 +764,8 @@ Until deliverable 5 ships, the lane is information for the person who merges.
   commit, the change records it contains, the environment, the migrations
   applied, and the post-deploy result. The first three exist at deploy time;
   the template collects them. Containment is the platform's rollback to the
-  previous artifact, and the record's migration impact says when that alone
-  is not enough.
+  previous artifact. The record does not say whether that is safe: it says
+  which migrations ran, which is where a person starts when it is not.
 - **After deploy.** `browser:doctor --url <origin>` already checks each
   feature's landmark against the graph. In production the runtime-error
   collector is absent by design, so the window is `unavailable` and the run
@@ -795,7 +896,7 @@ Remote text (titles, bodies, findings) is escaped and never run.
 
 **Knowing when to look.** Three signals and no service: GitHub's own
 notification when review is requested (code owners are requested
-automatically, and from deliverable 5 the lane job requests a reviewer for
+automatically, and from deliverable 6 the lane job requests a reviewer for
 any medium or high floor); the harness's hand-off line, which ends with the
 inbox count; and the count in the Dev Center's tab title.
 
@@ -804,45 +905,70 @@ decision command for the person's terminal (RFC 0030 §8, amended 2026-11-01).
 For the Dev Center to be enough, a decision has to be possible in it, so it
 gains a closed set of actions:
 
-| Action | Runs |
-| --- | --- |
-| Approve or close a plan, waive an element | `plan:approve`, `plan:close`, `plan:waive --reason` |
-| Approve or request changes on a pull request | `gh pr review`, with the person's text |
-| Triage an issue | `gh issue edit` (label, assignee), `gh issue close` |
+| Action | Runs | Bound to |
+| --- | --- | --- |
+| Approve or close a plan, waive an element | `plan:approve`, `plan:close`, `plan:waive --reason` | The plan file and its digest |
+| Approve or request changes on a pull request | `gh pr review`, with the person's text | The repository, the pull request and its head SHA |
+| Triage an issue | `gh issue edit` (label, assignee), `gh issue close` | The repository and the issue |
 
-- Off unless `GUREN_DECISIONS=1`. No template sets it; `guren add review`
-  offers to add it to the `dev` script, so turning it on is the owner's act.
-- Confirmed on an origin of its own. The application answers on `127.0.0.1`
-  as it does on `localhost` (the MCP Apps sandbox notes that its proxy's
-  origin "is the application itself"), so a second hostname on the same port
-  is not a separate place. The Dev Center opens a listener on another
-  loopback port that serves the confirmation document and the decision
-  endpoint and nothing else, and the endpoint accepts no other `Origin`. A
-  script injected into a page of the application is on the application's
-  origin, whichever hostname loaded it, and can neither read the confirmation
-  nor post as it.
-- The listener answers one `Host` (its own address and port) and 404s every
-  other, which closes DNS rebinding. The endpoint requires that exact
-  `Origin` and a per-process token in a custom header, so a cross-origin
-  request is preflighted and a plain form post is refused. The confirmation
-  is sent with `frame-ancestors 'none'` and
+**What a confirmation holds.** The action, its target and the exact candidate:
+a plan's digest, or a pull request's head SHA. The person confirms that tuple
+and the text they wrote. At the click the listener reads the candidate again
+and refuses when it moved: a plan edited since, or a pull request that gained
+a commit, is shown again and not acted on. A plan that exists only in a pull
+request is decided by approving that pull request (§5), never by running
+`plan:approve` on a local file that may differ from it.
+
+**The listener.** The application answers on `127.0.0.1` as it does on
+`localhost` (the MCP Apps sandbox notes that its proxy's origin "is the
+application itself"), so a second hostname on the same port is not a separate
+place. Decisions are confirmed on a listener of their own:
+
+- It is opened by the provider that mounts the Dev Center, after the
+  application's listener has bound its port, on a loopback port the system
+  picks. Its address is published in the Dev Center's JSON, so nothing
+  derives it from a port that `bin/serve.ts` may have walked past. It is
+  closed with the application, and replaced on a hot reload with a new token.
+- It starts only under the guards the Dev Center has (development,
+  `GUREN_MCP=1`) and `GUREN_DECISIONS=1`. No template sets that flag;
+  `guren add review` offers to add it to the `dev` script, so turning it on is
+  the owner's act. `browser:serve` never sets it and removes it from the
+  child's environment: the instance an agent drives for browser verification
+  has no decisions listener.
+- It answers one `Host` (its own address and port) and 404s every other, which
+  closes DNS rebinding. It serves the confirmation document and the decision
+  endpoint and nothing else.
+- The token is per process and exists only in the confirmation document. The
+  Dev Center's own pages, which share the application's origin, never hold
+  it: they open the confirmation's address with the action and the target,
+  and that is all they can do.
+- The endpoint requires the listener's exact `Origin` and the token in a
+  custom header, so a cross-origin request is preflighted and a plain form
+  post is refused. The confirmation is sent with `frame-ancestors 'none'` and
   `Cross-Origin-Resource-Policy: same-origin`, so it cannot be framed or
   fetched.
-- A prototype of this was attacked from an application page in a browser,
-  from `localhost` and from `127.0.0.1` on the application's port: reading
-  the confirmation, framing it, loading it as a script, and posting to the
-  endpoint by `fetch` and by form were all refused, and only the click on
-  the confirmation itself was accepted (Measurements).
-- What a script can still do is bring a confirmation up, by opening its
-  address. It cannot answer one. So the confirmation states the command and
-  its target in full and does nothing until clicked.
-- A request names an action and an id. The server builds the command; nothing
-  from the request reaches a shell.
-- The confirmation shows the exact command and what it changes, and the
-  action is refused unless the existing dry run says it would go through.
-- Every action is appended to `.guren/decisions.log`.
+- A request names an action and a target. The server builds the command;
+  nothing from the request reaches a shell. The action is refused unless the
+  existing dry run says it would go through, and every action is appended to
+  `.guren/decisions.log`.
 - Merging is not an action. The repository's own auto-merge does it once the
   approvals are there.
+
+A prototype of the listener was attacked from an application page in a
+browser, from `localhost` and from `127.0.0.1` on the application's port:
+reading the confirmation, framing it, loading it as a script, and posting to
+the endpoint by `fetch` and by form were all refused, and only the click on
+the confirmation itself was accepted (Measurements).
+
+**What this does not do.** It separates the confirmation from scripts in the
+application's pages. It does not tell a person from an agent: an agent that
+drives a browser can open a confirmation and click it, which is why RFC 0030
+kept the buttons from executing ("nothing here can tell the person from the
+agent"). Three things stand against that, none of them a proof. The listener
+does not exist in the instance `browser:serve` starts, the one an agent's
+browser verification uses. The flag is the owner's to set. And an agent with a
+shell can already run `plan:approve`: the harness rule that forbids it, and
+the decisions log that shows it, are the same guard there as here.
 
 This reverses a choice RFC 0030 made on purpose (**decided 2026-11-13** by the
 maintainer, Open Question 14). It ships as its own deliverable, and RFC 0030
@@ -870,7 +996,9 @@ does for the dependency reports.
 
 - The floor guards against mistakes. It does not stop an author who writes
   code to defeat it; only enforcement run from outside the change can (§8),
-  and none ships here.
+  which is deliverable 6 and not before.
+- A decision made in the Dev Center is separated from scripts in the
+  application's pages, not from an agent that drives a browser (§12).
 - The evidence runs the change's own code (tests, introspection), so it is
   not evidence about a change that attacks the runner.
 - Facts are lower bounds. A security record that did not weaken has not
@@ -883,23 +1011,30 @@ does for the dependency reports.
 
 ### 14. Phasing
 
-Six deliverables. The first three are specified here. The fourth and fifth
-get their own specification before they ship, with the measurements listed
-under Open Questions as their acceptance criteria.
+Seven deliverables. The first is the smallest thing that is useful by itself
+and produces the data the rest is judged on. Each later one names what it
+needs first.
 
-| Deliverable | Ships | Produces |
-| --- | --- | --- |
-| 1. Evidence, record and the read side | `resolveChange()`; `change:lane` with the facts that need only the head and the diff (paths, migrations, audit, acceptance, dependencies), the rest `unjudged`; `change:evidence` with the gate, a fresh-clone `plan:verify` and the browser aggregate; the record; `guren add review`; `factory:status`; the Dev Center inbox, change page and line page, reading local files and `gh`. Report only | Lanes and holds on every pull request; one page that lists what waits on a person, cloud work included; the records the shadow comparison needs |
-| 2. Decisions in the Dev Center | The action set of §12 behind `GUREN_DECISIONS=1`, with the amendment to RFC 0030 §8 | A person who never opens a terminal or the pull request page to decide |
-| 3. Lessons | The `lesson` type, `make:lesson`, delivery through `context` and the harness, the `fix` skill, the canonical review contract, the tests step handed to `test-writer` | The loop from a finding to a rule or a check |
-| 4. Historical evidence and delegation | Base preparation and per-route security records; red runs from history; the declaration matcher; the forecast in `plan:render` and `plan:approve` | Measured on real histories: the share `unjudged`, the share `unobserved`, declarations matched |
-| 5. Enforcement | The GitHub adapter that meets §8's list | Low changes merging without a person, where the shadow data supports it |
-| 6. Release and sweeps | The release record, `browser:doctor --landmarks-only`, the sweep template, `change:stats --remote` | The line closed from production back to intake |
+| Deliverable | Ships | Needs first | Produces |
+| --- | --- | --- | --- |
+| 1. Report | `resolveChange()`; `change:lane` with the facts read from the head and the diff (paths, migrations, schema, audit, acceptance, dependencies), every other fact `unjudged`; `change:evidence` wrapping the gate, with plan and browser evidence reported as unavailable; the versioned record, uploaded even on failure; the pull request summary; the `lane:` label; `guren add review` | Nothing | A floor and its reasons on every pull request, and the floor-against-label data of the shadow comparison |
+| 2. The Dev Center, read side | The inbox, the change page with its reading list, the line page and `factory:status`, reading local files and `gh` | 1 | One page that lists what waits on a person, cloud work included |
+| 3. Decisions and plan approval | The listener and the action set of §12; `plan:approve --propose` and `--from-merge`; the amendment to RFC 0030 §8 | 2 | A person who decides without a terminal, and a plan approved by merging it |
+| 4. Lessons | The `lesson` type, `make:lesson`, delivery through `context` and the harness, the `fix` skill, the canonical review contract, the tests step handed to `test-writer` | Nothing | The loop from a finding to a rule or a check |
+| 5. Structural evidence and delegation | Per-route security records and base records; a fresh-clone `plan:verify` with red runs from the change's commits; the browser aggregate and behaviour specs; the declaration matcher; the forecast | 1, and for approval standing 3 | Evidence complete enough for a low lane, measured on real histories: the share `unjudged`, the share `unobserved`, declarations matched |
+| 6. Enforcement | The lane job and the GitHub settings of §8 | 5, and the shadow bar met | Low changes merging without a person |
+| 7. Release and sweeps | The release record, `browser:doctor --landmarks-only`, the sweep template, the monthly numbers | 1 | The line closed from production back to intake |
+
+Until deliverable 5, a plan's evidence is reported as unavailable and a change
+under a plan is held, so nothing is called low on evidence that was not
+gathered. Until deliverable 6, the lane is information for the person who
+merges.
 
 Follow-up RFCs, named so they are not mistaken for done: provisioning a cloud
 environment for agents (an amendment to RFC 0008), feature flags, a
 production error reporter that files issues, the headless plan producer
-(RFC 0030 D1), and reviewer eval cases.
+(RFC 0030 D1), reviewer eval cases, and a registration manifest with a plan
+section for providers (§3).
 
 ## Alternatives Considered
 
@@ -984,12 +1119,15 @@ measured is listed at the end, with the deliverable that measures it.
    organization public repositories and Enterprise Cloud private ones (§8).
 4. ~~**Approving a plan from the pull request.** Who runs `plan:approve`?~~
    **Resolved (2026-11-14):** merging the plan's pull request is the
-   approval. The agent runs `plan:approve --propose`; the standing is
-   `approved` once that entry is on the default branch (§5).
+   approval. The agent runs `plan:approve --propose`, which writes a proposal
+   and no approval; the standing is `approved` once the store shows the pull
+   request merged with an approving review by someone other than its author.
+   An ancestor commit alone approves nothing (§5).
 5. ~~**Leaving shadow mode.** What agreement justifies enforcement?~~
-   **Resolved (2026-11-14):** a default bar the team may change: 50 pull
-   requests over four weeks, no revert and no defect found among the low
-   ones, 95% agreement overall (§8).
+   **Resolved (2026-11-14):** a default bar the team may change, judged from
+   the floor against a person's `lane:` label: 50 pull requests over four
+   weeks, none of the low ones reverted or labelled high, at most one in
+   twenty labelled medium (§8).
 6. ~~**A low lane for fixes.**~~
    **Resolved (2026-11-14):** not in this RFC. A fix has no plan, so nothing
    declares its targets, and it stays medium. Revisited with the shadow
@@ -1036,7 +1174,10 @@ measured is listed at the end, with the deliverable that measures it.
     rules of §12. The confirmation and the endpoint sit on a listener of
     their own, since the application answers on `127.0.0.1` as on
     `localhost`, so a script injected into the application's pages can
-    neither read nor post.
+    neither read nor post. That separates the confirmation from page
+    scripts, not a person from an agent driving a browser, which RFC 0030
+    gave as its reason; the listener is therefore absent under
+    `browser:serve`, and the rest is the harness rule and the log.
 15. ~~**Away from the machine.**~~
     **Resolved (2026-11-14):** the pull request's `evidence.md` and GitHub's
     notification are enough. No snapshot, and the Dev Center stays
@@ -1048,47 +1189,43 @@ measured is listed at the end, with the deliverable that measures it.
 
 ### Measurements (2026-11-14)
 
-Read from the git histories of the 11 applications, out of two dogfooding
-runs, that headless sessions built through the plan loop with commits naming
-their steps: 195 step commits and 423 acceptance ids. The plan composition is
-over every plan of both runs, 3,216 elements with a change kind. No test was
-run: these are counts over commits, diffs and plan files.
+Each row says what was counted and what that supports. None is a measurement
+of the design in use: the commands do not exist yet.
 
-| Question | Measured | Consequence |
+**From git histories.** The 11 applications, out of two dogfooding runs, that
+headless sessions built through the plan loop with commits naming their
+steps: 195 step commits in 48 tasks, and 423 acceptance ids. The plan
+composition is over every plan of both runs, 3,216 elements with a change
+kind. No test was run for these: they are counts over commits, diffs and plan
+files. "Existing" means present at the commit before the plan's first step,
+which for a later task is not that task's own merge base.
+
+| Counted | Result | What it supports |
 | --- | --- | --- |
-| Do commits carry step ids? | 195 of the 238 commits after a plan's approval are named `task/…`; the rest are the driver's own | The convention holds unenforced, and nothing here depends on it |
-| Does a test arrive before its implementation? | 403 of 423 ids (95%) first appear in a commit that touches no controller, routes file or policy | Most red runs can be reproduced; about 5% would be `unobserved` |
-| Is the lockfile stable inside a plan? | 1 of 195 step commits changes `bun.lock`; 185 (95%) have the lockfile of the plan's last step | The head's install is reusable almost always (§4) |
-| What is a plan made of? | add 2,949, alter 131, existing 119, drop 17 | 92% additions, in applications built from a starter |
-| Can a whole plan be one low change? | 0 of 11. Every one edits `db/schema.ts`, the routes entry, the application entry and `Layout.tsx`; ten edit existing server files (the starter's `User` model, its auth controllers, `config/env.ts`) | The unit that flows is the step (§5) |
-| Can a step? | 95 of 195 (49%) edit no file that existed at the plan's base; 66 more (34%) edit only the three wiring files; 34 (17%) edit other existing source | 49% low as first specified, 83% once wiring files are judged by what they register (§3) |
-| Which steps are held? | Tests: 34 of 36 edit nothing existing. Scaffold: 25 of 29 edit only wiring files, http 30 of 48. Pages: 13 of 27 edit existing client code, the layout's navigation in every application | The person's share is mostly the navigation link |
+| Commits after a plan's approval named `task/…` | 195 of 238; the rest are the driver's own | The convention holds unenforced. Nothing here depends on it |
+| Ids whose first commit touches no controller, routes file or policy | 403 of 423 (95%) | Candidates for reproducing a red run. It does not show the test failed there, or why |
+| Step commits changing `bun.lock` | 1 of 195; 185 have the lockfile of the plan's last step | The head's install can usually be reused (§4) |
+| Plan elements by change kind | add 2,949, alter 131, existing 119, drop 17 | 92% additions, in applications built from a starter |
+| Whole plans editing nothing but new files | 0 of 11 | A plan is not the unit that flows (§5) |
+| Tasks editing nothing existing | 6 of 48 | An upper bound, by paths alone, on what could be low as first specified |
+| Tasks editing only the schema and the routes entry beyond that | 7 more (13 of 48) | The same bound once both are judged by what they declare (§3) |
+| Tasks editing the application entry, existing client code, existing server code | 8, 6 and 21 | Where one person reads. The layout's navigation is edited in every application |
+| Step commits editing nothing existing; only the schema and routes entry | 95 and 43 of 195 | The per-step figures. A step is not a mergeable unit, since a tests step fails the gate |
 
-Limits. All 11 are new applications, so "existing" means the starter's code; a
-plan on a mature application alters more. Two runs of one driver are not a
-population. The dependencies added in these histories (`playwright`,
-`@axe-core/playwright`) came from the driver's verification phase, not from a
-step.
+**Run.**
 
-Three more were run the same day.
+| Question | How | Result | What it supports |
+| --- | --- | --- | --- |
+| What does reproducing red runs cost? | One history (42 behaviours) in GitHub Actions, Bun 1.4.4: a worktree per commit that first carries an id, the head's install linked in, `codegen`, that commit's test files | Three commits, 0.3 s to prepare and 0.1 to 0.7 s to run each | A warm run with identical lockfiles. Not the cost of a cold preparation or of a commit with another lockfile |
+| Is a failure there a red run? | The same run | Two commits failed on assertions (a 404 where the plan expects a redirect). One failed loading a helper that imports a model a later step adds. A first run with no application key failed every case at the head too | Why a load failure is `unobserved` and the head is the control (§4). Under that rule one of the three would not have counted |
+| Does code owner review block with zero required approvals? | A public repository, a ruleset, three pull requests | Yes for an author who does not own the path, and it clears on the owner's approval. A pull request the owner opens is not blocked | §8 |
+| Can edits inside a file be matched to the plan? | A parse of each edited file's spans against the plan's declarations, over the 11 histories | 4 of 27 files, 24 of 166 lines | Not scheduled (§3) |
+| Do merge bases have a completed push run? | This repository's last 60 merged pull requests | 60 of 60, at most four days before the merge | That the runs exist. Not that their records would be comparable, and not stacked pull requests, of which there were none |
+| Does storing and fetching a record work? | A workflow on a test repository: the push run uploads `guren-record-<sha>`, the pull request run asks the artifacts API for its merge base's, with a read-only token | Found for a branch cut from a commit that had a push run; reported missing for one cut before the workflow existed | The mechanism of §3 |
+| Can an application page reach a decisions listener? | A prototype on its own port and an application page on another, driven in a browser from `localhost` and from `127.0.0.1` | Every read, frame, script load and post refused; a foreign `Host` and a request with no `Origin` refused; the click on the confirmation accepted. A script can open the confirmation and cannot answer it | The isolation of §12 from page scripts. Nothing about an agent that drives the browser |
+| Does the harness's own review run? | The implementation logs of 52 runs | The `code-review` agent was called in 4, and in none of the 11 step-by-step runs | §7 |
 
-| Question | How | Result |
-| --- | --- | --- |
-| What does reproducing red runs cost? | One of the histories (42 behaviours) in GitHub Actions, Bun 1.4.4: a worktree per commit that first carries an id, the head's install linked in, `codegen`, that commit's test files | Three commits, 0.3 s to prepare and 0.1 to 0.7 s to run each; every case failed there and all 46 passed at the head. About two seconds for the plan |
-| Is a failure there a red run? | The same run | Two commits failed on assertions (a 404 where the plan expects a redirect). One failed on a test helper importing a model a later step adds. A first run with no application key failed every case at the head as well. Hence the head as the control (§4) |
-| Does code owner review block with zero required approvals? | A public repository, a ruleset, three pull requests | Yes for an author who does not own the path, and it clears on the owner's approval. A pull request the owner opens is not blocked (§8) |
-| Can edits inside a file be matched to the plan? | A parse of each edited file's spans against the plan's declarations, over the 11 histories | 4 of 27 files, 24 of 166 lines. Not scheduled (§3) |
-
-And four that needed something running.
-
-| Question | How | Result |
-| --- | --- | --- |
-| How often is there no base record? | This repository's last 60 merged pull requests: the merge base of each, and whether a push run of CI completed on it | 0 of 60 missing. The base was at most four days older than the merge, inside any artifact retention |
-| Does storing and fetching a record work? | A workflow on a test repository: the push run uploads `guren-record-<sha>`, the pull request run asks the artifacts API for its merge base's, with a read-only token | Found for a branch cut from a commit that had a push run; reported missing for one cut before the workflow existed |
-| Can an application page reach the decisions listener? | A prototype listener on its own port and an application page on another, driven in a browser from `localhost` and from `127.0.0.1` | Eight attempts from each origin refused, a foreign `Host` and a request with no `Origin` refused, no other route answered; the click on the confirmation was accepted. Opening the confirmation from a script works, answering it does not (§12) |
-| Does the harness's own review run? | The implementation logs of 52 runs | The `code-review` agent was called in 4, and in none of the 11 step-by-step runs (§7) |
-
-One could not be measured. The independent evaluations of the 11 applications
+**Could not be measured.** The independent evaluations of the 11 applications
 name a file for only six of the application defects they found (five of them
 in files the plan added), too few to say what share of defects a low lane
 would have let through. An evaluation that names `file:line` for each defect
@@ -1096,9 +1233,14 @@ would make that countable.
 
 ### Still to be measured
 
-- **The shadow period.** Whether the default bar is met, and how often a
-  person changes a fix. It needs real pull requests with human reviews beside
-  the floor, which only the report workflow in use produces.
+- **Deliverable 1, in use.** The shadow comparison: the floor against the
+  person's `lane:` label, and what became of the low ones.
+- **Deliverable 5.** The same task counts on real merge units with the
+  declaration matcher and the security records in place; the share of red
+  runs that are `reproduced` under the rule of §4; cold preparation time.
+- **Deliverable 6, on a repository.** That a completed check run can trigger
+  the lane job from the default branch, and that the checks API names the app
+  that produced a check run.
 
 ## Sources (verified 2026-11)
 
