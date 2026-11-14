@@ -727,8 +727,9 @@ export default defineNavigation([
   the three that take the user alone are synchronous and read only the user.
   The other five take a second argument (`{ teamId }`, `{ projectId }`, the
   state of a job) and are called as `[Model, context]`; four of them query,
-  once or twice. Those are the abilities the warning above keeps out of the
-  navigation, so no ability these applications could name there queries.
+  once or twice. In these applications no ability an entry could name
+  queries. That is a count and not a bound: a warning keeps nothing out, and
+  a `before` hook or an ability that takes the user alone may query too.
 - **A route is named, not spelled.** The name is checked against the route
   manifest's type, and by `guren check`: the route exists, is a `GET` with no
   path parameter (`isParameterless()`, the rule the browser map picks a
@@ -774,15 +775,18 @@ export default defineNavigation([
   are generators, so a plan's `commands` may run them; `make:feature` calls
   the first for its index page, with the ability when it also writes the
   policy, and passes `wide` to the index page it writes; `plan:next` names
-  the commands for the pages step of a task that owns a navigation element.
+  the commands for the step that owns a navigation element: a task's pages
+  step, or under screens first the steps named there.
 - **Existing applications.** `guren add navigation` writes the module and
   replaces the layout only when the layout is still byte for byte one the
-  framework shipped, the test `guren add ui` applies to its components.
+  framework shipped, judged by a hash of every version it shipped, as
+  `guren upgrade` judges the UI components. This rule is new: `guren add ui`
+  itself never replaces a file.
   Otherwise it writes the module, prints the lines the layout needs, and
   leaves the layout alone; its edits stay medium.
 
 In a plan, an entry is an element of the `navigation` section, with a change
-kind like any other: `{ id, change, route, label?, auth?, can?: { ability,
+kind like any other: `{ id, change, route, label?, auth?, where?, can?: { ability,
 policy } }`. An entry is identified by its route, so a file holds one entry
 per route, and `route` is the id of a route the plan adds or the name of one
 the application has. `plan:render` checks that the route is a parameterless
@@ -819,27 +823,50 @@ task introduced came from a pages step, among them every accessibility defect
 They are a person's to see, and the cheapest moment is before the backend
 exists.
 
-So a plan may order its screens first, with `screens: 'first'`. The task
-derivation then changes in two places.
+So a plan may order its screens first, with `screens: 'first'`. It covers
+what the plan adds and nothing else: a view, a route or a validator the plan
+alters stays in its task as today. Putting an existing route on a fixture
+would take a working feature out of production, and editing an existing page
+before approval would change a route that is live. On an application that is
+already released, screens first reaches its new screens only.
 
-- **One screens task, ahead of every other.** Its one step writes each view's
-  page, the fixture entry for each route a view names, and those routes
-  registered with the `prototype` handler, with the validators their forms
-  need. `plan:scaffold` writes the fixture entries, the route registrations
-  and the page data types; the page components stay the agent's, as RFC 0030
-  decided. It verifies with `codegen`, the typecheck, `check --prototype`
-  and `build:prototype`, none of which needs a database or an environment,
-  so a cloud session with no services can build it.
-- **The other tasks lose their pages step and gain a promotion.** The `http`
-  step replaces the `prototype` handler with the planned action, and the
-  resource is typed against the data type the page was built on (RFC 0021
-  §6), so the typecheck is what holds the backend to the screens a person
-  walked.
+The task derivation then gives an element two owners where it has one today:
+the step that creates it and the step that completes it.
+
+| Element the plan adds | Created by | Completed by |
+| --- | --- | --- |
+| A view and its page | The screens task | The screens task |
+| A route a view names | The screens task, registered on the `prototype` handler | The `http` step of its task, which replaces the handler with the planned action |
+| A validator a form needs | The screens task | The `http` step, where the action validates with it |
+| A navigation entry with no `can` | The screens task | The screens task |
+| A navigation entry with `can` | The `http` step of the task that adds its policy | The same step |
+
+- **One screens task, ahead of every other.** `plan:scaffold` writes the
+  fixture entries, the route registrations and the page data types; the page
+  components stay the agent's, as RFC 0030 decided. It verifies with
+  `codegen`, the typecheck, `check --prototype` and `build:prototype`. The
+  last two join the closed list of verify commands. None needs a database or
+  an environment, so a cloud session with no services can build it.
+- **The other tasks lose their pages step and gain a promotion.** Their
+  scaffold step reuses the validators and the routes file the screens task
+  wrote, where today it refuses a name that exists. The `http` step replaces
+  the `prototype` handler with the planned action, and the resource is typed
+  against the data type the page was built on (RFC 0021 §6), so the typecheck
+  is what holds the backend to the screens a person walked.
+- **An entry with `can` waits for its policy.** It imports a model and names
+  an ability that no task has written when the screens are built.
+
+This is the largest change this RFC asks of RFC 0030. Today `plan/tasks.ts`
+gives each element one completing step, the scaffold refuses a target that
+exists, and a verification's fingerprint follows that one owner.
 
 **The walk is part of approving the plan.** A plan with screens first is
 proposed as before (`plan:approve --propose`), and under the `proposed`
-standing `plan:next` hands out the screens task and nothing else: the only
-work that can be built before approval is work that cannot run in production.
+standing the screens task and nothing else can be worked: `plan:next`,
+`plan:scaffold` and `plan:verify` accept a proposed plan for that task alone,
+and the Stop hook verifies it. `plan:waive` and `plan:close` refuse as
+before. The only work that can be built before approval is work that cannot
+run in production.
 (**Decided 2026-11-14** by the maintainer, over building the screens after
 approval, which stops the person twice and makes every change after the walk
 a revision to approve again.)
@@ -847,24 +874,45 @@ The pull request then carries the plan, the proposal and the screens. Its
 evidence names the static build as an artifact (`guren-prototype-<sha>`), and
 the Dev Center's "Plan to review" row opens it, built locally from the
 change's head. A comment made on the walk is saved against the view whose
-page was open, in the review the Dev Center already keeps. The agent reads it
-and revises the plan with `plan:revise`; a draft revises freely, so the plan
-changes before anyone has approved it. Merging the pull request approves the
-plan and the screens together. The person stops once, and what they approve
-is something they clicked.
+page was open, in the review the Dev Center already keeps, and the agent
+reads it and revises the plan. Merging the pull request approves the plan and
+the screens together. The person stops once, and what they approve is
+something they clicked.
 
-Three rules keep this from weakening what is already decided, and a fourth
-says what the walk cannot show.
+**A revision made on the walk.** The baseline is stamped at the proposal,
+before any screen exists, which is how approval tells the plan's own work
+from a collision: an added element absent at the stamp and present now reads
+as built (RFC 0030 §4). A revision keeps that baseline, so an element it adds
+has no stamp, and once the screens task had built it, approval would read a
+collision. So under `proposed` the order is the rule: revise, then build.
+`plan:revise` stamps each element the revision adds from the tree as it
+stands and refuses one that is already there; `--propose` runs again and
+writes the proposal at the new hash; and the screens task's record, taken at
+the old digest, is stale and is verified again. Nothing is restamped, and no
+collision is let through.
+
+Four rules keep this from weakening what is already decided, and a fifth says
+what the walk cannot show.
 
 - **A fixture never stands in for a behaviour.** The screens task mounts
   every route ahead of the tests that request it, so a test that asserts only
-  a page would pass on fixture data before any action exists. `plan:verify`
-  runs a plan's tests with the fixtures off: a `prototype` route answers 501
-  there, as a scaffolded action stub does, and the red run of §4 is observed
-  against the route.
-- **A promoted route is a new route.** Its per-route security record has no
-  base, since a fixture authorizes and validates nothing. The record is
-  judged as an added route's (§3), not compared with the fixture's.
+  a page would pass on fixture data before any action exists. One contract
+  covers every run of the tests: under a `TestApp` a `prototype` route
+  answers 501, with its middleware and its contract still applied and its
+  fixture never imported, unless the test asks for fixtures. `plan:verify`,
+  the replay of red runs in §4 and the gate all run the application's tests,
+  which request routes through a `TestApp`, so the three see the same route.
+  Today a route dispatched without its fixture throws, which §4 would read as
+  a load failure and not as a red run. `planMayPassNow` and the test
+  skeletons treat a route on its fixture as one that does not answer yet.
+- **Promotion keeps the route's guards.** A route on its fixture already runs
+  its middleware and validates its contract: the router builds the same chain
+  around the `prototype` handler as around an action. So its security record
+  has a base, and a promotion is compared like any other change (§3): a
+  middleware or a contract schema the promoted route no longer has is
+  `authorization-removed` or `validation-removed`. Only what the action
+  brings, the policies it consults and the validators it calls, has no
+  counterpart, and that part is judged as an added route's.
 - **The release holds while a route is on its fixture.** The application
   refuses to boot in production with a `prototype` route (RFC 0021 §4: a
   fixture's state is shared by every request of the process). Nothing ahead
@@ -878,7 +926,7 @@ says what the walk cannot show.
   What the hold costs depends on the application. Before its first release,
   nothing. After it, every release waits from the plan's merge to its last
   promotion, a fix that has nothing to do with the plan among them.
-- **An application may leave such routes out of production instead.** The
+- **An application may keep such routes dark in production instead.** The
   refusal stays the default, and an application chooses otherwise in its
   entry (**decided 2026-11-14** by the maintainer, as an amendment to
   RFC 0021 §4):
@@ -889,40 +937,50 @@ says what the walk cannot show.
   })
   ```
 
-  Under `skip` a production boot does not mount a route on the `prototype`
-  handler, so it answers 404 like a route that was never registered, never
-  imports the fixture, and logs the routes it left out once. No fixture is
-  served, which is what the refusal was for. `GUREN_PROTOTYPE_ROUTES=1` still
-  serves fixtures on purpose, and the loader given alone keeps today's
-  meaning. Then the default branch can release at any commit, and a release
-  contains what has been promoted so far, which is what merging task by task
-  already gives a plan without screens.
+  Under `skip` a production boot mounts each route on the `prototype` handler
+  in its registered place with a handler that answers 404, never imports the
+  fixture, and logs those routes once. The route is answered and not left
+  out, because a route registered after it could otherwise take its requests:
+  `/posts/:id` would answer `/posts/new`. No fixture is served, which is what
+  the refusal was for. `GUREN_PROTOTYPE_ROUTES=1` still serves fixtures on
+  purpose, and the loader given alone keeps today's meaning. Then the default
+  branch can release at any commit, and a release contains what has been
+  promoted so far, which is what merging task by task already gives a plan
+  without screens.
 
-  What changes around it: `prototype-routes` in `guren doctor` becomes a
-  warning that lists the routes, the deploy workflow deploys and the release
-  record names the routes not served, and the navigation leaves out an entry
-  whose route is not mounted, since the server builds it. A link inside a
-  page is not filtered, so a promoted page can link to a 404 until its
-  target is promoted. A forgotten promotion is quiet where the refusal was
-  loud, and the release record is where it shows. Choosing `skip` is an edit
-  to the application entry outside its lists, so a person reads it (§3).
+  The route stays registered, so the typed route manifest, `Router.route()`
+  and the introspection manifest keep it. The manifest says for each route
+  whether production serves it and what the application chose, and the rest
+  reads that: the navigation leaves out an entry whose route is dark,
+  `prototype-routes` in `guren doctor` is a warning only where the choice is
+  `skip`, and the release record names the routes not served. A link inside a
+  page is not filtered, so a promoted page can link to a 404 until its target
+  is promoted. A forgotten promotion is quiet where the refusal was loud, and
+  the release record is where it shows. Choosing `skip` is an edit to the
+  application entry outside its lists, so a person reads it (§3).
 
 - **The static build has no server to filter the navigation.** There the
-  shared props come from the fixture, so `build:prototype` writes
-  `navigation` into them from `config/navigation.ts`, which is data it can
-  read: `auth` and `where` are decided against the fixture's one user, and an
-  entry with `can` is shown, since no gate runs in a browser. The walk shows
-  the screens one identity reaches. It does not show who else may see a
-  link, or that a route refuses anyone: RFC 0021 left personas to a
-  follow-up, and those are the tests' and the security record's to say.
+  shared props come from the fixture, so `build:prototype` asks the CLI for
+  the navigation and adds it to the build's shared props without touching the
+  fixture's source. The CLI reads `config/navigation.ts` by syntax and never
+  imports it: it is the reader `guren check` uses, since a second one would
+  come to disagree with it, and an import would load models and the framework
+  into a build that has no server. `auth` and `where` are decided against the
+  fixture's one user, and an entry with `can` is shown, since no gate runs in
+  a browser. Under screens first the entries with `can` arrive after the
+  walk, so the walk shows the navigation without them. It shows the screens
+  one identity reaches. It does not show who else may see a link, or that a
+  route refuses anyone: RFC 0021 left personas to a follow-up, and those are
+  the tests' and the security record's to say.
 
 What this buys the lanes, by paths on the same 43 tasks with each task's
 pages step taken out: 13 could be low today, 25 with the application entry
 and 30 with environment keys, where the same tasks with their pages gave 11,
-18 and 23. The screens task is one more unit per plan and always a person's.
-None of this has run through the plan loop: no measured history has a
-screens task, and the one application built prototype-first was built
-outside the loop.
+18 and 23. That is the bound for a plan whose screens are all new; an altered
+screen keeps its task as it was. The screens task is one more unit per plan
+and always a person's. None of this has run through the plan loop: no
+measured history has a screens task, and the one application built
+prototype-first was built outside the loop.
 
 **Approval on the pull request.** At a terminal nothing changes: a person runs
 `plan:approve`, there or from the Dev Center (§12). For a plan that arrives as
@@ -933,9 +991,9 @@ a pull request, merging it is the approval, by this protocol:
    and the elements accepted without a behaviour, which the approval will
    bind. It never writes `approvals.json`, so a CLI that predates the
    proposal reads the plan as unapproved and not as approved. The standing is
-   `proposed`, which every gated command refuses as it refuses `unapproved`:
-   nothing is implemented on that branch but a screens task (above), and the
-   plan lands first.
+   `proposed`, which every gated command refuses as it refuses `unapproved`,
+   but for a screens task (above): nothing else is implemented on that
+   branch, and the plan lands first.
 2. A person approves the pull request, from the Dev Center, bound to its head
    SHA. The change is `plan-record`, so it is high.
 3. After the merge, `plan:approve --from-merge` asks the store, not git: the
