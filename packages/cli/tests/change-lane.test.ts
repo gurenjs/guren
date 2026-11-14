@@ -347,6 +347,16 @@ describe('judgeChangeLane', () => {
     expect(report.facts).toEqual([expect.objectContaining({ code: 'ambient', lane: 'low', target: 'generated files' })])
   })
 
+  test('should tell a generated behaviour spec from the setup an author keeps', async () => {
+    const { repo, base } = await createRepo({ 'tests/browser/behaviours/generated/comments.e2e.ts': '// generated\n', 'tests/browser/behaviours/auth.setup.e2e.ts': '// setup\n' })
+    const report = await laneOf(repo, base, await commit(repo, { 'tests/browser/behaviours/generated/comments.e2e.ts': null, 'tests/browser/behaviours/auth.setup.e2e.ts': null }))
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane, fact.files])).toEqual([
+      ['test-removed', 'high', ['tests/browser/behaviours/auth.setup.e2e.ts']],
+      ['ambient', 'low', ['tests/browser/behaviours/generated/comments.e2e.ts']],
+    ])
+  })
+
   test('should call a dropped ability or a deleted policy a removed policy', async () => {
     const dropped = await laneAfter({ 'app/Policies/PostPolicy.ts': POLICY(['view']) })
     const deleted = await laneAfter({ 'app/Policies/PostPolicy.ts': null })

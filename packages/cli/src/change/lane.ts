@@ -78,7 +78,7 @@ const GATE_PREFIXES = ['scripts/', 'bin/', '.github/', '.claude/hooks/', '.codex
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies', 'overrides', 'resolutions', 'trustedDependencies', 'patchedDependencies']
 const LOCKFILES = new Set(['bun.lock', 'bun.lockb'])
 const AMBIENT: ReadonlyArray<{ target: string; test: (path: string) => boolean }> = [
-  { target: 'generated files', test: (path) => path.startsWith('.guren/') || path === '.env.example' || path.startsWith('tests/browser/generated/') || path.startsWith('docs/spec/') || path.startsWith('.e2e/cache/') },
+  { target: 'generated files', test: (path) => path.startsWith('.guren/') || path === '.env.example' || path.startsWith('tests/browser/generated/') || path.startsWith('tests/browser/behaviours/generated/') || path.startsWith('docs/spec/') || path.startsWith('.e2e/cache/') },
   { target: 'documentation', test: (path) => path.startsWith('docs/') },
   { target: 'translation catalogs', test: (path) => path.startsWith('lang/') },
 ]
@@ -87,9 +87,9 @@ const AUDIT_CONFIG_FILES = new Set(['config/audit.ts', 'config/audit.js', 'confi
 const ACCEPTANCE_NEEDLE = '[AC-'
 
 const MODULE = String.raw`(?:modules/[^/]+/)?`
-// What a run collects, wider than discovery's `.test.` rule: bun also takes `_test`, `.spec` and `_spec`.
+// What a run collects, wider than discovery's `.test.` rule: bun also takes `_test`, `.spec` and `_spec`, Playwright and e2e the two below.
 const TEST_FILE = /[._](?:test|spec)\.[cm]?[jt]sx?$/
-const BROWSER_SPEC = new RegExp(`^${MODULE}tests/.+\\.browser\\.[cm]?[jt]s$`)
+const BROWSER_SPEC = new RegExp(`^${MODULE}tests/.+\\.(?:browser|e2e)\\.[cm]?[jt]s$`)
 const TESTS_DIR = new RegExp(`^${MODULE}tests/`)
 const SOURCE_FILE = /\.[cm]?[jt]sx?$/
 const SCHEMA_FILE = new RegExp(`^${MODULE}db/schema\\.ts$`)
