@@ -255,7 +255,7 @@ fetches the record of its merge base and passes it as `--base-record`.
 - **Where the merge base is.** For a pull request cut from the default branch
   it is a default-branch commit, whose push run stored a record. For a stacked
   pull request it is its parent's head, whose own run stored one. When the
-  parent is squash-merged that commit is gone, the child is rebased, and its
+  parent is squash-merged that commit is gone, GitHub rebases the child (§5), and its
   merge base is a default-branch commit again. A force push makes a new head
   and a new run. A base branch that moved changes nothing until the pull
   request is updated against it, which starts a new run.
@@ -537,6 +537,30 @@ code (21). These are upper bounds: declarations, security records, evidence
 and review can only lower them. So on a new application most tasks are read by
 one person, and what the line gives that person first is the evidence and a
 reading list, not an empty queue.
+
+**A plan's tasks are a stack.** GitHub's stacked pull requests (public preview
+on Free and Enterprise Cloud, and enabled on this repository) are this unit:
+one pull request per task, each based on the one below. From GitHub's
+documentation:
+
+| GitHub documents | So |
+| --- | --- |
+| Every pull request in a stack is judged against the rules of the stack's base: required reviews, required checks, code owners | The lane status and the native floor apply to every task, not only the bottom one |
+| A workflow on `pull_request` for the default branch runs for every pull request in the stack, with no change to the workflow | The evidence runs per task |
+| They merge from the bottom up, and one merges only when everything below it also meets the rules | A low task above a held one waits for it, which is the order the tasks depend in |
+| Merging the bottom rebases the rest automatically, and a rebase that leaves a diff unchanged keeps its approvals | The cascading rebase is GitHub's work, not the agent's |
+| A merge queue takes the stack in order | Nothing to add |
+| A stack is merged through the asynchronous merge API, as one operation | The merge is one request for the highest task that is ready, not one per pull request |
+
+The harness's `gh-stack` skill opens and extends the stack. A stacked pull
+request's own base is the head of the one below it, which is what
+`github.event.pull_request.base` names, so the change the evidence reads is
+that task's layer; `github.event.pull_request.stack` gives the stack's base
+and the task's position. Two limits: every branch of a stack is in one
+repository, so a fork cannot use it, and whether GitHub's auto-merge applies
+to a stacked pull request is not in the pages read. If it does not, the lane
+job (deliverable 6) requests the merge once a task and everything below it
+are satisfied.
 
 **Approval on the pull request.** At a terminal nothing changes: a person runs
 `plan:approve`, there or from the Dev Center (§12). For a plan that arrives as
@@ -896,6 +920,30 @@ judge. The full diff is one link away.
 
 **The line page.** `factory:status` (below) and the numbers of §11.
 
+**Starting it.** Today the Dev Center exists only while the application's dev
+server runs, which needs its database and environment. It becomes something
+that is simply there:
+
+- `guren dev-center` serves `/_guren` by itself, on a loopback port the system
+  picks, under the guards it has today, and writes its address to
+  `.guren/dev-center.json`. The handler already takes a directory and never
+  imports the application: it reads plan files, `.guren/` and `gh`, and builds
+  the graph through the introspection child. So it needs no database and no
+  boot. What does need the running application (runtime errors, the UI
+  catalog's preview) is shown as unavailable until `guren dev` runs, which
+  keeps mounting the Dev Center as it does now.
+- The harness starts it. The session-start hook runs `guren dev-center
+  --ensure`, which starts one for the checkout when none is running and
+  prints the address, so whenever a session is open on the person's machine
+  the inbox is one link away, and the agent's hand-off line can point at it.
+- It starts read-only. The decisions listener still needs `GUREN_DECISIONS=1`
+  from the owner, and no hook sets it.
+
+This covers a person at their machine, including one whose agents run in the
+cloud: their own Dev Center shows that work through `gh`. It does not cover a
+person away from the machine, who has the pull request's `evidence.md` (Open
+Question 15).
+
 **Where it reads from.** Locally, what it reads today (plan files, `.guren/`)
 plus the output of a local `change:evidence`. Remotely, the open pull
 requests, their change records, reviews and issues, through `gh` under the
@@ -962,8 +1010,9 @@ place. Decisions are confirmed on a listener of their own:
   nothing from the request reaches a shell. The action is refused unless the
   existing dry run says it would go through, and every action is appended to
   `.guren/decisions.log`.
-- Merging is not an action. The repository's own auto-merge does it once the
-  approvals are there.
+- Merging is not an action. The platform does it once the approvals are
+  there: the repository's auto-merge, or for a stack the merge of the highest
+  task that is ready (§5).
 
 A prototype of the listener was attacked from an application page in a
 browser, from `localhost` and from `127.0.0.1` on the application's port:
@@ -1030,7 +1079,7 @@ needs first.
 | Deliverable | Ships | Needs first | Produces |
 | --- | --- | --- | --- |
 | 1. Report | `resolveChange()`; `change:lane` with the facts read from the head and the diff (paths, migrations, schema, audit, acceptance, dependencies), every other fact `unjudged`; `change:evidence` wrapping the gate, with plan and browser evidence reported as unavailable; the versioned record, uploaded even on failure; the pull request summary; the `lane:` label; `guren add review` | Nothing | A floor and its reasons on every pull request, and the floor-against-label data of the shadow comparison |
-| 2. The Dev Center, read side | The inbox, the change page with its reading list, the line page and `factory:status`, reading local files and `gh` | 1 | One page that lists what waits on a person, cloud work included |
+| 2. The Dev Center, read side | `guren dev-center` and the session-start hook that starts it; the inbox, the change page with its reading list, the line page and `factory:status`, reading local files and `gh` | 1 | One page that lists what waits on a person, cloud work included |
 | 3. Decisions and plan approval | The listener and the action set of §12; `plan:approve --propose` and `--from-merge`; the amendment to RFC 0030 §8 | 2 | A person who decides without a terminal, and a plan approved by merging it |
 | 4. Lessons | The `lesson` type, `make:lesson`, delivery through `context` and the harness, the `fix` skill, the canonical review contract, the tests step handed to `test-writer` | Nothing | The loop from a finding to a rule or a check |
 | 5. Structural evidence and delegation | Per-route security records and base records; a fresh-clone `plan:verify` with red runs from the change's commits; the browser aggregate and behaviour specs; the declaration matcher; the forecast | 1, and for approval standing 3 | Evidence complete enough for a low lane, measured on real histories: the share `unjudged`, the share `unobserved`, declarations matched |
