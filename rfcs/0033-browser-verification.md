@@ -5,7 +5,8 @@
 **Status:** Accepted (2026-10-15; the deciding maintainer asked for implementation to start
 and shortened the standard discussion period.) The amendment in §12 (accessibility checks and
 visual change between runs) was accepted on 2026-10-31. The amendment in §13 (behaviour specs
-through an agent runner) was proposed on 2026-11-14 and is not accepted.
+through an agent runner) was proposed and accepted on 2026-11-14; the deciding maintainer
+shortened the discussion period after the measurements in §13.1.
 
 ## Problem
 
@@ -554,6 +555,7 @@ plan should at least point at the latest run for an id is Open Question 8.
 | M3 | `add browser-tests`, specs from plan views | A scaffolded app with one approved plan gets a spec whose locators resolve on the live page |
 | M4 | Gate decision | Measured flake rate and CI cost on the golden-path smoke decide whether an acceptance may require a browser run |
 | M5 | Accessibility spec and visual change between runs (§12) | The measurement app has no axe violation under the §12.2 tags before the spec ships; `--close` reports `unchanged`, `changed` and `new` in fixtures and never moves a result |
+| M6 | Behaviour specs through an agent runner (§13) | §13.9 holds on the measurement app before the blueprint option ships |
 
 **Amended in implementation:** the skill moved from M1 to M2. Its launch, doctor
 and evidence steps name `browser:serve`, `browser:doctor` and `browser:record`;
@@ -646,7 +648,9 @@ under three minutes, so a night makes forty.
 
 ### 11. Non-goals
 
-No model calls from Guren, no agentic test runner, ~~no visual regression~~ no
+No model calls from Guren, ~~no agentic test runner~~ no agentic test runner in
+the default install, in any `@guren/*` package or in any gate (**amended in
+§13:** an app may opt into one for behaviour specs), ~~no visual regression~~ no
 visual regression baseline or gate (**amended in §12:** no committed reference
 image, no pixel threshold, and no result a screenshot can pass), no
 mobile engine, no production use, no new dependency in any `@guren/*` runtime
@@ -917,10 +921,13 @@ a failing test is the advisory form.
 **Check accessibility in `browser:doctor`.** The doctor opens no browser (§4),
 and axe needs a rendered DOM.
 
-### 13. Proposed amendment (2026-11-14): behaviour specs through an agent runner
+### 13. Amendment after acceptance (2026-11-14): behaviour specs through an agent runner
 
-**Proposed, not accepted.** Nothing in §§1 to 12 changes until it is; §13.8
-lists what would.
+**Accepted 2026-11-14,** on the day it was proposed: the deciding maintainer
+shortened the discussion period once §13.1's measurements were in. §13.8 lists
+what changes in §§5 to 11. Nothing of it is implemented yet. M6 (§9) builds it,
+and the blueprint option ships only once §13.9 holds, including the three items
+there that no measurement has covered so far.
 
 The generated specs open a page and check that a view's labels and actions are
 visible (§6). None performs a behaviour: fills the form, submits it and looks at
@@ -1108,7 +1115,8 @@ do (Open Question 3).
 `guren add browser-tests --behaviours --agent <claude-code|codex>`, on an app
 that already has the blueprint or in the same run. `--behaviours` without
 `--agent` refuses and names both: whose login runs the steps is the person's
-choice, and there is no default. It writes, once:
+choice, and there is no default. `--agent codex` refuses until §13.9's Codex
+item is measured. It writes, once:
 
 - `e2e.browser.config.ts`: the target on `http://127.0.0.1:4319`, started by
   `app.command` as `guren browser:serve --port 4319` with `reuseExisting: false`,
@@ -1367,6 +1375,19 @@ still Open Question 5.
   which by the rule of three puts the rate under 4.6% at 95% confidence. The
   cause of the one earlier failure is not named, so the guide states the rate.
 
+Three items were added at acceptance. Nothing in §13.1 covers them:
+
+- **Codex.** Every agent step in §13.1 ran on Claude Code. Before
+  `--agent codex` is offered, a test records in one live run and replays with
+  no model call under it, and `POLICY_DENIED` is counted over at least fifty
+  live steps. Until then `--agent codex` refuses and says it is not measured.
+- **A CI runner.** Every run in §13.1 was on macOS. On the Linux runner CI
+  uses, `test:behaviours:ci` replays recordings made on macOS with no model
+  call and no login.
+- **The agent's environment after it starts.** §13.1 read the environment each
+  process is started with. Either what the agent's process loads afterwards is
+  checked too, or the guide says that it was not.
+
 #### 13.10 Alternatives considered
 
 **Write the Playwright steps from the plan.** Where the view's form labels
@@ -1375,7 +1396,7 @@ action need no agent and no second runner. It breaks on what the plan does not
 say: a `select`'s option, a checkbox, a date or file control, a `confirm()`, a
 form that appears after a click. Each needs a rule in the generator and a
 `fixme` where the rule runs out, and every markup change is a failing test
-someone edits by hand. It remains the fallback if this amendment is rejected,
+someone edits by hand. It remains the fallback if §13.9 does not hold in M6,
 and is the stronger choice for an app whose forms are all plain text.
 
 **Make the runner the engine of every spec.** The smoke, view and
@@ -1401,6 +1422,10 @@ change often, and the skill may name it as a live-drive option. As the default
 it would require a model key for agent steps in CI, and the 0.20 package declares
 Node engines only. The map, serve and doctor here are engine-neutral, so
 adopting it later costs a spec template, not a redesign.
+**Amended in §13 (2026-11-14):** adopted as an option an app chooses for
+behaviour specs, never as the engine of the generated smoke, view and
+accessibility specs. Both reasons above were measured again: a committed
+recording replays in CI with no key, and 0.23.1 runs under Bun 1.4.4.
 
 **Vendor `create-verification-skill` unchanged.** Every app would get a
 generated skill written from an agent's reading of the source, which drifts from
@@ -1489,7 +1514,8 @@ changes behaviour.
 13. (§13) How is replay measured nightly with no model key? The measurement
     app is scaffolded fresh each night and has no recordings. Committing its
     recordings as a fixture makes every scaffold change read as a stale
-    recording; giving the nightly a key makes it a paid run.
+    recording; giving the nightly a key makes it a paid run. To be decided
+    before M6 is done.
 14. (§13) Should the generator write plain Playwright steps where the view's
     form labels every input (§13.10) and an agent step only where that rule
     runs out? One suite would then hold two kinds of step, and the app would
