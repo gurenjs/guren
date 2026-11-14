@@ -2,6 +2,10 @@
 
 MCP App を使うと、ツールの結果をエージェントのホストの中でページとして表示できます。Guren では、そのページにルートがすでに描画している Inertia のページをそのまま使います。ルートの `.agent()` の宣言に `ui` を足して view をビルドすれば、Claude の Web 版のような MCP Apps 対応のホストは、投稿をテキストで返す代わりに `posts/Show` を表示します。view の中のリンクやフォームもそのまま動き、Inertia の遷移はそれぞれ対応するツールの呼び出しになります。
 
+次の画像は、デモアプリの厨房ボード（普通の Inertia のページ）を Claude の会話の中に表示したところです。ボタンもページのものがそのまま出ていて、押すとブラウザで押したときと同じルートが実行されます。
+
+![Claude の Web 版の会話です。「Show me the kitchen board.」というメッセージの下に、Guren Diner というコネクタの kitchen_board ツールが、アプリの Kitchen ページを表示しています。4 件の注文それぞれに、状態と次の手順のボタンが並んでいます](../../images/mcp-apps-claude.png)
+
 前提として、ルートが [Agent Interface](./agent-interface.md) のエージェントツールになっていて、`mcpPlugin()` で公開されている必要があります。
 
 ## view を宣言する
