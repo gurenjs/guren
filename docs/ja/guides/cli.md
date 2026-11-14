@@ -132,6 +132,54 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 
 `bun test` は `*.spec.ts` も集めてしまうため、spec のファイル名は `.browser.ts` で終わります。ブラウザテストは `guren gate` では実行されません。
 
+### 振る舞いの spec
+
+`add browser-tests --behaviours --agent claude-code` は、承認済みの計画の振る舞いをブラウザで実行するテストを導入します。テストは振る舞いの開始ページを開き、計画から組み立てた指示(`set "Title" to {title}, then use "Create"`)を 1 つコーディングエージェントに渡して操作させます。そのあと、結果を通常のロケーターで確かめます。確かめる対象は、リダイレクト先、遷移先のページのラベルとアクション、計画がエラーを見込むフィールドの `aria-invalid` です。テストは [e2e](https://github.com/e2e-inc/e2e) ランナーで動き、エージェントの操作はステップごとに記録されます。記録のあるステップはモデルを呼ばずに再生されます。Claude Code のログインは、ステップを初めて実行するときと、ページが変わって記録が合わなくなったときにだけ使われます。
+
+`--agent` は必須で、どのエージェントのログインでステップを実行するかを指定します。いまは `claude-code` だけを指定でき、`codex` は計測が済むまで受け付けません。コマンドは次のファイルを一度だけ書き出します。
+
+- `e2e.browser.config.ts`: アプリを `bunx guren browser:serve` 経由で `127.0.0.1:4319` に起動する設定です。すでに動いているサーバーには接続しません
+- `tests/browser/behaviours/given.ts`: 利用者が編集するファイルです(後述)
+- `tests/browser/behaviours/auth.setup.e2e.ts`: パスワードでサインインするアプリでだけ書き出します。Playwright のセットアップと同じシード済みのアカウントでサインインし、テストが使うセッションを保存します
+
+あわせて `test:behaviours` と `test:behaviours:ci` のスクリプトを追加し、`e2e`、`@e2e-dev/web`、`@e2e-dev/acp` を固定のバージョンで、Claude Code 用のアダプターと一緒にインストールします。`--no-install` を付けると、`bun add` のコマンドを表示するだけになります。`.gitignore` には `.e2e/*` と `!.e2e/cache/` が追加されます。以後は `bunx guren browser:map` が、振る舞いごとに 1 つのテストを `tests/browser/behaviours/generated/<plan>.e2e.ts` に保ちます。
+
+種類が `success` か `validation` で、ルートが `GET` 以外の振る舞いがテストになります。ただし、計画のビューがそのルートへフォームを送信するか、そのルートのアクションを持っている場合に限ります。それ以外の振る舞いはスキップされるテストになり、タイトルに理由が入ります。たとえば、`TestApp` でしか確かめられない種類(未サインイン、権限のないユーザー、存在しないレコード)、実行後にブラウザで確かめられるものが残らない振る舞い、フォームのコントロールがリクエストの前に止めてしまう入力値です。開始ページがパスパラメーターを取る振る舞い(`/posts/:id/edit`)には、`given.ts` のエントリーが必要です。エントリーではレコードを作り、パラメーターの値を返します。エントリーがないテストは実行時にスキップされ、足りないエントリーが理由に示されます。
+
+```ts
+export const given: Record<string, (fixtures: GivenFixtures) => Promise<Record<string, string> | void>> = {
+  'AC-posts-update-1': async ({ browser }) => {
+    await browser.goto('/posts/create', { waitUntil: 'networkidle' })
+    await browser.locator('input[name="title"]').fill('Given post')
+    await browser.locator('button[type="submit"]').tap()
+    await browser.waitForURL(/\/posts\/\d+$/u)
+    return { id: new URL(await browser.url()).pathname.split('/').at(-1)! }
+  },
+}
+```
+
+実行には 2 つのスクリプトを使います。
+
+```bash
+bun run test:behaviours       # 記録のあるステップは再生し、残りはモデルで実行して記録する
+bun run test:behaviours:ci    # 再生だけを行う(--strict-cache)
+```
+
+計画を承認したあとやページを変えたあとに `bun run test:behaviours` を実行し、`.e2e/cache/` をコミットしてください。記録はテストデータなので、その差分はページを変えたコミットに含めます。小さなアプリで計測したところ、モデルでの実行は `sonnet` で 1 ステップあたり約 10 秒、4 万 1 千トークン(うち 88% はキャッシュの読み出し)で、記録済みのテスト 4 件の再生は 7 秒でした。初回の実行では、ランナーが固定している Chromium が、Playwright のものとは別にダウンロードされます。
+
+CI では `bun run test:behaviours:ci` を実行します。ログインも API キーも要りません。macOS で作った記録は Linux でも再生されます(Debian のコンテナで計測)。最小構成の Linux イメージでは、先に `bunx playwright-core install-deps chromium` で Chromium のシステムライブラリを入れてください。入っていないとブラウザが起動せず、終了コード 3 で終わります。何が起きたかは終了コードで分かります。
+
+| 終了コード | 意味 | 対応 |
+|------------|------|------|
+| 0 | すべてのステップを再生した | 不要 |
+| 1 | テストが失敗した | ステップのあとの確認が通っていません。ページの動きが計画と違っています |
+| 2 | `REPLAY_STALE`(記録がいまのページに合わない) | 手元で `bun run test:behaviours` を実行します。通ったら新しい記録をコミットします。失敗するなら、ページの動きが計画と違っています。失敗した実行は合わなくなった記録を削除するので、ページか計画を直すまで `.e2e/cache/` はコミットしないでください |
+| 3 | ステップを実行できなかった | 記録のないステップがモデルを呼ぼうとして、ログインがないために失敗しています(`MODEL_PROVIDER_FAILED`)。手元で `bun run test:behaviours` を実行し、記録をコミットしてください。計画が変わって `browser:map` が作り直したテストはタイトルが変わるので、まだ記録がありません。アプリを起動できなかったときも同じコードになります |
+
+エージェントにはステップ用のツールだけが渡され、シェルもファイルも MCP サーバーも使えません。生成される形のステップをモデルで 65 回実行した計測では、エージェントが自前のツールを使おうとして拒否される `POLICY_DENIED` は 1 度も起きませんでした(95% の信頼度で発生率は 4.6% 未満)。env ファイルに書かれた変数は、`BROWSER_TEST_PASSWORD` も含めて、設定ファイルがすべて空文字にしてエージェントへ渡します。そうしないと、Bun が env ファイルをエージェントのプロセスにも読み込むためです。パスワードはランナーが入力するので、エージェントには渡りません。シェルだけで `export` している変数はエージェントに届くので、テストを実行するシェルでは秘密の値を `export` しないでください。起動したあとのエージェントのプロセスが何を読むかまでは確かめていません。
+
+`BROWSER_TEST_PASSWORD` が未設定のときは、サインインのセットアップが変数名を示して失敗し、サインインが必要なテストはスキップされます。`--force` は設定ファイルとセットアップを書き直しますが、`given.ts` は書き換えません。インストール済みの `@playwright/test` がランナーの固定する `playwright-core` より古いと、`tests/browser/generated/a11y.browser.ts` が型チェックに通らなくなることがあります。その場合はコマンドが警告し、バージョンを上げる `bun add` のコマンドを表示します。これらのテストも `guren gate` では実行されません。
+
 ### API 専用アプリの場合
 
 `api` ブループリントで作ったアプリには、`@guren/inertia-client` への依存も、web ルートのエントリ（`routes/web.ts` / `routes/web.js`）もありません。Inertia のページを書き出すコマンドは、この 2 つの手がかりを見て次のように動きます。
