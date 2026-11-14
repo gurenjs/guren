@@ -840,6 +840,9 @@ derivation then changes in two places.
 proposed as before (`plan:approve --propose`), and under the `proposed`
 standing `plan:next` hands out the screens task and nothing else: the only
 work that can be built before approval is work that cannot run in production.
+(**Decided 2026-11-14** by the maintainer, over building the screens after
+approval, which stops the person twice and makes every change after the walk
+a revision to approve again.)
 The pull request then carries the plan, the proposal and the screens. Its
 evidence names the static build as an artifact (`guren-prototype-<sha>`), and
 the Dev Center's "Plan to review" row opens it, built locally from the
