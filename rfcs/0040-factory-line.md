@@ -319,12 +319,11 @@ records, which need a base record and ship in deliverable 5; until then it is
 medium. A line in either that changes nothing it declares is `source-edited`
 as anywhere else.
 
-The application entry stays medium. What it registers is not all in the
-manifest: providers and their outcomes are, while middleware added with
-`app.use()` goes straight to Hono and the options of `createApp()` are
-reported only in part, and a plan has no section that declares a provider.
-Judging the entry by what it registers needs a registration manifest and a
-matching plan section first, and this RFC specifies neither.
+The application entry is medium until a plan can declare what it registers
+(§5). Two of its lists, `providers` and `config` in the `createApp()`
+literal, can be read from the file. Middleware added with `app.use()` goes
+straight to Hono and the other options are not lists, so an edit that touches
+those stays medium.
 
 **Accounting for an edit inside a file is not scheduled.** The idea: give each
 target a span in its file (a controller action, a policy ability, a validator
@@ -577,6 +576,70 @@ repository, so a fork cannot use it, and whether GitHub's auto-merge applies
 to a stacked pull request is not in the pages read. If it does not, the lane
 job (deliverable 6) requests the merge once a task and everything below it
 are satisfied.
+
+**What a plan cannot declare yet.** The low lane is small because a plan has
+no way to state the commonest edits to existing files. Every existing source
+file the 48 measured tasks edited, by what the plan said about it (78 files,
+counted once per application):
+
+| What the plan said about the file | Files |
+| --- | --- |
+| It is the schema or the routes entry, read structurally already | 22 |
+| A changed element owns it: an `alter` on a controller, a model, a validator or a page | 14 |
+| The application entry: `providers` and `config` in `createApp()` | 11 |
+| The layout: navigation links | 10 |
+| `config/env.ts`: environment keys | 5 |
+| A page, a validator or a controller with no element in the plan | 9 |
+| An element the plan called `existing` | 3 |
+| Middleware, or a routes file beside the entry | 4 |
+
+Three of these rows are a list with an entry added: a provider or a config
+module in `createApp()`, a key in `defineEnv()`, a link in the navigation. A
+plan that could declare them, and a reader that could tell an added entry from
+any other edit, would make them declarable facts, as the schema is. On the
+same 48 tasks, by paths alone:
+
+| Judged structurally | Tasks that could be low |
+| --- | --- |
+| The schema and the routes entry (today) | 13 |
+| and the application entry | 21 |
+| and environment keys | 26 |
+| and navigation | 32 |
+| and edits a changed element owns, if they could be accounted for (§3) | 39 |
+
+So three sections move the upper bound from about a quarter of the tasks to
+two thirds. Proposed, as an amendment to RFC 0030's plan format:
+
+```typescript
+env: [{ id: 'env.queueConnection', change: { kind: 'add' }, key: 'QUEUE_CONNECTION', type: 'string', default: 'sync', required: false }]
+providers: [{ id: 'provider.jobs', change: { kind: 'add' }, className: 'JobsProvider', purpose: 'Registers the queue jobs' }]
+config: [{ id: 'config.queue', change: { kind: 'add' }, name: 'queue' }]
+views: [{ /* … */ nav: { label: 'Jobs', auth: 'any' } }]
+```
+
+| Section | Read from | Fact | Needs first |
+| --- | --- | --- | --- |
+| `env` | The keys of the object given to `defineEnv()` in `config/env.ts`, in both versions of the file | `env-added`, low when declared. A key removed or changed is medium | Nothing. `env:example` already derives `.env.example` |
+| `providers`, `config` | The `providers` and `config` arrays of the `createApp()` literal, which `composeAppProviderRegistration()` already locates. A policy's provider is implied by its `policies` element, as `plan:scaffold` writes it | `provider-added` and `config-added`, low when declared or implied | Nothing for these two arrays. `app.use()` and the other options are not lists and stay medium |
+| `views[].nav` | The entries of a navigation module the layout renders from | `nav-added`, low when declared | The module. The scaffold's layout writes its links by hand with role checks inline, so it first needs `resources/js/navigation.ts` (a label, a route name and who sees it per entry), a template change that belongs with RFC 0036 |
+
+One rule keeps all of them honest, the one the schema follows: an edit is the
+structural fact only when the file differs from its base by exactly those
+entries and the imports they need. Anything else in the same file is
+`source-edited`.
+
+Each section costs what any plan element costs: a check in `plan:render`, a
+state in `plan:status`, a line in the producer prompt, and an entry for
+`plan:scaffold` to write. The plan format's version moves, since an older CLI
+refuses a section it does not know. `env` and the two `createApp()` arrays
+need nothing else and go into deliverable 5; navigation waits for its module.
+
+Two rows are not the format's to fix. The nine files with no element are
+plans that were incomplete: `plan:verify` already records the files a step
+touched, and would name any that no element of the plan owns, so the agent
+revises the plan while its session is open and a person does not meet the
+edit first in a pull request. And an edit a changed element owns stays medium
+(§3).
 
 **Approval on the pull request.** At a terminal nothing changes: a person runs
 `plan:approve`, there or from the Dev Center (§12). For a plan that arrives as
@@ -1145,7 +1208,7 @@ needs first.
 | 2. The Dev Center, read side | `guren dev-center` and the session-start hook that starts it; the inbox, the change page with its reading list, the line page and `factory:status`, reading local files and `gh` | 1 | One page that lists what waits on a person, cloud work included |
 | 3. Decisions and plan approval | The listener and the action set of §12; `plan:approve --propose` and `--from-merge`; the amendment to RFC 0030 §8 | 2 | A person who decides without a terminal, and a plan approved by merging it |
 | 4. Lessons | The `lesson` type, `make:lesson`, delivery through `context` and the harness, the `fix` skill, the canonical review contract, the tests step handed to `test-writer` | Nothing | The loop from a finding to a rule or a check |
-| 5. Structural evidence and delegation | Per-route security records and base records; a fresh-clone `plan:verify` with red runs from the change's commits; the browser aggregate and behaviour specs; the declaration matcher; the forecast | 1, and for approval standing 3 | Evidence complete enough for a low lane, measured on real histories: the share `unjudged`, the share `unobserved`, declarations matched |
+| 5. Structural evidence and delegation | Per-route security records and base records; a fresh-clone `plan:verify` with red runs from the change's commits; the browser aggregate and behaviour specs; the declaration matcher; the forecast; the plan sections `env`, `providers` and `config` (§5) | 1, and for approval standing 3 | Evidence complete enough for a low lane, measured on real histories: the share `unjudged`, the share `unobserved`, declarations matched |
 | 6. Enforcement | The lane job and the GitHub settings of §8 | 5, and the shadow bar met | Low changes merging without a person |
 | 7. Release and sweeps | The release record, `browser:doctor --landmarks-only`, the sweep template, the monthly numbers | 1 | The line closed from production back to intake |
 
@@ -1157,8 +1220,8 @@ merges.
 Follow-up RFCs, named so they are not mistaken for done: cloud environments
 other than Claude's (an amendment to RFC 0008), feature flags, a
 production error reporter that files issues, the headless plan producer
-(RFC 0030 D1), reviewer eval cases, and a registration manifest with a plan
-section for providers (§3).
+(RFC 0030 D1), reviewer eval cases, a navigation module with a plan field
+for it (§5), and `app.use()` in the introspection manifest.
 
 ## Alternatives Considered
 
@@ -1334,6 +1397,7 @@ which for a later task is not that task's own merge base.
 | Tasks editing nothing existing | 6 of 48 | An upper bound, by paths alone, on what could be low as first specified |
 | Tasks editing only the schema and the routes entry beyond that | 7 more (13 of 48) | The same bound once both are judged by what they declare (§3) |
 | Tasks editing the application entry, existing client code, existing server code | 8, 6 and 21 | Where one person reads. The layout's navigation is edited in every application |
+| Tasks that could be low once the application entry, environment keys and navigation are judged structurally | 21, 26 and 32 of 48, cumulatively; 39 with edits a changed element owns | The upper bound the plan sections of §5 would buy. Paths alone, as above |
 | Step commits editing nothing existing; only the schema and routes entry | 95 and 43 of 195 | The per-step figures. A step is not a mergeable unit, since a tests step fails the gate |
 
 **Run.**
