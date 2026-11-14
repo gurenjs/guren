@@ -1163,6 +1163,11 @@ file per approved plan, only when the manifest declares `e2e` and
 `@e2e-dev/web` and `e2e.browser.config.ts` exists. Otherwise it writes none,
 removes what it wrote before, and prints why, as for the accessibility spec.
 The rules for a file it does not own (§6) apply unchanged.
+**Amended in implementation:** `tests/browser/behaviours/given.ts` has to exist
+too, since every generated spec imports it, as the accessibility spec waits for
+its options file (§12.2). The Playwright config is not a condition: the two
+suites are kept apart. An app that shows no sign of having asked (the config,
+`given.ts`, `@e2e-dev/web`, or a generated spec left on disk) is told nothing.
 
 **Which behaviours.** Those of kind `success` or `validation` whose route is
 not a `GET` and which a view of the plan sends: the view whose `form.submitsTo`
@@ -1178,21 +1183,38 @@ skipped test naming why, never left out and never passed:
 | a signed-in route with no password sign-in | as §6 |
 | no outcome a browser can check | every expectation is a status or a database row, an `errors` key has no labelled field, or the view `expect.inertia` names has no label and no action |
 | an input that is not a string, a number or a boolean | nothing says how a control takes it |
-| a `validation` behaviour whose input leaves empty a key that the route's form contract (RFC 0036 §2.1) renders with `required` | the browser stops the submit, so no request is sent and no error is rendered (§13.1); `TestApp` pins it |
+| a `validation` behaviour whose input ~~leaves empty a key that the route's form contract (RFC 0036 §2.1) renders with `required`~~ the form's own control may stop or change (**amended in implementation**, below) | the browser stops the submit, so no request is sent and no error is rendered (§13.1); `TestApp` pins it |
+| a `QUERY` route | no form or link sends it |
 
-**One test per behaviour.** For `AC-comments-store-1`, sent by the form of a
-view on `GET /posts/:post`:
+**Amended in implementation: which validation inputs are skipped.** An empty
+value on a `required` control is one case of a wider one. A control built from
+the route's contract also carries `min`, `max`, `step`, a length and an input
+type, and any of them stops a submit as `required` does. The generator reads
+the plan, not the app's contract, so it judges from the plan's validator and
+towards skipping: a labelled field left empty, a required one left out, a
+number outside a `min` or `max` rule or not an integer where the type is one, a
+string outside its length rules, one an `email` control would refuse (by the
+HTML standard's rule) or that is no URL under a `url` rule, a date that is no
+calendar date. A rule the plan words in prose is taken to be the
+server's. The rule can skip a behaviour a browser could have run (an edit form
+keeps the value of a key the input leaves out); it is meant never to write one
+whose submit cannot happen.
+
+**One test per behaviour.** For `AC-posts-update-1`, sent by the form of a
+view on `GET /posts/:id/edit`, as the generator writes it (**amended in
+implementation:** the example first given here pinned only what held before the
+step):
 
 ```ts
-test('AC-comments-store-1 (9c41f2): a signed-in user comments on a post', { session: 'browser' }, async ({ app, agent, screen, browser }) => {
-  const start = await begin('AC-comments-store-1', { app, browser })
-  await app.open(start.path('/posts/:post'))
+test('AC-posts-update-1 (6a2991): a signed-in user retitles a post', { session: 'browser' }, async ({ app, agent, screen, browser }) => {
+  const start = await begin('AC-posts-update-1', 'its start page /posts/:id/edit takes a path parameter', { app, browser })
+  await app.open(`/posts/${start.value('id')}/edit`)
   await expectDefaultLocale(browser)
   const off = await browser.onDialog('accept')
-  await agent.act('set "Comment" to {body}, then use "Post comment"', { params: { body: 'First!' } })
+  await agent.act('set "Title" to {title}, then use "Save"', { params: { title: 'Retitled post' } })
   await off()
-  await expect(browser).toHaveURL(start.path('/posts/:post'))
-  await expect(screen.getByRole('button', 'Post comment')).toBeVisible()
+  await expect(browser).toHaveURL(landed(['/posts/', { known: 'id' }], start))
+  await expect(screen.getByRole('button', 'Edit').or(screen.getByRole('link', 'Edit')).first()).toBeVisible()
 })
 ```
 
@@ -1229,6 +1251,14 @@ test('AC-comments-store-1 (9c41f2): a signed-in user comments on a post', { sess
   `aria-invalid="true"` on that control, which `@guren/inertia-client/forms`
   sets. `agent.assert` is never generated: it calls the model on every run, so
   a spec holding one cannot run in CI without a login.
+- **A pin that held before the step is not written** (amended in
+  implementation). A redirect the start page's URL already satisfies (the same
+  literals, and a parameter wherever the start page has one, whatever its name
+  or constraint), and any label or action the sending view shows, under
+  whatever view the plan lands on, are true before the agent does anything, so
+  a submit that did nothing would pass them. A behaviour left with nothing is
+  skipped. An optional or wildcard segment in a redirect is not
+  pinned either, and one in the start page skips the behaviour.
 - **At least one pin, or no test.** The runner saves a recording only after a
   locator or URL assertion passes behind the step; an assertion on a plain
   value does not count. A behaviour with none of the pins above could neither
@@ -1244,8 +1274,13 @@ test('AC-comments-store-1 (9c41f2): a signed-in user comments on a post', { sess
   (Open Question 15).
 
 A signed-in route runs under the session `browser`, the seeded account of §6;
-any other route runs signed out. Which account a behaviour's `actor` means is
-still Open Question 5.
+~~any other route runs signed out~~. **Amended in implementation:** every other
+route runs under that session too when the app has the sign-in setup, except a
+route the graph reads as guest-only. The graph reads authentication from
+middleware, and the scaffold's own actions refuse a guest in their body
+(`this.auth.userOrFail()`), so on the measurement app `POST /posts` read as
+public and would have been driven as a guest into a 401. Which account a
+behaviour's `actor` means is still Open Question 5.
 
 #### 13.6 Recordings
 

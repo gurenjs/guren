@@ -26,7 +26,7 @@ export const browserMapCommand = defineCommand({
     const failed = !map.complete || map.unreadablePlans.length > 0 || (args.check === true && stale.length > 0)
     if (failed) markCommandFailed()
     if (args.json) {
-      console.log(JSON.stringify({ ...map, changed: run.changed, orphans: run.orphans, removed: run.removed, ...(run.specsHeld ? { specsHeld: run.specsHeld } : {}), ...(run.accessibilityOff ? { accessibilityOff: run.accessibilityOff } : {}) }))
+      console.log(JSON.stringify({ ...map, changed: run.changed, orphans: run.orphans, removed: run.removed, ...(run.specsHeld ? { specsHeld: run.specsHeld } : {}), ...(run.accessibilityOff ? { accessibilityOff: run.accessibilityOff } : {}), ...(run.behavioursOff ? { behavioursOff: run.behavioursOff } : {}), ...(run.unlabelledInputs ? { unlabelledInputs: run.unlabelledInputs } : {}) }))
       return
     }
     const lines: string[] = []
@@ -42,6 +42,8 @@ export const browserMapCommand = defineCommand({
     }
     if (run.specsHeld) lines.push(`The generated specs were left as they are: ${run.specsHeld}.`)
     if (run.accessibilityOff) lines.push(`Accessibility checks are off: ${run.accessibilityOff}. Run guren add browser-tests again to add them.`)
+    if (run.behavioursOff) lines.push(`Behaviour specs are off: ${run.behavioursOff}.`)
+    for (const entry of run.unlabelledInputs ?? []) lines.push(`A behaviour sets a field its view's form does not label: ${entry}`)
     console.log(lines.join('\n'))
   },
 })
