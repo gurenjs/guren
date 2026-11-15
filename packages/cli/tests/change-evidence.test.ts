@@ -291,6 +291,18 @@ describe('the record and the summary', () => {
 
     expect(renderEvidenceMarkdown(evidence).split('\n')[0]).toBe('## Change evidence: floor `low`, eligible for low')
   })
+
+  test('should name the lane guren.review.ts set and the approvals it asks of the floor', async () => {
+    const { repo } = await createRepo()
+    const base = await commit(repo, { 'guren.review.ts': "export default { facts: { ambient: 'medium' }, approvals: { medium: 1 } }\n" })
+    const evidence = await evidenceOf(repo, base, await commit(repo, { 'docs/guide.md': 'A longer guide.\n' }))
+    const markdown = renderEvidenceMarkdown(evidence)
+
+    expect(evidence.lane?.floor).toBe('medium')
+    expect(markdown).toContain('(raised by guren.review.ts from low)')
+    expect(markdown).toContain('guren.review.ts at the merge base applies: a medium change needs 1 approval where someone other than the author can approve. Nothing enforces it yet.')
+    expect((await changeRecord(repo, base, evidence.lane!.head, evidence, false)).facts).toEqual([{ code: 'ambient', lane: 'medium', policyFrom: 'low', files: ['docs/guide.md'] }])
+  })
 })
 
 /** A repository whose gate passes or fails on its `test` script alone: codegen, check and audit pass on its one route, lint skips. */

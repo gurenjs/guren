@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { defineCommand } from '../define-command'
 import { judgeChangeLane, type ChangeFact, type ChangeLaneReport, type Lane } from '../change/lane'
 import { openChange, resolveChange } from '../change/resolve'
+import { policyNote, REVIEW_POLICY_FILE } from '../change/review-policy'
 import { auditChangeRevisions } from '../change/revision-audit'
 import { changeRecord, collectChangeEvidence, EVIDENCE_DIR, firstLine, redactSecrets, renderEvidenceMarkdown, writeChangeEvidence } from '../change/evidence'
 import { CliError } from '../cli-error'
@@ -11,13 +12,14 @@ import { markCommandFailed } from '../command-status'
 const short = (sha: string): string => sha.slice(0, 12)
 
 function factLine(fact: ChangeFact): string {
-  return `  ${fact.code}${fact.target ? ` (${fact.target})` : ''}: ${fact.message}`
+  return `  ${fact.code}${fact.target ? ` (${fact.target})` : ''}: ${fact.message}${policyNote(fact)}`
 }
 
 export function renderChangeLane(report: ChangeLaneReport): string {
   const lines = [`Change ${short(report.mergeBase)}..${short(report.head)}: floor ${report.floor}`]
   if (report.mergeBase === report.head && report.base !== report.head) lines.push('  the head is an ancestor of the base, so no commit is ahead of it: were --base and --head swapped?')
   else if (report.base !== report.mergeBase) lines.push(`  read from the merge base of ${short(report.base)} and the head`)
+  if (report.policy.state === 'read') lines.push(`  ${REVIEW_POLICY_FILE} applied as the merge base has it`)
   if (report.facts.length === 0) lines.push('', 'No path changed.')
   for (const lane of ['high', 'medium', 'low'] satisfies Lane[]) {
     const facts = report.facts.filter((fact) => fact.lane === lane)
@@ -38,6 +40,7 @@ function trustBoundary(report: ChangeLaneReport): string[] {
   return [
     'The floor guards against mistakes. It does not stop an author who writes code to defeat it.',
     'Facts are lower bounds: a fact that did not appear has not proved the code unchanged.',
+    ...(report.policy.state === 'read' ? [`${REVIEW_POLICY_FILE} was read from the merge base, where a person merged it; an edit to it in this change applies only once merged.`] : []),
     ...(report.audit.loadedCode ? ["The audit loaded the application's code at the commits it exported, under this shell's environment, so it is no evidence about a change that attacks the runner."] : []),
   ]
 }

@@ -19,15 +19,19 @@ import { readPolicyAbilities } from '../plan/policy-abilities'
 import { discoverPlanFiles, isPlanFileName, isPlanInput } from '../plan-check'
 import { parseSchemaSource, type SchemaTable } from '../schema-parser'
 import { auditCoverageGaps, auditFacts } from './audit-facts'
+import { LANES, type FactCode, type Lane } from './fact-classes'
+import { applyReviewPolicy, loadBaseReviewPolicy, REVIEW_POLICY_FILE, type LoadedReviewPolicy } from './review-policy'
 import type { ChangedPath, ChangeReader, ChangeSide, ResolvedChange } from './resolve'
 import type { ChangeAudits } from './revision-audit'
 
-export type Lane = 'low' | 'medium' | 'high'
+export type { FactCode, Lane } from './fact-classes'
 
 export interface ChangeFact {
-  code: string
+  code: FactCode
   /** The floor this fact sets. */
   lane: Lane
+  /** The lane the fact had before `guren.review.ts` set it. */
+  policyFrom?: Lane
   /** A table, a migration, a plan section: what the fact is about, when it is narrower than its files. */
   target?: string
   files: string[]
@@ -63,9 +67,9 @@ export interface ChangeLaneReport {
   /** `compared`: both sides were audited and compared. `loadedCode`: the run executed the application's code, compared or not. */
   audit: { compared: boolean; loadedCode: boolean }
   plans: ChangePlan[]
+  /** `guren.review.ts` at the merge base. */
+  policy: LoadedReviewPolicy
 }
-
-const LANES: readonly Lane[] = ['low', 'medium', 'high']
 
 export function highestLane(lanes: Iterable<Lane>): Lane {
   let highest = 0
@@ -278,7 +282,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     }
   }
 
-  const fallbackCode = (entry: ChangedPath): string => (entry.outsideApp ? 'outside-app' : entry.status === 'added' ? 'file-added' : entry.status === 'deleted' ? 'source-removed' : entry.status === 'renamed' ? 'source-renamed' : 'source-edited')
+  const fallbackCode = (entry: ChangedPath): FactCode => (entry.outsideApp ? 'outside-app' : entry.status === 'added' ? 'file-added' : entry.status === 'deleted' ? 'source-removed' : entry.status === 'renamed' ? 'source-renamed' : 'source-edited')
   for (const entry of change.paths) {
     if (claimed.has(entry) || !touches(entry, (path) => posix.basename(path) === 'package.json')) continue
     const located = Object.values(sides(entry)).map((path) => fromRoot(entry, path))
@@ -404,7 +408,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     } else if (entry.status === 'added' && TESTS_DIR.test(entry.path)) {
       const existing = await idsAtBase()
       const repeated = acceptanceIds(afterText).filter((id) => existing.has(id))
-      if (repeated.length > 0) fact([entry], { code: 'file-added', lane: 'medium', evidence: 'static', message: `${entry.path}: a test added under ${list(repeated)}, which an existing test carries` })
+      if (repeated.length > 0) fact([entry], { code: 'acceptance-added', lane: 'medium', evidence: 'static', message: `${entry.path}: a test added under ${list(repeated)}, which an existing test carries` })
       else fact([entry], { code: 'test-added', lane: 'low', evidence: 'static', message: `${entry.path}: a test added, carrying no existing acceptance id` })
     }
   }
@@ -503,16 +507,23 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     unjudged.push({ reader: 'dependency-advisory', reason: 'the advisories of the changed dependencies were not compared with the base by this version', lane: 'medium', files: [...new Set(dependencies)] })
   }
 
+  const policy = await loadBaseReviewPolicy(reader)
+  const judged = policy.state === 'read' ? applyReviewPolicy(facts, change.paths, policy.policy) : facts
+  if (policy.state === 'unreadable') {
+    unjudged.push({ reader: 'review-policy', reason: `${REVIEW_POLICY_FILE} at the merge base was not applied, so a lane it raises would not show: ${policy.reason}`, lane: 'high', files: [REVIEW_POLICY_FILE] })
+  }
+
   return {
     schemaVersion: 1,
     base: change.base,
     mergeBase: change.mergeBase,
     head: change.head,
-    floor: highestLane([...facts.map((entry) => entry.lane), ...unjudged.map((entry) => entry.lane)]),
-    facts,
+    floor: highestLane([...judged.map((entry) => entry.lane), ...unjudged.map((entry) => entry.lane)]),
+    facts: judged,
     unjudged,
     audit,
     plans: await readChangePlans(reader, trees.head),
+    policy,
   }
 }
 

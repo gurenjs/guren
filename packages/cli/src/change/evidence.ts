@@ -12,6 +12,7 @@ import { runGit } from '../changed-files'
 import type { GateReport } from '../gate'
 import { writeFileAtomic } from '../plan/beside'
 import { judgeChangeLane, rendersPages, type ChangeLaneReport, type Lane } from './lane'
+import { policyNote, REVIEW_POLICY_FILE } from './review-policy'
 import { openChange, resolveChange } from './resolve'
 import { auditChangeRevisions } from './revision-audit'
 
@@ -60,7 +61,8 @@ export interface ChangeRecord {
   mergeBase: string | null
   head: string
   floor: Lane | null
-  facts: Array<{ code: string; lane: Lane; target?: string; files: string[] }>
+  /** `policyFrom`: the lane before `guren.review.ts` set it, which the shadow comparison reads beside the label. */
+  facts: Array<{ code: string; lane: Lane; policyFrom?: Lane; target?: string; files: string[] }>
   /** The readers that did not read, which is what a floor above its facts rests on. */
   unjudged: Array<{ reader: string; lane: Lane }>
   audit: ChangeLaneReport['audit'] | null
@@ -283,7 +285,7 @@ export async function changeRecord(cwd: string, base: string, head: string, evid
     mergeBase: evidence.lane?.mergeBase ?? null,
     head: evidence.lane?.head ?? head,
     floor: evidence.lane?.floor ?? null,
-    facts: (evidence.lane?.facts ?? []).map(({ code, lane, target, files }) => ({ code, lane, ...(target ? { target } : {}), files })),
+    facts: (evidence.lane?.facts ?? []).map(({ code, lane, policyFrom, target, files }) => ({ code, lane, ...(policyFrom ? { policyFrom } : {}), ...(target ? { target } : {}), files })),
     unjudged: (evidence.lane?.unjudged ?? []).map(({ reader, lane }) => ({ reader, lane })),
     audit: evidence.lane?.audit ?? null,
     holds: evidence.holds.map(({ code, lane }) => ({ code, lane })),
@@ -304,6 +306,10 @@ export function renderEvidenceMarkdown(evidence: ChangeEvidence): string {
     `Gate: **${evidence.gate.ok ? 'passed' : 'failed'}**. Migration impact: ${evidence.migrationImpact}.`,
   ]
   if (lane) lines.push('', `Read from ${lane.mergeBase.slice(0, 12)}..${lane.head.slice(0, 12)}.`)
+  if (lane?.policy.state === 'read') {
+    const approvals = lane.policy.policy.approvals?.[lane.floor]
+    lines.push('', `${REVIEW_POLICY_FILE} at the merge base applies${approvals === undefined ? '' : `: a ${lane.floor} change needs ${approvals} ${approvals === 1 ? 'approval' : 'approvals'} where someone other than the author can approve`}. Nothing enforces it yet.`)
+  }
   if (evidence.holds.length > 0) {
     lines.push('', '### Holds', '', ...evidence.holds.map((hold) => `- \`${hold.code}\`: ${hold.message}`))
   }
@@ -313,7 +319,7 @@ export function renderEvidenceMarkdown(evidence: ChangeEvidence): string {
       const facts = lane.facts.filter((fact) => fact.lane === level)
       if (facts.length === 0) continue
       lines.push('', `### ${level}`, '', '| Fact | What | Files |', '| --- | --- | --- |')
-      for (const fact of facts) lines.push(`| \`${fact.code}\` | ${escapeCell(fact.message)} | ${escapeCell(fact.files.slice(0, 3).join(', '))}${fact.files.length > 3 ? ` and ${fact.files.length - 3} more` : ''} |`)
+      for (const fact of facts) lines.push(`| \`${fact.code}\` | ${escapeCell(`${fact.message}${policyNote(fact)}`)} | ${escapeCell(fact.files.slice(0, 3).join(', '))}${fact.files.length > 3 ? ` and ${fact.files.length - 3} more` : ''} |`)
     }
     if (lane.unjudged.length > 0) lines.push('', '### Not judged', '', ...lane.unjudged.map((entry) => `- \`${entry.reader}\` (${entry.lane}): ${entry.reason}`))
   }

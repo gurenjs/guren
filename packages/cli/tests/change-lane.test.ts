@@ -204,7 +204,7 @@ describe('openChange', () => {
 
     expect(report.facts.map((fact) => [fact.code, fact.lane, fact.files])).toEqual([
       ['migration-destructive', 'high', ['db/migrations/0002_drop/migration.sql']],
-      ['file-added', 'medium', ['tests/posts-again.test.ts']],
+      ['acceptance-added', 'medium', ['tests/posts-again.test.ts']],
     ])
   })
 })
@@ -369,7 +369,7 @@ describe('judgeChangeLane', () => {
     const repeated = await laneAfter({ 'tests/posts-again.test.ts': "test('[AC-posts-1] lists posts', () => {})\n" })
 
     expect(fresh.facts).toEqual([expect.objectContaining({ code: 'test-added', lane: 'low' })])
-    expect(repeated.facts).toEqual([expect.objectContaining({ code: 'file-added', lane: 'medium' })])
+    expect(repeated.facts).toEqual([expect.objectContaining({ code: 'acceptance-added', lane: 'medium' })])
   })
 
   test('should treat a generated browser spec as ambient, deleted or not', async () => {

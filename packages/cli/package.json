@@ -51,6 +51,10 @@
       "types": "./dist/arch/index.d.ts",
       "default": "./dist/arch/index.js"
     },
+    "./review": {
+      "types": "./dist/review/index.d.ts",
+      "default": "./dist/review/index.js"
+    },
     "./oxlint": {
       "default": "./dist/oxlint/index.js"
     }

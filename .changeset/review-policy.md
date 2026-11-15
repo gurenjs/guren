@@ -1,0 +1,5 @@
+---
+'@guren/cli': minor
+---
+
+Add `guren.review.ts`, the review policy of RFC 0040, and the `@guren/cli/review` subpath with `defineReviewPolicy()`. `change:lane` and `change:evidence` read the policy at the merge base, so a pull request that edits it is judged by the policy it started from. `paths` puts a change touching a matching path at `high` or `medium`, and `facts` sets a fact's lane: any fact can be raised, and only a fact a plan could declare can be lowered, as far as a declaration would take it. Each fact the policy set is printed with `lowered by guren.review.ts` or `raised by guren.review.ts`, and `evidence.md` prints the approvals the floor would need. The file is read as data and never run: a value that is not written in place, a key it does not know or a lowering it does not allow makes the policy unreadable, and the change is then held at `high` with nothing applied. `guren add review` now writes a `guren.review.ts`. A test added under an acceptance id an existing test carries is now `acceptance-added` instead of `file-added`, so a policy lowering `file-added` does not lower it.

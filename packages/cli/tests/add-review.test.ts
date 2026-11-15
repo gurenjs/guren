@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { addReview, REVIEW_LANE_LABELS, reviewFileEntries, reviewNextSteps, runsBareGate } from '../src/add-review'
+import { readReviewPolicySource } from '../src/change/review-policy'
 import { builtinSubCommands } from '../src/commands'
 import { PLAN_COMMAND_CLASSES } from '../src/plan/command-allowlist'
 import { createTempRoot } from './helpers'
@@ -25,7 +26,7 @@ async function createApp(): Promise<string> {
   return app
 }
 
-const WRITTEN = ['.github/workflows/change.yml', '.github/pull_request_template.md', '.github/ISSUE_TEMPLATE/feature.md', '.github/ISSUE_TEMPLATE/defect.md']
+const WRITTEN = ['guren.review.ts', '.github/workflows/change.yml', '.github/pull_request_template.md', '.github/ISSUE_TEMPLATE/feature.md', '.github/ISSUE_TEMPLATE/defect.md']
 
 describe('guren add review', () => {
   test('should write the workflow and the templates as shipped', async () => {
@@ -34,6 +35,12 @@ describe('guren add review', () => {
 
     expect(result.created.map((path) => path.slice(app.length + 1))).toEqual(WRITTEN)
     for (const entry of reviewFileEntries()) expect(await readFile(join(app, entry.path), 'utf8')).toBe(entry.contents)
+  })
+
+  test('should ship a policy that change:lane reads whole', () => {
+    const policy = reviewFileEntries().find((entry) => entry.path === 'guren.review.ts')!.contents
+
+    expect(readReviewPolicySource(policy)).toEqual({ state: 'read', policy: { approvals: { low: 0, medium: 1, high: 2 }, identities: 'auto', merge: { low: 'person' } } })
   })
 
   test('should keep what is there on a re-run, and replace it under --force', async () => {
