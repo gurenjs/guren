@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, spyOn, test } from 'bun:test'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import { runCommand } from 'citty'
@@ -8,7 +8,7 @@ import { changeRecord, collectChangeEvidence, renderEvidenceMarkdown, writeChang
 import { runWithCommandStatus } from '../src/command-status'
 import { builtinSubCommands } from '../src/commands'
 import type { GateReport } from '../src/gate'
-import { createTempRoot } from './helpers'
+import { createTempRoot, DEFAULT_ROUTES_FIXTURE, linkWorkspaceCore } from './helpers'
 
 // Each case makes a repository and runs git a dozen times, past Bun's 5 s default under a loaded suite.
 setDefaultTimeout(60_000)
@@ -127,6 +127,48 @@ describe('collectChangeEvidence', () => {
     expect(evidence.migrationImpact).toBe('additive')
   })
 
+  test('should hold a change to a translation catalog, which a page renders as its labels', async () => {
+    const { repo, base } = await createRepo()
+    const evidence = await evidenceOf(repo, base, await commit(repo, { 'lang/en/posts.json': '{ "title": "Title" }\n' }), { audit: false })
+
+    expect(evidence.lane?.floor).toBe('low')
+    expect(holdCodes(evidence)).toEqual(['browser-evidence-unavailable'])
+  })
+
+  test('should hold a change whose head is behind its base, rather than call it empty and low', async () => {
+    const { repo, base } = await createRepo()
+    const ahead = await commit(repo, { 'package.json': JSON.stringify({ scripts: { test: 'true' } }) })
+
+    const swapped = await evidenceOf(repo, ahead, base)
+
+    expect(holdCodes(swapped)).toContain('change-empty')
+    expect(swapped.holds.find((hold) => hold.code === 'change-empty')?.message).toContain('were --base and --head swapped')
+    expect(swapped.eligible).toBe(false)
+  })
+
+  test('should hold what the gate rewrote among the committed files', async () => {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, { '.guren/routes.gen.ts': 'export {}\n' })
+    const gate = async () => {
+      await writeFile(join(repo, '.guren/routes.gen.ts'), 'export const regenerated = true\n', 'utf8')
+      return gateReport(true)
+    }
+
+    const evidence = await evidenceOf(repo, base, head, { gate })
+
+    expect(evidence.holds).toEqual([expect.objectContaining({ code: 'gate-rewrote-tree', message: expect.stringContaining('.guren/routes.gen.ts') })])
+  })
+
+  test('should see an uncommitted file above an application below the repository root', async () => {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, { 'tsconfig.base.json': '{}\n', 'apps/web/docs/guide.md': 'A guide.\n' })
+    await writeFile(join(repo, 'tsconfig.base.json'), '{ "compilerOptions": {} }\n', 'utf8')
+
+    const evidence = await evidenceOf(join(repo, 'apps/web'), base, head)
+
+    expect(evidence.holds).toContainEqual(expect.objectContaining({ code: 'checkout-dirty', message: expect.stringContaining('tsconfig.base.json') }))
+  })
+
   test('should hold a change under a plan that is not closed', async () => {
     const { repo, base } = await createRepo()
     const evidence = await evidenceOf(repo, base, await commit(repo, { 'docs/plans/broken/plan.json': '{' }), { audit: false })
@@ -141,16 +183,31 @@ describe('the record and the summary', () => {
     const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n' })
     const evidence = await evidenceOf(repo, base, head, { gate: async () => gateReport(false) })
 
-    const dir = await writeChangeEvidence(repo, '.guren/evidence', evidence, await changeRecord(repo, base, head, evidence))
+    const dir = await writeChangeEvidence(repo, join(repo, '.guren/evidence'), evidence, await changeRecord(repo, base, head, evidence, false))
     const record = JSON.parse(await readFile(join(dir, 'record.json'), 'utf8'))
 
     expect(await readFile(join(dir, '.gitignore'), 'utf8')).toBe('*\n')
     expect(JSON.parse(await readFile(join(dir, 'evidence.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(evidence)))
     expect(await readFile(join(dir, 'evidence.md'), 'utf8')).toBe(renderEvidenceMarkdown(evidence))
-    expect(record).toMatchObject({ recordVersion: 1, base, head, mergeBase: base, floor: 'low', eligible: false, gate: { ok: false, stages: [{ name: 'test', status: 'fail' }] } })
+    expect(record).toMatchObject({ recordVersion: 1, base, head, mergeBase: base, floor: 'low', eligible: false, unjudged: [], audit: { compared: false, loadedCode: false }, gate: { ok: false, deps: false, stages: [{ name: 'test', status: 'fail' }] } })
     expect(record.securityRecords).toEqual({ unavailable: expect.any(String) })
     expect(typeof record.cli).toBe('string')
     expect(JSON.stringify(record)).not.toContain('1 test failed')
+  })
+
+  test('should read the server version through the application\'s @guren/core when none sits beside it', async () => {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n' })
+    const store = join(ROOT, `store-${repos++}`)
+    await mkdir(join(store, 'node_modules/@guren/server'), { recursive: true })
+    await mkdir(join(store, 'node_modules/@guren/core'), { recursive: true })
+    await writeFile(join(store, 'node_modules/@guren/server/package.json'), JSON.stringify({ name: '@guren/server', version: '9.8.7' }), 'utf8')
+    await mkdir(join(repo, 'node_modules/@guren'), { recursive: true })
+    await symlink(join(store, 'node_modules/@guren/core'), join(repo, 'node_modules/@guren/core'), 'dir')
+
+    const record = await changeRecord(repo, base, head, await evidenceOf(repo, base, head), true)
+
+    expect(record.server).toBe('9.8.7')
   })
 
   test('should open the summary with the conclusion', async () => {
@@ -161,21 +218,56 @@ describe('the record and the summary', () => {
   })
 })
 
-describe('change:evidence', () => {
-  test('should fail exactly when the gate fails, after writing its files', async () => {
-    const { repo, base } = await createRepo()
-    const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n', 'package.json': JSON.stringify({ name: 'app', scripts: { test: 'false' } }) })
-    const log = spyOn(console, 'log').mockImplementation(() => {})
-    try {
-      const exitCode = await runWithCommandStatus(() => runCommand(builtinSubCommands['change:evidence'], { rawArgs: ['--base', base, '--head', head, '--app', repo, '--no-deps', '--no-audit', '--json'] }))
-      const evidence = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
+/** A repository whose gate passes or fails on its `test` script alone: codegen, check and audit pass on its one route, lint skips. */
+async function gatedRepo(testScript: 'true' | 'false'): Promise<{ repo: string; base: string; head: string }> {
+  const { repo, base } = await createRepo()
+  const head = await commit(repo, {
+    '.gitignore': 'node_modules\n.guren\ntypes\n',
+    'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+    'docs/plans/draft.plan.json': '{',
+    'package.json': JSON.stringify({ name: 'app', type: 'module', scripts: { typecheck: 'true', test: testScript } }),
+  })
+  await linkWorkspaceCore(repo)
+  return { repo, base, head }
+}
 
-      expect(evidence.gate.ok).toBe(false)
-      expect(exitCode).toBe(1)
-      expect(await readFile(join(repo, '.guren/evidence/record.json'), 'utf8')).toContain(`"head": "${head}"`)
-    } finally {
-      log.mockRestore()
-    }
+async function runEvidence(rawArgs: string[]): Promise<{ exitCode: number; evidence: { gate: GateReport; holds: unknown[] }; errors: string[] }> {
+  const log = spyOn(console, 'log').mockImplementation(() => {})
+  const error = spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    const exitCode = await runWithCommandStatus(() => runCommand(builtinSubCommands['change:evidence'], { rawArgs: [...rawArgs, '--no-deps', '--no-audit', '--json'] }))
+    return { exitCode, evidence: JSON.parse(String(log.mock.calls.at(-1)?.[0])), errors: error.mock.calls.map((call) => String(call[0])) }
+  } finally {
+    log.mockRestore()
+    error.mockRestore()
+  }
+}
+
+describe('change:evidence', () => {
+  test('should pass on a passing gate whatever holds the change, and fail on a failing one', async () => {
+    const passing = await gatedRepo('true')
+    const failing = await gatedRepo('false')
+
+    const passed = await runEvidence(['--base', passing.base, '--head', passing.head, '--app', passing.repo])
+    const failed = await runEvidence(['--base', failing.base, '--head', failing.head, '--app', failing.repo])
+
+    expect(passed.evidence.gate.ok).toBe(true)
+    expect(passed.evidence.holds.length).toBeGreaterThan(0)
+    expect(passed.exitCode).toBe(0)
+    expect(failed.evidence.gate.ok).toBe(false)
+    expect(failed.exitCode).toBe(1)
+    expect(await readFile(join(failing.repo, '.guren/evidence/record.json'), 'utf8')).toContain(`"head": "${failing.head}"`)
+  })
+
+  test('should keep the gate\'s exit code when the evidence cannot be written', async () => {
+    const { repo, base, head } = await gatedRepo('true')
+    const blocked = join(repo, 'blocked')
+    await writeFile(blocked, 'a file, not a directory\n', 'utf8')
+
+    const run = await runEvidence(['--base', base, '--head', head, '--app', repo, '-o', blocked])
+
+    expect(run.exitCode).toBe(0)
+    expect(run.errors).toEqual([expect.stringContaining(`The evidence could not be written to ${blocked}`)])
   })
 
   test('should refuse to run without both commits', async () => {

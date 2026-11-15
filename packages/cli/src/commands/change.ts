@@ -1,3 +1,5 @@
+import { resolve } from 'node:path'
+
 import { defineCommand } from '../define-command'
 import { judgeChangeLane, type ChangeFact, type ChangeLaneReport, type Lane } from '../change/lane'
 import { openChange, resolveChange } from '../change/resolve'
@@ -50,16 +52,25 @@ export const changeEvidenceCommand = defineCommand({
     deps: { type: 'boolean', default: true, description: "Scan dependencies in the gate's audit stage, as `guren gate --deps` does (needs registry access). Disable with --no-deps." },
     audit: { type: 'boolean', default: true, description: "Audit both sides of the change, which loads the application's code. Disable with --no-audit." },
     json: { type: 'boolean', description: 'Print the evidence as JSON.' },
+    routes: { type: 'string', description: 'Path to routes entry file, as `guren gate --routes` takes it.' },
     app: { type: 'string', description: 'Application root directory.' },
   },
   async run({ args }) {
     if (!args.base || !args.head) throw new CliError('change:evidence needs both --base <sha> and --head <sha>: a change is the commits between two named commits.')
     const cwd = args.app ?? process.cwd()
-    const [base, head] = [String(args.base), String(args.head)]
-    const evidence = await collectChangeEvidence({ cwd, base, head, deps: args.deps !== false, audit: args.audit !== false })
-    const dir = await writeChangeEvidence(cwd, args.output ?? EVIDENCE_DIR, evidence, await changeRecord(cwd, base, head, evidence))
+    const [base, head, deps] = [String(args.base), String(args.head), args.deps !== false]
+    const evidence = await collectChangeEvidence({ cwd, base, head, deps, audit: args.audit !== false, ...(args.routes ? { routesFile: String(args.routes) } : {}) })
+    // `-o` is from where the command runs, as a workflow step names it; the default is the application's own.
+    const target = args.output ? resolve(String(args.output)) : resolve(cwd, EVIDENCE_DIR)
+    let written: string | undefined
+    try {
+      written = await writeChangeEvidence(cwd, target, evidence, await changeRecord(cwd, base, head, evidence, deps))
+    } catch (error) {
+      // Nothing but the gate fails this command: a file it could not write is said, never an exit code.
+      console.error(`The evidence could not be written to ${target}: ${error instanceof Error ? error.message : String(error)}`)
+    }
     if (args.json) console.log(JSON.stringify(evidence))
-    else console.log(`${renderEvidenceMarkdown(evidence)}\nWritten to ${dir}`)
+    else console.log(`${renderEvidenceMarkdown(evidence)}${written ? `\nWritten to ${written}` : ''}`)
     if (!evidence.gate.ok) markCommandFailed()
   },
 })
