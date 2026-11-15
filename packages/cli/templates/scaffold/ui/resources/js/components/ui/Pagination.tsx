@@ -57,13 +57,14 @@ export function Pagination({
 }: PaginationProps) {
   if (links.pages.length <= 1) return null
   const byNumber = new Map(links.pages.map((page) => [page.page, page]))
-  const current = links.pages.find((page) => page.active)?.page ?? 1
-  const last = links.pages.at(-1)?.page ?? current
+  // A page past the last one marks none active: every number stays a link, the run starts at page 1.
+  const current = links.pages.find((page) => page.active)?.page
+  const last = links.pages.at(-1)?.page ?? 1
 
   return (
     <nav aria-label={label} className={['flex flex-wrap items-center gap-2 font-mono text-sm', className].filter(Boolean).join(' ')} {...props}>
       {links.prev ? <Link href={links.prev} className={LINK}>{previousLabel}</Link> : <span aria-disabled="true" className={DISABLED}>{previousLabel}</span>}
-      {paginationItems(current, last, siblings).map((item, index) => {
+      {paginationItems(current ?? 1, last, siblings).map((item, index) => {
         if (item === 'gap') return <span key={`gap-${index}`} aria-hidden="true" className="px-1 text-g-muted">…</span>
         const url = byNumber.get(item)?.url
         if (item === current) return <span key={item} aria-current="page" className={CURRENT}>{item}</span>

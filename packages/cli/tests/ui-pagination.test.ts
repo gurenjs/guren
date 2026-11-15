@@ -80,6 +80,16 @@ describe('Pagination', () => {
     ])
   })
 
+  it('should keep every page a link when the requested page is past the last one', () => {
+    // What Paginator.links() returns for ?page=4 of three pages: no page active, prev pointing at the last.
+    const past: PaginationLinksLike = { ...links(3, 3), pages: links(3, 3).pages.map((page) => ({ ...page, active: false })), prev: '/posts?page=3' }
+    expect(items({ links: past }).filter((item) => /^\d+$/.test(item.text))).toEqual([
+      { link: true, href: '/posts?page=1', text: '1', current: false },
+      { link: true, href: '/posts?page=2', text: '2', current: false },
+      { link: true, href: '/posts?page=3', text: '3', current: false },
+    ])
+  })
+
   it('should take its labels from props', () => {
     const props: PaginationProps = { links: links(1, 2), previousLabel: '前へ', nextLabel: '次へ', 'aria-label': 'ページ' }
     expect((Pagination(props) as ReactElement<{ 'aria-label': string }>).props['aria-label']).toBe('ページ')
