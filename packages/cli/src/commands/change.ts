@@ -115,6 +115,11 @@ export const changePolicyCommand = defineCommand({
     if (result.state === 'refused') {
       throw new CliError(`${result.file} has guren:review markers that cannot be rewritten safely, so nothing was written:\n${result.problems.map((problem) => `  ${problem}`).join('\n')}`)
     }
+    if (result.state === 'unreadable') {
+      console.error(`${result.file} was not ${args.check ? 'checked' : 'written'}: the block would describe an application this run could not read.\n${result.reasons.map((reason) => `  ${reason}`).join('\n')}`)
+      markCommandFailed()
+      return
+    }
     const said = {
       written: `Wrote ${result.file}.`,
       unchanged: `${result.file} is current.`,

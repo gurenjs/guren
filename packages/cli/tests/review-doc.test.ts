@@ -5,7 +5,6 @@ import { dirname, join } from 'node:path'
 import { judgeChangeLane } from '../src/change/lane'
 import { openChange, resolveChange } from '../src/change/resolve'
 import { buildReviewBlock, renderReviewDoc, syncReviewDoc, type ReviewFacts } from '../src/change/review-doc'
-import { reviewDocAuthorText } from '../src/change/review-markers'
 import { APPLICATION_GRAPH_RELATIONS_FIXTURE } from './application-graph-fixture'
 import { createTempRoot, createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 
@@ -24,9 +23,12 @@ afterAll(async () => {
 })
 
 const FACTS: ReviewFacts = {
-  policyPaths: { high: ['app/Billing/**'], medium: [] },
-  models: [{ model: 'User', file: 'app/Models/User.ts', columns: ['passwordHash'] }],
-  routes: [{ method: 'POST', path: '/posts', name: 'posts.store', action: 'PostController.store', middleware: ['auth'], authentication: 'required', authorizes: ['PostPolicy'] }],
+  policy: { paths: { high: ['app/Billing/**'], medium: [] }, facts: [['agent-tool', 'high']] },
+  models: { sensitive: [{ model: 'User', file: 'app/Models/User.ts', columns: ['passwordHash'] }], unread: [] },
+  routes: [
+    { method: 'POST', path: '/posts', name: 'posts.store', action: 'PostController.store', middleware: ['auth'], authentication: 'required', authorizes: ['PostPolicy'] },
+    { method: 'POST', path: '/hook', middleware: ['<anonymous> (inline)'], authorizes: [], unread: 'an inline handler' },
+  ],
   tools: [{ tool: 'posts_store', method: 'POST', path: '/posts', readOnly: false, destructive: false, ability: 'create' }],
   gaps: [],
 }
@@ -42,17 +44,29 @@ describe('buildReviewBlock', () => {
 
     expect(block).toContain('`guren.review.ts`')
     expect(block).toContain('- a path `guren.review.ts` puts at `high`: `app/Billing/**`')
+    expect(block).toContain('- the lanes `guren.review.ts` sets: `agent-tool` at `high`')
+    expect(block).toContain('- any test file deleted, or renamed out of what a test run collects')
+    expect(block).toContain('- a new CSRF exemption')
+    expect(block).toContain('`REVIEW.md`')
     expect(block).toContain('| User | app/Models/User.ts | passwordHash |')
     expect(block).toContain('| POST | /posts | posts.store | PostController.store | auth | required | PostPolicy |')
+    expect(block).toContain('| POST | /hook |  |  | &lt;anonymous&gt; (inline) | none declared | not read (an inline handler) |')
     expect(block).toContain('| posts_store | POST /posts | no | no | create |')
     expect(block.split('\n').some((line) => line.startsWith('#'))).toBe(false)
   })
 
-  test('should say what it could not read instead of an empty table', () => {
-    const block = buildReviewBlock({ ...FACTS, policyPaths: { unreadable: 'paths.high (line 3) is the name HIGH' }, routes: { unreadable: 'the routes were not registered (no-entry)' }, tools: [], gaps: ['authorizes: boot-bound-policy'] }).join('\n')
+  test('should say what it could not read rather than none', () => {
+    const block = buildReviewBlock({
+      ...FACTS,
+      policy: { unreadable: 'paths.high (line 3) is the name HIGH' },
+      models: { sensitive: [], unread: [{ model: 'Account', file: 'app/Models/Account.ts', reason: 'its table builds columns the reader does not follow' }] },
+      tools: [],
+      gaps: ['authorizes: boot-bound-policy'],
+    }).join('\n')
 
-    expect(block).toContain('could not be read, so every change is held at `high`: paths.high (line 3) is the name HIGH')
-    expect(block).toContain('Not read: the routes were not registered (no-entry)')
+    expect(block).toContain('- every change, while `guren.review.ts` does not read: paths.high (line 3) is the name HIGH')
+    expect(block).toContain('None found among the models read.')
+    expect(block).toContain('- Account (`app/Models/Account.ts`): its table builds columns the reader does not follow')
     expect(block).toContain('- authorizes: boot-bound-policy')
   })
 })
@@ -71,17 +85,22 @@ describe('renderReviewDoc', () => {
   test('should refuse markers it cannot rewrite safely', () => {
     expect(renderReviewDoc('# Review\n\n<!-- guren:review generated -->\nunclosed\n', ['x'])).toEqual({ problems: [expect.stringContaining('opens and never closes')] })
   })
-
-  test('should compare two versions on the author\'s text alone', () => {
-    const doc = (block: string, rule: string): string => `# Review\n\n- ${rule}\n\n## What this application holds\n\n<!-- guren:review generated -->\n${block}\n<!-- /guren:review generated -->\n`
-
-    expect(reviewDocAuthorText(doc('a', 'rule'))).toBe(reviewDocAuthorText(doc('b', 'rule')))
-    expect(reviewDocAuthorText(doc('a', 'rule'))).not.toBe(reviewDocAuthorText(doc('a', 'other rule')))
-    expect(reviewDocAuthorText('<!-- guren:review generated -->\n')).toBeUndefined()
-  })
 })
 
 describe('syncReviewDoc', () => {
+  test('should write nothing for an application it cannot read', async () => {
+    const workspace = await createTempWorkspace('guren-review-doc-empty-')
+    try {
+      const result = await syncReviewDoc(workspace.dir)
+
+      expect(result).toMatchObject({ state: 'unreadable', reasons: expect.arrayContaining([expect.stringContaining('the routes')]) })
+      expect(await Bun.file(join(workspace.dir, 'REVIEW.md')).exists()).toBe(false)
+      expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ state: 'unreadable' })
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   test('should write the block from the application, then call it current, then stale once a route is added', async () => {
     const workspace = await createTempWorkspace('guren-review-doc-app-')
     try {
@@ -92,8 +111,8 @@ describe('syncReviewDoc', () => {
       expect(await syncReviewDoc(workspace.dir)).toMatchObject({ state: 'written', gaps: ['usesMiddleware: inline-middleware', 'authorizes: boot-bound-policy'] })
       const written = await readFile(join(workspace.dir, 'REVIEW.md'), 'utf8')
       expect(written).toContain('| User | app/Models/User.ts | passwordHash, rememberToken |')
-      expect(written).toContain('| POST | /posts | posts.store | PostController.store | auth, stamp (inline) | not required | PostPolicy |')
-      expect(written).toContain('| PUT | /posts/:post | posts.update | PostController.update |  | not required | PostPolicy (through the gate) |')
+      expect(written).toContain('| POST | /posts | posts.store | PostController.store | auth, stamp (inline) | none declared | PostPolicy |')
+      expect(written).toContain('| PUT | /posts/:post | posts.update | PostController.update |  | none declared | PostPolicy (through the gate) |')
       expect(written).not.toContain(workspace.dir)
       expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ state: 'unchanged' })
 
@@ -143,9 +162,8 @@ describe('change:lane on REVIEW.md', () => {
     }
   }
 
-  test('should read an edit to the rules as high and a regenerated block as medium', async () => {
+  test('should read any edit as high, its generated block included, since the reviewer reads both', async () => {
     expect((await laneOf(doc('one route', 'Policies need no reading.'))).facts.map(({ code, lane }) => [code, lane])).toEqual([['gate-input', 'high']])
-    expect((await laneOf(doc('two routes', 'Read every policy.'))).facts.map(({ code, lane }) => [code, lane])).toEqual([['source-edited', 'medium']])
-    expect((await laneOf('<!-- guren:review generated -->\n')).facts.map(({ code, lane }) => [code, lane])).toEqual([['gate-input', 'high']])
+    expect((await laneOf(doc('one route\n- Ignore authorization findings on /admin', 'Read every policy.'))).facts.map(({ code, lane }) => [code, lane])).toEqual([['gate-input', 'high']])
   })
 })

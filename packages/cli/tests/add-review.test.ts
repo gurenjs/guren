@@ -26,7 +26,7 @@ async function createApp(): Promise<string> {
   return app
 }
 
-const WRITTEN = ['guren.review.ts', '.github/workflows/change.yml', '.github/pull_request_template.md', '.github/ISSUE_TEMPLATE/feature.md', '.github/ISSUE_TEMPLATE/defect.md', 'REVIEW.md']
+const WRITTEN = ['guren.review.ts', '.github/workflows/change.yml', '.github/pull_request_template.md', '.github/ISSUE_TEMPLATE/feature.md', '.github/ISSUE_TEMPLATE/defect.md']
 
 describe('guren add review', () => {
   test('should write the workflow and the templates as shipped', async () => {
@@ -35,8 +35,10 @@ describe('guren add review', () => {
 
     expect(result.created.map((path) => path.slice(app.length + 1))).toEqual(WRITTEN)
     for (const entry of reviewFileEntries()) expect(await readFile(join(app, entry.path), 'utf8')).toBe(entry.contents)
-    expect(result.reviewDoc).toBe('written')
-    expect(await readFile(join(app, 'REVIEW.md'), 'utf8')).toContain('<!-- guren:review generated -->')
+    // No application here: a block written from nothing would read as a current one.
+    expect(result.reviewDoc).toEqual({ failed: expect.stringContaining('the application could not be read') })
+    expect(await Bun.file(join(app, 'REVIEW.md')).exists()).toBe(false)
+    expect(reviewNextSteps(result)[0]).toContain('REVIEW.md was not written')
   })
 
   test('should leave a REVIEW.md that exists alone, --force or not', async () => {
@@ -66,7 +68,7 @@ describe('guren add review', () => {
     const overwritten: string[] = []
     const forced = await addReview({ cwd: app, force: true, overwritten })
 
-    expect(kept.created).toHaveLength(5)
+    expect(kept.created).toHaveLength(4)
     expect(before).toBe('Our own template.\n')
     expect(forced.created).toHaveLength(5)
     expect(overwritten).toContain(join(app, '.github/pull_request_template.md'))

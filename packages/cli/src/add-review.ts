@@ -7,7 +7,7 @@
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { REVIEW_DOC_FILE } from './change/review-markers'
+import { REVIEW_DOC_FILE } from './change/review-doc'
 import { runGitRaw } from './changed-files'
 import { CliError } from './cli-error'
 import { scaffoldTemplateFile } from './scaffold-templates'
@@ -84,7 +84,9 @@ async function writeReviewDoc(cwd: string): Promise<AddReviewResult['reviewDoc']
   try {
     const { syncReviewDoc } = await import('./change/review-doc')
     const result = await syncReviewDoc(cwd)
-    return result.state === 'refused' ? { failed: result.problems.join('; ') } : 'written'
+    if (result.state === 'refused') return { failed: result.problems.join('; ') }
+    if (result.state === 'unreadable') return { failed: `the application could not be read (${result.reasons.join('; ')})` }
+    return 'written'
   } catch (error) {
     return { failed: (error instanceof Error ? error.message : String(error)).split('\n')[0]! }
   }
