@@ -78,11 +78,12 @@ export function highestLane(lanes: Iterable<Lane>): Lane {
 }
 
 // `bunfig.toml` is not in the RFC's list: it names the preload and root `bun test` runs under.
-const GATE_FILES = new Set([
-  '.oxlintrc.json', 'tsconfig.json', 'bunfig.toml', 'guren.arch.ts', 'guren.review.ts', 'playwright.browser.config.ts', 'e2e.browser.config.ts',
+// `REVIEW.md` is what the reviewer reads: its generated block too, since nothing checks it against the app in a change.
+export const GATE_FILES = new Set([
+  'REVIEW.md', '.oxlintrc.json', 'tsconfig.json', 'bunfig.toml', 'guren.arch.ts', 'guren.review.ts', 'playwright.browser.config.ts', 'e2e.browser.config.ts',
   '.claude/settings.json', '.claude/settings.local.json', '.codex/hooks.json', '.cursor/hooks.json',
 ])
-const GATE_PREFIXES = ['scripts/', 'bin/', '.github/', '.claude/hooks/', '.codex/hooks/', '.codex/rules/', '.cursor/hooks/']
+export const GATE_PREFIXES = ['scripts/', 'bin/', '.github/', '.claude/hooks/', '.codex/hooks/', '.codex/rules/', '.cursor/hooks/']
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies', 'overrides', 'resolutions', 'trustedDependencies', 'patchedDependencies']
 const LOCKFILES = new Set(['bun.lock', 'bun.lockb'])
 const AMBIENT: ReadonlyArray<{ target: string; test: (path: string) => boolean }> = [

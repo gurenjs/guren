@@ -35,7 +35,7 @@ import { migrateCommand, seedCommand, resetCommand, freshCommand, rollbackComman
 import { introspectCommand } from './commands/introspect'
 import { graphCommand } from './commands/graph'
 import { depsExposureCommand, depsWhyCommand } from './commands/deps'
-import { changeEvidenceCommand, changeLaneCommand } from './commands/change'
+import { changeEvidenceCommand, changeLaneCommand, changePolicyCommand } from './commands/change'
 import { browserDoctorCommand, browserMapCommand, browserRecordCommand, browserServeCommand } from './commands/browser'
 import { runtimeErrorsCommand } from './commands/runtime-errors'
 import { planCommand, planRenderCommand, planStatusCommand, planVerifyCommand, planNextCommand, planScaffoldCommand, planApproveCommand, planWaiveCommand, planReviseCommand, planCloseCommand } from './commands/plan'
@@ -1870,6 +1870,7 @@ export const builtinSubCommands = {
   'deps:exposure': depsExposureCommand,
   'change:lane': changeLaneCommand,
   'change:evidence': changeEvidenceCommand,
+  'change:policy': changePolicyCommand,
   'browser:map': browserMapCommand,
   'browser:serve': browserServeCommand,
   'browser:doctor': browserDoctorCommand,
