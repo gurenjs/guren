@@ -1493,6 +1493,27 @@ const addBrowserTestsCommand = defineCommand({
   },
 })
 
+const addReviewCommand = defineCommand({
+  meta: {
+    name: 'review',
+    description: 'Install the Change workflow (RFC 0040): change:evidence on every pull request and push to main, with its summary and record, plus a pull request template asking for a lane: label and two issue templates.',
+  },
+  args: {
+    force: {
+      type: 'boolean',
+      description: 'Overwrite the workflow and the templates if they exist.',
+    },
+  },
+  async run({ args }) {
+    const { addReview, REVIEW_LANE_LABELS } = await import('./add-review')
+    const overwritten: string[] = []
+    const result = await addReview({ force: Boolean(args.force), overwritten })
+    announceWrittenFiles(result.created, overwritten)
+    if (result.duplicateGate) consola.info('.github/workflows/ci.yml still runs `bunx guren gate`, which the Change workflow now runs too. Remove that step once the Change workflow has passed on a pull request.')
+    consola.info(`Create the labels the pull request template asks for (a reviewer can only pick one that exists):\n${REVIEW_LANE_LABELS.map((label) => `  gh label create ${label.name} --color ${label.color} --description "${label.description}"`).join('\n')}`)
+  },
+})
+
 const addUiCommand = defineCommand({
   meta: {
     name: 'ui',
@@ -1548,6 +1569,7 @@ const addSubCommands = {
   plugin: addPluginCommand,
   prototype: addPrototypeCommand,
   'browser-tests': addBrowserTestsCommand,
+  review: addReviewCommand,
   session: createAddBlueprintCommand('session', 'Install database-backed sessions: the schema table and migration, config/session.ts, and sessions:prune.'),
   schedule: createAddBlueprintCommand('schedule', 'Install a schedule kernel with a sample recurring task.'),
   storage: createAddBlueprintCommand('storage', 'Install storage scaffolding with local/public disks and a sample storage service.'),

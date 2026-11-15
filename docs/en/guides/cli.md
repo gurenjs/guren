@@ -37,6 +37,7 @@ bunx guren add prototype
 bunx guren add ai --provider anthropic
 bunx guren add oauth
 bunx guren add browser-tests
+bunx guren add review
 bunx guren add ui
 ```
 
@@ -133,6 +134,16 @@ bunx guren add ui button --force  # replace your copy with the current template
 ```
 
 A re-run writes only the components that are missing and lists the ones it left alone. Import each component from its own file (`import { Button } from '@/resources/js/components/ui/Button'`); there is no index file. `Button.tsx` also exports `buttonClass()`, for a `<Link>` or `<a>` styled as a button. `make:feature` and `make:auth` import these components in the pages they write and copy any that are missing, without touching one you already have. New apps from `create-guren-app` ship with all of them.
+
+### `add review`
+
+`add review` installs the Change workflow, which runs `bunx guren change:evidence` on every pull request and every push to `main`. The command writes four files once, and a re-run leaves each one that exists alone unless you pass `--force`:
+
+- `.github/workflows/change.yml` checks out the pull request's head commit (not GitHub's merge commit) with its full history, runs the evidence, adds `evidence.md` to the job summary, and uploads `record.json` as `guren-record-<head sha>`. The job fails only when the gate fails, and the summary and the record are kept when it does.
+- `.github/pull_request_template.md` asks for the issue, the plan, and one `lane:` label: the review the change needed in the reviewer's own judgement, whatever floor the workflow printed.
+- `.github/ISSUE_TEMPLATE/feature.md` and `defect.md`.
+
+The labels have to exist before a reviewer can pick one, so the command prints the three `gh label create` lines. The Change workflow runs the same gate as the scaffolded `ci.yml`, and the command says so when that file still has its `bunx guren gate` step, which can go once the Change workflow has passed on a pull request.
 
 ### `add browser-tests`
 

@@ -83,6 +83,7 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'add plugin': 'dependencies',
   // A browser toolchain is the app owner's to take on, not a plan step's.
   'add browser-tests': 'dependencies',
+  'add review': 'deploy',
   'make:migration': 'migration',
   codegen: 'derived',
   'routes:types': 'derived',
