@@ -10,7 +10,7 @@ import { dirname, join, sep } from 'node:path'
 import { controllerActionSource, type GurenApplicationGraph } from '../application-graph'
 import { escapeMarkdownTableCell } from '../docs-links'
 import { describeMethod } from '../http-methods'
-import type { DocRef } from '../docs-index'
+import { standingLessonRule, type DocRef } from '../docs-index'
 import { readMarkedLines, spliceMarkedBlock, type MarkerSyntax } from '../marker-blocks'
 import { writeFileAtomic } from '../plan/beside'
 import { FACT_CLASSES, type FactCode, type Lane } from './fact-classes'
@@ -85,8 +85,8 @@ export interface CrossCuttingLesson {
 /** The lessons a reviewer and an agent are told about by path, from the documents as read. */
 export function crossCuttingLessons(refs: readonly DocRef[]): CrossCuttingLesson[] {
   return refs
-    .filter((ref) => ref.type === 'lesson' && (ref.status ?? 'stable') === 'stable' && ref.entities.length === 0 && (ref.lesson?.paths.length ?? 0) > 0 && ref.lesson?.rule)
-    .map((ref) => ({ rule: ref.lesson!.rule!.trim(), paths: [...ref.lesson!.paths].sort(), file: ref.path }))
+    .filter((ref) => standingLessonRule(ref) !== undefined && ref.entities.length === 0 && (ref.lesson?.paths.length ?? 0) > 0)
+    .map((ref) => ({ rule: standingLessonRule(ref)!, paths: [...ref.lesson!.paths].sort(), file: ref.path }))
     .sort((a, b) => a.file.localeCompare(b.file))
 }
 
@@ -302,7 +302,7 @@ export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts
     readModels(cwd, skippedModels).catch((error: unknown) => ({ unreadable: why(error) })),
     introspectApp(cwd, { withoutEnvFiles: true }),
     readPolicySummary(cwd),
-    import('../docs-index').then(({ scanDocs }) => scanDocs(cwd)),
+    import('../docs-index').then(({ scanDocs }) => scanDocs(cwd)).catch((error: unknown) => ({ unreadable: why(error) })),
   ])
   const unreadable: string[] = []
   if ('unreadable' in graph) unreadable.push(`the application graph: ${graph.unreadable}`)
@@ -310,8 +310,9 @@ export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts
     unreadable.push(`the routes: ${[...new Set(graph.coverage.route?.reasons.map((reason) => reason.code) ?? [])].join(', ') || 'not registered'}`)
   }
   if ('unreadable' in models) unreadable.push(`the models: ${models.unreadable}`)
+  if ('unreadable' in docs) unreadable.push(`the lessons under docs/: ${docs.unreadable}`)
   if (introspection.status !== 'ok') unreadable.push(`the agent routes, since the application did not introspect (${introspection.reason}): ${introspection.message.split('\n')[0]!.replaceAll(`${cwd}${sep}`, '')}`)
-  if (unreadable.length > 0 || 'unreadable' in graph || 'unreadable' in models || introspection.status !== 'ok') return { unreadable }
+  if (unreadable.length > 0 || 'unreadable' in graph || 'unreadable' in models || 'unreadable' in docs || introspection.status !== 'ok') return { unreadable }
 
   const unreadModels: ReviewFacts['models']['unread'] = skippedModels.sort().map((file) => ({ model: file.split('/').pop()!.replace(/\.[cm]?[jt]sx?$/u, ''), file, reason: 'the file did not parse, or holds no class' }))
   // The model reader reads one class per file; every other model the graph found there is unread.
@@ -398,12 +399,14 @@ async function planLessonRules(cwd: string, lessons: readonly CrossCuttingLesson
       if (error.code === 'ENOENT') return undefined
       throw error
     })
-    if (existing !== undefined && !existing.includes(LESSONS_MARKER)) {
-      planned.push({ path, file: { file: rendered.path, state: 'refused', problems: [`${rendered.path} exists and is not the lessons rule \`guren change:policy\` writes; rename it`] } })
+    const ours = existing === undefined || existing.includes(LESSONS_MARKER)
+    if (lessons.length === 0) {
+      // A file of that name nobody generated is the author's, and with nothing to write it is left alone.
+      if (existing !== undefined && ours) planned.push(check ? { path, file: { file: rendered.path, state: 'stale' } } : { path, file: { file: rendered.path, state: 'removed' }, remove: true })
       continue
     }
-    if (lessons.length === 0) {
-      if (existing !== undefined) planned.push(check ? { path, file: { file: rendered.path, state: 'stale' } } : { path, file: { file: rendered.path, state: 'removed' }, remove: true })
+    if (!ours) {
+      planned.push({ path, file: { file: rendered.path, state: 'refused', problems: [`${rendered.path} exists and is not the lessons rule \`guren change:policy\` writes; rename it`] } })
       continue
     }
     if (existing === rendered.content) planned.push({ path, file: { file: rendered.path, state: 'unchanged' } })

@@ -411,13 +411,20 @@ function renderCopilotRule(doc: RuleDoc): string {
  * one name in each component's rule directory. The name carries no `guren-` prefix, so the native
  * namespaces' prune pattern never claims it, and the canonical roots claim only the names they plan.
  */
+/** `app/{Http,Jobs}/**` as `app/Http/**` and `app/Jobs/**`: Cursor's `globs` and Copilot's `applyTo` are comma-joined, so a brace's comma would split the glob. */
+export function expandBraces(glob: string): string[] {
+  const match = /\{([^{}]*)\}/u.exec(glob)
+  if (!match || !match[1]!.includes(',')) return [glob]
+  return match[1]!.split(',').flatMap((part) => expandBraces(`${glob.slice(0, match.index)}${part}${glob.slice(match.index + match[0].length)}`))
+}
+
 export function renderScopedRule(component: HarnessComponent, name: string, doc: RuleDoc): { path: string; content: string } | undefined {
   const canonical = (root: '.claude' | '.agents') => ({ path: `${canonicalDirs(root).rules}/${name}.md`, content: `---\npaths:\n${doc.paths.map((path) => `  - ${yamlString(path)}`).join('\n')}\n---\n${doc.body}` })
   switch (component) {
     case 'claude': return canonical('.claude')
     case 'agents': return canonical('.agents')
-    case 'cursor': return { path: `${CURSOR_RULES_NAMESPACE.dir}/${name}${CURSOR_RULES_NAMESPACE.suffix}`, content: renderCursorRule(doc) }
-    case 'copilot': return { path: `${COPILOT_RULES_NAMESPACE.dir}/${name}${COPILOT_RULES_NAMESPACE.suffix}`, content: renderCopilotRule(doc) }
+    case 'cursor': return { path: `${CURSOR_RULES_NAMESPACE.dir}/${name}${CURSOR_RULES_NAMESPACE.suffix}`, content: renderCursorRule({ ...doc, paths: [...new Set(doc.paths.flatMap(expandBraces))] }) }
+    case 'copilot': return { path: `${COPILOT_RULES_NAMESPACE.dir}/${name}${COPILOT_RULES_NAMESPACE.suffix}`, content: renderCopilotRule({ ...doc, paths: [...new Set(doc.paths.flatMap(expandBraces))] }) }
     default: return undefined
   }
 }

@@ -6,6 +6,7 @@ import { judgeChangeLane } from '../src/change/lane'
 import { openChange, resolveChange } from '../src/change/resolve'
 import { BUGBOT_LIMIT, buildReviewBlock, crossCuttingLessons, renderBugbotDoc, renderReviewDoc, syncReviewDoc, type ReviewFacts } from '../src/change/review-doc'
 import { APPLICATION_GRAPH_RELATIONS_FIXTURE } from './application-graph-fixture'
+import { expandBraces, renderScopedRule } from '../src/agent-targets'
 import { scanDocs } from '../src/docs-index'
 import { envFileNames } from '../src/introspect'
 import { createTempRoot, createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
@@ -112,6 +113,14 @@ describe('lessons across the code', () => {
     }
   })
 
+  test('expands a brace for the agents whose scope is a comma-joined list', () => {
+    expect(expandBraces('app/{Http,Jobs}/**/*.{ts,tsx}')).toEqual(['app/Http/**/*.ts', 'app/Http/**/*.tsx', 'app/Jobs/**/*.ts', 'app/Jobs/**/*.tsx'])
+    expect(expandBraces('app/**')).toEqual(['app/**'])
+    const doc = { description: 'Lessons', paths: ['app/{Http,Jobs}/**'], body: '\n# Lessons\n' }
+    expect(renderScopedRule('cursor', 'lessons', doc)?.content).toContain('globs: "app/Http/**,app/Jobs/**"')
+    expect(renderScopedRule('claude', 'lessons', doc)?.content).toContain('  - "app/{Http,Jobs}/**"')
+  })
+
   test('keeps one lessons rule per installed agent, removes it when no lesson stands, and refuses a file nobody generated', async () => {
     const workspace = await createTempWorkspace('guren-review-doc-lesson-rules-')
     try {
@@ -131,6 +140,10 @@ describe('lessons across the code', () => {
 
       await writeWorkspaceFiles(workspace.dir, { '.claude/rules/lessons.md': '# Our own lessons\n' })
       expect(await syncReviewDoc(workspace.dir, { facts, components: ['claude'] })).toMatchObject({ files: [{ state: 'unchanged', held: true }, { file: '.claude/rules/lessons.md', state: 'refused' }] })
+      expect(await readFile(join(workspace.dir, '.claude/rules/lessons.md'), 'utf8')).toBe('# Our own lessons\n')
+
+      // With no lesson to write, the author's file is left alone and the review documents still regenerate.
+      expect(await syncReviewDoc(workspace.dir, { facts: FACTS, components: ['claude'] })).toEqual({ state: 'read', files: [{ file: 'REVIEW.md', state: 'unchanged' }], gaps: [] })
       expect(await readFile(join(workspace.dir, '.claude/rules/lessons.md'), 'utf8')).toBe('# Our own lessons\n')
     } finally {
       await workspace.cleanup()

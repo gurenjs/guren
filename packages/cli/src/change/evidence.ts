@@ -274,7 +274,7 @@ export async function collectChangeEvidence(options: ChangeEvidenceOptions): Pro
       else {
         const stale = review.files.filter((file) => file.state === 'stale' || file.state === 'missing')
         const refused = review.files.filter((file) => file.state === 'refused')
-        if (stale.length > 0) hold('review-doc-stale', `${stale.map((file) => `${file.file} is ${file.state}`).join(', ')}: the reviewer reads a block that does not describe this application; run \`guren change:policy\` and commit it`)
+        if (stale.length > 0) hold('review-doc-stale', `${stale.map((file) => `${file.file} is ${file.state}`).join(', ')}: what the reviewer or an agent reads no longer describes this application; run \`guren change:policy\` and commit it`)
         if (refused.length > 0) hold('review-doc-unchecked', `${refused.map((file) => `${file.file}: ${(file.problems ?? []).join('; ')}`).join(', ')}`)
       }
     } catch (error) {

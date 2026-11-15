@@ -109,9 +109,9 @@ export const changeLaneCommand = defineCommand({
 })
 
 export const changePolicyCommand = defineCommand({
-  meta: { name: 'change:policy', description: "Regenerate the block of REVIEW.md, and of .cursor/BUGBOT.md for an app that reviews with Cursor, that lists what a reviewer must read (RFC 0040 §7), from the application as registered; --check writes nothing and exits 1 on a stale or missing block." },
+  meta: { name: 'change:policy', description: "Regenerate the block of REVIEW.md, and of .cursor/BUGBOT.md for an app that reviews with Cursor, that lists what a reviewer must read (RFC 0040 §7), and each installed agent's lessons rule, from the application as registered; --check writes nothing and exits 1 on a stale or missing file." },
   args: {
-    check: { type: 'boolean', description: 'Write nothing; exit 1 when REVIEW.md (or, for Cursor, .cursor/BUGBOT.md) is missing or its block is stale.' },
+    check: { type: 'boolean', description: 'Write nothing; exit 1 when REVIEW.md, .cursor/BUGBOT.md (for Cursor) or an agent\'s lessons rule is missing or stale.' },
     app: { type: 'string', description: 'Application root directory.' },
   },
   async run({ args }) {
