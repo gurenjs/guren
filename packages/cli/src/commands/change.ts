@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { defineCommand } from '../define-command'
 import { judgeChangeLane, type ChangeFact, type ChangeLaneReport, type Lane } from '../change/lane'
 import { openChange, resolveChange } from '../change/resolve'
-import { syncReviewDoc } from '../change/review-doc'
+import { REVIEW_DOC_FILE, syncReviewDoc } from '../change/review-doc'
 import { policyNote, REVIEW_POLICY_FILE } from '../change/review-policy'
 import { changeAdvisories } from '../change/revision-advisories'
 import { auditChangeRevisions } from '../change/revision-audit'
@@ -109,30 +109,33 @@ export const changeLaneCommand = defineCommand({
 })
 
 export const changePolicyCommand = defineCommand({
-  meta: { name: 'change:policy', description: "Regenerate the block of REVIEW.md that lists what a reviewer must read (RFC 0040 §7), from the application as registered; --check writes nothing and exits 1 on a stale or missing block." },
+  meta: { name: 'change:policy', description: "Regenerate the block of REVIEW.md, and of .cursor/BUGBOT.md for an app that reviews with Cursor, that lists what a reviewer must read (RFC 0040 §7), from the application as registered; --check writes nothing and exits 1 on a stale or missing block." },
   args: {
-    check: { type: 'boolean', description: 'Write nothing; exit 1 when REVIEW.md is missing or its block is stale.' },
+    check: { type: 'boolean', description: 'Write nothing; exit 1 when REVIEW.md (or, for Cursor, .cursor/BUGBOT.md) is missing or its block is stale.' },
     app: { type: 'string', description: 'Application root directory.' },
   },
   async run({ args }) {
     const cwd = resolve(args.app ?? process.cwd())
     const result = await syncReviewDoc(cwd, { check: args.check === true })
-    if (result.state === 'refused') {
-      throw new CliError(`${result.file} has guren:review markers that cannot be rewritten safely, so nothing was written:\n${result.problems.map((problem) => `  ${problem}`).join('\n')}`)
-    }
     if (result.state === 'unreadable') {
-      console.error(`${result.file} was not ${args.check ? 'checked' : 'written'}: the block would describe an application this run could not read.\n${result.reasons.map((reason) => `  ${reason}`).join('\n')}`)
+      console.error(`${REVIEW_DOC_FILE} was not ${args.check ? 'checked' : 'written'}: the block would describe an application this run could not read.\n${result.reasons.map((reason) => `  ${reason}`).join('\n')}`)
       markCommandFailed()
       return
     }
-    const said = {
-      written: `Wrote ${result.file}.`,
-      unchanged: `${result.file} is current.`,
-      stale: `${result.file} is stale: run \`guren change:policy\`.`,
-      missing: `${result.file} does not exist: run \`guren change:policy\` (or \`guren add review\`).`,
-    }[result.state]
-    console.log(said)
+    const refused = result.files.filter((file) => file.state === 'refused')
+    if (refused.length > 0) {
+      throw new CliError(refused.map((file) => `${file.file} has guren:review markers that cannot be rewritten safely, so nothing was written there:\n${(file.problems ?? []).map((problem) => `  ${problem}`).join('\n')}`).join('\n'))
+    }
+    for (const file of result.files) {
+      console.log({
+        written: `Wrote ${file.file}.`,
+        unchanged: `${file.file} is current.`,
+        stale: `${file.file} is stale: run \`guren change:policy\`.`,
+        missing: `${file.file} does not exist: run \`guren change:policy\` (or \`guren add review\`).`,
+        refused: '',
+      }[file.state])
+    }
     if (result.gaps.length > 0) console.log(`The graph did not read these whole, so the block may miss routes or policies:\n${result.gaps.map((gap) => `  ${gap}`).join('\n')}`)
-    if (result.state === 'stale' || result.state === 'missing') markCommandFailed()
+    if (result.files.some((file) => file.state === 'stale' || file.state === 'missing')) markCommandFailed()
   },
 })

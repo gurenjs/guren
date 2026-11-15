@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 
 import { judgeChangeLane } from '../src/change/lane'
 import { openChange, resolveChange } from '../src/change/resolve'
-import { buildReviewBlock, renderReviewDoc, syncReviewDoc, type ReviewFacts } from '../src/change/review-doc'
+import { BUGBOT_BUDGET, buildReviewBlock, renderBugbotDoc, renderReviewDoc, syncReviewDoc, type ReviewFacts } from '../src/change/review-doc'
 import { APPLICATION_GRAPH_RELATIONS_FIXTURE } from './application-graph-fixture'
 import { createTempRoot, createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 
@@ -88,6 +88,24 @@ describe('renderReviewDoc', () => {
   })
 })
 
+describe('renderBugbotDoc', () => {
+  test('should carry the same block, and past the budget only what is always read with a pointer to REVIEW.md', () => {
+    const block = buildReviewBlock(FACTS)
+    const small = renderBugbotDoc(undefined, block)
+    expect('content' in small && small.content).toContain(block.join('\n'))
+    expect('content' in small && small.content.startsWith('# Bugbot\n')).toBe(true)
+
+    const many = buildReviewBlock({ ...FACTS, routes: Array.from({ length: 400 }, (_, index) => ({ method: 'POST', path: `/things/${index}`, middleware: ['auth'], authorizes: [] })) })
+    const capped = renderBugbotDoc(undefined, many)
+    if (!('content' in capped)) throw new Error(capped.problems.join('; '))
+    expect(many.join('\n').length).toBeGreaterThan(BUGBOT_BUDGET)
+    expect(capped.content.length).toBeLessThan(BUGBOT_BUDGET)
+    expect(capped.content).toContain('- a new CSRF exemption')
+    expect(capped.content).toContain('The tables of what this application holds are in `REVIEW.md`')
+    expect(capped.content).not.toContain('/things/1')
+  })
+})
+
 describe('syncReviewDoc', () => {
   test('should write nothing for an application it cannot read', async () => {
     const workspace = await createTempWorkspace('guren-review-doc-empty-')
@@ -108,19 +126,24 @@ describe('syncReviewDoc', () => {
       await linkWorkspaceCore(workspace.dir)
       await writeWorkspaceFiles(workspace.dir, { ...APPLICATION_GRAPH_RELATIONS_FIXTURE, ...USER_FILES })
 
-      expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ state: 'missing' })
-      expect(await syncReviewDoc(workspace.dir)).toMatchObject({ state: 'written', gaps: ['usesMiddleware: inline-middleware', 'authorizes: boot-bound-policy'] })
+      expect(await syncReviewDoc(workspace.dir, { check: true })).toEqual({ state: 'read', files: [{ file: 'REVIEW.md', state: 'missing' }], gaps: expect.any(Array) })
+      expect(await syncReviewDoc(workspace.dir)).toEqual({ state: 'read', files: [{ file: 'REVIEW.md', state: 'written' }], gaps: ['usesMiddleware: inline-middleware', 'authorizes: boot-bound-policy'] })
       const written = await readFile(join(workspace.dir, 'REVIEW.md'), 'utf8')
       expect(written).toContain('| User | app/Models/User.ts | passwordHash, rememberToken |')
       expect(written).toContain('| POST | /posts | posts.store | PostController.store | auth, stamp (inline) | none declared | PostPolicy |')
       expect(written).toContain('| PUT | /posts/:post | posts.update | PostController.update |  | none declared | PostPolicy (through the gate) |')
       expect(written).not.toContain(workspace.dir)
-      expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ state: 'unchanged' })
+      expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ files: [{ file: 'REVIEW.md', state: 'unchanged' }] })
 
       const main = APPLICATION_GRAPH_RELATIONS_FIXTURE['src/main.ts']!.replace(".name('posts.update')", ".name('posts.update')\n  router.delete('/posts/:post', [PostController, 'update']).name('posts.destroy')")
       await writeWorkspaceFiles(workspace.dir, { 'src/main.ts': main })
-      expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ state: 'stale' })
+      expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ files: [{ file: 'REVIEW.md', state: 'stale' }] })
       expect(await readFile(join(workspace.dir, 'REVIEW.md'), 'utf8')).toBe(written)
+
+      // An app that reviews with Cursor keeps `.cursor/BUGBOT.md` beside it, judged by --check alike.
+      expect(await syncReviewDoc(workspace.dir, { cursor: true })).toMatchObject({ files: [{ file: 'REVIEW.md', state: 'written' }, { file: '.cursor/BUGBOT.md', state: 'written' }] })
+      expect(await readFile(join(workspace.dir, '.cursor/BUGBOT.md'), 'utf8')).toContain('<!-- guren:review generated -->')
+      expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ files: [{ state: 'unchanged' }, { file: '.cursor/BUGBOT.md', state: 'unchanged' }] })
     } finally {
       await workspace.cleanup()
     }
@@ -162,7 +185,7 @@ describe('loadReviewFacts', () => {
         'app/Models/Account.ts': "export class Account { static appends = ['apiToken'] }\n",
       })
 
-      expect(await syncReviewDoc(workspace.dir)).toMatchObject({ state: 'written' })
+      expect(await syncReviewDoc(workspace.dir)).toMatchObject({ files: [{ file: 'REVIEW.md', state: 'written' }] })
       const written = await readFile(join(workspace.dir, 'REVIEW.md'), 'utf8')
 
       expect(written).toContain('| DELETE | /posts/:post | posts.destroy | destroy |  | none declared | not read (the controller was not resolved) |')

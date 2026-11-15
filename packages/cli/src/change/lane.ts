@@ -84,9 +84,9 @@ export const GATE_FILES = new Set([
   'REVIEW.md', '.oxlintrc.json', 'tsconfig.json', 'bunfig.toml', 'guren.arch.ts', 'guren.review.ts', 'playwright.browser.config.ts', 'e2e.browser.config.ts',
   '.claude/settings.json', '.claude/settings.local.json', '.codex/hooks.json', '.cursor/hooks.json',
 ])
-// Wherever it sits: `.npmrc` names the registry `bun install` and `bun audit` ask.
-export const GATE_BASENAMES = new Set(['.npmrc'])
-export const GATE_PREFIXES = ['scripts/', 'bin/', '.github/', '.claude/hooks/', '.codex/hooks/', '.codex/rules/', '.cursor/hooks/']
+// Wherever they sit: `.npmrc` names the registry an install asks; Cursor reads `BUGBOT.md` and `APPROVAL_POLICY.md` per directory.
+export const GATE_BASENAMES = new Set(['.npmrc', 'BUGBOT.md', 'APPROVAL_POLICY.md'])
+export const GATE_PREFIXES = ['scripts/', 'bin/', '.github/', '.claude/hooks/', '.codex/hooks/', '.codex/rules/', '.cursor/hooks/', '.cursor/approval-policies/']
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies', 'overrides', 'resolutions', 'trustedDependencies', 'patchedDependencies']
 const LOCKFILES = new Set(['bun.lock', 'bun.lockb'])
 const AMBIENT: ReadonlyArray<{ target: string; test: (path: string) => boolean }> = [

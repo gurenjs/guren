@@ -41,6 +41,18 @@ describe('guren add review', () => {
     expect(reviewNextSteps(result)[0]).toContain('REVIEW.md was not written')
   })
 
+  test('should write APPROVAL_POLICY.md for an app whose harness has the Cursor component', async () => {
+    const app = await createApp()
+    await mkdir(join(app, '.cursor/rules'), { recursive: true })
+    await writeFile(join(app, '.cursor/rules/guren-comments.mdc'), 'managed\n', 'utf8')
+
+    const result = await addReview({ cwd: app })
+
+    expect(result.created.map((path) => path.slice(app.length + 1))).toContain('APPROVAL_POLICY.md')
+    expect(await readFile(join(app, 'APPROVAL_POLICY.md'), 'utf8')).toContain('eligible for low')
+    expect((await addReview({ cwd: await createApp() })).created.map((path) => path.endsWith('APPROVAL_POLICY.md'))).not.toContain(true)
+  })
+
   test('should leave a REVIEW.md that exists alone, --force or not', async () => {
     const app = await createApp()
     await writeFile(join(app, 'REVIEW.md'), 'Our own rules.\n', 'utf8')

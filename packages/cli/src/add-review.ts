@@ -7,6 +7,7 @@
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import { hasHarnessComponent } from './agent-harness'
 import { REVIEW_DOC_FILE } from './change/review-doc'
 import { runGitRaw } from './changed-files'
 import { CliError } from './cli-error'
@@ -26,6 +27,8 @@ export const REVIEW_LANE_LABELS = [
   { name: 'lane:medium', color: 'bf8700', description: 'One person reads it' },
   { name: 'lane:high', color: 'cf222e', description: 'A careful read, or a second person' },
 ] as const
+
+const CURSOR_APPROVAL_POLICY = 'APPROVAL_POLICY.md'
 
 const CI_WORKFLOWS = ['.github/workflows/ci.yml', '.github/workflows/ci.yaml']
 
@@ -59,8 +62,9 @@ export function reviewNextSteps(result: Pick<AddReviewResult, 'duplicateGate' | 
   ]
 }
 
-export function reviewFileEntries(): ScaffoldFileEntry[] {
-  return REVIEW_FILES.map((file) => scaffoldTemplateFile('review', file))
+/** `cursor`: also `APPROVAL_POLICY.md`, the file Cursor's PR Routing & Approval reads (RFC 0040 §7). */
+export function reviewFileEntries(options: { cursor?: boolean } = {}): ScaffoldFileEntry[] {
+  return [...REVIEW_FILES, ...(options.cursor ? [CURSOR_APPROVAL_POLICY] : [])].map((file) => scaffoldTemplateFile('review', file))
 }
 
 export async function addReview(options: WriterOptions = {}): Promise<AddReviewResult> {
@@ -71,23 +75,27 @@ export async function addReview(options: WriterOptions = {}): Promise<AddReviewR
   if (top && (await realpath(top)) !== (await realpath(cwd))) {
     throw new CliError(`guren add review writes .github/ for an application at the root of its repository, and ${cwd} sits below ${top}: GitHub would never run a workflow there. Nothing was written.`)
   }
-  const created = await writeScaffoldFiles(reviewFileEntries(), { ...options, skipExisting: !options.force })
+  const cursor = await hasHarnessComponent(cwd, 'cursor')
+  const created = await writeScaffoldFiles(reviewFileEntries({ cursor }), { ...options, skipExisting: !options.force })
   const workflows = await Promise.all(CI_WORKFLOWS.map((file) => readFile(join(cwd, file), 'utf8').catch(() => '')))
-  const reviewDoc = await writeReviewDoc(cwd)
-  return { created: reviewDoc === 'written' ? [...created, join(cwd, REVIEW_DOC_FILE)] : created, duplicateGate: workflows.some(runsBareGate), reviewDoc }
+  const { reviewDoc, written } = await writeReviewDoc(cwd)
+  return { created: [...created, ...written.map((file) => join(cwd, file))], duplicateGate: workflows.some(runsBareGate), reviewDoc }
 }
 
 /** The author owns REVIEW.md once it exists, `--force` or not: only its generated block is ever rewritten, by `change:policy`. */
-async function writeReviewDoc(cwd: string): Promise<AddReviewResult['reviewDoc']> {
+async function writeReviewDoc(cwd: string): Promise<{ reviewDoc: AddReviewResult['reviewDoc']; written: string[] }> {
   // A stat that fails for any reason but absence keeps the file: never write over what could not be read.
-  if (await stat(join(cwd, REVIEW_DOC_FILE)).then(() => true, (error: NodeJS.ErrnoException) => error.code !== 'ENOENT')) return 'kept'
+  if (await stat(join(cwd, REVIEW_DOC_FILE)).then(() => true, (error: NodeJS.ErrnoException) => error.code !== 'ENOENT')) return { reviewDoc: 'kept', written: [] }
+  const failed = (why: string) => ({ reviewDoc: { failed: why }, written: [] })
   try {
     const { syncReviewDoc } = await import('./change/review-doc')
     const result = await syncReviewDoc(cwd)
-    if (result.state === 'refused') return { failed: result.problems.join('; ') }
-    if (result.state === 'unreadable') return { failed: `the application could not be read (${result.reasons.join('; ')})` }
-    return 'written'
+    if (result.state === 'unreadable') return failed(`the application could not be read (${result.reasons.join('; ')})`)
+    const refused = result.files.filter((file) => file.state === 'refused')
+    const written = result.files.filter((file) => file.state === 'written').map((file) => file.file)
+    if (refused.length > 0) return { reviewDoc: { failed: refused.map((file) => `${file.file}: ${(file.problems ?? []).join('; ')}`).join('; ') }, written }
+    return { reviewDoc: 'written', written }
   } catch (error) {
-    return { failed: (error instanceof Error ? error.message : String(error)).split('\n')[0]! }
+    return failed((error instanceof Error ? error.message : String(error)).split('\n')[0]!)
   }
 }
