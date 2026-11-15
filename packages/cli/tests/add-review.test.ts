@@ -35,6 +35,21 @@ describe('guren add review', () => {
 
     expect(result.created.map((path) => path.slice(app.length + 1))).toEqual(WRITTEN)
     for (const entry of reviewFileEntries()) expect(await readFile(join(app, entry.path), 'utf8')).toBe(entry.contents)
+    // No application here: a block written from nothing would read as a current one.
+    expect(result.reviewDoc).toEqual({ failed: expect.stringContaining('the application could not be read') })
+    expect(await Bun.file(join(app, 'REVIEW.md')).exists()).toBe(false)
+    expect(reviewNextSteps(result)[0]).toContain('REVIEW.md was not written')
+  })
+
+  test('should leave a REVIEW.md that exists alone, --force or not', async () => {
+    const app = await createApp()
+    await writeFile(join(app, 'REVIEW.md'), 'Our own rules.\n', 'utf8')
+
+    const result = await addReview({ cwd: app, force: true, overwritten: [] })
+
+    expect(result.reviewDoc).toBe('kept')
+    expect(await readFile(join(app, 'REVIEW.md'), 'utf8')).toBe('Our own rules.\n')
+    expect(reviewNextSteps(result)[0]).toContain('REVIEW.md exists and was left as it is')
   })
 
   test('should ship a policy that change:lane reads whole', () => {
@@ -110,11 +125,11 @@ describe('guren add review', () => {
   })
 
   test('should name the label commands, and the duplicate gate only when there is one', () => {
-    const plain = reviewNextSteps({ duplicateGate: false }).join('\n')
+    const plain = reviewNextSteps({ duplicateGate: false, reviewDoc: 'written' }).join('\n')
 
     for (const label of REVIEW_LANE_LABELS) expect(plain).toContain(`gh label create ${label.name} --color ${label.color}`)
     expect(plain).not.toContain('ci.yml')
-    expect(reviewNextSteps({ duplicateGate: true })[0]).toContain('ci.yml appears to run')
+    expect(reviewNextSteps({ duplicateGate: true, reviewDoc: 'written' })[0]).toContain('ci.yml appears to run')
   })
 
   test('should be registered, and refused to a plan', () => {
