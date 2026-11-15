@@ -129,6 +129,7 @@ export const changePolicyCommand = defineCommand({
     for (const file of result.files) {
       console.log({
         written: `Wrote ${file.file}.`,
+        removed: `Removed ${file.file}: no stable lesson names paths any more.`,
         unchanged: `${file.file} is current.`,
         stale: `${file.file} is stale: run \`guren change:policy\`.`,
         missing: `${file.file} does not exist: run \`guren change:policy\`${file.file === REVIEW_DOC_FILE ? ' (or `guren add review`)' : ''}.`,
