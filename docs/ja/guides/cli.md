@@ -118,14 +118,17 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 
 ### `add review`
 
-`add review` は Change ワークフローを入れます。このワークフローは、すべてのプルリクエストと `main` への push で `bunx guren change:evidence` を実行します。GitHub はリポジトリの直下にあるワークフローしか読まないので、対象はリポジトリの直下にあるアプリケーションで、その下の階層にあるアプリケーションでは実行を断ります。書き出すファイルは 5 つで、どれも 1 回だけ書き、すでにあるファイルは `--force` を付けない限り再実行しても変えません。
+`add review` は Change ワークフローを入れます。このワークフローは、すべてのプルリクエストと `main` への push で `bunx guren change:evidence` を実行します。GitHub はリポジトリの直下にあるワークフローしか読まないので、対象はリポジトリの直下にあるアプリケーションで、その下の階層にあるアプリケーションでは実行を断ります。書き出すファイルは 6 つで、どれも 1 回だけ書き、すでにあるファイルは `--force` を付けない限り再実行しても変えません。
 
 - `guren.review.ts`(レビューのポリシー。後述)。
+- `REVIEW.md`。Claude Code Review が読むファイルで、レビューする人に向けたルールと、`bunx guren change:policy` がアプリケーションから生成するブロックが入ります。ブロックに並ぶのは、`change:lane` が常に `high` にするもの、機密の列を持つモデル、データを変えるルートと通るミドルウェアやアクションが使う Policy、エージェントが呼べるルートです。`--force` でもこのファイルは置き換えません。一度できたら、書き換わるのは `change:policy` が生成するブロックだけです。
 - `.github/workflows/change.yml` は、プルリクエストの head のコミット(GitHub のマージコミットではない)を履歴ごとチェックアウトし、どのブランチにも残っていない base(force push の後など)も取得して証拠を集めます。プルリクエストの base を付け替えたときも実行し直します。そのうえで`evidence.md` をジョブの要約に足し、`record.json` を `guren-record-<head の SHA>` としてアップロードします。ジョブが失敗するのは gate が失敗したときだけです。失敗したときも要約と記録は残り、アップロードの失敗でジョブは失敗しません。ランナーから npm のレジストリに届かないときは、証拠のステップに `--no-deps` を足します。
 - `.github/pull_request_template.md` は、issue と計画を求め、プルリクエストに表示される文で、レビューする人に `lane:` ラベルを 1 つ付けてもらいます。付けるのは、レビューする人自身が必要だと考えたレビューの重さで、ワークフローが出した下限とは別に選びます。`gh pr create --body` で作ったプルリクエストはテンプレートを使わないので、ジョブの要約にも同じ依頼を出します。
 - `.github/ISSUE_TEMPLATE/feature.md` と `defect.md`。
 
 ラベルは先に作っておかないと選べないので、コマンドは `gh label create` の 3 行を出力します。Change ワークフローは scaffold の `ci.yml` と同じ gate を実行します。`ci.yml` に `bunx guren gate` のステップが残っているときはそのことを知らせるので、Change ワークフローがプルリクエストで通ったら、そのステップは消してかまいません。
+
+ルート、Policy、モデル、`guren.review.ts` を変えたら `bunx guren change:policy` を実行します。`--check` を付けると何も書かず、ブロックが古いときは終了コード 1 で終わります。`change:lane` は、`REVIEW.md` のブロックの外の編集をレビューの観点が変わる変更として `high` に、ブロックの中だけの編集を `medium` にします。
 
 #### レビューのポリシー
 
@@ -286,6 +289,7 @@ CI では `bun run test:behaviours:ci` を実行します。ログインも API 
 | `deps:exposure` | インストールされている各パッケージについて、それを import しているアプリのファイル (それを持ち込む直接の依存を import しているファイルを含む)、そのファイルが動く場所 (server、client、SSR、build、test)、Application Graph をたどって届くルートを出力する。`@guren` のパッケージだけが持ち込むものは `framework` として 1 回だけ示す。`--package <name>` で絞り込み、`--json` で版付きの文書を出力する。出力の最後に、結果が確かめずに頼っているものを並べる (JSON では `trustBoundary`)。読み取りが 1 つでも不完全なら exit 1 | `bunx guren deps:exposure --package marked` |
 | `change:lane` | 2 つのコミットの間の変更から事実を読み取り、レビューのレーンの下限(`low`、`medium`、`high`)を出力する。作業ツリーは読まず、git のオブジェクトから gate の入力、計画の記録、マイグレーション、スキーマのテーブル、受け入れテスト、Policy、依存を読む。`--base` と `--head` にはコミットの SHA を渡し、両者のマージベースから先を変更として扱う。変更の両側で audit も実行し、base に無かったものを報告する。対象は、audit の失敗、レスポンスに出る機密の列、CSRF の免除、無効にされたセキュリティの既定値、抑制された指摘。そのために各コミットを一時ディレクトリに展開し、手元の install を使って `guren audit` を走らせるので、コマンドを実行したシェルの環境変数のもとでアプリケーションのコードが読み込まれる。コミットの lockfile がインストール済みのものと違うとき、何もインストールされていないとき、リポジトリ内のパッケージがインストールされているとき(ワークスペースのメンバー、`link:` や `file:` の依存)、コミットがアプリケーション内に symlink を持つときは audit を行わない。`--no-audit` でこの手順を省ける。マージベースに `guren.review.ts` があれば、[レビューのポリシー](#レビューのポリシー)に従って事実のレーンを上げ下げする。読まないもの(ルートごとのセキュリティ記録、依存の脆弱性情報、audit できなかった側)は「Not judged」に並び、下限は `medium` 以上になる。レーンが何であっても終了コードは 0 で、`--json` を付けるとバージョン付きのレポートを出力する | `bunx guren change:lane --base 9f2c1ab --head 4e7d0c3` |
 | `change:evidence` | CI で gate の代わりに実行するコマンド。`guren gate --deps` を実行し、`change:lane` と同じ判定をしたうえで、`evidence.json`、要約した `record.json`、ジョブの要約用の `evidence.md` をアプリケーションの `.guren/evidence/` (または、コマンドを実行した場所から見た `-o <dir>`) に書き出す。失敗するのは gate が失敗したときだけで、書き出せなかったファイルは標準エラーに出すだけで終了コードを変えない。証拠から確かめられなかったことは保留として記録する。対象は、失敗した gate、`--head` にない、gate の実行中に移動した、または追跡中のファイルに未コミットの変更があるチェックアウト、gate の codegen が書き換えたコミット済みのファイル、読めなかった変更(浅いクローン)、コミットを含まない変更(base より古い head)。このバージョンでは、閉じていない計画がひとつでもあるときの計画の証拠と、ページ、ルートファイル、翻訳カタログを変える変更のブラウザの証拠も保留になる。下限が low で保留がなければ low の対象になる。失敗したコマンドが出力した認証情報(URL のユーザー情報、秘密を表す名前の `NAME=value`)は、どのファイルでも伏せ字にする。`--routes` は gate に渡し、`--no-deps` と `--no-audit` で依存の走査と両側の audit を省ける | `bunx guren change:evidence --base 9f2c1ab --head 4e7d0c3` |
+| `change:policy` | `REVIEW.md` のうち、レビューで必ず読むものを並べたブロックを、登録されたアプリケーションから作り直す(`browser:map` と同じくアプリを introspect する)。`REVIEW.md` が無ければ作る。`guren:review` のマーカーの外は書いた人のものなので残し、安全に書き換えられないマーカーがあれば何も書かずに止まる。`--check` を付けると何も書かず、ファイルが無いかブロックが古いときは終了コード 1 で終わる | `bunx guren change:policy --check` |
 | `spec:generate` | `docs/spec/` にある導出スペックビュー(ER 図・ドメインモデル・画面一覧・モジュールマップ)を生成し直す。詳しくは[スペックアンカード開発](./spec-anchored.md)を参照 | `bunx guren spec:generate` |
 
 `audit` は、名前付きミドルウェアで保護したルート(例: `router.middleware('auth').group(...)`)を保護済みとして扱い、`/login` や `/register` などのゲスト向けのフローを認証チェックの対象から外します。

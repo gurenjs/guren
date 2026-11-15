@@ -95,6 +95,7 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'deps:exposure': 'process',
   'change:lane': 'reads-only',
   'change:evidence': 'process',
+  'change:policy': 'process',
   'route:list': 'reads-only',
   'model:list': 'reads-only',
   'tool:list': 'reads-only',

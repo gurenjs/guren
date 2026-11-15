@@ -26,7 +26,7 @@ async function createApp(): Promise<string> {
   return app
 }
 
-const WRITTEN = ['guren.review.ts', '.github/workflows/change.yml', '.github/pull_request_template.md', '.github/ISSUE_TEMPLATE/feature.md', '.github/ISSUE_TEMPLATE/defect.md']
+const WRITTEN = ['guren.review.ts', '.github/workflows/change.yml', '.github/pull_request_template.md', '.github/ISSUE_TEMPLATE/feature.md', '.github/ISSUE_TEMPLATE/defect.md', 'REVIEW.md']
 
 describe('guren add review', () => {
   test('should write the workflow and the templates as shipped', async () => {
@@ -35,6 +35,19 @@ describe('guren add review', () => {
 
     expect(result.created.map((path) => path.slice(app.length + 1))).toEqual(WRITTEN)
     for (const entry of reviewFileEntries()) expect(await readFile(join(app, entry.path), 'utf8')).toBe(entry.contents)
+    expect(result.reviewDoc).toBe('written')
+    expect(await readFile(join(app, 'REVIEW.md'), 'utf8')).toContain('<!-- guren:review generated -->')
+  })
+
+  test('should leave a REVIEW.md that exists alone, --force or not', async () => {
+    const app = await createApp()
+    await writeFile(join(app, 'REVIEW.md'), 'Our own rules.\n', 'utf8')
+
+    const result = await addReview({ cwd: app, force: true, overwritten: [] })
+
+    expect(result.reviewDoc).toBe('kept')
+    expect(await readFile(join(app, 'REVIEW.md'), 'utf8')).toBe('Our own rules.\n')
+    expect(reviewNextSteps(result)[0]).toContain('REVIEW.md exists and was left as it is')
   })
 
   test('should ship a policy that change:lane reads whole', () => {
@@ -53,7 +66,7 @@ describe('guren add review', () => {
     const overwritten: string[] = []
     const forced = await addReview({ cwd: app, force: true, overwritten })
 
-    expect(kept.created).toHaveLength(4)
+    expect(kept.created).toHaveLength(5)
     expect(before).toBe('Our own template.\n')
     expect(forced.created).toHaveLength(5)
     expect(overwritten).toContain(join(app, '.github/pull_request_template.md'))
@@ -110,11 +123,11 @@ describe('guren add review', () => {
   })
 
   test('should name the label commands, and the duplicate gate only when there is one', () => {
-    const plain = reviewNextSteps({ duplicateGate: false }).join('\n')
+    const plain = reviewNextSteps({ duplicateGate: false, reviewDoc: 'written' }).join('\n')
 
     for (const label of REVIEW_LANE_LABELS) expect(plain).toContain(`gh label create ${label.name} --color ${label.color}`)
     expect(plain).not.toContain('ci.yml')
-    expect(reviewNextSteps({ duplicateGate: true })[0]).toContain('ci.yml appears to run')
+    expect(reviewNextSteps({ duplicateGate: true, reviewDoc: 'written' })[0]).toContain('ci.yml appears to run')
   })
 
   test('should be registered, and refused to a plan', () => {

@@ -1,0 +1,223 @@
+/**
+ * `REVIEW.md` (RFC 0040 §7): the author's rules for a reviewer, and one block between
+ * `<!-- guren:review generated -->` markers that `guren change:policy` keeps: what is always read
+ * by a person, the models with sensitive columns, the routes that change data with what authorizes
+ * them, and the routes agents can call, read from the Application Graph and the route contracts.
+ */
+import { readFile } from 'node:fs/promises'
+import { join, sep } from 'node:path'
+
+import { controllerActionSource, type GurenApplicationGraph } from '../application-graph'
+import { escapeMarkdownTableCell } from '../docs-links'
+import { describeMethod } from '../http-methods'
+import { readMarkedLines, spliceMarkedBlock } from '../marker-blocks'
+import { writeFileAtomic } from '../plan/beside'
+import { GATE_FILES, GATE_PREFIXES } from './lane'
+import { fenced, REVIEW_BLOCK, REVIEW_DOC_FILE, REVIEW_MARKERS, REVIEW_SECTION } from './review-markers'
+import { readReviewPolicySource, REVIEW_POLICY_FILE } from './review-policy'
+
+/** The graph sections the block's tables rest on; one that did not read whole is named in the block. */
+const GRAPH_SECTIONS = ['route', 'handles', 'usesMiddleware', 'authorizes', 'model', 'policy'] as const
+
+type Read<T> = T | { unreadable: string }
+
+export interface ReviewRoute {
+  method: string
+  path: string
+  name?: string
+  action?: string
+  middleware: string[]
+  authentication?: 'required' | 'guest-only'
+  /** Policies the action names, and `<Policy> (through the gate)` for one paired by name only. */
+  authorizes: string[]
+}
+
+export interface ReviewFacts {
+  policyPaths: Read<{ high: string[]; medium: string[] }> | undefined
+  models: Read<Array<{ model: string; file: string; columns: string[] }>>
+  routes: Read<ReviewRoute[]>
+  tools: Read<Array<{ tool: string; method: string; path: string; readOnly: boolean; destructive: boolean; ability?: string }>>
+  /** Graph sections that did not read whole, each with its reason codes. */
+  gaps: string[]
+}
+
+const code = (value: string): string => `\`${value.replace(/`/gu, "'")}\``
+const cell = (value: string): string => escapeMarkdownTableCell(value)
+const unreadable = (value: object): value is { unreadable: string } => 'unreadable' in value
+
+/** The mutating routes of the graph, in registration order, each with the policies its action reaches. */
+export function reviewRoutes(graph: GurenApplicationGraph): ReviewRoute[] {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]))
+  const from = (id: string, relation: string) => graph.edges.filter((edge) => edge.from === id && edge.relation === relation)
+  const routes: ReviewRoute[] = []
+  for (const node of [...graph.nodes].sort((a, b) => (a.route?.order ?? 0) - (b.route?.order ?? 0))) {
+    const route = node.route
+    if (node.kind !== 'route' || !route || describeMethod(route.method).safe) continue
+    const middleware = [
+      ...from(node.id, 'usesMiddleware').map((edge) => byId.get(edge.to)?.label ?? edge.to),
+      ...graph.unresolved.filter((entry) => entry.from === node.id && entry.relation === 'usesMiddleware').map((entry) => `${entry.target} (inline)`),
+    ]
+    const authorizes: string[] = []
+    const controller = from(node.id, 'handles').map((edge) => byId.get(edge.to)).find((target) => target?.kind === 'controller')
+    if (controller && route.action !== undefined) {
+      const source = controllerActionSource(route.action)
+      for (const edge of from(controller.id, 'authorizes')) {
+        if (edge.evidence.some((entry) => entry.source === source)) authorizes.push(byId.get(edge.to)?.label ?? edge.to)
+      }
+      const key = `${controller.label}.${route.action} `
+      for (const entry of graph.unresolved) {
+        if (entry.from === controller.id && entry.relation === 'authorizes' && entry.reason.startsWith(key)) authorizes.push(`${entry.target === key.trim() ? 'a policy' : entry.target} (through the gate)`)
+      }
+    }
+    routes.push({
+      method: route.method,
+      path: route.path,
+      ...(route.name ? { name: route.name } : {}),
+      ...(route.action !== undefined ? { action: controller ? `${controller.label}.${route.action}` : route.action } : {}),
+      middleware: [...new Set(middleware)],
+      ...(route.authentication ? { authentication: route.authentication } : {}),
+      authorizes: [...new Set(authorizes)],
+    })
+  }
+  return routes
+}
+
+export function reviewGraphGaps(graph: GurenApplicationGraph): string[] {
+  return GRAPH_SECTIONS.flatMap((section) => {
+    const coverage = graph.coverage[section]
+    if (!coverage || coverage.status === 'complete') return coverage ? [] : [`${section}: not read`]
+    return [`${section}: ${[...new Set(coverage.reasons.map((reason) => reason.code))].join(', ') || coverage.status}`]
+  })
+}
+
+/** The block's lines, markers excluded. Deterministic: the same application gives the same bytes. */
+export function buildReviewBlock(facts: ReviewFacts): string[] {
+  const lines = [
+    'Generated by `guren change:policy`; run it again after a change to routes, policies, models or `guren.review.ts`, and `guren change:policy --check` fails while this block is stale. Edit the rules outside the markers.',
+    '',
+    '**Read by a person whatever else the change does** (`change:lane` sets these at `high`):',
+    '',
+    `- what the gate or the harness runs: ${[...GATE_FILES].sort().map(code).join(', ')}, everything under ${GATE_PREFIXES.map(code).join(', ')}, the \`package.json\` scripts and every file a script names, and this file outside the markers`,
+    '- plan records under `docs/plans/`, an existing migration edited or deleted, a destructive migration, a test that carries an acceptance id (`[AC-…]`) edited or removed, an ability removed from a policy, and a new `guren-audit-ignore` or a change to `config/audit.*`',
+  ]
+  const policy = facts.policyPaths
+  if (policy && unreadable(policy)) lines.push(`- ${code(REVIEW_POLICY_FILE)} could not be read, so every change is held at \`high\`: ${policy.unreadable}`)
+  else if (policy && policy.high.length > 0) lines.push(`- a path ${code(REVIEW_POLICY_FILE)} puts at \`high\`: ${policy.high.map(code).join(', ')}`)
+  if (policy && !unreadable(policy) && policy.medium.length > 0) lines.push(`- at \`medium\` at least: ${policy.medium.map(code).join(', ')}`)
+
+  lines.push('', '**Models with sensitive columns** (a credential-like name, or `hidden` on the model): a response, a resource or a page that sends one is a finding.', '')
+  if (unreadable(facts.models)) lines.push(`Not read: ${facts.models.unreadable}`)
+  else if (facts.models.length === 0) lines.push('None found.')
+  else lines.push('| Model | File | Columns |', '| --- | --- | --- |', ...facts.models.map((entry) => `| ${cell(entry.model)} | ${cell(entry.file)} | ${cell(entry.columns.join(', '))} |`))
+
+  lines.push('', '**Routes that change data**, with the middleware they pass through and the policies their action names. A route with no policy and no authorization middleware is one to read for who may call it.', '')
+  if (unreadable(facts.routes)) lines.push(`Not read: ${facts.routes.unreadable}`)
+  else if (facts.routes.length === 0) lines.push('None found.')
+  else {
+    lines.push('| Method | Path | Name | Action | Middleware | Signed in | Authorizes |', '| --- | --- | --- | --- | --- | --- | --- |')
+    for (const route of facts.routes) {
+      const signedIn = route.authentication === 'required' ? 'required' : route.authentication === 'guest-only' ? 'guests only' : 'not required'
+      lines.push(`| ${route.method} | ${cell(route.path)} | ${cell(route.name ?? '')} | ${cell(route.action ?? '')} | ${cell(route.middleware.join(', '))} | ${signedIn} | ${cell(route.authorizes.join(', ') || 'none found')} |`)
+    }
+  }
+
+  lines.push('', '**Routes agents can call** (`.agent()`, exposed as MCP tools): a tool that is not read-only acts for whoever holds the token.', '')
+  if (unreadable(facts.tools)) lines.push(`Not read: ${facts.tools.unreadable}`)
+  else if (facts.tools.length === 0) lines.push('None.')
+  else {
+    lines.push('| Tool | Route | Read-only | Destructive | Ability |', '| --- | --- | --- | --- | --- |')
+    for (const tool of facts.tools) lines.push(`| ${cell(tool.tool)} | ${cell(`${tool.method} ${tool.path}`)} | ${tool.readOnly ? 'yes' : 'no'} | ${tool.destructive ? 'yes' : 'no'} | ${cell(tool.ability ?? 'not derivable')} |`)
+  }
+
+  if (facts.gaps.length > 0) lines.push('', '**What the tables may be missing**, since the graph did not read these whole:', '', ...facts.gaps.map((gap) => `- ${gap}`))
+  return lines
+}
+
+function checked(text: string): { content: string } | { problems: string[] } {
+  const { problems } = readMarkedLines(text, REVIEW_MARKERS)
+  return problems.length > 0 ? { problems } : { content: text }
+}
+
+/** A new document, or the existing one with only its generated block replaced; text outside the markers is the author's. */
+export function renderReviewDoc(existing: string | undefined, content: readonly string[]): { content: string } | { problems: string[] } {
+  if (existing === undefined) {
+    return checked([
+      '# Review',
+      '',
+      'What a reviewer of this repository checks. Claude Code Review reads this file. Write the rules for this codebase under Rules, and keep each one to a line a reviewer can act on.',
+      '',
+      '## Rules',
+      '',
+      '- A change to authentication, authorization or a policy is read for who may now do what.',
+      '',
+      `## ${REVIEW_SECTION}`,
+      '',
+      ...fenced(content),
+      '',
+    ].join('\n'))
+  }
+  const { doc, problems } = readMarkedLines(existing, REVIEW_MARKERS)
+  if (problems.length > 0) return { problems }
+  return checked(spliceMarkedBlock(doc, REVIEW_BLOCK, fenced(content), { headings: new Set([REVIEW_SECTION]), newHeading: REVIEW_SECTION }).join(doc.eol))
+}
+
+/** The working tree's policy paths, for the block; the lane reads the merge base's. */
+export async function readPolicyPaths(cwd: string): Promise<ReviewFacts['policyPaths']> {
+  const source = await readFile(join(cwd, REVIEW_POLICY_FILE), 'utf8').catch(() => undefined)
+  if (source === undefined) return undefined
+  const loaded = readReviewPolicySource(source)
+  if (loaded.state !== 'read') return { unreadable: loaded.state === 'unreadable' ? loaded.reason : 'absent' }
+  const list = (value: string | string[] | undefined): string[] => (value === undefined ? [] : Array.isArray(value) ? value : [value])
+  return { high: list(loaded.policy.paths?.high), medium: list(loaded.policy.paths?.medium) }
+}
+
+/** What the block holds, read from the application: the graph introspects it, the tools load its routes file. */
+export async function loadReviewFacts(cwd: string): Promise<ReviewFacts> {
+  const [{ loadApplicationGraph }, { readModels, sensitiveIn }, { listTools }] = await Promise.all([
+    import('../application-graph-load'), import('../data-exposure-audit'), import('../tool-list'),
+  ])
+  // The block is compared across machines by `--check`, so no absolute path may reach it.
+  const why = (error: unknown): string => (error instanceof Error ? error.message : String(error)).split('\n')[0]!
+    .replaceAll(`${cwd}${sep}`, '').replace(/(?:\/[^\s/'"()]+)+\/([^\s/'"()]+)/gu, '$1')
+  const [graph, models, tools, policyPaths] = await Promise.all([
+    loadApplicationGraph({ cwd, introspect: true }).catch((error: unknown) => ({ unreadable: why(error) })),
+    readModels(cwd).catch((error: unknown) => ({ unreadable: why(error) })),
+    listTools({ appRoot: cwd }).catch((error: unknown) => ({ unreadable: why(error) })),
+    readPolicyPaths(cwd),
+  ])
+  const routeCoverage = 'unreadable' in graph ? undefined : graph.coverage.route
+  const noRoutes = routeCoverage !== undefined && routeCoverage.status !== 'complete' && !('unreadable' in graph) && !graph.nodes.some((node) => node.kind === 'route')
+  return {
+    policyPaths,
+    models: 'unreadable' in models ? models : models
+      .map((entry) => ({ model: entry.model.className, file: entry.model.file, columns: [...new Set([...(entry.columns ?? []), ...(Array.isArray(entry.hidden) ? entry.hidden : [])])].filter((column) => sensitiveIn(entry, column)) }))
+      .filter((entry) => entry.columns.length > 0)
+      .sort((a, b) => a.file.localeCompare(b.file)),
+    routes: 'unreadable' in graph ? graph : noRoutes ? { unreadable: `the routes were not registered (${[...new Set(routeCoverage.reasons.map((reason) => reason.code))].join(', ') || routeCoverage.status})` } : reviewRoutes(graph),
+    tools: 'unreadable' in tools ? tools : tools.tools.map((tool) => ({
+      tool: tool.toolName, method: tool.method, path: tool.path, readOnly: tool.annotations.readOnlyHint, destructive: tool.annotations.destructiveHint,
+      ...(tool.authorization ? { ability: tool.authorization.ability } : {}),
+    })),
+    gaps: 'unreadable' in graph ? [] : reviewGraphGaps(graph),
+  }
+}
+
+export type ReviewDocResult =
+  | { state: 'written' | 'unchanged' | 'stale' | 'missing'; file: string; gaps: string[] }
+  | { state: 'refused'; file: string; problems: string[] }
+
+/** `REVIEW.md` at the application root, its block regenerated; under `check` nothing is written. */
+export async function syncReviewDoc(cwd: string, options: { check?: boolean; facts?: ReviewFacts } = {}): Promise<ReviewDocResult> {
+  const file = join(cwd, REVIEW_DOC_FILE)
+  const facts = options.facts ?? await loadReviewFacts(cwd)
+  const existing = await readFile(file, 'utf8').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+  const rendered = renderReviewDoc(existing, buildReviewBlock(facts))
+  if ('problems' in rendered) return { state: 'refused', file, problems: rendered.problems }
+  if (rendered.content === existing) return { state: 'unchanged', file, gaps: facts.gaps }
+  if (options.check) return { state: existing === undefined ? 'missing' : 'stale', file, gaps: facts.gaps }
+  await writeFileAtomic(file, rendered.content)
+  return { state: 'written', file, gaps: facts.gaps }
+}

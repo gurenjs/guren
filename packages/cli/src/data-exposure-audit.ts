@@ -32,7 +32,7 @@ export interface DataExposureReport {
   unread: DataExposureUnread[]
 }
 
-interface ModelFacts {
+export interface ModelFacts {
   model: ColumnConsumerModel
   module: string | null
   /** JS property names; `null` when the model's table was not found. */
@@ -73,7 +73,8 @@ function credentialList(...fields: Array<string | null>): string[] | 'unreadable
   return fields.every((field): field is string => field !== null) ? fields : 'unreadable'
 }
 
-async function readModels(cwd: string): Promise<ModelFacts[]> {
+/** Each model with its columns and the lists that hide them, read statically; `guren change:policy` reads it too. */
+export async function readModels(cwd: string): Promise<ModelFacts[]> {
   const [files, tables] = await Promise.all([discoverModelFiles(cwd), parseSchemaTables(cwd).catch(() => [])])
   const models: ModelFacts[] = []
   for (const path of files) {
@@ -119,7 +120,7 @@ function list(value: string[] | 'unreadable'): string[] {
   return value === 'unreadable' ? [] : value
 }
 
-function sensitiveIn(model: ModelFacts, column: string): boolean {
+export function sensitiveIn(model: ModelFacts, column: string): boolean {
   return isSensitiveColumn(column) || list(model.hidden).includes(column)
 }
 

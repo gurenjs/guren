@@ -20,6 +20,7 @@ import { discoverPlanFiles, isPlanFileName, isPlanInput } from '../plan-check'
 import { parseSchemaSource, type SchemaTable } from '../schema-parser'
 import { auditCoverageGaps, auditFacts } from './audit-facts'
 import { LANES, type FactCode, type Lane } from './fact-classes'
+import { REVIEW_DOC_FILE, reviewDocAuthorText } from './review-markers'
 import { applyReviewPolicy, loadBaseReviewPolicy, REVIEW_POLICY_FILE, type LoadedReviewPolicy } from './review-policy'
 import type { ChangedPath, ChangeReader, ChangeSide, ResolvedChange } from './resolve'
 import type { ChangeAudits } from './revision-audit'
@@ -78,11 +79,11 @@ export function highestLane(lanes: Iterable<Lane>): Lane {
 }
 
 // `bunfig.toml` is not in the RFC's list: it names the preload and root `bun test` runs under.
-const GATE_FILES = new Set([
+export const GATE_FILES = new Set([
   '.oxlintrc.json', 'tsconfig.json', 'bunfig.toml', 'guren.arch.ts', 'guren.review.ts', 'playwright.browser.config.ts', 'e2e.browser.config.ts',
   '.claude/settings.json', '.claude/settings.local.json', '.codex/hooks.json', '.cursor/hooks.json',
 ])
-const GATE_PREFIXES = ['scripts/', 'bin/', '.github/', '.claude/hooks/', '.codex/hooks/', '.codex/rules/', '.cursor/hooks/']
+export const GATE_PREFIXES = ['scripts/', 'bin/', '.github/', '.claude/hooks/', '.codex/hooks/', '.codex/rules/', '.cursor/hooks/']
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies', 'overrides', 'resolutions', 'trustedDependencies', 'patchedDependencies']
 const LOCKFILES = new Set(['bun.lock', 'bun.lockb'])
 const AMBIENT: ReadonlyArray<{ target: string; test: (path: string) => boolean }> = [
@@ -278,6 +279,21 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     if (named || touches(entry, isGatePath)) {
       const why = named ? 'a package.json script names it' : entry.outsideApp ? 'at the repository root, what CI, the gate or the harness runs' : 'what the gate or the harness runs'
       fact([entry], { code: 'gate-input', lane: 'high', evidence: 'path', message: `${entry.path} ${entry.status}: ${why}` })
+    }
+  }
+
+  // The reviewer reads REVIEW.md: its rules are what a change could rewrite to pass review, its block `change:policy` regenerates.
+  for (const entry of inApp) {
+    if (claimed.has(entry) || !touches(entry, (path) => path === REVIEW_DOC_FILE)) continue
+    const authorText = async (side: ChangeSide): Promise<string | undefined> => {
+      const text = await read(side, sides(entry)[side])
+      return text === null ? '' : reviewDocAuthorText(text)
+    }
+    const [before, after] = [await authorText('base'), await authorText('head')]
+    if (before === undefined || after === undefined || before !== after) {
+      fact([entry], { code: 'gate-input', lane: 'high', evidence: 'static', message: `${entry.path} ${entry.status}: the rules a reviewer reads, outside its generated block${before === undefined || after === undefined ? ', whose markers do not read' : ''}` })
+    } else {
+      fact([entry], { code: 'source-edited', lane: 'medium', evidence: 'static', message: `${entry.path}: only the block \`guren change:policy\` generates changed` })
     }
   }
 
