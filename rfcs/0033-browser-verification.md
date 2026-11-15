@@ -1716,9 +1716,12 @@ changes behaviour.
     runner's cache format, which a pin upgrade may change. The skill and the
     CLI guide say that a regenerated test leaves its old recording behind and
     that `e2e cache clear` followed by `test:behaviours` records every agent
-    step again; a command that removes only the entries of tests that no
-    longer exist is proposed to the runner. Since locator steps (Open
-    Question 14) need no recording, fewer recordings are left behind.
+    step again. The runner's draft e2e-inc/e2e#1692 (one readable file per
+    test) proposes that a successful read-write run remove the recordings of
+    tests its collection proves gone; a pin upgrade that brings it changes the
+    recordings' format, so the fixture and an app's recordings are made again
+    then (§13.6). Since locator steps (Open Question 14) need no recording,
+    fewer recordings are left behind.
 16. (§13) No other agent runner was measured. Is a comparison needed before a
     blueprint names a dependency this young?
 17. (§13) `e2e explore`, its bug bash and `e2e mcp` were not measured. Should
