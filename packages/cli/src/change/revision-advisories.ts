@@ -19,21 +19,26 @@ const execute = promisify(execFile)
 
 const LOCKFILE = 'bun.lock'
 const BINARY_LOCKFILE = 'bun.lockb'
-// The registry `bun audit` asks: always the base's, so the change cannot choose the one it is judged against.
-const REGISTRY_CONFIG = new Set(['bunfig.toml', '.npmrc'])
+// The registry `bun audit` asks: the base's, so the change cannot choose the one it is judged against.
+// Not `bunfig.toml`: its `[install] production` would leave dev dependencies out of the scan.
+const REGISTRY_CONFIG = new Set(['.npmrc'])
+// Each of these overrides the registry `.npmrc` names, and the CLI may have loaded them from the head's `.env`.
+const REGISTRY_ENV = /^(?:npm_config_|bun_config_)/iu
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']
 
-/** A changed dependency file: as the lane names it, and from the repository root. */
+/** A changed dependency file: as the lane names it, and from the repository root on each side. */
 export interface ChangedDependencyFile {
   file: string
   fromRoot: string
+  /** Where the file was at the base, when the change renamed it. */
+  baseFromRoot?: string
 }
 
 /** One lockfile's advisory keys (`deps:<package>:<GHSA>`) on each side, or why they could not be read. */
 export type LockfileAdvisories = { directory: string; files: string[] } & ({ base: string[]; head: string[] } | { unavailable: string })
 
 export interface ChangeAdvisoryOptions {
-  /** `bun audit --json` in a directory; the default runs it. */
+  /** `bun audit --json` in a directory; the default runs it with no registry override from the environment. */
   scan?: (directory: string) => Promise<DependencyScanOutput | null>
 }
 
@@ -47,13 +52,13 @@ const ancestors = (fromRoot: string): string[] => {
   return segments.map((_, index) => `${segments.slice(0, segments.length - index).join('/')}/`).concat('')
 }
 
-/** The nearest directory holding a lockfile of either kind, on the head or, where the change deleted it, the base. */
-async function governingLockfile(root: string, change: ResolvedChange, fromRoot: string): Promise<{ directory: string; binary: boolean } | undefined> {
+type Governing = { directory: string; binary: boolean } | undefined
+
+/** The nearest directory holding a lockfile of either kind at `rev`. */
+async function governingLockfile(root: string, rev: string, fromRoot: string): Promise<Governing> {
   for (const directory of ancestors(fromRoot)) {
-    for (const rev of [change.head, change.mergeBase]) {
-      if (await exists(root, rev, `${directory}${LOCKFILE}`)) return { directory, binary: false }
-      if (await exists(root, rev, `${directory}${BINARY_LOCKFILE}`)) return { directory, binary: true }
-    }
+    if (await exists(root, rev, `${directory}${LOCKFILE}`)) return { directory, binary: false }
+    if (await exists(root, rev, `${directory}${BINARY_LOCKFILE}`)) return { directory, binary: true }
   }
   return undefined
 }
@@ -70,55 +75,69 @@ function declaresDependencies(manifest: string | undefined): boolean {
   }
 }
 
-async function sideKeys(root: string, change: ResolvedChange, side: ChangeSide, directory: string, scratch: string, scan: NonNullable<ChangeAdvisoryOptions['scan']>): Promise<string[] | { unavailable: string }> {
-  const rev = side === 'base' ? change.mergeBase : change.head
-  if (!(await exists(root, rev, `${directory}${LOCKFILE}`))) {
-    if (await exists(root, rev, `${directory}${BINARY_LOCKFILE}`)) return { unavailable: `the ${side} has a binary ${BINARY_LOCKFILE}, which \`bun audit\` does not read` }
+function defaultScan(directory: string): Promise<DependencyScanOutput | null> {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !REGISTRY_ENV.test(key))) as Record<string, string>
+  return startDependencyScan(directory, env)
+}
+
+const manifestOf = (path: string): string => `${posix.dirname(path) === '.' ? '' : `${posix.dirname(path)}/`}package.json`
+
+async function sideKeys(
+  root: string, rev: string, side: ChangeSide, governing: Governing, manifests: readonly string[], registryRev: string, scratch: string,
+  scan: NonNullable<ChangeAdvisoryOptions['scan']>,
+): Promise<string[] | { unavailable: string }> {
+  if (!governing) {
     // No lockfile and no dependencies is a side with no advisories; dependencies without one say nothing.
-    if (declaresDependencies(await git(root, ['show', `${rev}:${directory}package.json`]))) return { unavailable: `the ${side} declares dependencies in ${directory}package.json and has no ${LOCKFILE}` }
-    return []
+    for (const manifest of manifests) {
+      if (declaresDependencies(await git(root, ['show', `${rev}:${manifest}`]))) return { unavailable: `the ${side} declares dependencies in ${manifest} and no ${LOCKFILE} governs it` }
+    }
+    return side === 'base' ? [] : { unavailable: `no ${LOCKFILE} governs the changed files at the head` }
   }
+  const { directory } = governing
+  if (governing.binary) return { unavailable: `the ${side}'s ${directory}${BINARY_LOCKFILE} is binary, which \`bun audit\` does not read` }
   const tree = join(scratch, side)
   const lockfile = `${directory}${LOCKFILE}`
   const refused = await exportBlobs(root, rev, tree, '', (path) => path === lockfile || posix.basename(path) === 'package.json')
-    ?? await exportBlobs(root, change.mergeBase, tree, '', (path) => REGISTRY_CONFIG.has(posix.basename(path)))
+    ?? await exportBlobs(root, registryRev, tree, '', (path) => REGISTRY_CONFIG.has(posix.basename(path)))
   if (refused) return { unavailable: `the ${side}'s lockfile could not be exported: ${refused}` }
+  const output = await scan(join(tree, directory))
   const findings: AuditFinding[] = []
-  const result = dependencyFindingsFromOutput(await scan(join(tree, directory)), findings)
+  const result = dependencyFindingsFromOutput(output, findings)
   if (result.status !== 'complete') return { unavailable: findings.find((finding) => finding.key === 'deps:scan')?.message ?? `the ${side}'s dependencies could not be scanned` }
+  // `bun audit` warns on stderr, exit 0, when it skips a registry it could not ask: a report without that registry's packages.
+  const warning = output?.stderr.trim()
+  if (warning) return { unavailable: `\`bun audit\` warned on the ${side}, so its report may leave packages out: ${warning.split('\n')[0]}` }
   return findings.map((finding) => finding.key).filter((key) => key.startsWith('deps:') && key !== 'deps:none').sort()
 }
 
-/** One entry per lockfile a changed dependency file is governed by, each with the files it governs. */
+/** One entry per pair of lockfiles (the head's and the base's) governing changed dependency files. */
 export async function changeAdvisories(cwd: string, change: ResolvedChange, changed: readonly ChangedDependencyFile[], options: ChangeAdvisoryOptions = {}): Promise<LockfileAdvisories[]> {
-  const scan = options.scan ?? startDependencyScan
+  const scan = options.scan ?? defaultScan
   const root = await git(cwd, ['rev-parse', '--show-toplevel'])
   if (root === undefined) return [{ directory: '', files: changed.map((entry) => entry.file), unavailable: 'git could not name the repository root' }]
-  const groups = new Map<string, { binary: boolean; files: ChangedDependencyFile[] }>()
-  const results: LockfileAdvisories[] = []
+  const groups = new Map<string, { head: Governing; base: Governing; files: ChangedDependencyFile[] }>()
   for (const entry of changed) {
-    const lockfile = await governingLockfile(root, change, entry.fromRoot)
-    if (!lockfile) {
-      results.push({ directory: posix.dirname(entry.fromRoot), files: [entry.file], unavailable: `no ${LOCKFILE} governs ${entry.fromRoot}` })
-      continue
-    }
-    const group = groups.get(lockfile.directory) ?? { binary: lockfile.binary, files: [] }
+    const head = await governingLockfile(root, change.head, entry.fromRoot)
+    // Read on each side: a package can move from a workspace's lockfile to its own, or be renamed.
+    const base = await governingLockfile(root, change.mergeBase, entry.baseFromRoot ?? entry.fromRoot)
+    const key = `${head?.directory ?? '-'}\0${base?.directory ?? '-'}`
+    const group = groups.get(key) ?? { head, base, files: [] }
     group.files.push(entry)
-    groups.set(lockfile.directory, group)
+    groups.set(key, group)
   }
-  for (const [directory, group] of groups) {
+  const results: LockfileAdvisories[] = []
+  for (const group of groups.values()) {
     const files = group.files.map((entry) => entry.file)
-    if (group.binary) {
-      results.push({ directory, files, unavailable: `${directory}${BINARY_LOCKFILE} is binary, which \`bun audit\` does not read` })
-      continue
-    }
-    if (!group.files.some((entry) => posix.basename(entry.fromRoot) === LOCKFILE)) {
-      results.push({ directory, files, unavailable: `a manifest changed its dependencies and ${directory}${LOCKFILE} did not` })
+    const directory = group.head?.directory ?? group.base?.directory ?? ''
+    const headLockfile = group.head && !group.head.binary ? `${group.head.directory}${LOCKFILE}` : undefined
+    if (headLockfile && !group.files.some((entry) => entry.fromRoot === headLockfile)) {
+      results.push({ directory, files, unavailable: `a manifest changed its dependencies and ${headLockfile} did not` })
       continue
     }
     const scratch = await mkdtemp(join(tmpdir(), 'guren-change-advisories-'))
     try {
-      const [base, head] = [await sideKeys(root, change, 'base', directory, scratch, scan), await sideKeys(root, change, 'head', directory, scratch, scan)]
+      const base = await sideKeys(root, change.mergeBase, 'base', group.base, group.files.map((entry) => manifestOf(entry.baseFromRoot ?? entry.fromRoot)), change.mergeBase, scratch, scan)
+      const head = await sideKeys(root, change.head, 'head', group.head, group.files.map((entry) => manifestOf(entry.fromRoot)), change.mergeBase, scratch, scan)
       if (!Array.isArray(head)) results.push({ directory, files, ...head })
       else if (!Array.isArray(base)) results.push({ directory, files, ...base })
       else results.push({ directory, files, base, head })

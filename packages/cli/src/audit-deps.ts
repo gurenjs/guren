@@ -136,11 +136,12 @@ export interface DependencyScanOutput {
  * trees (a scaffolded app whose `@guren/*` are `file:` links), and a healthy
  * scan measures ~1 s, so a longer wait only buys a slower `unavailable`.
  */
-export function startDependencyScan(cwd: string): Promise<DependencyScanOutput | null> {
+export function startDependencyScan(cwd: string, env?: Record<string, string>): Promise<DependencyScanOutput | null> {
   let proc: ReturnType<typeof Bun.spawn>
   try {
     proc = Bun.spawn([process.execPath, 'audit', '--json'], {
       cwd,
+      ...(env ? { env } : {}),
       stdout: 'pipe',
       stderr: 'pipe',
       timeout: DEPENDENCY_SCAN_TIMEOUT_MS,

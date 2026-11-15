@@ -343,10 +343,13 @@ describe('judgeChangeLane', () => {
     const MANIFEST = (deps: Record<string, string>): string => JSON.stringify({ name: 'app', dependencies: deps })
     const LOCK = (version: string): string => `{ "packages": { "minimist": ["minimist@${version}"] } }\n`
     // Stands in for `bun audit --json`: an advisory for the old minimist, nothing for the patched one, and nothing for a registry named evil.
+    // `bunfig.toml` with `production` hides dev dependencies, and a lock naming `@private/` makes bun warn of a registry it skipped.
     const scan = async (directory: string) => {
       const lock = await Bun.file(join(directory, 'bun.lock')).text()
       const npmrc = await Bun.file(join(directory, '.npmrc')).text().catch(() => '')
-      const vulnerable = lock.includes('minimist@1.2.0') && !npmrc.includes('evil')
+      const bunfig = await Bun.file(join(directory, 'bunfig.toml')).text().catch(() => '')
+      if (lock.includes('@private/')) return { stdout: '{}', stderr: 'warn: skipped @private: the registry returned 404\n', exitCode: 0 }
+      const vulnerable = lock.includes('minimist@1.2.0') && !npmrc.includes('evil') && !bunfig.includes('production')
       return { stdout: vulnerable ? JSON.stringify({ minimist: [{ url: 'https://github.com/advisories/GHSA-xvch-5gv4-984h', title: 'Prototype Pollution', severity: 'critical', vulnerable_versions: '<1.2.6' }] }) : '{}', stderr: '', exitCode: vulnerable ? 1 : 0 }
     }
     async function laneWith(baseFiles: Record<string, string>, headFiles: Record<string, string | null>): Promise<ChangeLaneReport> {
@@ -388,7 +391,7 @@ describe('judgeChangeLane', () => {
 
       expect(advisoryUnjudged(stale)).toEqual([[expect.stringContaining('bun.lock did not'), ['package.json']]])
       expect(advisoryUnjudged(binary)).toEqual([[expect.stringContaining('bun.lockb is binary'), ['package.json', 'bun.lockb']]])
-      expect(advisoryUnjudged(unlocked)).toEqual([[expect.stringContaining('the base declares dependencies in package.json and has no bun.lock'), ['package.json', 'bun.lock']]])
+      expect(advisoryUnjudged(unlocked)).toEqual([[expect.stringContaining('the base declares dependencies in package.json and no bun.lock governs it'), ['package.json', 'bun.lock']]])
       expect(advisoryFacts(fresh)).toEqual([['minimist:GHSA-XVCH-5GV4-984H', ['package.json', 'bun.lock']]])
     })
 
@@ -417,7 +420,45 @@ describe('judgeChangeLane', () => {
       )
 
       expect(advisoryFacts(report)).toEqual([])
-      expect(advisoryUnjudged(report)).toEqual([[expect.stringContaining('the base declares dependencies in package.json and has no bun.lock'), ['packages/a/package.json', 'bun.lock']]])
+      expect(advisoryUnjudged(report)).toEqual([[expect.stringContaining('the base declares dependencies in packages/a/package.json and no bun.lock governs it'), ['packages/a/package.json', 'bun.lock']]])
+    })
+
+    test('should leave bunfig.toml out of the scan, and not judge a report bun audit warned it left packages out of', async () => {
+      const production = await laneWith(
+        { 'package.json': MANIFEST({}), 'bun.lock': LOCK('1.2.8'), 'bunfig.toml': '[install]\nproduction = true\n' },
+        { 'package.json': JSON.stringify({ name: 'app', devDependencies: { minimist: '1.2.0' } }), 'bun.lock': LOCK('1.2.0') },
+      )
+      const skipped = await laneWith(
+        { 'package.json': MANIFEST({}), 'bun.lock': LOCK('1.2.8') },
+        { 'package.json': MANIFEST({ '@private/lib': '1.0.0' }), 'bun.lock': '{ "packages": { "@private/lib": ["@private/lib@1.0.0"] } }\n' },
+      )
+
+      expect(advisoryFacts(production)).toEqual([['minimist:GHSA-XVCH-5GV4-984H', ['package.json', 'bun.lock']]])
+      expect(advisoryUnjudged(skipped)).toEqual([[expect.stringContaining('warned on the head'), ['package.json', 'bun.lock']]])
+    })
+
+    test('should read a renamed package from where it was, and a lockfile another fact claimed', async () => {
+      const renamed = await laneWith(
+        { 'tools/a/package.json': MANIFEST({ minimist: '1.2.0' }), 'tools/a/bun.lock': LOCK('1.2.0') },
+        { 'tools/a/package.json': null, 'tools/a/bun.lock': null, 'tools/b/package.json': MANIFEST({ minimist: '1.2.0' }), 'tools/b/bun.lock': LOCK('1.2.0') },
+      )
+      const claimed = await laneWith(
+        { 'scripts/tool/package.json': MANIFEST({ minimist: '1.2.8' }), 'scripts/tool/bun.lock': LOCK('1.2.8') },
+        { 'scripts/tool/package.json': MANIFEST({ minimist: '1.2.0' }), 'scripts/tool/bun.lock': LOCK('1.2.0') },
+      )
+
+      expect(advisoryFacts(renamed)).toEqual([])
+      expect(advisoryUnjudged(renamed)).toEqual([])
+      expect(advisoryFacts(claimed)).toEqual([['minimist:GHSA-XVCH-5GV4-984H', ['scripts/tool/bun.lock']]])
+    })
+
+    test('should find the lockfile governing each side apart, when a package leaves its workspace', async () => {
+      const report = await laneWith(
+        { 'package.json': JSON.stringify({ name: 'root', workspaces: ['packages/*'] }), 'bun.lock': LOCK('1.2.8'), 'packages/a/package.json': MANIFEST({ minimist: '1.2.8' }) },
+        { 'packages/a/package.json': MANIFEST({ minimist: '1.2.0' }), 'packages/a/bun.lock': LOCK('1.2.0') },
+      )
+
+      expect(advisoryFacts(report)).toEqual([['minimist:GHSA-XVCH-5GV4-984H', ['packages/a/package.json', 'packages/a/bun.lock']]])
     })
 
     test('should ask the registry the base names, whatever .npmrc the head adds, and read that .npmrc as a gate input', async () => {

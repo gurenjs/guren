@@ -529,14 +529,22 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
       if (gaps.length > 0) unjudged.push({ reader: 'audit-coverage', reason: `the audit read less at the head than at the base: ${gaps.join('; ')}`, lane: 'medium' })
     }
   }
-  const dependencies = [...new Set(facts.filter((entry) => entry.code === 'dependencies-changed').flatMap((entry) => entry.files))]
+  // A lockfile another fact claimed first (a gate input under `scripts/`) still says what installs.
+  for (const entry of change.paths) {
+    if (touches(entry, (path) => LOCKFILES.has(posix.basename(path)))) dependencyEntries.add(entry)
+  }
+  const dependencies = [...new Set([...dependencyEntries].map((entry) => entry.path))]
   if (dependencies.length > 0) {
     const notJudged = (why: string, files: string[]): void => {
       unjudged.push({ reader: 'dependency-advisory', reason: `${why}, so an advisory the changed dependencies bring in was not judged`, lane: 'medium', files })
     }
     if (!options.advisories) notJudged('`bun audit` was not run on the two sides', dependencies)
     else {
-      const located = [...new Map([...dependencyEntries].map((entry) => [fromRoot(entry, entry.path), { file: entry.path, fromRoot: fromRoot(entry, entry.path) }])).values()]
+      const located = [...new Map([...dependencyEntries].map((entry) => [fromRoot(entry, entry.path), {
+        file: entry.path,
+        fromRoot: fromRoot(entry, entry.path),
+        ...(entry.oldPath ? { baseFromRoot: fromRoot(entry, entry.oldPath) } : {}),
+      }])).values()]
       for (const result of await options.advisories(located)) {
         if ('unavailable' in result) {
           notJudged(result.unavailable, result.files)
