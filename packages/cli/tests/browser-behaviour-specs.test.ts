@@ -112,15 +112,17 @@ const contentsOf = (acceptance: PlanAcceptance[], options?: Parameters<typeof ge
 const STORE = behaviour('AC-posts-store-1', 'store', { description: 'a signed-in user creates a post', input: input({ title: 'First' }), expect: { redirect: '/posts/:id', inertia: 'view.posts.show' } })
 
 describe('the behaviour specs', () => {
-  test('write one test per behaviour a view sends: the start page, one agent step, then locators', () => {
+  test('write one test per behaviour a view sends: the start page, locator steps where the plan names every control, then locator pins', () => {
     const { files, unlabelled } = generate([STORE])
     expect(files.map((entry) => entry.path)).toEqual([SPEC])
     const contents = files[0]!.contents
     expect(contents.startsWith(GENERATED_HEADER)).toBe(true)
-    expect(contents).toMatch(/test\('AC-posts-store-1 \([0-9a-f]{6}\): a signed-in user creates a post', \{ session: 'browser' \}, async \(\{ app, agent, screen, browser \}\) => \{/u)
+    expect(contents).toMatch(/test\('AC-posts-store-1 \([0-9a-f]{6}\): a signed-in user creates a post', \{ session: 'browser' \}, async \(\{ app, screen, browser \}\) => \{/u)
     expect(contents).toContain("const start = await begin('AC-posts-store-1', undefined, { app, browser })")
     expect(contents).toContain("await app.open('/posts/create')")
-    expect(contents).toContain(`await agent.act('set "Title" to {title}, then use "Create"', { params: { title: 'First' } })`)
+    expect(contents).toContain("await screen.getByLabel('Title', { exact: true }).fill('First')")
+    expect(contents).toContain("await screen.getByRole('button', 'Create').or(screen.getByRole('link', 'Create')).tap()")
+    expect(contents).not.toContain('agent.act')
     expect(contents).toContain("await expect(browser).toHaveURL(landed(['/posts/', { not: ['create'] }], start))")
     expect(contents).toContain("await expect(screen.getByRole('button', 'Edit').or(screen.getByRole('link', 'Edit')).first()).toBeVisible()")
     expect(contents).not.toContain('agent.assert')
@@ -131,10 +133,13 @@ describe('the behaviour specs', () => {
 
   test('accept a dialog for the length of the step, after the locale check', () => {
     const body = contentsOf([STORE]).split("test('AC-posts-store-1")[1]!
-    const order = ['await expectDefaultLocale(browser)', "const off = await browser.onDialog('accept')", 'await agent.act(', 'await off()', 'await expect(browser)']
-    const positions = order.map((line) => body.indexOf(line))
-    expect(positions.every((position) => position > 0)).toBe(true)
-    expect([...positions].sort((a, b) => a - b)).toEqual(positions)
+    const update = contentsOf([behaviour('AC-posts-update-1', 'update', { input: input({ title: 'Again' }), expect: { redirect: '/posts/:id' } })]).split("test('AC-posts-update-1")[1]!
+    for (const [text, step] of [[body, '.fill('], [body, '.tap()'], [update, 'await agent.act(']] as const) {
+      const order = ['await expectDefaultLocale(browser)', "const off = await browser.onDialog('accept')", step, 'await off()', 'await expect(browser)']
+      const positions = order.map((line) => text.indexOf(line))
+      expect(positions.every((position) => position > 0)).toBe(true)
+      expect([...positions].sort((a, b) => a - b)).toEqual(positions)
+    }
   })
 
   test('pin a validation error on the labelled control, and leave a status unpinned', () => {
@@ -148,7 +153,9 @@ describe('the behaviour specs', () => {
     const contents = contentsOf([behaviour('AC-posts-update-1', 'update', { input: input({ title: 'Again' }), expect: { redirect: '/posts/:id' } })])
     expect(contents).toContain("const start = await begin('AC-posts-update-1', 'its start page /posts/:id/edit takes a path parameter', { app, browser })")
     expect(contents).toContain("await app.open(`/posts/${start.value('id')}/edit`)")
+    // The edit view names no action for the route, so the step ends "submit the form" and is the agent's.
     expect(contents).toContain(`await agent.act('set "Title" to {title}, then submit the form', { params: { title: 'Again' } })`)
+    expect(contents).toMatch(/async \(\{ app, agent, browser \}\)/u)
     expect(contents).toContain("await expect(browser).toHaveURL(landed(['/posts/', { known: 'id' }], start))")
   })
 
@@ -166,8 +173,48 @@ describe('the behaviour specs', () => {
     expect(contents).toContain("  await begin('AC-posts-destroy-1', 'the plan gives it a starting state', { app, browser })")
     expect(contents).not.toContain('const start =')
     expect(contents).toContain("await app.open('/posts/latest')")
-    expect(contents).toContain(`await agent.act('use "Delete"')`)
+    expect(contents).toContain("await screen.getByRole('button', 'Delete').or(screen.getByRole('link', 'Delete')).tap()")
     expect(contents).toContain("await expect(browser).toHaveURL('/posts')")
+  })
+
+  test('fill a text field, set a checkbox and pick a select option by value, and leave a date or file control to the agent', () => {
+    const fields = [titleField, { field: 'featured', label: 'Featured', input: 'checkbox' }, { field: 'category', label: 'Category', input: 'select' }] as const
+    const views = withView('view.posts.new', { form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [...fields] } })
+    const contents = contentsOf([{ ...STORE, input: input({ title: 'First', featured: false, category: 3 }) }], { views })
+    expect(contents).toContain("await screen.getByLabel('Featured', { exact: true }).uncheck()")
+    expect(contents).toContain("await screen.getByLabel('Category', { exact: true }).selectOption({ value: '3' })")
+    expect(contents).not.toContain('agent.act')
+    for (const control of ['date', 'datetime', 'file'] as const) {
+      const dated = withView('view.posts.new', { form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [titleField, { field: 'publishedOn', label: 'Published on', input: control }] } })
+      const agentStep = contentsOf([{ ...STORE, input: input({ title: 'First', publishedOn: '2026-11-15' }) }], { views: dated })
+      expect(agentStep).toContain(`await agent.act('set "Title" to {title}, set "Published on" to {publishedOn}, then use "Create"'`)
+      expect(agentStep).not.toContain('.fill(')
+    }
+    const checkedText = contentsOf([{ ...STORE, input: input({ title: 'First', featured: 'yes' }) }], { views })
+    expect(checkedText).toContain('agent.act')
+  })
+
+  test('fill a number or textarea control only with what it keeps as written, and leave a doubly labelled or hidden key to the agent', () => {
+    const form = (fields: ReadonlyArray<{ field: string; label: string; input: 'text' | 'textarea' | 'number' | 'hidden' }>) =>
+      withView('view.posts.new', { form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [...fields] } })
+    const store = (values: Record<string, unknown>, views: ViewInput[]) => contentsOf([{ ...STORE, input: input(values) }], { views })
+    const rated = form([titleField, { field: 'rating', label: 'Rating', input: 'number' }, { field: 'body', label: 'Body', input: 'textarea' }])
+    const filled = store({ title: 'First', rating: 4, body: 'One\nTwo' }, rated)
+    expect(filled).toContain("await screen.getByLabel('Rating', { exact: true }).fill('4')")
+    expect(filled).toContain("await screen.getByLabel('Body', { exact: true }).fill('One\\nTwo')")
+    expect(filled).not.toContain('agent.act')
+    expect(store({ title: 'First', rating: '4.5' }, rated)).toContain(".fill('4.5')")
+    for (const [values, views] of [
+      [{ title: 'First', rating: 'four' }, rated],
+      [{ title: 'First', rating: '1e3' }, rated],
+      [{ title: 'One\nTwo' }, rated],
+      [{ title: 'First' }, form([titleField, { field: 'title', label: 'Final title', input: 'text' }])],
+      [{ title: 'First' }, form([{ field: 'title', label: 'Title', input: 'hidden' }])],
+    ] as const) {
+      const contents = store(values, views)
+      expect(contents).toContain('await agent.act(')
+      expect(contents).not.toContain('.fill(')
+    }
   })
 
   test('run signed in whenever the app can sign in, and signed out on a guest-only route', () => {
@@ -382,12 +429,14 @@ describe('the spec files', () => {
   test('typechecks against the runner beside the config, the setup and the given.ts the blueprint writes', async () => {
     const workspace = await createTempWorkspace('guren-behaviour-spec-types-')
     try {
+      const fields = [titleField, { field: 'featured', label: 'Featured', input: 'checkbox' }, { field: 'category', label: 'Category', input: 'select' }] as const
+      const views = withView('view.posts.new', { form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [...fields] } })
       const contents = contentsOf([
-        STORE,
+        { ...STORE, input: input({ title: 'First', featured: true, category: 'news' }) },
         behaviour('AC-posts-store-2', 'store', { kind: 'validation', input: input({ title: '   ' }), expect: { errors: ['title'] } }),
         behaviour('AC-posts-update-1', 'update', { input: input({ title: 'Again' }), expect: { redirect: '/posts/:id' } }),
-      ])
-      for (const written of ['landed([', "toHaveAttribute('aria-invalid'", "begin('AC-posts-update-1'"]) expect(contents).toContain(written)
+      ], { views })
+      for (const written of ['landed([', "toHaveAttribute('aria-invalid'", "begin('AC-posts-update-1'", '.fill(', '.check()', '.selectOption({ value:', '.tap()', 'agent.act(']) expect(contents).toContain(written)
       const files: Record<string, string> = { [SPEC]: contents }
       for (const file of [BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP]) files[file] = await readFile(join(TEMPLATE_ROOT, file), 'utf8')
       // The config as --agent codex writes it; only the Claude Code one is a file the template check reads.
