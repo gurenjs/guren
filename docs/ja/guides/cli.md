@@ -129,7 +129,7 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 
 ラベルは先に作っておかないと選べないので、コマンドは `gh label create` の 3 行を出力します。Change ワークフローは scaffold の `ci.yml` と同じ gate を実行します。`ci.yml` に `bunx guren gate` のステップが残っているときはそのことを知らせるので、Change ワークフローがプルリクエストで通ったら、そのステップは消してかまいません。
 
-ルート、Policy、モデル、`guren.review.ts` を変えたら `bunx guren change:policy` を実行します。`--check` を付けると何も書かず、ブロックが古いときは終了コード 1 で終わります。アプリケーションを読み込めないときは、どちらも書かずに終了コード 1 で終わります。ブロックの内容は、アプリケーションを env ファイル(`.env` など、Bun が読み込み、git に入れないファイル)なしで登録した結果なので、手元でも CI でも同じになります。シェルが export した変数はそのまま効きます。`change:evidence` も `REVIEW.md` があれば同じ確認を行い、ブロックが古いあいだは変更を保留(`review-doc-stale`)にします。workflow は失敗させません。`change:lane` は、生成されたブロックも含めて `REVIEW.md` の編集をすべて `high` にします(`BUGBOT.md`、`APPROVAL_POLICY.md`、`.cursor/approval-policies/` も同じです)。レビューする人はファイル全体を読み、変更の中でブロックをアプリケーションと照らし合わせるものがないためです。
+ルート、Policy、モデル、`guren.review.ts` を変えたら `bunx guren change:policy` を実行します。`--check` を付けると何も書かず、ブロックが古いときは終了コード 1 で終わります。アプリケーションを読み込めないときは、どちらも書かずに終了コード 1 で終わります。ブロックの内容は、アプリケーションを env ファイル(`.env` など、Bun が読み込み、git に入れないファイル)なしで登録した結果なので、手元でも CI でも同じになります。アプリケーションのディレクトリと、コマンドを実行したディレクトリにある env ファイルが設定する値は、どの `NODE_ENV` のものでも外します。シェルが別の値で export した変数はそのまま効きます。`change:evidence` も `REVIEW.md` があれば同じ確認を行い、ブロックが古いとき(`review-doc-stale`)と、確認のためにアプリケーションを読み込めないとき(`review-doc-unchecked`)は変更を保留にします。workflow は失敗させません。`change:lane` は、生成されたブロックも含めて `REVIEW.md` の編集をすべて `high` にします(`BUGBOT.md`、`APPROVAL_POLICY.md`、`.cursor/approval-policies/` も同じです)。レビューする人はファイル全体を読み、変更の中でブロックをアプリケーションと照らし合わせるものがないためです。
 
 #### レビューのポリシー
 

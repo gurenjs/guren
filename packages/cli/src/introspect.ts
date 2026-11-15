@@ -145,11 +145,38 @@ function runOrCrash(root: string, timeoutMs: number, graph: boolean, env?: Reado
   }))
 }
 
-/** The names Bun loads from the app's env files: a Bun started on nothing else in the app root holds exactly those. */
+// Bun picks the env files by NODE_ENV, and one file may set NODE_ENV itself, so every mode is asked: unset (Bun's development), production, test.
+const ENV_FILE_MODES: ReadonlyArray<string | undefined> = [undefined, 'production', 'test']
+
+/** What a Bun started in `directory` on nothing but PATH, HOME and `mode` holds: exactly what its env files set there. */
+async function envFilesIn(directory: string, mode: string | undefined, scratch: string): Promise<Record<string, string>> {
+  const seeded: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...(mode ? { NODE_ENV: mode } : {}) }
+  // To a file, not stdout: a `bunfig.toml` preload runs for `bun -e` too and may print first.
+  const out = join(scratch, `${mode ?? 'default'}-${Math.random().toString(36).slice(2)}.json`)
+  await promisify(execFile)(bunExecutable(), ['-e', 'require("node:fs").writeFileSync(process.argv.at(-1), JSON.stringify(process.env))', '--', out], { cwd: directory, env: seeded, timeout: 30_000 })
+  const loaded = JSON.parse(await readFile(out, 'utf8')) as Record<string, string>
+  return Object.fromEntries(Object.entries(loaded).filter(([name]) => !(name in seeded)))
+}
+
+/**
+ * The names this process holds at a value one of the app's env files gives them: what Bun loaded
+ * into it from the app root, or from the directory the command started in, under any mode. A name
+ * the shell exports at another value is the shell's and stays.
+ */
 export async function envFileNames(root: string): Promise<string[]> {
-  const seeded = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...(process.env.NODE_ENV ? { NODE_ENV: process.env.NODE_ENV } : {}) }
-  const { stdout } = await promisify(execFile)(bunExecutable(), ['-e', 'process.stdout.write(JSON.stringify(Object.keys(process.env)))'], { cwd: root, env: seeded, timeout: 30_000 })
-  return (JSON.parse(stdout) as string[]).filter((name) => !(name in seeded)).sort()
+  const scratch = await mkdtemp(join(tmpdir(), 'guren-env-files-'))
+  try {
+    const directories = [...new Set([resolve(root), resolve(process.cwd())])]
+    const values = new Map<string, Set<string>>()
+    for (const directory of directories) {
+      for (const mode of ENV_FILE_MODES) {
+        for (const [name, value] of Object.entries(await envFilesIn(directory, mode, scratch))) values.set(name, (values.get(name) ?? new Set()).add(value))
+      }
+    }
+    return [...values].filter(([name, seen]) => process.env[name] !== undefined && seen.has(process.env[name]!)).map(([name]) => name).sort()
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
 }
 
 async function runIntrospection(root: string, timeoutMs: number, graph: boolean, extraEnv?: Readonly<Record<string, string>>, withoutEnvFiles = false): Promise<Introspection> {
@@ -161,8 +188,8 @@ async function runIntrospection(root: string, timeoutMs: number, graph: boolean,
   const resultFile = join(dir, 'result.json')
 
   try {
-    const started = Date.now()
     const unset = withoutEnvFiles ? await envFileNames(root) : []
+    const started = Date.now()
     const run = await runCaptured([bunExecutable(), ...(withoutEnvFiles ? ['--no-env-file'] : []), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS)], root, {
       unset,
       timeoutMs,

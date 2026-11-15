@@ -210,6 +210,10 @@ describe('the environment the block is read under', () => {
       process.env.GUREN_REVIEW_FEATURE = '1'
 
       expect(await envFileNames(workspace.dir)).toEqual(['GUREN_REVIEW_FEATURE'])
+      // The shell's own value is the shell's: only a value an env file gives is dropped.
+      process.env.GUREN_REVIEW_FEATURE = '2'
+      expect(await envFileNames(workspace.dir)).toEqual([])
+      process.env.GUREN_REVIEW_FEATURE = '1'
       expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ files: [{ file: 'REVIEW.md', state: 'unchanged' }] })
       expect(await readFile(join(workspace.dir, 'REVIEW.md'), 'utf8')).not.toContain('/feature')
     } finally {

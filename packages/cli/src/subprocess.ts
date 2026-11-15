@@ -13,7 +13,7 @@ export interface CapturedOptions {
   timeoutMs?: number
   /** Laid over this process's environment. */
   env?: Readonly<Record<string, string>>
-  /** Names left out of the child's environment, after `env` is laid over. */
+  /** Names of this process's environment left out of the child's; `env` is laid over afterwards. */
   unset?: readonly string[]
   /**
    * Run the child in its own process group, killed whole on timeout, on its exit,
@@ -53,8 +53,10 @@ export const runCaptured: CapturedExec = (command, cwd, options) =>
     }
     const grouped = Boolean(options?.processGroup) && process.platform !== 'win32'
     // Colour codes would end up inside findings an agent reads back.
-    const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', ...options?.env }
+    // `unset` takes from what this process holds, before `env`: a name the caller sets is never dropped.
+    const env: NodeJS.ProcessEnv = { ...process.env }
     for (const name of options?.unset ?? []) delete env[name]
+    Object.assign(env, { NO_COLOR: '1', FORCE_COLOR: '0', ...options?.env })
     const child = spawn(executable, args, {
       cwd,
       env,
