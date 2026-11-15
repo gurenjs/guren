@@ -1,0 +1,69 @@
+/**
+ * `guren add review` (RFC 0040 §7, §8): the Change workflow that runs `change:evidence` on every
+ * pull request and push to main, a pull request template that asks for the issue, the plan and a
+ * `lane:` label, and two issue templates. Each file is written once; `--force` replaces it.
+ */
+import { readFile, realpath } from 'node:fs/promises'
+import { join } from 'node:path'
+
+import { runGitRaw } from './changed-files'
+import { CliError } from './cli-error'
+import { scaffoldTemplateFile } from './scaffold-templates'
+import { writeRoot, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
+
+const REVIEW_FILES = [
+  'workflows/change.yml',
+  'pull_request_template.md',
+  'ISSUE_TEMPLATE/feature.md',
+  'ISSUE_TEMPLATE/defect.md',
+] as const
+
+export const REVIEW_LANE_LABELS = [
+  { name: 'lane:low', color: '2da44e', description: 'Nothing a person had to read' },
+  { name: 'lane:medium', color: 'bf8700', description: 'One person reads it' },
+  { name: 'lane:high', color: 'cf222e', description: 'A careful read, or a second person' },
+] as const
+
+const CI_WORKFLOWS = ['.github/workflows/ci.yml', '.github/workflows/ci.yaml']
+
+/**
+ * A line of a workflow that runs the bare gate, in any step form. A comment, inline or whole, and a
+ * step's `name:` only describe it. A heuristic over lines, not a YAML reading: the message says so.
+ */
+export function runsBareGate(workflow: string): boolean {
+  return workflow.split('\n').some((line) => {
+    const code = line.replace(/(^|\s)#.*$/, '')
+    return !/^\s*-?\s*name:/.test(code) && /\bguren\s+gate\b/.test(code)
+  })
+}
+
+export interface AddReviewResult {
+  created: string[]
+  /** `.github/workflows/ci.yml` still runs the bare gate, so it runs twice per change. */
+  duplicateGate: boolean
+}
+
+/** What the command prints after writing: the label commands, and the duplicate gate when there is one. */
+export function reviewNextSteps(result: Pick<AddReviewResult, 'duplicateGate'>): string[] {
+  return [
+    ...(result.duplicateGate ? ['.github/workflows/ci.yml appears to run `bunx guren gate`, which the Change workflow now runs too. Check that step, and remove it once the Change workflow has passed on a pull request.'] : []),
+    `Create the labels the pull request template asks for (a reviewer can only pick one that exists):\n${REVIEW_LANE_LABELS.map((label) => `  gh label create ${label.name} --color ${label.color} --description "${label.description}"`).join('\n')}`,
+  ]
+}
+
+export function reviewFileEntries(): ScaffoldFileEntry[] {
+  return REVIEW_FILES.map((file) => scaffoldTemplateFile('review', `.github/${file}`))
+}
+
+export async function addReview(options: WriterOptions = {}): Promise<AddReviewResult> {
+  const cwd = writeRoot(options)
+  // GitHub reads workflows from the repository root alone, and the workflow runs there.
+  // Only git's own newline goes: a directory may be named with a trailing space.
+  const top = (await runGitRaw(cwd, ['rev-parse', '--show-toplevel']))?.replace(/\n$/, '')
+  if (top && (await realpath(top)) !== (await realpath(cwd))) {
+    throw new CliError(`guren add review writes .github/ for an application at the root of its repository, and ${cwd} sits below ${top}: GitHub would never run a workflow there. Nothing was written.`)
+  }
+  const created = await writeScaffoldFiles(reviewFileEntries(), { ...options, skipExisting: !options.force })
+  const workflows = await Promise.all(CI_WORKFLOWS.map((file) => readFile(join(cwd, file), 'utf8').catch(() => '')))
+  return { created, duplicateGate: workflows.some(runsBareGate) }
+}

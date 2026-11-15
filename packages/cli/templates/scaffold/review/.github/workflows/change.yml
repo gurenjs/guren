@@ -1,0 +1,63 @@
+name: Change
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    # `edited` for a pull request retargeted to another base, whose merge base and facts change with it.
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  change:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base != null }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # The record names the pull request's own head, never GitHub's merge commit (RFC 0040 §8).
+      BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.HEAD }}
+          # The change is read from the merge base of BASE and HEAD, which a shallow clone does not hold.
+          fetch-depth: 0
+
+      # A force push names a base no branch keeps, which the checkout does not fetch. Without it the
+      # evidence holds the change as unread, never as clean; a first push names no base at all.
+      - name: Fetch the base
+        if: ${{ env.BASE != '0000000000000000000000000000000000000000' }}
+        continue-on-error: true
+        run: git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch --no-tags origin "$BASE"
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Runs the gate as `bunx guren gate --deps` does and fails exactly when it does. Everything
+      # else it could not establish is a hold in the evidence, never a failed build. Add --no-deps
+      # if this runner cannot reach the npm registry.
+      - name: Change evidence
+        run: bunx guren change:evidence --base "$BASE" --head "$HEAD"
+        env:
+          # The Bun advisory check asks api.github.com, which allows 60 unauthenticated requests an hour.
+          GITHUB_TOKEN: ${{ github.token }}
+
+      # The job's result is the gate's: a summary or an upload that fails is not a failed change.
+      - name: Summary
+        if: ${{ !cancelled() && hashFiles('.guren/evidence/evidence.md') != '' }}
+        continue-on-error: true
+        run: cat .guren/evidence/evidence.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record
+        if: ${{ !cancelled() && hashFiles('.guren/evidence/record.json') != '' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: guren-record-${{ env.HEAD }}
+          path: .guren/evidence/record.json
+          # No retention-days: the record is the base later changes are compared with, so it keeps the repository's own limit.
+          overwrite: true

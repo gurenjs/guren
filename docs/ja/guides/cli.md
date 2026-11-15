@@ -37,6 +37,7 @@ bunx guren add prototype
 bunx guren add ai --provider anthropic
 bunx guren add oauth
 bunx guren add browser-tests
+bunx guren add review
 bunx guren add ui
 ```
 
@@ -114,6 +115,16 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 ```
 
 もう一度実行すると、足りないコンポーネントだけを書き出し、残したファイルを一覧で表示します。コンポーネントはそれぞれのファイルから import します(`import { Button } from '@/resources/js/components/ui/Button'`)。index ファイルはありません。`Button.tsx` は `buttonClass()` も export しているので、`<Link>` や `<a>` をボタンの見た目にするときに使えます。`make:feature` と `make:auth` が書き出すページもこれらのコンポーネントを import し、足りないものがあればコピーします。すでにあるファイルには手を付けません。`create-guren-app` で作った新しいアプリには、最初から全部入っています。
+
+### `add review`
+
+`add review` は Change ワークフローを入れます。このワークフローは、すべてのプルリクエストと `main` への push で `bunx guren change:evidence` を実行します。GitHub はリポジトリの直下にあるワークフローしか読まないので、対象はリポジトリの直下にあるアプリケーションで、その下の階層にあるアプリケーションでは実行を断ります。書き出すファイルは 4 つで、どれも 1 回だけ書き、すでにあるファイルは `--force` を付けない限り再実行しても変えません。
+
+- `.github/workflows/change.yml` は、プルリクエストの head のコミット(GitHub のマージコミットではない)を履歴ごとチェックアウトし、どのブランチにも残っていない base(force push の後など)も取得して証拠を集めます。プルリクエストの base を付け替えたときも実行し直します。そのうえで`evidence.md` をジョブの要約に足し、`record.json` を `guren-record-<head の SHA>` としてアップロードします。ジョブが失敗するのは gate が失敗したときだけです。失敗したときも要約と記録は残り、アップロードの失敗でジョブは失敗しません。ランナーから npm のレジストリに届かないときは、証拠のステップに `--no-deps` を足します。
+- `.github/pull_request_template.md` は、issue と計画を求め、プルリクエストに表示される文で、レビューする人に `lane:` ラベルを 1 つ付けてもらいます。付けるのは、レビューする人自身が必要だと考えたレビューの重さで、ワークフローが出した下限とは別に選びます。`gh pr create --body` で作ったプルリクエストはテンプレートを使わないので、ジョブの要約にも同じ依頼を出します。
+- `.github/ISSUE_TEMPLATE/feature.md` と `defect.md`。
+
+ラベルは先に作っておかないと選べないので、コマンドは `gh label create` の 3 行を出力します。Change ワークフローは scaffold の `ci.yml` と同じ gate を実行します。`ci.yml` に `bunx guren gate` のステップが残っているときはそのことを知らせるので、Change ワークフローがプルリクエストで通ったら、そのステップは消してかまいません。
 
 ### `add browser-tests`
 
