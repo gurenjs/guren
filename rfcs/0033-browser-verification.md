@@ -1649,13 +1649,16 @@ changes behaviour.
     recording; giving the nightly a key makes it a paid run. To be decided
     before M6 is done.~~ **Decided 2026-11-15 by the deciding maintainer:**
     the recordings are committed as a fixture
-    (`scripts/smoke/fixtures/browser-behaviours/`), and `browser-measure.yml`
-    replays them every night in a job of its own, with no key and no login,
-    each replay against a database migrated from empty. A stale or missing
-    recording is not counted against the replay streak: it is what a Guren
-    change does to the recordings an app commits, which is the signal the
-    fixture is there to give, so such a night stays green and says so in a
-    warning annotation. `smoke:browser-behaviours --record` makes
+    (`scripts/smoke/fixtures/browser-behaviours/`, with `tests.json` naming
+    the tests they replay), and `browser-measure.yml` replays them every
+    night in a job of its own, with no key and no login, each replay against
+    a database migrated from empty. A stale or missing recording, or a test
+    of `tests.json` that no longer runs, leaves that night out of the replay
+    streak, neither counted nor ending it: it is what a Guren change does to
+    the recordings an app commits, which is the signal the fixture is there
+    to give, so such a night stays green and says so in a warning
+    annotation. Any other failure, and a scheduled night that kept no
+    metrics, ends the streak. `smoke:browser-behaviours --record` makes
     the fixture again under a login, refusing to write it unless it replays
     with none. A key in the nightly was the other option; it would measure
     live steps every night but never whether a change re-keys a recording,

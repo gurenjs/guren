@@ -98,10 +98,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Scheduled nights only: a dispatch measures a branch or a replay count of its own choosing.
+          # Each night gets a directory and its run.json even when it kept no metrics, which ends the streak.
           nights="$RUNNER_TEMP/behaviour-nights"
           mkdir -p "$nights"
-          for id in $(gh run list --workflow browser-measure.yml --branch main --status completed --limit 13 --json databaseId --jq '.[].databaseId'); do
-            gh run download "$id" --pattern 'browser-behaviours-*' --dir "$nights/$id" || echo "Run $id kept no behaviour metrics."
-          done
-          cp "$RUNNER_TEMP/browser-behaviours/behaviours.json" "$nights/tonight-behaviours.json" || echo "Tonight kept no behaviour metrics."
+          gh run list --workflow browser-measure.yml --branch main --event schedule --status completed --limit 13 \
+            --json databaseId,createdAt --jq '.[] | "\(.databaseId) \(.createdAt)"' > "$RUNNER_TEMP/behaviour-runs.txt"
+          while read -r id created; do
+            mkdir -p "$nights/$id"
+            printf '{"createdAt":"%s"}\n' "$created" > "$nights/$id/run.json"
+            gh run download "$id" --pattern 'browser-behaviours-*' --dir "$nights/$id" < /dev/null || echo "Run $id kept no behaviour metrics."
+          done < "$RUNNER_TEMP/behaviour-runs.txt"
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            mkdir -p "$nights/tonight"
+            printf '{"createdAt":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$nights/tonight/run.json"
+            cp "$RUNNER_TEMP/browser-behaviours/behaviours.json" "$nights/tonight/" || echo "Tonight kept no behaviour metrics."
+          fi
           bun ./scripts/smoke/browser-behaviours.ts --aggregate "$nights"
