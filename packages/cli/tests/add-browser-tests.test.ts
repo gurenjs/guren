@@ -4,7 +4,7 @@ import { join, relative } from 'node:path'
 import { consola } from 'consola'
 
 import {
-  addBrowserTests, BEHAVIOUR_DEV_PACKAGES, BEHAVIOUR_SCRIPTS, behaviourAgent, BROWSER_TEST_SCRIPT, CLAUDE_CODE_ADAPTER, CONFIG_LOCALE_LINE, pinConfigLocale,
+  addBrowserTests, agentConfig, BEHAVIOUR_AGENTS, BEHAVIOUR_DEV_PACKAGES, BEHAVIOUR_SCRIPTS, behaviourAgent, BROWSER_TEST_SCRIPT, CONFIG_LOCALE_LINE, pinConfigLocale,
 } from '../src/add-browser-tests'
 import { readAppLocale, type AppLocaleReading } from '../src/app-locale'
 import { BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP } from '../src/browser-behaviour-specs'
@@ -633,7 +633,7 @@ describe('guren add browser-tests --behaviours', () => {
     expect(behaviourAgent({ behaviours: true, agent: 'claude-code' })).toBe('claude-code')
     expect(() => behaviourAgent({ behaviours: true })).toThrow('--behaviours needs --agent claude-code or --agent codex')
     expect(() => behaviourAgent({ agent: 'claude-code' })).toThrow('it goes with --behaviours')
-    expect(() => behaviourAgent({ behaviours: true, agent: 'codex' })).toThrow('--agent codex is not available yet')
+    expect(behaviourAgent({ behaviours: true, agent: 'codex' })).toBe('codex')
     expect(() => behaviourAgent({ behaviours: true, agent: 'cursor' })).toThrow('--agent cursor names no agent')
   })
 
@@ -642,7 +642,7 @@ describe('guren add browser-tests --behaviours', () => {
     try {
       await seedInertiaApp(workspace.dir)
       await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST })
-      await expect(addBrowserTests({ install: false, behaviours: true, agent: 'codex', loadMap: async () => mapOf([POSTS]) })).rejects.toThrow('Nothing was written')
+      await expect(addBrowserTests({ install: false, behaviours: true, agent: 'cursor', loadMap: async () => mapOf([POSTS]) })).rejects.toThrow('Nothing was written')
       expect(await readFile(join(workspace.dir, 'package.json'), 'utf8')).toBe(INERTIA_MANIFEST)
       expect(await Bun.file(join(workspace.dir, BROWSER_TESTS_CONFIG)).exists()).toBe(false)
     } finally {
@@ -674,11 +674,77 @@ describe('guren add browser-tests --behaviours', () => {
 
       const install = info.mock.calls.map((call) => String(call[0])).find((line) => line.startsWith('Run: bun add -d '))
       for (const name of BEHAVIOUR_DEV_PACKAGES) expect(install).toContain(` ${name}@${cliDependencyRange('devDependencies', name)}`)
-      expect(install).toContain(` ${CLAUDE_CODE_ADAPTER.name}@${CLAUDE_CODE_ADAPTER.range}`)
+      expect(install).toContain(' @agentclientprotocol/claude-agent-acp@^0.107.0')
+      expect(install).not.toContain('codex-acp')
       // Not installed (--no-install), so no behaviour spec that would fail to import.
       expect(result.mapped.behavioursOff).toBe('e2e and @e2e-dev/web are not in package.json')
     } finally {
       info.mockRestore()
+      await workspace.cleanup()
+    }
+  })
+
+  test('writes the config for the agent it was asked for, and names that agent\'s adapter', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-codex-')
+    const info = spyOn(consola, 'info').mockImplementation((() => {}) as never)
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST })
+      const result = await addBrowserTests({ install: false, behaviours: true, agent: 'codex', loadMap: async () => mapOf([POSTS]) })
+      expect(result.behaviours).toBe('codex')
+      const config = await readFile(join(workspace.dir, BEHAVIOURS_CONFIG), 'utf8')
+      expect(config).toContain("import { codex } from '@e2e-dev/acp'\n")
+      expect(config).toContain('executor: codex({ env: emptied }) }')
+      expect(config).not.toContain('claudeCode')
+      const install = info.mock.calls.map((call) => String(call[0])).find((line) => line.startsWith('Run: bun add -d '))
+      expect(install).toContain(' @agentclientprotocol/codex-acp@^2.6.0')
+      expect(install).not.toContain('claude-agent-acp')
+    } finally {
+      info.mockRestore()
+      await workspace.cleanup()
+    }
+  })
+
+  test('rewrites only the three lines of the config that name the agent', async () => {
+    const shipped = { path: BEHAVIOURS_CONFIG, contents: await template(BEHAVIOURS_CONFIG) }
+    expect(agentConfig(shipped, 'claude-code')).toEqual(shipped)
+    const before = shipped.contents.split('\n')
+    const after = agentConfig(shipped, 'codex').contents.split('\n')
+    expect(after).toHaveLength(before.length)
+    const changed = after.filter((line, index) => line !== before[index])
+    expect(changed).toEqual([
+      "import { codex } from '@e2e-dev/acp'",
+      "  // Steps run under this machine's Codex login; a recorded step replays with no model call.",
+      '  agents: { default: { executor: codex({ env: emptied }) } },',
+    ])
+    // A template that lost one of those lines is refused rather than written for the wrong agent.
+    expect(() => agentConfig({ path: BEHAVIOURS_CONFIG, contents: shipped.contents.replace('claudeCode({', 'claude({') }, 'codex')).toThrow('to name the agent on')
+    expect(Object.keys(BEHAVIOUR_AGENTS)).toEqual(['claude-code', 'codex'])
+  })
+
+  test('says so when a config kept from an earlier run names another agent, and rewrites it under --force', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-switch-')
+    const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
+    const mismatch = (): string[] => warn.mock.calls.map((call) => String(call[0])).filter((line) => line.includes('run on another agent'))
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST })
+      const run = (agent: string, force = false) => addBrowserTests({ install: false, force, behaviours: true, agent, loadMap: async () => mapOf([POSTS]) })
+      await run('claude-code')
+      expect(mismatch()).toEqual([])
+      await run('claude-code')
+      expect(mismatch()).toEqual([])
+
+      await run('codex')
+      expect(mismatch()).toHaveLength(1)
+      expect(await readFile(join(workspace.dir, BEHAVIOURS_CONFIG), 'utf8')).toContain('claudeCode')
+
+      warn.mockClear()
+      await run('codex', true)
+      expect(mismatch()).toEqual([])
+      expect(await readFile(join(workspace.dir, BEHAVIOURS_CONFIG), 'utf8')).toContain("import { codex } from '@e2e-dev/acp'")
+    } finally {
+      warn.mockRestore()
       await workspace.cleanup()
     }
   })

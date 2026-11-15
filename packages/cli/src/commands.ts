@@ -1463,11 +1463,11 @@ const addBrowserTestsCommand = defineCommand({
     },
     agent: {
       type: 'string',
-      description: 'With --behaviours: the coding agent whose login runs the steps. claude-code; codex is not available yet.',
+      description: 'With --behaviours: the coding agent whose login runs the steps, claude-code or codex.',
     },
   },
   async run({ args }) {
-    const { addBrowserTests } = await import('./add-browser-tests')
+    const { addBrowserTests, BEHAVIOUR_AGENTS } = await import('./add-browser-tests')
     const overwritten: string[] = []
     const result = await addBrowserTests({
       force: Boolean(args.force), install: args.install, overwritten,
@@ -1488,7 +1488,7 @@ const addBrowserTestsCommand = defineCommand({
     }
     consola.info('Next: bunx playwright install chromium, then bun run test:browser. After approving a plan, run bunx guren browser:map to regenerate the specs.')
     if (result.behaviours) {
-      consola.info('Behaviour specs: bun run test:behaviours runs each step under your Claude Code login and records it; the first run downloads the Chromium build the runner pins, beside the one Playwright has. Commit .e2e/cache/, and run bun run test:behaviours:ci in CI, where a recorded step replays with no login.')
+      consola.info(`Behaviour specs: bun run test:behaviours runs each step under your ${BEHAVIOUR_AGENTS[result.behaviours].label} login and records it; the first run downloads the Chromium build the runner pins, beside the one Playwright has. Commit .e2e/cache/, and run bun run test:behaviours:ci in CI, where a recorded step replays with no login.`)
     }
   },
 })

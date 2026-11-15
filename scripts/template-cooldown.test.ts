@@ -45,7 +45,7 @@ describe('scaffoldThirdPartyRanges', () => {
     expect(sources('mysql2')).toContain('create-guren-app --db mysql')
     expect(sources('ai')).toContain('guren add ai')
     expect(sources('@ai-sdk/anthropic')).toEqual(['guren add ai'])
-    for (const name of ['e2e', '@e2e-dev/web', '@e2e-dev/acp', '@agentclientprotocol/claude-agent-acp']) {
+    for (const name of ['e2e', '@e2e-dev/web', '@e2e-dev/acp', '@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']) {
       expect(sources(name)).toEqual(['guren add browser-tests --behaviours'])
     }
     expect(sources('hono')).toContain('@guren/server')

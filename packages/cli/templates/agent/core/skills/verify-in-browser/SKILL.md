@@ -46,8 +46,8 @@ When the app has `e2e.browser.config.ts` (`guren add browser-tests
 behaviour of an approved plan: it opens the start page, performs the behaviour
 in one agent step, and checks the outcome with locators. A step replays from
 its recording under `.e2e/cache/`. Only a step with no recording, or one whose
-recording no longer matches the page, runs live, under the person's Claude Code
-login, and records again.
+recording no longer matches the page, runs live, under the person's login for
+the agent that config names (Claude Code or Codex), and records again.
 
 Run `bun run test:behaviours` (port 4319), then `git status --short .e2e/cache`:
 
@@ -63,8 +63,8 @@ Run `bun run test:behaviours` (port 4319), then `git status --short .e2e/cache`:
   `tests/browser/behaviours/given.ts` is the person's, like `a11y.ts`. The
   failed run deleted that test's recording and may have recorded others again:
   list those files and commit none of them until the person decides.
-- It exits 3: an agent step could not run (`MODEL_PROVIDER_FAILED`, no Claude
-  Code login) or the runner could not start the app. Tell the person; that
+- It exits 3: an agent step could not run (`MODEL_PROVIDER_FAILED`, no login
+  for that agent) or the runner could not start the app. Tell the person; that
   test verified nothing.
 
 CI runs `bun run test:behaviours:ci`, which replays only. When it reports

@@ -1095,11 +1095,12 @@ devDependencies (it needs them to typecheck the config template). A new version
 reaches an app when `@guren/cli` moves them, in a release whose changeset says
 whether recordings have to be made again.
 
-**Amended in implementation:** the adapter is installed at `^0.107.0`, the
-version the measurements ran on. No template imports it, so `@guren/cli` does
+**Amended in implementation:** the adapter is installed at `^0.107.0`
+(`claude-agent-acp`) or `^2.6.0` (`codex-acp`), the versions the measurements
+ran on. No template imports it, so `@guren/cli` does
 not declare it and the blueprint holds the range. The release check that every
 range a scaffold installs has cleared the three-day gate (RFC 0039 §2) reads
-these four, so no release ships a pin an app's own gate would refuse.
+each of them, so no release ships a pin an app's own gate would refuse.
 
 **No runtime dependency.** No `@guren/*` package depends on any of these at
 run time, and Guren's own code still calls no model. The runner asks the
@@ -1131,8 +1132,13 @@ do (Open Question 3).
 `guren add browser-tests --behaviours --agent <claude-code|codex>`, on an app
 that already has the blueprint or in the same run. `--behaviours` without
 `--agent` refuses and names both: whose login runs the steps is the person's
-choice, and there is no default. `--agent codex` refuses until §13.9's Codex
-item is measured. It writes, once:
+choice, and there is no default. ~~`--agent codex` refuses until §13.9's Codex
+item is measured.~~ **Amended in implementation:** `--agent codex` is offered
+since §13.9's Codex item was measured (2026-11-15). The config differs from
+the Claude Code one in the three lines that name the agent, and a recording
+made under one agent replays under the other (measured). A config kept from a
+run for the other agent is warned about, and `--force` rewrites it. It writes,
+once:
 
 - `e2e.browser.config.ts`: the target on `http://127.0.0.1:4319`, started by
   `app.command` as `guren browser:serve --port 4319` with `reuseExisting: false`,
@@ -1478,8 +1484,9 @@ Three items were added at acceptance. Nothing in §13.1 covers them:
   none was `POLICY_DENIED`, which by the rule of three puts the rate under
   5.8% at 95% confidence; 16.6 s and 65,000 tokens a step, 86% of them cache
   reads. The adapter's processes held each name of the app's env files as an
-  empty string. The blueprint still refuses `--agent codex`: offering it is a
-  change to the blueprint that follows.
+  empty string. A fake `OPENAI_API_KEY` in `.env`, emptied with the rest, did
+  not keep Codex from running a step under the ChatGPT login. The blueprint
+  offers `--agent codex` since (§13.4).
 - **A CI runner.** Every run in §13.1 was on macOS. On the Linux runner CI
   uses, `test:behaviours:ci` replays recordings made on macOS with no model
   call and no login. Measured on 2026-11-14 on Linux, not on that runner: in a

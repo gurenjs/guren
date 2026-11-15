@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { z } from 'zod'
 
-import { addBrowserTests } from '../src/add-browser-tests'
+import { addBrowserTests, agentConfig } from '../src/add-browser-tests'
 import {
   BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP, buildBehaviourSpecs, GENERATED_BEHAVIOURS_DIR,
 } from '../src/browser-behaviour-specs'
@@ -390,6 +390,8 @@ describe('the spec files', () => {
       for (const written of ['landed([', "toHaveAttribute('aria-invalid'", "begin('AC-posts-update-1'"]) expect(contents).toContain(written)
       const files: Record<string, string> = { [SPEC]: contents }
       for (const file of [BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP]) files[file] = await readFile(join(TEMPLATE_ROOT, file), 'utf8')
+      // The config as --agent codex writes it; only the Claude Code one is a file the template check reads.
+      files['e2e.codex.config.ts'] = agentConfig({ path: BEHAVIOURS_CONFIG, contents: files[BEHAVIOURS_CONFIG]! }, 'codex').contents
       await writeWorkspaceFiles(workspace.dir, files)
       // The packages declare their types through `exports`, which a `paths` entry naming the directory does not read.
       const runner = Object.fromEntries(['e2e', '@e2e-dev/web', '@e2e-dev/acp'].map((name) => [name, [join(CLI_ROOT, 'node_modules', name, 'dist/index.d.ts')]]))
