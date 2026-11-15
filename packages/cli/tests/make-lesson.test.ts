@@ -50,6 +50,9 @@ describe('makeLesson', () => {
 
       expect(content).toContain(`source: { commit: ${sha.slice(0, 12)}, kind: revert }`)
       await expect(makeLesson('Unknown', { from: 'deadbeefcafe' })).rejects.toThrow('neither a pull request number nor a commit')
+      // Bare digits are a pull request unless git reads them as this repository's commit.
+      expect(readFileSync(await makeLesson('Bare number', { from: '412' }), 'utf8')).toContain('source: { pr: 412, kind: review-finding }')
+      await expect(makeLesson('Kind alone', { kind: 'revert' })).rejects.toThrow('--kind says what --from came from')
     } finally {
       await workspace.cleanup()
     }
@@ -73,7 +76,7 @@ describe('lessons in check --docs', () => {
     try {
       await mkdir(join(workspace.dir, 'docs/lessons'), { recursive: true })
       await mkdir(join(workspace.dir, 'tests'), { recursive: true })
-      await writeFile(join(workspace.dir, 'tests/posts.test.ts'), "test('[AC-posts-1] loads through its post', () => {})\n", 'utf8')
+      await writeFile(join(workspace.dir, 'tests/posts.test.ts'), "test('[AC-posts-1] loads through its post', () => {})\ntest('[AC-posts-12] lists them', () => {})\n", 'utf8')
       await writeFile(join(workspace.dir, 'docs/lessons/0001-ok.md'), lessonDoc('status: stable\nrule: "Load through the post"\nenforcedBy: tests/posts.test.ts#AC-posts-1\nreview: 2999-01-01'), 'utf8')
       await writeFile(join(workspace.dir, 'docs/lessons/0002-norule.md'), lessonDoc('status: stable'), 'utf8')
       await writeFile(join(workspace.dir, 'docs/lessons/0003-long.md'), lessonDoc(`rule: "${'x'.repeat(161)}"`), 'utf8')
@@ -81,6 +84,8 @@ describe('lessons in check --docs', () => {
       await writeFile(join(workspace.dir, 'docs/lessons/0005-missing.md'), lessonDoc('rule: "r"\nenforcedBy: guren.arch.ts#controllers-no-drizzle'), 'utf8')
       await writeFile(join(workspace.dir, 'docs/lessons/0006-old.md'), lessonDoc('status: stable\nrule: "r"\nreview: 2020-01-01'), 'utf8')
       await writeFile(join(workspace.dir, 'docs/lessons/0007-retired.md'), lessonDoc('status: deprecated\nrule: "r"'), 'utf8')
+      await writeFile(join(workspace.dir, 'docs/lessons/0008-prefix.md'), lessonDoc('rule: "r"\nenforcedBy: tests/posts.test.ts#AC-posts-1'), 'utf8')
+      await writeFile(join(workspace.dir, 'docs/lessons/0009-noname.md'), lessonDoc('rule: "r"\nenforcedBy: tests/posts.test.ts'), 'utf8')
 
       const results = (await runDocsCheck({ cwd: workspace.dir })).filter((result) => result.key.startsWith('docs-lesson-'))
       const byKey = Object.fromEntries(results.map((result) => [result.key, result.status]))
@@ -92,7 +97,18 @@ describe('lessons in check --docs', () => {
         'docs-lesson-enforced:docs/lessons/0005-missing.md': 'fail',
         'docs-lesson-review:docs/lessons/0006-old.md': 'warn',
         'docs-lesson-superseded:docs/lessons/0007-retired.md': 'warn',
+        'docs-lesson-enforced:docs/lessons/0009-noname.md': 'fail',
       })
+
+      // A whole token: once AC-posts-1 is gone, AC-posts-12 does not keep it standing.
+      await writeFile(join(workspace.dir, 'tests/posts.test.ts'), "test('[AC-posts-12] lists them', () => {})\n", 'utf8')
+      const scoped = await runDocsCheck({ cwd: workspace.dir, changedFiles: new Set(['tests/posts.test.ts']) })
+      expect(scoped.filter((result) => result.key.startsWith('docs-lesson-enforced:')).map((result) => result.key).sort()).toEqual([
+        'docs-lesson-enforced:docs/lessons/0001-ok.md',
+        'docs-lesson-enforced:docs/lessons/0004-enforced.md',
+        'docs-lesson-enforced:docs/lessons/0008-prefix.md',
+        'docs-lesson-enforced:docs/lessons/0009-noname.md',
+      ])
     } finally {
       await workspace.cleanup()
     }

@@ -296,6 +296,9 @@ function changedScope(refs: DocRef[], changedFiles: Set<string> | null): Set<str
 
   const inScope = (ref: DocRef): boolean => {
     if (changedFiles.has(ref.path)) return true
+    // The check a lesson points at goes stale by an edit to that file, not to the lesson.
+    const enforced = ref.lesson?.enforcedBy?.split('#', 1)[0]
+    if (enforced && targetChanged(posix.normalize(enforced))) return true
     if (ref.entities.some((entity) => changedModelNames.has(entity.toLowerCase()))) return true
     if (
       ref.related.some((entry) =>
@@ -336,11 +339,13 @@ async function checkLesson(cwd: string, ref: DocRef, probes: PathProbes): Promis
     const [file, name] = lesson.enforcedBy.split('#', 2) as [string, string | undefined]
     const target = posix.normalize(file)
     const text = isAppRootRelative(target) && (await probes.exists(target)) ? await readFile(`${cwd}/${target}`, 'utf8').catch(() => undefined) : undefined
-    if (text === undefined) {
-      results.push(check(`docs-lesson-enforced:${ref.path}`, `${ref.path} enforcedBy`, 'fail', `\`enforcedBy: ${lesson.enforcedBy}\` names ${file}, which does not exist.`, 'Name the check as <file>#<name>, relative to the application root.', ref.path))
-    } else if (name !== undefined && name !== '' && !text.includes(name)) {
-      results.push(check(`docs-lesson-enforced:${ref.path}`, `${ref.path} enforcedBy`, 'fail', `\`enforcedBy: ${lesson.enforcedBy}\`: ${file} does not mention ${name}.`, 'Name a rule or a test the file holds, as it is written there.', ref.path))
+    const failEnforced = (message: string): void => {
+      results.push(check(`docs-lesson-enforced:${ref.path}`, `${ref.path} enforcedBy`, 'fail', message, 'Name the check as <file>#<name>: a file relative to the application root, and a rule or a test it holds, as it is written there.', ref.path))
     }
+    if (!name) failEnforced(`\`enforcedBy: ${lesson.enforcedBy}\` names no check in ${file}: a file existing is not a check that catches the failure.`)
+    else if (text === undefined) failEnforced(`\`enforcedBy: ${lesson.enforcedBy}\` names ${file}, which is not a file in the application.`)
+    // As a whole token: `AC-posts-1` must not pass on `AC-posts-12`, nor `no-drizzle` on `controllers-no-drizzle`.
+    else if (!new RegExp(`(?<![\\w-])${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?![\\w-])`, 'u').test(text)) failEnforced(`\`enforcedBy: ${lesson.enforcedBy}\`: ${file} does not hold ${name}.`)
   }
   if (lesson.review !== undefined) {
     if (!ISO_DATE.test(lesson.review)) {

@@ -74,7 +74,7 @@ const ENTITY_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/
  * the decision before the code, and `guren check --docs` failing until the
  * model lands is the intended "implementation missing" signal.
  */
-export async function resolveAdrPrefill(entity: string, moduleName?: string): Promise<AdrPrefill> {
+export async function resolveAdrPrefill(entity: string, moduleName?: string, dir = ADR_DIR): Promise<AdrPrefill> {
   if (!ENTITY_NAME_RE.test(entity)) {
     throw new Error(
       `Invalid entity name "${entity}" — it is written into YAML frontmatter, so it must be a plain class identifier (letters, digits, underscores).`,
@@ -98,7 +98,7 @@ export async function resolveAdrPrefill(entity: string, moduleName?: string): Pr
     if (matches.length > 1) {
       const locations = matches.map((m) => m.module ?? 'app').sort()
       throw new Error(
-        `Model "${entity}" exists in multiple locations: ${locations.join(', ')}. Pass --module <name> to target that module's model (and docs/adr).`,
+        `Model "${entity}" exists in multiple locations: ${locations.join(', ')}. Pass --module <name> to target that module's model (and ${dir}).`,
       )
     }
     consola.warn(

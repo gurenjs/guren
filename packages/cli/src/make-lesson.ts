@@ -38,17 +38,25 @@ function quoted(value: string, what: string): string {
 }
 
 async function sourceOf(from: string, kind: LessonSourceKind | undefined): Promise<string> {
-  const pr = /^#?(\d+)$/u.exec(from.trim())
-  if (pr) return `{ pr: ${pr[1]}, kind: ${kind ?? 'review-finding'} }`
-  const [sha] = (await runGit(process.cwd(), ['rev-parse', '--verify', '--quiet', `${from.trim()}^{commit}`])) ?? []
+  const value = from.trim()
+  const pr = (number: string): string => `{ pr: ${number}, kind: ${kind ?? 'review-finding'} }`
+  if (/^#\d+$/u.test(value)) return pr(value.slice(1))
+  const [sha] = (await runGit(process.cwd(), ['rev-parse', '--verify', '--quiet', `${value}^{commit}`])) ?? []
+  // Bare digits can name a pull request or a commit abbreviation; git decides, and `#412` says which.
+  if (/^\d+$/u.test(value)) {
+    if (!sha) return pr(value)
+    if (value.length < 7) throw new Error(`--from ${value} is both a pull request number and a commit abbreviation here: write #${value} for the pull request, or the commit's full SHA.`)
+  }
   if (!sha) throw new Error(`--from ${from} is neither a pull request number nor a commit in this repository.`)
   const [subject] = (await runGit(process.cwd(), ['log', '-1', '--format=%s', sha])) ?? []
   return `{ commit: ${sha.slice(0, 12)}, kind: ${kind ?? (subject?.startsWith('Revert ') ? 'revert' : 'escaped-defect')} }`
 }
 
+/** Six months on, clamped to the last day of that month: Aug 31 gives Feb 28, not Mar 3. */
 function reviewDate(now: Date): string {
-  const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + REVIEW_AFTER_MONTHS, now.getUTCDate()))
-  return date.toISOString().slice(0, 10)
+  const month = now.getUTCMonth() + REVIEW_AFTER_MONTHS
+  const lastDay = new Date(Date.UTC(now.getUTCFullYear(), month + 1, 0)).getUTCDate()
+  return new Date(Date.UTC(now.getUTCFullYear(), month, Math.min(now.getUTCDate(), lastDay))).toISOString().slice(0, 10)
 }
 
 function lessonTemplate(title: string, rule: string, prefill: AdrPrefill, paths: string[], source: string | undefined, actor: string | null, now: Date): string {
@@ -85,8 +93,9 @@ export async function makeLesson(title: string, options: MakeLessonOptions = {})
   const paths = (options.paths ?? []).map((path) => path.trim()).filter((path) => path.length > 0)
   for (const path of paths) quoted(path, 'path')
   if (options.kind && !LESSON_SOURCE_KINDS.includes(options.kind)) throw new Error(`--kind is one of ${LESSON_SOURCE_KINDS.join(', ')}.`)
+  if (options.kind && !options.from) throw new Error('--kind says what --from came from, and needs it.')
   const [prefill, actor, source] = await Promise.all([
-    options.entity ? resolveAdrPrefill(options.entity, moduleName) : { entities: [], related: [] },
+    options.entity ? resolveAdrPrefill(options.entity, moduleName, LESSON_DIR) : { entities: [], related: [] },
     resolveActor(options.by),
     options.from ? sourceOf(options.from, options.kind) : undefined,
   ])
