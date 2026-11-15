@@ -124,14 +124,14 @@ export const changePolicyCommand = defineCommand({
     }
     const refused = result.files.filter((file) => file.state === 'refused')
     if (refused.length > 0) {
-      throw new CliError(refused.map((file) => `${file.file} has guren:review markers that cannot be rewritten safely, so nothing was written there:\n${(file.problems ?? []).map((problem) => `  ${problem}`).join('\n')}`).join('\n'))
+      throw new CliError(`Nothing was written: ${refused.map((file) => `${file.file} cannot be rewritten as generated:\n${(file.problems ?? []).map((problem) => `  ${problem}`).join('\n')}`).join('\n')}`)
     }
     for (const file of result.files) {
       console.log({
         written: `Wrote ${file.file}.`,
         unchanged: `${file.file} is current.`,
         stale: `${file.file} is stale: run \`guren change:policy\`.`,
-        missing: `${file.file} does not exist: run \`guren change:policy\` (or \`guren add review\`).`,
+        missing: `${file.file} does not exist: run \`guren change:policy\`${file.file === REVIEW_DOC_FILE ? ' (or `guren add review`)' : ''}.`,
         refused: '',
       }[file.state])
     }

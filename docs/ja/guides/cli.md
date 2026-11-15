@@ -125,7 +125,7 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 - `.github/workflows/change.yml` は、プルリクエストの head のコミット(GitHub のマージコミットではない)を履歴ごとチェックアウトし、どのブランチにも残っていない base(force push の後など)も取得して証拠を集めます。プルリクエストの base を付け替えたときも実行し直します。そのうえで`evidence.md` をジョブの要約に足し、`record.json` を `guren-record-<head の SHA>` としてアップロードします。ジョブが失敗するのは gate が失敗したときだけです。失敗したときも要約と記録は残り、アップロードの失敗でジョブは失敗しません。ランナーから npm のレジストリに届かないときは、証拠のステップに `--no-deps` を足します。
 - `.github/pull_request_template.md` は、issue と計画を求め、プルリクエストに表示される文で、レビューする人に `lane:` ラベルを 1 つ付けてもらいます。付けるのは、レビューする人自身が必要だと考えたレビューの重さで、ワークフローが出した下限とは別に選びます。`gh pr create --body` で作ったプルリクエストはテンプレートを使わないので、ジョブの要約にも同じ依頼を出します。
 - `.github/ISSUE_TEMPLATE/feature.md` と `defect.md`。
-- エージェントのハーネスに Cursor が入っているアプリ(`bunx guren agent:init --target cursor`)では `APPROVAL_POLICY.md` も書きます。Cursor の PR Routing & Approval が読むファイルで、Change の証拠が `eligible for low` のプルリクエストだけを承認するように指示します。このとき `change:policy` は `.cursor/BUGBOT.md` も保ちます。Bugbot がレビューのたびに読み込むファイルで、中身は REVIEW.md と同じブロックです。表まで入れると Bugbot の上限の 30,000 文字に収まらないときは、常に人が読むものだけに絞ります。
+- エージェントのハーネスに Cursor が入っているアプリ(`bunx guren agent:init --target cursor`)では `APPROVAL_POLICY.md` も書きます。Cursor の PR Routing & Approval が読むファイルで、Change の証拠が `eligible for low` のプルリクエストだけを承認するように指示します。このとき `change:policy` は `.cursor/BUGBOT.md` も保ちます。Bugbot がレビューのたびに読み込むファイルで、中身は REVIEW.md と同じブロックです。書いたルールも含めたファイル全体が Bugbot の読む 30,000 文字を超えるときは、常に人が読むものだけに絞ります。それでも超えるときはどちらのファイルも書かずに止まります。
 
 ラベルは先に作っておかないと選べないので、コマンドは `gh label create` の 3 行を出力します。Change ワークフローは scaffold の `ci.yml` と同じ gate を実行します。`ci.yml` に `bunx guren gate` のステップが残っているときはそのことを知らせるので、Change ワークフローがプルリクエストで通ったら、そのステップは消してかまいません。
 

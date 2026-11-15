@@ -7,8 +7,7 @@
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { hasHarnessComponent } from './agent-harness'
-import { REVIEW_DOC_FILE } from './change/review-doc'
+import { REVIEW_DOC_FILE, reviewsWithCursor } from './change/review-doc'
 import { runGitRaw } from './changed-files'
 import { CliError } from './cli-error'
 import { scaffoldTemplateFile } from './scaffold-templates'
@@ -55,8 +54,8 @@ export interface AddReviewResult {
 export function reviewNextSteps(result: Pick<AddReviewResult, 'duplicateGate' | 'reviewDoc'>): string[] {
   const reviewDoc = result.reviewDoc
   return [
-    ...(reviewDoc === 'kept' ? [`${REVIEW_DOC_FILE} exists and was left as it is; \`bunx guren change:policy\` regenerates its block.`] : []),
-    ...(typeof reviewDoc === 'object' ? [`${REVIEW_DOC_FILE} was not written: ${reviewDoc.failed}. Run \`bunx guren change:policy\` once the application loads.`] : []),
+    ...(reviewDoc === 'kept' ? [`${REVIEW_DOC_FILE} exists and was left as it is; \`bunx guren change:policy\` regenerates its block, and keeps \`.cursor/BUGBOT.md\` for an app that reviews with Cursor.`] : []),
+    ...(typeof reviewDoc === 'object' ? [`${REVIEW_DOC_FILE} was not written: ${reviewDoc.failed}. Run \`bunx guren change:policy\` once that is fixed.`] : []),
     ...(result.duplicateGate ? ['.github/workflows/ci.yml appears to run `bunx guren gate`, which the Change workflow now runs too. Check that step, and remove it once the Change workflow has passed on a pull request.'] : []),
     `Create the labels the pull request template asks for (a reviewer can only pick one that exists):\n${REVIEW_LANE_LABELS.map((label) => `  gh label create ${label.name} --color ${label.color} --description "${label.description}"`).join('\n')}`,
   ]
@@ -75,25 +74,25 @@ export async function addReview(options: WriterOptions = {}): Promise<AddReviewR
   if (top && (await realpath(top)) !== (await realpath(cwd))) {
     throw new CliError(`guren add review writes .github/ for an application at the root of its repository, and ${cwd} sits below ${top}: GitHub would never run a workflow there. Nothing was written.`)
   }
-  const cursor = await hasHarnessComponent(cwd, 'cursor')
+  const cursor = await reviewsWithCursor(cwd)
   const created = await writeScaffoldFiles(reviewFileEntries({ cursor }), { ...options, skipExisting: !options.force })
   const workflows = await Promise.all(CI_WORKFLOWS.map((file) => readFile(join(cwd, file), 'utf8').catch(() => '')))
-  const { reviewDoc, written } = await writeReviewDoc(cwd)
+  const { reviewDoc, written } = await writeReviewDoc(cwd, cursor)
   return { created: [...created, ...written.map((file) => join(cwd, file))], duplicateGate: workflows.some(runsBareGate), reviewDoc }
 }
 
 /** The author owns REVIEW.md once it exists, `--force` or not: only its generated block is ever rewritten, by `change:policy`. */
-async function writeReviewDoc(cwd: string): Promise<{ reviewDoc: AddReviewResult['reviewDoc']; written: string[] }> {
+async function writeReviewDoc(cwd: string, cursor: boolean): Promise<{ reviewDoc: AddReviewResult['reviewDoc']; written: string[] }> {
   // A stat that fails for any reason but absence keeps the file: never write over what could not be read.
   if (await stat(join(cwd, REVIEW_DOC_FILE)).then(() => true, (error: NodeJS.ErrnoException) => error.code !== 'ENOENT')) return { reviewDoc: 'kept', written: [] }
   const failed = (why: string) => ({ reviewDoc: { failed: why }, written: [] })
   try {
     const { syncReviewDoc } = await import('./change/review-doc')
-    const result = await syncReviewDoc(cwd)
+    const result = await syncReviewDoc(cwd, { cursor })
     if (result.state === 'unreadable') return failed(`the application could not be read (${result.reasons.join('; ')})`)
     const refused = result.files.filter((file) => file.state === 'refused')
     const written = result.files.filter((file) => file.state === 'written').map((file) => file.file)
-    if (refused.length > 0) return { reviewDoc: { failed: refused.map((file) => `${file.file}: ${(file.problems ?? []).join('; ')}`).join('; ') }, written }
+    if (refused.length > 0) return { reviewDoc: { failed: refused.map((file) => `${file.file}: ${(file.problems ?? []).join('; ')}`).join('; ') }, written: [] }
     return { reviewDoc: 'written', written }
   } catch (error) {
     return failed((error instanceof Error ? error.message : String(error)).split('\n')[0]!)

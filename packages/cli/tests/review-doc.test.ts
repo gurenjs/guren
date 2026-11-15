@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 
 import { judgeChangeLane } from '../src/change/lane'
 import { openChange, resolveChange } from '../src/change/resolve'
-import { BUGBOT_BUDGET, buildReviewBlock, renderBugbotDoc, renderReviewDoc, syncReviewDoc, type ReviewFacts } from '../src/change/review-doc'
+import { BUGBOT_LIMIT, buildReviewBlock, renderBugbotDoc, renderReviewDoc, syncReviewDoc, type ReviewFacts } from '../src/change/review-doc'
 import { APPLICATION_GRAPH_RELATIONS_FIXTURE } from './application-graph-fixture'
 import { createTempRoot, createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 
@@ -89,24 +89,50 @@ describe('renderReviewDoc', () => {
 })
 
 describe('renderBugbotDoc', () => {
-  test('should carry the same block, and past the budget only what is always read with a pointer to REVIEW.md', () => {
+  test('should carry the same block, and when the whole file would pass Bugbot\'s limit only what is always read with a pointer to REVIEW.md', () => {
     const block = buildReviewBlock(FACTS)
     const small = renderBugbotDoc(undefined, block)
     expect('content' in small && small.content).toContain(block.join('\n'))
     expect('content' in small && small.content.startsWith('# Bugbot\n')).toBe(true)
 
-    const many = buildReviewBlock({ ...FACTS, routes: Array.from({ length: 400 }, (_, index) => ({ method: 'POST', path: `/things/${index}`, middleware: ['auth'], authorizes: [] })) })
+    const routes = (count: number): ReviewFacts['routes'] => Array.from({ length: count }, (_, index) => ({ method: 'POST', path: `/things/${index}`, middleware: ['auth'], authorizes: [] }))
+    const many = buildReviewBlock({ ...FACTS, routes: routes(600) })
     const capped = renderBugbotDoc(undefined, many)
     if (!('content' in capped)) throw new Error(capped.problems.join('; '))
-    expect(many.join('\n').length).toBeGreaterThan(BUGBOT_BUDGET)
-    expect(capped.content.length).toBeLessThan(BUGBOT_BUDGET)
+    expect(many.join('\n').length).toBeGreaterThan(BUGBOT_LIMIT)
+    expect(capped.content.length).toBeLessThanOrEqual(BUGBOT_LIMIT)
     expect(capped.content).toContain('- a new CSRF exemption')
     expect(capped.content).toContain('The tables of what this application holds are in `REVIEW.md`')
     expect(capped.content).not.toContain('/things/1')
+
+    // Measured over the file: a block that fits alone is cut once the author's rules push the file past the limit.
+    const fits = buildReviewBlock({ ...FACTS, routes: routes(200) })
+    const rules = `# Bugbot\n\n## Rules\n\n${'- Read every change to billing twice.\n'.repeat(500)}\n## What this application holds\n\n<!-- guren:review generated -->\nold\n<!-- /guren:review generated -->\n`
+    expect(fits.join('\n').length).toBeLessThan(BUGBOT_LIMIT)
+    const pushed = renderBugbotDoc(rules, fits)
+    expect('content' in pushed && pushed.content.length).toBeLessThanOrEqual(BUGBOT_LIMIT)
+    expect('content' in pushed && pushed.content).not.toContain('/things/1')
+
+    const tooLong = renderBugbotDoc(`# Bugbot\n\n## Rules\n\n${'- Read every change to billing twice.\n'.repeat(900)}\n`, fits)
+    expect(tooLong).toEqual({ problems: [expect.stringContaining('even without the tables')] })
   })
 })
 
 describe('syncReviewDoc', () => {
+  test('should write neither file when one refuses', async () => {
+    const workspace = await createTempWorkspace('guren-review-doc-refuse-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, { '.cursor/BUGBOT.md': '# Bugbot\n\n<!-- guren:review generated -->\nunclosed\n' })
+
+      const result = await syncReviewDoc(workspace.dir, { facts: FACTS, cursor: true })
+
+      expect(result).toMatchObject({ state: 'read', files: [{ file: 'REVIEW.md', state: 'unchanged', held: true }, { file: '.cursor/BUGBOT.md', state: 'refused' }] })
+      expect(await Bun.file(join(workspace.dir, 'REVIEW.md')).exists()).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   test('should write nothing for an application it cannot read', async () => {
     const workspace = await createTempWorkspace('guren-review-doc-empty-')
     try {
@@ -222,6 +248,24 @@ describe('change:lane on REVIEW.md', () => {
       await dispose()
     }
   }
+
+  test('should read Cursor\'s review files as gate inputs wherever they sit', async () => {
+    const repo = join(ROOT, `repo-${repos++}`)
+    await mkdir(repo, { recursive: true })
+    await git(repo, ['init', '--initial-branch=main'])
+    await git(repo, ['config', 'user.email', 'test@example.com'])
+    await git(repo, ['config', 'user.name', 'Test'])
+    const base = await commit(repo, { 'package.json': '{"name":"app"}' })
+    const head = await commit(repo, { '.cursor/BUGBOT.md': 'rules\n', 'APPROVAL_POLICY.md': 'approve\n', 'app/Billing/APPROVAL_POLICY.md': 'approve\n', '.cursor/approval-policies/ROUTING.md': '- product: app\n' })
+    const change = await resolveChange(repo, base, head)
+    const { reader, dispose } = openChange(repo, change)
+    try {
+      const report = await judgeChangeLane(change, reader)
+      expect(report.facts.filter((fact) => fact.code === 'gate-input').flatMap((fact) => fact.files).sort()).toEqual(['.cursor/BUGBOT.md', '.cursor/approval-policies/ROUTING.md', 'APPROVAL_POLICY.md', 'app/Billing/APPROVAL_POLICY.md'])
+    } finally {
+      await dispose()
+    }
+  })
 
   test('should read any edit as high, its generated block included, since the reviewer reads both', async () => {
     expect((await laneOf(doc('one route', 'Policies need no reading.'))).facts.map(({ code, lane }) => [code, lane])).toEqual([['gate-input', 'high']])

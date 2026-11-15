@@ -231,19 +231,24 @@ export function renderReviewDoc(existing: string | undefined, content: readonly 
   return renderDoc(existing, content, REVIEW_TEMPLATE)
 }
 
-/** Bugbot cuts a rule file at 30,000 characters; the block stays well under it, so the author's rules above it keep room. */
-export const BUGBOT_BUDGET = 20_000
+/** Bugbot cuts a rule file at 30,000 characters, measured over the whole file, the author's rules included. */
+export const BUGBOT_LIMIT = 30_000
 
 /**
- * `.cursor/BUGBOT.md`: the same block, or, past {@link BUGBOT_BUDGET}, what is always read by a
- * person and a pointer to `REVIEW.md` for the tables, since a cut block would end mid-table.
+ * `.cursor/BUGBOT.md`: the same block, or, where the whole file would pass {@link BUGBOT_LIMIT},
+ * what is always read by a person and a pointer to `REVIEW.md` for the tables, since a cut file
+ * would end mid-table. A file that passes it even so is refused rather than written to be cut.
  */
 export function renderBugbotDoc(existing: string | undefined, content: readonly string[]): { content: string } | { problems: string[] } {
-  const full = content.join('\n')
-  if (full.length <= BUGBOT_BUDGET) return renderDoc(existing, content, BUGBOT_TEMPLATE)
+  const full = renderDoc(existing, content, BUGBOT_TEMPLATE)
+  if (!('content' in full) || full.content.length <= BUGBOT_LIMIT) return full
   const tables = content.findIndex((line) => line.startsWith('**Models with sensitive columns**'))
   const head = tables === -1 ? content : content.slice(0, tables)
-  return renderDoc(existing, [...head, `The tables of what this application holds are in \`${REVIEW_DOC_FILE}\`: ${full.length} characters, past what fits here under Bugbot's 30,000.`], BUGBOT_TEMPLATE)
+  const cut = renderDoc(existing, [...head, `The tables of what this application holds are in \`${REVIEW_DOC_FILE}\`: with them this file would pass the ${BUGBOT_LIMIT.toLocaleString('en-US')} characters Bugbot reads.`], BUGBOT_TEMPLATE)
+  if ('content' in cut && cut.content.length > BUGBOT_LIMIT) {
+    return { problems: [`${cut.content.length} characters even without the tables, past the ${BUGBOT_LIMIT.toLocaleString('en-US')} Bugbot reads: shorten the rules outside the markers or the paths in guren.review.ts`] }
+  }
+  return cut
 }
 
 /** The working tree's policy, for the block; the lane reads the merge base's. */
@@ -336,29 +341,30 @@ export interface ReviewDocFile {
   file: string
   state: 'written' | 'unchanged' | 'stale' | 'missing' | 'refused'
   problems?: string[]
+  /** Not written, though it would have been, because another file refused. */
+  held?: true
 }
 
 export type ReviewDocResult = { state: 'unreadable'; reasons: string[] } | { state: 'read'; files: ReviewDocFile[]; gaps: string[] }
 
-/** Whether the app reviews with Cursor too: its harness has the Cursor component, or a `.cursor/BUGBOT.md` exists. */
-async function reviewsWithCursor(cwd: string): Promise<boolean> {
-  if (await readFile(join(cwd, BUGBOT_FILE), 'utf8').then(() => true, () => false)) return true
+/** Whether the app reviews with Cursor: its agent harness has the Cursor component, the one opt-in `add review` and `change:policy` share. */
+export async function reviewsWithCursor(cwd: string): Promise<boolean> {
   const { hasHarnessComponent } = await import('../agent-harness')
   return hasHarnessComponent(cwd, 'cursor')
 }
 
-async function syncFile(path: string, render: (existing: string | undefined) => { content: string } | { problems: string[] }, check: boolean, relative: string): Promise<ReviewDocFile> {
+type Planned = { file: ReviewDocFile; path: string; content?: string }
+
+async function planFile(path: string, relative: string, render: (existing: string | undefined) => { content: string } | { problems: string[] }, check: boolean): Promise<Planned> {
   const existing = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return undefined
     throw error
   })
   const rendered = render(existing)
-  if ('problems' in rendered) return { file: relative, state: 'refused', problems: rendered.problems }
-  if (rendered.content === existing) return { file: relative, state: 'unchanged' }
-  if (check) return { file: relative, state: existing === undefined ? 'missing' : 'stale' }
-  await mkdir(dirname(path), { recursive: true })
-  await writeFileAtomic(path, rendered.content)
-  return { file: relative, state: 'written' }
+  if ('problems' in rendered) return { path, file: { file: relative, state: 'refused', problems: rendered.problems } }
+  if (rendered.content === existing) return { path, file: { file: relative, state: 'unchanged' } }
+  if (check) return { path, file: { file: relative, state: existing === undefined ? 'missing' : 'stale' } }
+  return { path, file: { file: relative, state: 'written' }, content: rendered.content }
 }
 
 /**
@@ -370,7 +376,16 @@ export async function syncReviewDoc(cwd: string, options: { check?: boolean; fac
   if ('unreadable' in loaded) return { state: 'unreadable', reasons: loaded.unreadable }
   const block = buildReviewBlock(loaded.facts)
   const check = options.check === true
-  const files = [await syncFile(join(cwd, REVIEW_DOC_FILE), (existing) => renderReviewDoc(existing, block), check, REVIEW_DOC_FILE)]
-  if (options.cursor ?? await reviewsWithCursor(cwd)) files.push(await syncFile(join(cwd, BUGBOT_FILE), (existing) => renderBugbotDoc(existing, block), check, BUGBOT_FILE))
-  return { state: 'read', files, gaps: loaded.facts.gaps }
+  const planned = [await planFile(join(cwd, REVIEW_DOC_FILE), REVIEW_DOC_FILE, (existing) => renderReviewDoc(existing, block), check)]
+  if (options.cursor ?? await reviewsWithCursor(cwd)) planned.push(await planFile(join(cwd, BUGBOT_FILE), BUGBOT_FILE, (existing) => renderBugbotDoc(existing, block), check))
+  // Every file is judged before the first write, so one that refuses leaves the other as it was.
+  if (planned.some((entry) => entry.file.state === 'refused')) {
+    return { state: 'read', files: planned.map((entry) => (entry.file.state === 'written' ? { file: entry.file.file, state: 'unchanged' as const, held: true } : entry.file)), gaps: loaded.facts.gaps }
+  }
+  for (const entry of planned) {
+    if (entry.content === undefined) continue
+    await mkdir(dirname(entry.path), { recursive: true })
+    await writeFileAtomic(entry.path, entry.content)
+  }
+  return { state: 'read', files: planned.map((entry) => entry.file), gaps: loaded.facts.gaps }
 }
