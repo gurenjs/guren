@@ -1742,9 +1742,19 @@ changes behaviour.
     made when the runner goes ninety days without a release, ships a change
     the next pin upgrade cannot follow, drops its Apache-2.0 licence, or
     another runner documents both of the first two.
-17. (§13) `e2e explore`, its bug bash and `e2e mcp` were not measured. Should
+17. ~~(§13) `e2e explore`, its bug bash and `e2e mcp` were not measured. Should
     the skill name any of them as a live-drive option, as the Alternatives
-    section allowed for?
+    section allowed for?~~ **Decided 2026-11-15 by the deciding maintainer:**
+    the skill names none of them. Measured on the measurement app with the
+    config the blueprint writes (0.23.1): `e2e explore` exits 2 with
+    `MODEL_UNAVAILABLE` before any model call, since it runs the runner's
+    built-in agent in place of the configured ACP executor and needs an AI SDK
+    model on a provider key, which §13 keeps out of an app's config. A bug bash
+    runs `e2e explore`, so it fails the same way. `e2e mcp` needs no model, but
+    it is an MCP server, which §5 tells the agent never to install or register.
+    The live drive stays on the browser tools the client already has, recorded
+    through `browser:record`. Revisit if `e2e explore` accepts the configured
+    executor.
 18. ~~(§13.6) Should a behaviour run have a database of its own, migrated from
     empty at the start of each run? The config could pass `browser:serve` a
     `--database-url` and migrate it, which keeps a run's rows out of the
