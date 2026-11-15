@@ -158,10 +158,28 @@ async function envFilesIn(directory: string, mode: string | undefined, scratch: 
   return Object.fromEntries(Object.entries(loaded).filter(([name]) => !(name in seeded)))
 }
 
+// The files Bun reads under the three modes; a line among them that interpolates (`$`) expands against whatever environment reads it.
+const ENV_FILES = ['.env', '.env.local', ...['development', 'production', 'test'].flatMap((mode) => [`.env.${mode}`, `.env.${mode}.local`])]
+const ENV_LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/u
+
+/** The names an env file in `directory` gives a value that interpolates another variable. */
+async function interpolatedIn(directory: string): Promise<string[]> {
+  const names: string[] = []
+  for (const file of ENV_FILES) {
+    const text = await readFile(join(directory, file), 'utf8').catch(() => '')
+    for (const line of text.split(/\r?\n/u)) {
+      const match = ENV_LINE.exec(line)
+      if (match && match[2]!.includes('$')) names.push(match[1]!)
+    }
+  }
+  return names
+}
+
 /**
  * The names this process holds at a value one of the app's env files gives them: what Bun loaded
  * into it from the app root, or from the directory the command started in, under any mode. A name
- * the shell exports at another value is the shell's and stays.
+ * the shell exports at another value is the shell's and stays, unless a file interpolates it, since
+ * an interpolated value expands against this process's environment and matches nothing the probe saw.
  */
 export async function envFileNames(root: string): Promise<string[]> {
   const scratch = await mkdtemp(join(tmpdir(), 'guren-env-files-'))
@@ -173,7 +191,11 @@ export async function envFileNames(root: string): Promise<string[]> {
         for (const [name, value] of Object.entries(await envFilesIn(directory, mode, scratch))) values.set(name, (values.get(name) ?? new Set()).add(value))
       }
     }
-    return [...values].filter(([name, seen]) => process.env[name] !== undefined && seen.has(process.env[name]!)).map(([name]) => name).sort()
+    const interpolated = new Set((await Promise.all(directories.map(interpolatedIn))).flat())
+    return [...values]
+      .filter(([name, seen]) => process.env[name] !== undefined && (seen.has(process.env[name]!) || interpolated.has(name)))
+      .map(([name]) => name)
+      .sort()
   } finally {
     await rm(scratch, { recursive: true, force: true })
   }
