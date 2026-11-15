@@ -5,13 +5,13 @@
  */
 import { posix } from 'node:path'
 
-import type { File } from '@babel/types'
+import type { File, ImportDeclaration, Statement } from '@babel/types'
 
 import { formatDestructiveFinding, judgeMigrations, readMigrationSources } from '@guren/orm/internal/migration-guard'
 
 import { parseSourceFile } from '../parse-cache'
 import { bracketedTokens, isAcceptanceId } from '../plan/acceptance-status'
-import { nodeText, objectLiteral, topLevelDeclaration, walk } from '../ast-walk'
+import { objectLiteral, topLevelDeclaration, walk } from '../ast-walk'
 import { TEST_FILE_PATTERN, toPosixRelative } from '../discovery'
 import { extractClassDeclaration } from '../model-parser'
 import { isPlanRevisionsDirName, planSlug } from '../plan/beside'
@@ -543,33 +543,49 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   }
 }
 
+const AST_POSITION_KEYS = new Set(['start', 'end', 'loc', 'range', 'extra', 'leadingComments', 'trailingComments', 'innerComments'])
+
+/** A node as its syntax, without positions or comments: a string literal keeps its exact value. */
+const canonical = (node: unknown): string => JSON.stringify(node, (key, value: unknown) => (AST_POSITION_KEYS.has(key) ? undefined : value))
+
 /**
  * A schema file without its tables, its drizzle imports and an object listing only tables: what
- * `schema-changed` does not account for, compared per statement. A function inside a table
- * (`$defaultFn`, `$onUpdate`, the extra config) is kept: it runs, and no column property states it.
+ * `schema-changed` does not account for, compared per statement as syntax. Inside a table what no
+ * column property states is kept: a function (but a foreign key's), a spread, a tagged template and
+ * any other name.
  */
 function schemaResidue(text: string | null, file: string | undefined, tables: readonly SchemaTable[]): string | undefined {
   if (text === null || file === undefined) return ''
   const ast = parseSourceFile(text, file)
   if (!ast) return undefined
   const names = new Set(tables.map((table) => table.identifier))
+  const framework = (statement: Statement): statement is ImportDeclaration => statement.type === 'ImportDeclaration' && /^(?:drizzle-orm|@guren\/orm)(?:\/|$)/.test(statement.source.value) && statement.specifiers.length > 0
+  const builders = new Set(ast.program.body.filter(framework).flatMap((statement) => statement.specifiers.map((specifier) => specifier.local.name)))
   const listsTables = (init: unknown): boolean => {
     const object = objectLiteral(init as never)
     return object !== null && object.properties.every((property) => property.type === 'ObjectProperty' && property.shorthand && property.value.type === 'Identifier' && names.has(property.value.name))
   }
   const kept: string[] = []
   for (const statement of ast.program.body) {
-    if (statement.type === 'ImportDeclaration' && /^(?:drizzle-orm|@guren\/orm)(?:\/|$)/.test(statement.source.value) && statement.specifiers.length > 0) continue
+    if (framework(statement)) continue
     const declaration = topLevelDeclaration(statement)
-    if (declaration?.declarations.every((declarator) => declarator.id.type === 'Identifier' && (names.has(declarator.id.name) || listsTables(declarator.init)))) {
-      walk(declaration, (node) => {
-        if (node.type !== 'ArrowFunctionExpression' && node.type !== 'FunctionExpression') return
-        kept.push(nodeText(text, node as { start?: number | null; end?: number | null }).replace(/\s+/g, ' '))
-        return false
-      })
+    if (!declaration?.declarations.every((declarator) => declarator.id.type === 'Identifier' && (names.has(declarator.id.name) || listsTables(declarator.init)))) {
+      kept.push(canonical(statement))
       continue
     }
-    kept.push(text.slice(statement.start!, statement.end!).replace(/\s+/g, ' '))
+    walk(declaration.declarations.map((declarator) => declarator.init), (node, parent) => {
+      // `.references(() => users.id)`: the foreign key the column reader states.
+      const body = node.type === 'ArrowFunctionExpression' ? (node.body as { type?: string; object?: { type?: string; name?: string }; computed?: boolean }) : undefined
+      if (body?.type === 'MemberExpression' && !body.computed && body.object?.type === 'Identifier' && names.has(String(body.object.name))) return false
+      if (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression' || node.type === 'SpreadElement' || node.type === 'TaggedTemplateExpression') {
+        kept.push(canonical(node))
+        return false
+      }
+      if (node.type !== 'Identifier' || builders.has(String(node.name)) || names.has(String(node.name))) return
+      const named = parent as { type?: string; key?: unknown; property?: unknown; computed?: boolean } | null
+      if (!named?.computed && ((named?.type === 'MemberExpression' && named.property === node) || (named?.type === 'ObjectProperty' && named.key === node))) return
+      kept.push(canonical(node))
+    })
   }
   return kept.join('\n')
 }

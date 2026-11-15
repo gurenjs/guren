@@ -52,13 +52,13 @@ const BASE_FILES: Record<string, string> = {
 const policySource = (body: string): string => `import { defineReviewPolicy } from '@guren/cli/review'\n\nexport default defineReviewPolicy(${body})\n`
 
 /** The lane of one commit on a base that carries `policy` as its `guren.review.ts`. */
-async function laneWithPolicy(policy: string | null, files: Record<string, string | null>): Promise<ChangeLaneReport> {
+async function laneWithPolicy(policy: string | null, files: Record<string, string | null>, baseFiles: Record<string, string> = {}): Promise<ChangeLaneReport> {
   const repo = join(ROOT, `repo-${repos++}`)
   await mkdir(repo, { recursive: true })
   await git(repo, ['init', '--initial-branch=main'])
   await git(repo, ['config', 'user.email', 'test@example.com'])
   await git(repo, ['config', 'user.name', 'Test'])
-  const base = await commit(repo, { ...BASE_FILES, ...(policy === null ? {} : { 'guren.review.ts': policy }) })
+  const base = await commit(repo, { ...BASE_FILES, ...baseFiles, ...(policy === null ? {} : { 'guren.review.ts': policy }) })
   const head = await commit(repo, files)
   const change = await resolveChange(repo, base, head)
   const { reader, dispose } = openChange(repo, change)
@@ -137,7 +137,7 @@ export default review({
   })
 
   test('should refuse a glob outside the * and ** it matches with', () => {
-    for (const glob of ['app/Billing/', './app/Billing/**', '/app/Billing/**', 'app/{Billing,Payments}/**', 'app/Billi?/**', 'app/[A-Z]*', '../config/**', 'app/./Billing/**', 'app//Billing/**', '.']) {
+    for (const glob of ['app/Billing/', './app/Billing/**', '/app/Billing/**', 'app/{Billing,Payments}/**', 'app/Billi?/**', 'app/[A-Z]*', '../config/**', 'app/./Billing/**', 'app//Billing/**', '.', 'app/@(Billing|Payments)/**', 'app/+(Billing)/**']) {
       expect(unreadable(policySource(`{ paths: { high: [${JSON.stringify(glob)}] } }`))).toContain(`paths.high has ${JSON.stringify(glob)}`)
     }
     expect(unreadable(policySource('{ review: { reviewer: "bugbot", timeoutMinutes: 1e400 } }'))).toContain('review.timeoutMinutes')
@@ -183,6 +183,10 @@ describe('applyReviewPolicy', () => {
       ['review-path', 'high', 'config/session.ts', ['config/session.ts']],
       ['review-path', 'medium', 'config/**', ['config/app.ts']],
     ])
+  })
+
+  test('should match a path git allows a newline in', () => {
+    expect(applyReviewPolicy([], [path('app/Billing/Invoice\nService.ts')], { paths: { high: 'app/Billing/**' } })).toHaveLength(1)
   })
 
   test('should read a glob with no wildcard as a file or a directory, as CODEOWNERS does', () => {
@@ -261,6 +265,24 @@ describe('judgeChangeLane: what a lowering may not reach', () => {
     const config = (body: string): string => `${PG_SCHEMA_FIXTURE}\nexport const tags = pgTable('tags', { id: serial('id').primaryKey() }, (t) => { ${body}; return [] })\n`
     const before = await laneWithPolicy(lowering, { 'db/schema.ts': config('void t') })
     expect(before.facts.map(({ code, lane }) => [code, lane])).toEqual([['schema-changed', 'low'], ['source-edited', 'medium']])
+  })
+
+  test('should read a schema edit as syntax, and keep what no column property states at medium', async () => {
+    const schema = (users: string, beside = ''): string => `import { pgTable, serial, integer, text } from '@guren/orm/drizzle/pg'
+import { BASE_COLUMNS, OTHER_COLUMNS } from './columns'
+
+export const users = pgTable('users', { id: serial('id').primaryKey(), ${users} })
+${beside}`
+    const tags = "export const tags = pgTable('tags', { id: serial('id').primaryKey(), userId: integer('user_id').references(() => users.id) })\n"
+    const schemaLane = async (base: string, head: string): Promise<string[][]> =>
+      (await laneWithPolicy(lowering, { 'db/schema.ts': head }, { 'db/schema.ts': base })).facts.map(({ code, lane }) => [code, lane])
+
+    expect(await schemaLane(schema('...BASE_COLUMNS'), schema('...OTHER_COLUMNS', tags))).toEqual([['schema-changed', 'low'], ['source-edited', 'medium']])
+    expect(await schemaLane(schema("name: text('name')", "export const label = 'one two'\n"), schema("name: text('name')", `export const label = 'one  two'\n${tags}`))).toEqual([['schema-changed', 'low'], ['source-edited', 'medium']])
+    expect(await schemaLane(schema("name: text('name')"), schema("name: text(sideEffect() ?? 'name')", tags))).toContainEqual(['source-edited', 'medium'])
+
+    const foreignKey = await laneWithPolicy(lowering, { 'db/schema.ts': `${PG_SCHEMA_FIXTURE.replace('pgTable, serial', 'pgTable, integer, serial')}\n${tags}` })
+    expect(foreignKey.facts.map(({ code, lane }) => [code, lane])).toEqual([['schema-changed', 'low']])
   })
 
   test('should not call existing source moved into app/Policies a policy the change added', async () => {
