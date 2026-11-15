@@ -1366,7 +1366,10 @@ behaviour's `actor` means is still Open Question 5.
   recording is made against one. Nothing in the blueprint gives the developer
   that database yet (Open Question 18).
 - **An upgrade** of the runner may re-key every recording (§13.3). The
-  `@guren/cli` release that moves the versions says so.
+  `@guren/cli` release that moves the versions says so. The nightly fixture
+  (Open Question 13) then reads `missing` or `stale`, and the PR that moves
+  the pins runs `bun run smoke:browser-behaviours --record` and commits the
+  fixture it writes.
 
 #### 13.7 What the agent can reach
 
@@ -1640,11 +1643,27 @@ changes behaviour.
     `views[].states` names (a form showing its 422 errors, an empty list)? A
     visit reaches only the landing state; another state needs a drive the map
     does not describe yet.
-13. (§13) How is replay measured nightly with no model key? The measurement
+13. ~~(§13) How is replay measured nightly with no model key? The measurement
     app is scaffolded fresh each night and has no recordings. Committing its
     recordings as a fixture makes every scaffold change read as a stale
     recording; giving the nightly a key makes it a paid run. To be decided
-    before M6 is done.
+    before M6 is done.~~ **Decided 2026-11-15 by the deciding maintainer:**
+    the recordings are committed as a fixture
+    (`scripts/smoke/fixtures/browser-behaviours/`, with `tests.json` naming
+    the tests they replay), and `browser-measure.yml` replays them every
+    night in a job of its own, with no key and no login, each replay against
+    a database migrated from empty. A stale or missing recording, or a test
+    of `tests.json` that no longer runs, leaves that night out of the replay
+    streak, neither counted nor ending it: it is what a Guren change does to
+    the recordings an app commits, which is the signal the fixture is there
+    to give, so such a night stays green and says so in a warning
+    annotation. Any other failure, and a scheduled night that kept no
+    metrics, ends the streak. `smoke:browser-behaviours --record` makes
+    the fixture again under a login, refusing to write it unless it replays
+    with none. A key in the nightly was the other option; it would measure
+    live steps every night but never whether a change re-keys a recording,
+    and live steps change only with the runner's pins, which are measured
+    when they move.
 14. (§13) Should the generator write plain Playwright steps where the view's
     form labels every input (§13.10) and an agent step only where that rule
     runs out? One suite would then hold two kinds of step, and the app would
