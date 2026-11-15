@@ -28,12 +28,16 @@ export const BEHAVIOURS_GIVEN_FILE = `${BEHAVIOURS_DIR}/given.ts`
 export const GENERATED_BEHAVIOURS_DIR = `${BEHAVIOURS_DIR}/generated`
 /** The runner and its browser engine: `browser:map` writes a behaviour spec only for an app declaring both. */
 export const BEHAVIOUR_PACKAGES = ['e2e', '@e2e-dev/web'] as const
+/** The package the config imports its executor from: a behaviour that needs an agent step is written only for an app declaring it. */
+export const BEHAVIOUR_AGENT_PACKAGE = '@e2e-dev/acp'
 /** The session the auth setup saves and a signed-in test runs under. */
 export const BEHAVIOUR_SESSION = 'browser'
 
 export interface BehaviourSpecOptions {
   /** The setup test signs in, so a route requiring a user can be driven. */
   signIn: boolean
+  /** The config names an agent (the app declares `@e2e-dev/acp`), so a behaviour the plan does not fully name can be an agent step. */
+  agent: boolean
 }
 
 interface BehaviourCase {
@@ -56,6 +60,7 @@ const REASONS = {
   query: 'its route is a QUERY, which no form or link sends',
   noView: 'no view of the plan sends its route, so nothing says which page to start on',
   signIn: 'needs a signed-in user, and the app has no password sign-in for the setup test',
+  agent: `needs an agent step, since the plan does not name every control it touches, and the app declares no ${BEHAVIOUR_AGENT_PACKAGE}, so the config names no agent`,
   outcome: 'no outcome a browser can check after the step: every expectation is a status or a database row, an errors key has no labelled field, or what it lands on already showed before the step',
   input: 'an input is not a string, a number or a boolean, and nothing says how a control takes it',
   control: 'its input is one a control of the form may stop or change before a request is sent (an empty, missing, out-of-range or malformed value), so no error would be rendered; TestApp pins it',
@@ -348,6 +353,7 @@ function behaviourCase(file: string, plan: Plan, behaviour: PlanAcceptance, app:
   if (pins.length === 0) return skip(REASONS.outcome)
 
   const located = locatorSteps(view, form, route.id, inputs)
+  if (located === undefined && !options.agent) return skip(REASONS.agent)
   const instruction = located === undefined ? buildInstruction(view, form, route.id, inputs) : undefined
   const needsGiven = startParameters.size > 0
     ? `its start page ${start.path} takes a path parameter`

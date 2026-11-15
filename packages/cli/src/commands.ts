@@ -1463,7 +1463,7 @@ const addBrowserTestsCommand = defineCommand({
     },
     agent: {
       type: 'string',
-      description: 'With --behaviours: the coding agent whose login runs the steps, claude-code or codex.',
+      description: 'With --behaviours: the coding agent whose login runs the steps, claude-code or codex, or none to run only the behaviours the plan names every control of, as locator steps.',
     },
   },
   async run({ args }) {
@@ -1487,7 +1487,9 @@ const addBrowserTestsCommand = defineCommand({
       consola.info('Set BROWSER_TEST_PASSWORD in .env: the browser account is seeded with it.')
     }
     consola.info('Next: bunx playwright install chromium, then bun run test:browser. After approving a plan, run bunx guren browser:map to regenerate the specs.')
-    if (result.behaviours) {
+    if (result.behaviours === 'none') {
+      consola.info('Behaviour specs: bun run test:behaviours runs the behaviours the plan names every control of, as locator steps with no agent, login or recording; a behaviour that needs an agent step is skipped naming why. The first run downloads the Chromium build the runner pins, beside the one Playwright has. Run it in CI as bun run test:behaviours:ci.')
+    } else if (result.behaviours) {
       consola.info(`Behaviour specs: bun run test:behaviours runs each step under your ${BEHAVIOUR_AGENTS[result.behaviours].label} login and records it; the first run downloads the Chromium build the runner pins, beside the one Playwright has. Commit .e2e/cache/, and run bun run test:behaviours:ci in CI, where a recorded step replays with no login.`)
     }
   },

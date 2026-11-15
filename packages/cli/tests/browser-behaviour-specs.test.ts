@@ -101,10 +101,10 @@ function mapOf(plan: Plan, routes: BrowserMapRoute[] = Object.values(ROUTES), ov
 const withView = (id: string, change: Partial<ViewInput>): ViewInput[] => VIEWS.map((view) => view.id === id ? { ...view, ...change } : view)
 const withRoute = (from: BrowserMapRoute, to: Partial<BrowserMapRoute>): BrowserMapRoute[] => Object.values(ROUTES).map((entry) => entry === from ? { ...entry, ...to } : entry)
 
-function generate(acceptance: PlanAcceptance[], options: { signIn?: boolean; routes?: BrowserMapRoute[]; map?: Partial<BrowserMap>; views?: ViewInput[] } = {}) {
+function generate(acceptance: PlanAcceptance[], options: { signIn?: boolean; agent?: boolean; routes?: BrowserMapRoute[]; map?: Partial<BrowserMap>; views?: ViewInput[] } = {}) {
   const plan = planOf(acceptance, options.views)
   const plans: ApprovedPlanInput[] = [{ file: FILE, plan }]
-  return buildBehaviourSpecs(mapOf(plan, options.routes, options.map), plans, { signIn: options.signIn ?? true }, new Map())
+  return buildBehaviourSpecs(mapOf(plan, options.routes, options.map), plans, { signIn: options.signIn ?? true, agent: options.agent ?? true }, new Map())
 }
 
 const contentsOf = (acceptance: PlanAcceptance[], options?: Parameters<typeof generate>[1]): string => generate(acceptance, options).files[0]!.contents
@@ -215,6 +215,15 @@ describe('the behaviour specs', () => {
       expect(contents).toContain('await agent.act(')
       expect(contents).not.toContain('.fill(')
     }
+  })
+
+  test('skip a behaviour that needs an agent step when the config names no agent, and still write the located ones', () => {
+    const update = behaviour('AC-posts-update-1', 'update', { input: input({ title: 'Again' }), expect: { redirect: '/posts/:id' } })
+    const contents = contentsOf([STORE, update], { agent: false })
+    expect(contents).toContain("await screen.getByRole('button', 'Create').or(screen.getByRole('link', 'Create')).tap()")
+    expect(contents).toContain("test.skip('AC-posts-update-1: does AC-posts-update-1: needs an agent step, since the plan does not name every control it touches, and the app declares no @e2e-dev/acp, so the config names no agent'")
+    expect(contents).not.toContain('agent.act')
+    expect(() => transpiler.transformSync(contents)).not.toThrow()
   })
 
   test('run signed in whenever the app can sign in, and signed out on a guest-only route', () => {
@@ -363,7 +372,7 @@ describe('the spec files', () => {
   test('one per plan with a behaviour, none for a plan with none, and a shared slug refuses', () => {
     expect(generate([]).files).toEqual([])
     const plan = planOf([STORE])
-    expect(() => buildBehaviourSpecs(mapOf(plan), [{ file: FILE, plan }], { signIn: true }, new Map([['posts', [FILE, 'posts.plan.json']]]))).toThrow('share the slug posts')
+    expect(() => buildBehaviourSpecs(mapOf(plan), [{ file: FILE, plan }], { signIn: true, agent: true }, new Map([['posts', [FILE, 'posts.plan.json']]]))).toThrow('share the slug posts')
   })
 
   test('browser:map writes them on its four conditions, whatever the Playwright config, and removes them when one goes', async () => {
@@ -441,6 +450,7 @@ describe('the spec files', () => {
       for (const file of [BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP]) files[file] = await readFile(join(TEMPLATE_ROOT, file), 'utf8')
       // The config as --agent codex writes it; only the Claude Code one is a file the template check reads.
       files['e2e.codex.config.ts'] = agentConfig({ path: BEHAVIOURS_CONFIG, contents: files[BEHAVIOURS_CONFIG]! }, 'codex').contents
+      files['e2e.none.config.ts'] = agentConfig({ path: BEHAVIOURS_CONFIG, contents: files[BEHAVIOURS_CONFIG]! }, 'none').contents
       await writeWorkspaceFiles(workspace.dir, files)
       // The packages declare their types through `exports`, which a `paths` entry naming the directory does not read.
       const runner = Object.fromEntries(['e2e', '@e2e-dev/web', '@e2e-dev/acp'].map((name) => [name, [join(CLI_ROOT, 'node_modules', name, 'dist/index.d.ts')]]))
@@ -478,7 +488,7 @@ describe('the spec files', () => {
     const workspace = await createTempWorkspace('guren-browser-map-behaviours-planned-')
     try {
       const plan = planOf([STORE])
-      const ask = (): ReturnType<typeof runBrowserMap> => runBrowserMap({ cwd: workspace.dir, write: false, map: mapOf(plan), plans: [{ file: FILE, plan }], behaviours: { signIn: true } })
+      const ask = (): ReturnType<typeof runBrowserMap> => runBrowserMap({ cwd: workspace.dir, write: false, map: mapOf(plan), plans: [{ file: FILE, plan }], behaviours: { signIn: true, agent: true } })
       await writeWorkspaceFiles(workspace.dir, { 'package.json': '{ "name": "app" }\n' })
 
       const asked = await ask()
