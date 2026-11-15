@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "trace-1",
+  "createdAt": "2026-11-15T05:02:37.383Z",
+  "payload": {
+    "actions": [
+      {
+        "name": "type",
+        "summary": "type \"Measured post\" into textbox \"Title\"",
+        "target": {
+          "role": "textbox",
+          "name": "Title"
+        },
+        "value": "Measured post"
+      },
+      {
+        "name": "tap",
+        "summary": "tap button \"Create\"",
+        "target": {
+          "role": "button",
+          "name": "Create"
+        }
+      }
+    ],
+    "executor": {
+      "name": "claude-code",
+      "version": "1"
+    },
+    "recordedFor": {
+      "testId": "tests/browser/behaviours/generated/browser-measure.e2e.ts::AC-posts-store-1%20%286f22d9%29%3A%20a%20signed-in%20user%20creates%20a%20post",
+      "targetId": "web",
+      "instructionDigest": "6636f461f4811d0ba0791ffe7c660775c893e3f5920a2108a4daca28b9055368",
+      "paramsDigest": "bdaacd560fc98e3c803c9cd09f0ca51450d3471f901ecf6af8cf9024ab463650",
+      "callIndex": 0,
+      "agent": "default"
+    },
+    "summary": "Typed \"Measured post\" into Title and tapped Create. App navigated to /posts/2, which shows \"title: Measured post\".",
+    "startPath": "/posts/create",
+    "endPath": "/posts/2",
+    "endAnchors": [
+      {
+        "role": "link",
+        "name": "Back"
+      },
+      {
+        "text": "title: Measured post"
+      },
+      {
+        "text": "body:"
+      },
+      {
+        "role": "link",
+        "name": "Edit"
+      },
+      {
+        "role": "button",
+        "name": "Delete"
+      },
+      {
+        "role": "document",
+        "name": "Post"
+      }
+    ],
+    "goneAnchors": [
+      {
+        "text": "Title"
+      },
+      {
+        "role": "textbox",
+        "name": "Title"
+      },
+      {
+        "text": "Body"
+      },
+      {
+        "role": "textbox",
+        "name": "Body"
+      },
+      {
+        "role": "button",
+        "name": "Create"
+      },
+      {
+        "role": "document",
+        "name": "New Post"
+      }
+    ],
+    "endWaitMs": 15040,
+    "keyedBy": {
+      "cacheSchema": "trace-1",
+      "policyVersion": "conservative/6",
+      "project": "a172cedcae47474b615c54d510a5d84a8dea3032e958587430b413538be3f333",
+      "platform": "web",
+      "engineName": "web",
+      "engineSpiVersion": 1,
+      "appIdentity": "3c350cd48a600d41bdf1159bfa6fbe4f3c2fe210c2e643ef1b41e2c9a62e0898",
+      "agentContextDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

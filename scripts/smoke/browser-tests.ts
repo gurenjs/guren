@@ -10,21 +10,11 @@
 import { appendFile, mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { cpus, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import process from 'node:process'
 
-import type { z } from 'zod'
-
 import { A11Y_SPEC_FILE, A11Y_TITLE_PREFIX } from '../../packages/cli/src/browser-specs'
-import type { PlanDraftSchema } from '../../packages/cli/src/plan/schema'
-import { PLAN_VERSION } from '../../packages/cli/src/plan/version'
-import { inheritedEnv } from './inherited-env'
-import { assertSingleInstalledCopies, ensureBuiltPackages, rewriteAppDependencies, vendorLocalPackages } from './local-packages'
-
-const repoRoot = resolve(import.meta.dir, '../..')
-const CLI = join(repoRoot, 'packages/cli/src/bin.ts')
-const CREATE_APP = join(repoRoot, 'packages/create-app/src/cli.ts')
-const PLAN_FILE = 'docs/plans/browser-measure/plan.json'
+import { approveMeasurementPlan, CLI, measurementPlan, mustRun, run, scaffoldMeasurementApp } from './browser-measure-app'
 /** A start takes about 6 s on the CI runner; the cap keeps a dispatched run inside the workflow's timeout. */
 const MAX_STARTS = 60
 const DEFAULT_STARTS = 40
@@ -44,19 +34,6 @@ function startCount(): number {
   return Number(raw)
 }
 
-// The CLI runs from this checkout's source while the app installs its own @guren/orm.
-const appEnv = (): Record<string, string | undefined> => ({ ...inheritedEnv(), GUREN_QUIET_DUPLICATE_ORM: '1' })
-
-async function run(cwd: string, command: string[], env: Record<string, string | undefined> = {}): Promise<number> {
-  const child = Bun.spawn(command, { cwd, env: { ...appEnv(), ...env }, stdout: 'inherit', stderr: 'inherit' })
-  return child.exited
-}
-
-async function mustRun(cwd: string, command: string[], env?: Record<string, string | undefined>): Promise<void> {
-  const code = await run(cwd, command, env)
-  if (code !== 0) throw new Error(`${command.join(' ')} exited ${code} in ${cwd}`)
-}
-
 const phases: Array<{ phase: string; ms: number }> = []
 
 async function timed<T>(phase: string, work: () => Promise<T>): Promise<T> {
@@ -66,51 +43,6 @@ async function timed<T>(phase: string, work: () => Promise<T>): Promise<T> {
     return await work()
   } finally {
     phases.push({ phase, ms: Math.round(performance.now() - started) })
-  }
-}
-
-type PlanInput = z.input<typeof PlanDraftSchema>
-type ActionInput = NonNullable<PlanInput['controllers']>[number]['actions'][number]
-
-/**
- * Every element `existing`: the plan describes what `add resource posts` wrote, so it approves
- * against the app as it stands. A field's label is what the scaffolded `<Field>` shows with no
- * translation: `humanizeFieldName()` of its name in `@guren/inertia-client/forms`.
- */
-function measurementPlan(): PlanInput {
-  const existing = { kind: 'existing' } as const
-  const action = (name: string, response: ActionInput['response'], extra: Partial<ActionInput> = {}): ActionInput => ({
-    id: `action.post.${name}`, change: existing, name, authorization: { middleware: [] }, response, rules: [], ...extra,
-  })
-  const route = (name: string, method: 'GET' | 'POST', path: string, middleware: string[] = []) => ({
-    id: `route.posts.${name}`, change: existing, method, path, name: `posts.${name}`, action: `action.post.${name}`, middleware, bind: [],
-  })
-  return {
-    planVersion: PLAN_VERSION,
-    title: 'Browser measurement',
-    summary: 'Describes the posts pages so the browser specs check their locators.',
-    scope: { goals: ['Measure the generated browser specs'], nonGoals: [] },
-    locale: 'en',
-    validators: [{ id: 'validator.post', change: existing, name: 'PostPayloadSchema', fields: [{ name: 'title', type: 'string', required: true, rules: [] }] }],
-    controllers: [{
-      id: 'controller.post', change: existing, className: 'PostController', actions: [
-        action('index', { kind: 'inertia', view: 'view.posts.index' }),
-        action('create', { kind: 'inertia', view: 'view.posts.new' }),
-        action('store', { kind: 'redirect', to: '/posts' }, { body: 'validator.post', authorization: { middleware: ['auth'] } }),
-      ],
-    }],
-    routes: [route('index', 'GET', '/posts'), route('create', 'GET', '/posts/create'), route('store', 'POST', '/posts', ['auth'])],
-    views: [
-      {
-        id: 'view.posts.index', change: existing, page: 'posts/Index', purpose: 'Lists the posts.', props: [],
-        actions: [{ label: 'New Post', route: 'route.posts.create' }], states: {},
-      },
-      {
-        id: 'view.posts.new', change: existing, page: 'posts/New', purpose: 'Writes a post.', props: [],
-        form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [{ field: 'title', label: 'Title', input: 'text' }] },
-        actions: [{ label: 'Create', route: 'route.posts.store' }], states: {},
-      },
-    ],
   }
 }
 
@@ -256,27 +188,8 @@ async function measure(): Promise<void> {
   await mkdir(out, { recursive: true })
   console.log(`App: ${app}\nOutput: ${out}`)
 
-  await timed('scaffold', async () => {
-    await ensureBuiltPackages()
-    await mustRun(repoRoot, ['bun', CREATE_APP, app, '--mode', 'ssr', '--db', 'sqlite'])
-    await rewriteAppDependencies(app, await vendorLocalPackages(join(app, '.guren-vendor')), 'The browser measurement app')
-    await mustRun(app, ['bun', 'install'])
-    await assertSingleInstalledCopies(app)
-    for (const command of [['add', 'auth'], ['add', 'resource', 'posts'], ['codegen', '--force'], ['make:migration'], ['db:migrate']]) {
-      await mustRun(app, ['bun', CLI, ...command])
-    }
-  })
-
-  await timed('approve the plan', async () => {
-    await mkdir(dirname(join(app, PLAN_FILE)), { recursive: true })
-    await writeFile(join(app, PLAN_FILE), `${JSON.stringify(measurementPlan(), null, 2)}\n`)
-    await appendFile(join(app, '.gitignore'), '\n.guren-vendor/\n')
-    const git = ['git', '-c', 'user.name=Smoke', '-c', 'user.email=smoke@example.test', '-c', 'commit.gpgsign=false']
-    for (const command of [['git', 'init', '-q'], ['git', 'add', '-A'], [...git, 'commit', '-q', '--no-verify', '-m', 'scaffold']]) {
-      await mustRun(app, command)
-    }
-    await mustRun(app, ['bun', CLI, 'plan:approve', PLAN_FILE])
-  })
+  await timed('scaffold', () => scaffoldMeasurementApp(app))
+  await timed('approve the plan', () => approveMeasurementPlan(app, measurementPlan()))
 
   await timed('add browser-tests', async () => {
     await mustRun(app, ['bun', CLI, 'add', 'browser-tests'])

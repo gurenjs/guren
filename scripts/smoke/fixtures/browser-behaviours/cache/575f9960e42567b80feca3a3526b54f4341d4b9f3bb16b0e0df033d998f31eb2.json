@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "trace-1",
+  "createdAt": "2026-11-15T05:02:46.458Z",
+  "payload": {
+    "actions": [
+      {
+        "name": "type",
+        "summary": "type \"   \" into textbox \"Title\"",
+        "target": {
+          "role": "textbox",
+          "name": "Title"
+        },
+        "value": "   "
+      },
+      {
+        "name": "tap",
+        "summary": "tap button \"Create\"",
+        "target": {
+          "role": "button",
+          "name": "Create"
+        }
+      }
+    ],
+    "executor": {
+      "name": "claude-code",
+      "version": "1"
+    },
+    "recordedFor": {
+      "testId": "tests/browser/behaviours/generated/browser-measure.e2e.ts::AC-posts-store-2%20%2821cc85%29%3A%20a%20title%20of%20spaces%20is%20refused",
+      "targetId": "web",
+      "instructionDigest": "6636f461f4811d0ba0791ffe7c660775c893e3f5920a2108a4daca28b9055368",
+      "paramsDigest": "1ad150183c97d0ee2b07ebf1dd4118c1ade25a7d90a7f85a9a6d6dd7e3e9408d",
+      "callIndex": 0,
+      "agent": "default"
+    },
+    "summary": "Typed three spaces into Title and tapped Create. The page stayed on /posts/create and showed the validation error \"Too small: expected string to have >=1 characters\".",
+    "startPath": "/posts/create",
+    "endPath": "/posts/create",
+    "endAnchors": [
+      {
+        "text": "Too small: expected string to have >=1 characters"
+      }
+    ],
+    "endWaitMs": 15713,
+    "keyedBy": {
+      "cacheSchema": "trace-1",
+      "policyVersion": "conservative/6",
+      "project": "a172cedcae47474b615c54d510a5d84a8dea3032e958587430b413538be3f333",
+      "platform": "web",
+      "engineName": "web",
+      "engineSpiVersion": 1,
+      "appIdentity": "3c350cd48a600d41bdf1159bfa6fbe4f3c2fe210c2e643ef1b41e2c9a62e0898",
+      "agentContextDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

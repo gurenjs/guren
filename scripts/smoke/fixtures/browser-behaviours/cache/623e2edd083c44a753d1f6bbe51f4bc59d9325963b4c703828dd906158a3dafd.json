@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "trace-1",
+  "createdAt": "2026-11-15T05:02:57.018Z",
+  "payload": {
+    "actions": [
+      {
+        "name": "type",
+        "summary": "type \"Retitled post\" into textbox \"Title\"",
+        "target": {
+          "role": "textbox",
+          "name": "Title"
+        },
+        "value": "Retitled post"
+      },
+      {
+        "name": "tap",
+        "summary": "tap button \"Save\"",
+        "target": {
+          "role": "button",
+          "name": "Save"
+        }
+      }
+    ],
+    "executor": {
+      "name": "claude-code",
+      "version": "1"
+    },
+    "recordedFor": {
+      "testId": "tests/browser/behaviours/generated/browser-measure.e2e.ts::AC-posts-update-1%20%286a2991%29%3A%20a%20signed-in%20user%20retitles%20a%20post",
+      "targetId": "web",
+      "instructionDigest": "bee662e81869e47489bb12094fcecf8c8501de210906039870559e0695567df5",
+      "paramsDigest": "5a9048dc6d605b747172b299f48eac7c6c9f5013d42d478ef99229b32e786849",
+      "callIndex": 0,
+      "agent": "default"
+    },
+    "summary": "Set Title to \"Retitled post\" and tapped Save. The app moved to /posts/3, which shows \"title: Retitled post\".",
+    "startPath": "/posts/3/edit",
+    "endPath": "/posts/3",
+    "endAnchors": [
+      {
+        "role": "link",
+        "name": "Back"
+      },
+      {
+        "text": "title: Retitled post"
+      },
+      {
+        "text": "body:"
+      },
+      {
+        "role": "link",
+        "name": "Edit"
+      },
+      {
+        "role": "button",
+        "name": "Delete"
+      },
+      {
+        "role": "document",
+        "name": "Post"
+      }
+    ],
+    "goneAnchors": [
+      {
+        "text": "Title"
+      },
+      {
+        "role": "textbox",
+        "name": "Title",
+        "value": "Given post"
+      },
+      {
+        "text": "Body"
+      },
+      {
+        "role": "textbox",
+        "name": "Body"
+      },
+      {
+        "role": "button",
+        "name": "Save"
+      },
+      {
+        "role": "document",
+        "name": "Edit Post"
+      }
+    ],
+    "endWaitMs": 15857,
+    "keyedBy": {
+      "cacheSchema": "trace-1",
+      "policyVersion": "conservative/6",
+      "project": "a172cedcae47474b615c54d510a5d84a8dea3032e958587430b413538be3f333",
+      "platform": "web",
+      "engineName": "web",
+      "engineSpiVersion": 1,
+      "appIdentity": "3c350cd48a600d41bdf1159bfa6fbe4f3c2fe210c2e643ef1b41e2c9a62e0898",
+      "agentContextDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}
