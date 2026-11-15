@@ -1722,8 +1722,26 @@ changes behaviour.
     recordings' format, so the fixture and an app's recordings are made again
     then (§13.6). Since locator steps (Open Question 14) need no recording,
     fewer recordings are left behind.
-16. (§13) No other agent runner was measured. Is a comparison needed before a
-    blueprint names a dependency this young?
+16. ~~(§13) No other agent runner was measured. Is a comparison needed before a
+    blueprint names a dependency this young?~~ **Decided 2026-11-15 by the
+    deciding maintainer:** no measured comparison. §13 needs four things of a
+    runner: committed recordings that replay in CI with no model key and no
+    login, live steps under the developer's own agent login, Bun, and locator
+    steps. The alternatives were read against the first two in their
+    documentation, not measured. Midscene.js replays committed cache files
+    read-only, and its own FAQ says the AI service is still needed, so a step
+    with no recording calls a model on a key. Stagehand's v4 cache needs a
+    Browserbase browser and key and has no effect on a local browser. Expect
+    names the Agent Client Protocol, but its documentation did not say whether
+    it replays recordings or runs on a login. The way out, if the runner
+    fails: since Open Question 14 a behaviour the plan fully names is written
+    as locator steps, which another runner, Playwright's included, can take
+    from the same rule; only the agent steps would need a runner of their own.
+    Until then the exact pins, the release cooldown and the nightly replay of
+    the fixture are what notice a breaking runner. The comparison is to be
+    made when the runner goes ninety days without a release, ships a change
+    the next pin upgrade cannot follow, drops its Apache-2.0 licence, or
+    another runner documents both of the first two.
 17. (§13) `e2e explore`, its bug bash and `e2e mcp` were not measured. Should
     the skill name any of them as a live-drive option, as the Alternatives
     section allowed for?
