@@ -82,8 +82,12 @@ function middlewareLabel(reason: string, target: string): string {
   return `${target} (unresolved)`
 }
 
-/** The mutating routes of the graph, in registration order, each with what authorizes it or why that was not read. */
-export function reviewRoutes(graph: GurenApplicationGraph): ReviewRoute[] {
+/**
+ * The mutating routes of the graph, in registration order, each with what authorizes it or why that
+ * was not read. `actionsOf` names the methods a controller file's class declares: the graph keeps an
+ * `authorizes` edge only for a declared one, so an inherited action would otherwise read as none.
+ */
+export function reviewRoutes(graph: GurenApplicationGraph, actionsOf?: (file: string, className: string) => ReadonlySet<string> | undefined): ReviewRoute[] {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]))
   const from = (id: string, relation: string) => graph.edges.filter((edge) => edge.from === id && edge.relation === relation)
   const unresolvedFrom = (id: string, relation: string) => graph.unresolved.filter((entry) => entry.from === id && entry.relation === relation)
@@ -99,8 +103,12 @@ export function reviewRoutes(graph: GurenApplicationGraph): ReviewRoute[] {
     const authorizes = unresolvedFrom(node.id, 'authorizes').map((entry) => `${entry.target} (middleware)`)
     const controller = from(node.id, 'handles').map((edge) => byId.get(edge.to)).find((target) => target?.kind === 'controller')
     let unread: string | undefined
+    const declared = controller?.file === undefined || !actionsOf ? undefined : actionsOf(controller.file, controller.label)
     if (route.action === undefined) unread = 'an inline handler'
     else if (!controller) unread = 'the controller was not resolved'
+    else if (controller.file === undefined) unread = 'a controller from a package'
+    else if (actionsOf && declared === undefined) unread = 'the controller file was not read'
+    else if (declared && !declared.has(route.action)) unread = 'an inherited action, whose body is in a base class'
     else {
       const source = controllerActionSource(route.action)
       for (const edge of from(controller.id, 'authorizes')) {
@@ -228,13 +236,14 @@ export async function readPolicySummary(cwd: string): Promise<ReviewFacts['polic
 
 /** The block's facts, or why the application could not be read: a block written from a failed read would read as current. */
 export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts } | { unreadable: string[] }> {
-  const [{ loadApplicationGraph }, { readModels, sensitiveIn }, { introspectApp }, { deriveAgentTools }] = await Promise.all([
-    import('../application-graph-load'), import('../data-exposure-audit'), import('../introspect'), import('@guren/server'),
+  const [{ loadApplicationGraph }, { readModels, sensitiveIn }, { introspectApp }, { deriveAgentTools }, { parseControllerMethods }] = await Promise.all([
+    import('../application-graph-load'), import('../data-exposure-audit'), import('../introspect'), import('@guren/server'), import('../controller-methods'),
   ])
+  const skippedModels: string[] = []
   const why = (error: unknown): string => (error instanceof Error ? error.message : String(error)).split('\n')[0]!.replaceAll(`${cwd}${sep}`, '')
   const [graph, models, introspection, policy] = await Promise.all([
     loadApplicationGraph({ cwd, introspect: true }).catch((error: unknown) => ({ unreadable: why(error) })),
-    readModels(cwd).catch((error: unknown) => ({ unreadable: why(error) })),
+    readModels(cwd, skippedModels).catch((error: unknown) => ({ unreadable: why(error) })),
     // A run of its own: the memoised one would answer a second call in this process from the first.
     introspectApp(cwd, { fresh: true }),
     readPolicySummary(cwd),
@@ -248,7 +257,7 @@ export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts
   if (introspection.status !== 'ok') unreadable.push(`the agent routes, since the application did not introspect (${introspection.reason}): ${introspection.message.split('\n')[0]!.replaceAll(`${cwd}${sep}`, '')}`)
   if (unreadable.length > 0 || 'unreadable' in graph || 'unreadable' in models || introspection.status !== 'ok') return { unreadable }
 
-  const unreadModels: ReviewFacts['models']['unread'] = []
+  const unreadModels: ReviewFacts['models']['unread'] = skippedModels.sort().map((file) => ({ model: file.split('/').pop()!.replace(/\.[cm]?[jt]sx?$/u, ''), file, reason: 'the file did not parse, or holds no class' }))
   const sensitive: ReviewFacts['models']['sensitive'] = []
   for (const entry of [...models].sort((a, b) => a.model.file.localeCompare(b.model.file))) {
     const reason = entry.columns === null ? 'its table was not found in a schema the reader parses'
@@ -258,13 +267,18 @@ export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts
     const columns = [...new Set([...(entry.columns ?? []), ...(Array.isArray(entry.hidden) ? entry.hidden : [])])].filter((column) => sensitiveIn(entry, column))
     if (columns.length > 0) sensitive.push({ model: entry.model.className, file: entry.model.file, columns })
   }
+  const scan = await parseControllerMethods(cwd)
+  const actionsOf = (file: string, className: string): ReadonlySet<string> | undefined => {
+    const declaration = scan.declarations.find((entry) => entry.file === file && entry.className === className)
+    return declaration ? new Set(declaration.methods.keys()) : undefined
+  }
   // Tools come from the routes the app registered, providers' included, as an adapter derives them; schemas are not needed here.
   const derived = deriveAgentTools(introspection.manifest.routes.map((route) => ({ ...route, schemas: undefined, controller: undefined })) as never)
   return {
     facts: {
       policy,
       models: { sensitive, unread: unreadModels },
-      routes: reviewRoutes(graph),
+      routes: reviewRoutes(graph, actionsOf),
       tools: derived.tools.map((tool) => ({
         tool: tool.toolName, method: tool.method, path: tool.path, readOnly: tool.annotations.readOnlyHint, destructive: tool.annotations.destructiveHint,
         ...(tool.authorization ? { ability: tool.authorization.ability } : {}),

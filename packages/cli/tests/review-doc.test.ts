@@ -143,6 +143,37 @@ async function commit(repo: string, files: Record<string, string>): Promise<stri
   return git(repo, ['rev-parse', 'HEAD'])
 }
 
+describe('loadReviewFacts', () => {
+  test('should say not read for a handler, an inherited action or a model the readers could not follow, through the graph', async () => {
+    const workspace = await createTempWorkspace('guren-review-doc-unread-')
+    try {
+      await linkWorkspaceCore(workspace.dir)
+      const main = APPLICATION_GRAPH_RELATIONS_FIXTURE['src/main.ts']!
+        .replace("import { createApp } from '@guren/core'", "import { createApp, Controller, authorizeMiddleware } from '@guren/core'\nimport { ChildController } from '../app/Http/Controllers/ChildController'\nclass InlineController extends Controller { async destroy() { return this.json({}) } }")
+        .replace(".name('posts.update')", ".name('posts.update')\n  router.delete('/posts/:post', [InlineController, 'destroy']).name('posts.destroy')\n  router.patch('/posts/:post', [PostController, 'index']).name('posts.patch').middleware(authorizeMiddleware('update'))\n  router.post('/child', [ChildController, 'store']).name('child.store').agent({})\n  router.post('/hook', async (c: { text: (body: string) => Response }) => c.text('ok')).name('hook')")
+      await writeWorkspaceFiles(workspace.dir, {
+        ...APPLICATION_GRAPH_RELATIONS_FIXTURE,
+        'src/main.ts': main,
+        'app/Http/Controllers/BaseController.ts': "import { Controller } from '@guren/core'\nimport { PostPolicy } from '../../Policies/PostPolicy'\nexport class BaseController extends Controller { async store() { return new PostPolicy() } }\n",
+        'app/Http/Controllers/ChildController.ts': "import { BaseController } from './BaseController'\nexport class ChildController extends BaseController {}\n",
+        'app/Models/Broken.ts': 'export class {\n',
+      })
+
+      expect(await syncReviewDoc(workspace.dir)).toMatchObject({ state: 'written' })
+      const written = await readFile(join(workspace.dir, 'REVIEW.md'), 'utf8')
+
+      expect(written).toContain('| DELETE | /posts/:post | posts.destroy | destroy |  | none declared | not read (the controller was not resolved) |')
+      expect(written).toContain('| PATCH | /posts/:post | posts.patch | PostController.index | &lt;anonymous&gt; (inline) | none declared | update (middleware) |')
+      expect(written).toContain('| POST | /child | child.store | ChildController.store |  | none declared | not read (an inherited action, whose body is in a base class) |')
+      expect(written).toContain('| POST | /hook | hook |  |  | none declared | not read (an inline handler) |')
+      expect(written).toContain('| child.store | POST /child | no | yes | not derivable |')
+      expect(written).toContain('- Broken (`app/Models/Broken.ts`): the file did not parse, or holds no class')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
 describe('change:lane on REVIEW.md', () => {
   const doc = (block: string, rule: string): string => `# Review\n\n## Rules\n\n- ${rule}\n\n## What this application holds\n\n<!-- guren:review generated -->\n${block}\n<!-- /guren:review generated -->\n`
 

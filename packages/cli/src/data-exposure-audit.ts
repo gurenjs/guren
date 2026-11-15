@@ -74,7 +74,7 @@ function credentialList(...fields: Array<string | null>): string[] | 'unreadable
 }
 
 /** Each model with its columns and the lists that hide them, read statically; `guren change:policy` reads it too. */
-export async function readModels(cwd: string): Promise<ModelFacts[]> {
+export async function readModels(cwd: string, skipped?: string[]): Promise<ModelFacts[]> {
   const [files, tables] = await Promise.all([discoverModelFiles(cwd), parseSchemaTables(cwd).catch(() => [])])
   const models: ModelFacts[] = []
   for (const path of files) {
@@ -82,7 +82,10 @@ export async function readModels(cwd: string): Promise<ModelFacts[]> {
     const ast = source === null ? null : parseSourceFile(source, path)
     const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
     const className = classDecl?.id?.name
-    if (!classDecl || !className) continue
+    if (!classDecl || !className) {
+      skipped?.push(toPosixRelative(cwd, path))
+      continue
+    }
     const module = moduleNameFor(cwd, path)
     const identifier = extractTableIdentifier(classDecl)
     const table = identifier === undefined ? undefined : inAppRoot(tables.filter((entry) => entry.identifier === identifier), (entry) => entry.module, module)
