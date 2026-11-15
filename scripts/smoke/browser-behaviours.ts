@@ -145,7 +145,7 @@ async function noLogin(root: string): Promise<Record<string, string | undefined>
   return { CLAUDE_CONFIG_DIR: claude, CODEX_HOME: codex, ANTHROPIC_API_KEY: undefined, OPENAI_API_KEY: undefined, CLAUDE_CODE_OAUTH_TOKEN: undefined }
 }
 
-type Outcome = 'replayed' | 'live' | 'stale' | 'missing' | 'policy' | 'failed' | 'not-run' | 'interrupted' | 'skipped'
+type Outcome = 'replayed' | 'live' | 'stale' | 'missing' | 'gap' | 'policy' | 'failed' | 'not-run' | 'interrupted' | 'skipped'
 
 interface ReportStep { kind: string; status: string; cache?: { mode?: string }; error?: { code?: string } }
 interface ReportResult { titlePath: string[]; file: string; status: string; skip?: { cause?: string } | null; attempts?: Array<{ status: string; error?: { code?: string } | null; steps?: ReportStep[] }> }
@@ -158,9 +158,11 @@ function outcomeOf(result: ReportResult): Outcome {
   const attempt = result.attempts?.at(-1)
   const agentSteps = (attempt?.steps ?? []).filter((step) => step.kind === 'agent')
   if (result.status === 'passed') return agentSteps.every((step) => step.cache?.mode === 'self-finalized') ? 'replayed' : 'live'
-  const code = attempt?.error?.code ?? agentSteps.find((step) => step.status === 'failed')?.error?.code
+  const failing = agentSteps.find((step) => step.status === 'failed')
+  const code = attempt?.error?.code ?? failing?.error?.code
   if (code === 'REPLAY_STALE') return 'stale'
-  if (code === 'MODEL_PROVIDER_FAILED') return 'missing'
+  // With no login a live step fails here: `missed` had no recording, a hand-off replayed part of one and then needed the model (§13.6).
+  if (code === 'MODEL_PROVIDER_FAILED') return failing?.cache?.mode === 'agent-concluded' ? 'gap' : 'missing'
   if (code === 'POLICY_DENIED') return 'policy'
   return 'failed'
 }
@@ -178,13 +180,14 @@ function outcomes(report: Report): Map<string, Outcome> {
     .map((result) => [result.titlePath.join(' › '), outcomeOf(result)]))
 }
 
-type Verdict = 'pass' | 'skipped' | 'stale' | 'missing' | 'live' | 'policy' | 'flaky' | 'defect' | 'not-run'
+type Verdict = 'pass' | 'skipped' | 'stale' | 'missing' | 'gap' | 'live' | 'policy' | 'flaky' | 'defect' | 'not-run'
 
 function verdictOf(seen: readonly Outcome[]): Verdict {
   const has = (outcome: Outcome): boolean => seen.includes(outcome)
   if (seen.every((outcome) => outcome === 'skipped')) return 'skipped'
   if (has('stale')) return 'stale'
   if (has('missing')) return 'missing'
+  if (has('gap')) return 'gap'
   if (has('live')) return 'live'
   if (has('policy')) return 'policy'
   const ran = seen.filter((outcome) => outcome === 'replayed' || outcome === 'failed')
@@ -203,7 +206,7 @@ interface Metrics {
   replays: ReplayRecord[]
   tests: Array<{ test: string; verdict: Verdict; outcomes: Partial<Record<Outcome, number>> }>
   /** `current` while every recording replays; otherwise what a Guren change did to the fixture, which `--record` makes again. */
-  summary: { fixture: 'current' | 'stale' | 'missing' | 'empty'; clean: boolean; flaky: number; defects: number; notRun: number; live: number; policy: number; unreported: number }
+  summary: { fixture: 'current' | 'stale' | 'missing' | 'empty'; clean: boolean; flaky: number; defects: number; notRun: number; gap: number; live: number; policy: number; unreported: number }
 }
 
 function summarize(seen: ReadonlyMap<string, Outcome[]>, replays: readonly ReplayRecord[], entries: number): Pick<Metrics, 'tests' | 'summary'> {
@@ -215,8 +218,9 @@ function summarize(seen: ReadonlyMap<string, Outcome[]>, replays: readonly Repla
   const count = (verdict: Verdict): number => tests.filter((entry) => entry.verdict === verdict).length
   const unreported = replays.filter((entry) => !entry.reported).length
   const fixture = entries === 0 ? 'empty' : count('missing') > 0 ? 'missing' : count('stale') > 0 ? 'stale' : 'current'
-  const summary = { fixture, flaky: count('flaky'), defects: count('defect'), notRun: count('not-run'), live: count('live'), policy: count('policy'), unreported } as const
-  return { tests, summary: { ...summary, clean: fixture === 'current' && unreported === 0 && summary.flaky === 0 && summary.defects === 0 && summary.notRun === 0 && summary.live === 0 && summary.policy === 0 } }
+  const summary = { fixture, flaky: count('flaky'), defects: count('defect'), notRun: count('not-run'), gap: count('gap'), live: count('live'), policy: count('policy'), unreported } as const
+  const failures = summary.flaky + summary.defects + summary.notRun + summary.gap + summary.live + summary.policy + unreported
+  return { tests, summary: { ...summary, clean: fixture === 'current' && failures === 0 } }
 }
 
 async function writeSummary(lines: readonly string[]): Promise<void> {
@@ -237,7 +241,7 @@ function summaryLines(metrics: Metrics): string[] {
     '## Behaviour specs replay (RFC 0033 §13, Open Question 13)',
     '',
     `${metrics.replays.length} replay(s) of ${metrics.fixture.entries} recording(s), each against a database migrated from empty and with no agent login. Fixture: ${summary.fixture}, ${fixtureLine[summary.fixture]}.`,
-    `${summary.clean ? 'Clean' : 'Not clean'}: flaky ${summary.flaky}, defects ${summary.defects}, not run ${summary.notRun}, ran live ${summary.live}, policy ${summary.policy}, unreported runs ${summary.unreported}.`,
+    `${summary.clean ? 'Clean' : 'Not clean'}: flaky ${summary.flaky}, defects ${summary.defects}, not run ${summary.notRun}, a recording with a gap ${summary.gap}, ran live ${summary.live}, policy ${summary.policy}, unreported runs ${summary.unreported}.`,
     walls.length > 0 ? `One replay: ${(Math.min(...walls) / 1000).toFixed(1)}-${(Math.max(...walls) / 1000).toFixed(1)} s, the app's start included.` : 'No replay produced a report.',
     '',
     '| Test | Verdict | Outcomes |', '| --- | --- | --- |',
@@ -255,6 +259,7 @@ async function replay(): Promise<void> {
 
   await setUpApp(app)
   const fixture = (await readdir(FIXTURE_DIR).catch(() => [])).filter((file) => file.endsWith('.json'))
+  if (fixture.length === 0) throw new Error(`${FIXTURE_DIR} holds no recording, so there is nothing to replay; make it with --record.`)
   await mkdir(join(app, '.e2e/cache'), { recursive: true })
   for (const file of fixture) await cp(join(FIXTURE_DIR, file), join(app, '.e2e/cache', file))
   const hidden = await noLogin(root)
@@ -266,7 +271,7 @@ async function replay(): Promise<void> {
     fixture: { entries: fixture.length },
     replays: [],
     tests: [],
-    summary: { fixture: 'empty', clean: false, flaky: 0, defects: 0, notRun: 0, live: 0, policy: 0, unreported: 0 },
+    summary: { fixture: 'empty', clean: false, flaky: 0, defects: 0, notRun: 0, gap: 0, live: 0, policy: 0, unreported: 0 },
   }
   const seen = new Map<string, Outcome[]>()
   for (let index = 1; index <= replays; index += 1) {
@@ -285,6 +290,10 @@ async function replay(): Promise<void> {
   }
 
   await writeSummary(summaryLines(metrics))
+  // A green scheduled run shows no summary unless opened, and a re-keyed fixture is the signal this job exists for.
+  if (process.env.GITHUB_ACTIONS && (metrics.summary.fixture === 'stale' || metrics.summary.fixture === 'missing')) {
+    console.log(`::warning title=Behaviour fixture ${metrics.summary.fixture}::A Guren change re-keyed the recordings an app commits. Run bun run smoke:browser-behaviours --record, commit the fixture, and say in the changeset that apps record again.`)
+  }
   console.log(`\nMetrics: ${join(out, 'behaviours.json')}\nApp kept at ${app}`)
   if (metrics.replays.every((entry) => !entry.reported)) throw new Error('No replay produced a report: nothing was measured.')
 }
