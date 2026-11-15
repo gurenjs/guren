@@ -1654,7 +1654,8 @@ changes behaviour.
     each replay against a database migrated from empty. A stale or missing
     recording is not counted against the replay streak: it is what a Guren
     change does to the recordings an app commits, which is the signal the
-    fixture is there to give, and `smoke:browser-behaviours --record` makes
+    fixture is there to give, so such a night stays green and says so in a
+    warning annotation. `smoke:browser-behaviours --record` makes
     the fixture again under a login, refusing to write it unless it replays
     with none. A key in the nightly was the other option; it would measure
     live steps every night but never whether a change re-keys a recording,
