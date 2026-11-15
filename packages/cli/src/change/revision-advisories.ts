@@ -62,6 +62,8 @@ function declaresDependencies(manifest: string | undefined): boolean {
   if (manifest === undefined) return false
   try {
     const value = JSON.parse(manifest) as Record<string, unknown>
+    // A workspace root may declare none itself while its members do.
+    if (value.workspaces !== undefined) return true
     return DEPENDENCY_FIELDS.some((field) => typeof value[field] === 'object' && value[field] !== null && Object.keys(value[field] as object).length > 0)
   } catch {
     return true
