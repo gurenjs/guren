@@ -37,6 +37,14 @@ export interface AddReviewResult {
   duplicateGate: boolean
 }
 
+/** What the command prints after writing: the label commands, and the duplicate gate when there is one. */
+export function reviewNextSteps(result: Pick<AddReviewResult, 'duplicateGate'>): string[] {
+  return [
+    ...(result.duplicateGate ? ['.github/workflows/ci.yml still runs `bunx guren gate`, which the Change workflow now runs too. Remove that step once the Change workflow has passed on a pull request.'] : []),
+    `Create the labels the pull request template asks for (a reviewer can only pick one that exists):\n${REVIEW_LANE_LABELS.map((label) => `  gh label create ${label.name} --color ${label.color} --description "${label.description}"`).join('\n')}`,
+  ]
+}
+
 export function reviewFileEntries(): ScaffoldFileEntry[] {
   return REVIEW_FILES.map((file) => scaffoldTemplateFile('review', `.github/${file}`))
 }

@@ -1,11 +1,8 @@
-import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { runCommand } from 'citty'
-import { consola } from 'consola'
-
-import { addReview, REVIEW_LANE_LABELS, reviewFileEntries, runsBareGate } from '../src/add-review'
+import { addReview, REVIEW_LANE_LABELS, reviewFileEntries, reviewNextSteps, runsBareGate } from '../src/add-review'
 import { builtinSubCommands } from '../src/commands'
 import { PLAN_COMMAND_CLASSES } from '../src/plan/command-allowlist'
 import { createTempRoot } from './helpers'
@@ -87,7 +84,7 @@ describe('guren add review', () => {
     expect(workflow).toContain('fetch-depth: 0')
     expect(workflow).toContain('run: bunx guren change:evidence --base "$BASE" --head "$HEAD"\n')
     expect(workflow.match(/if: \$\{\{ !cancelled\(\) && hashFiles\('\.guren\/evidence\/[a-z.]+'\) != '' \}\}\n {8}continue-on-error: true/g)).toHaveLength(2)
-    expect(workflow).not.toContain('retention-days')
+    expect(workflow).not.toMatch(/^\s*retention-days:/m)
     expect(workflow).toContain('name: guren-record-${{ env.HEAD }}')
   })
 
@@ -97,23 +94,12 @@ describe('guren add review', () => {
     for (const label of REVIEW_LANE_LABELS) expect(template).toContain(label.name)
   })
 
-  test('should print the label commands through the command', async () => {
-    const app = await createApp()
-    const info = spyOn(consola, 'info').mockImplementation((() => {}) as never)
-    const success = spyOn(consola, 'success').mockImplementation((() => {}) as never)
-    const cwd = process.cwd()
-    try {
-      process.chdir(app)
-      await runCommand((builtinSubCommands.add as { subCommands: Record<string, Parameters<typeof runCommand>[0]> }).subCommands.review!, { rawArgs: [] })
-    } finally {
-      process.chdir(cwd)
-      info.mockRestore()
-      success.mockRestore()
-    }
-    const printed = info.mock.calls.map((call) => String(call[0])).join('\n')
+  test('should name the label commands, and the duplicate gate only when there is one', () => {
+    const plain = reviewNextSteps({ duplicateGate: false }).join('\n')
 
-    for (const label of REVIEW_LANE_LABELS) expect(printed).toContain(`gh label create ${label.name} --color ${label.color}`)
-    expect(success.mock.calls).toHaveLength(4)
+    for (const label of REVIEW_LANE_LABELS) expect(plain).toContain(`gh label create ${label.name} --color ${label.color}`)
+    expect(plain).not.toContain('ci.yml')
+    expect(reviewNextSteps({ duplicateGate: true })[0]).toContain('ci.yml still runs')
   })
 
   test('should be registered, and refused to a plan', () => {

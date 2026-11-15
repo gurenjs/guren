@@ -1505,12 +1505,11 @@ const addReviewCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const { addReview, REVIEW_LANE_LABELS } = await import('./add-review')
+    const { addReview, reviewNextSteps } = await import('./add-review')
     const overwritten: string[] = []
     const result = await addReview({ force: Boolean(args.force), overwritten })
     announceWrittenFiles(result.created, overwritten)
-    if (result.duplicateGate) consola.info('.github/workflows/ci.yml still runs `bunx guren gate`, which the Change workflow now runs too. Remove that step once the Change workflow has passed on a pull request.')
-    consola.info(`Create the labels the pull request template asks for (a reviewer can only pick one that exists):\n${REVIEW_LANE_LABELS.map((label) => `  gh label create ${label.name} --color ${label.color} --description "${label.description}"`).join('\n')}`)
+    for (const line of reviewNextSteps(result)) consola.info(line)
   },
 })
 
