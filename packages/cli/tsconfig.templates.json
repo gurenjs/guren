@@ -67,6 +67,9 @@
       ],
       "@guren/plugin-ai/client": [
         "../plugin-ai/src/client.ts"
+      ],
+      "@guren/cli/review": [
+        "./src/review/index.ts"
       ]
     }
   },

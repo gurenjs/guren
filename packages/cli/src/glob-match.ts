@@ -27,9 +27,9 @@ export function compileGlob(glob: string): RegExp {
 
   const pattern = escaped
     .split(GLOBSTAR_SLASH_TOKEN)
-    .join('(?:.*/)?')
+    .join('(?:[\\s\\S]*/)?')
     .split(GLOBSTAR_TOKEN)
-    .join('.*')
+    .join('[\\s\\S]*')
     .split(STAR_TOKEN)
     .join('[^/]*')
 

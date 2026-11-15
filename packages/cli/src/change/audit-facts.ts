@@ -7,6 +7,7 @@ import { sep } from 'node:path'
 
 import type { AuditFinding, AuditReport } from '../audit'
 import { escalatesOnChange } from '../audit-taxonomy'
+import type { FactCode } from './fact-classes'
 import type { ChangeFact } from './lane'
 import type { ChangeReader, ChangeSide, ResolvedChange } from './resolve'
 
@@ -55,7 +56,7 @@ export async function auditFacts(change: ResolvedChange, reader: ChangeReader, b
 
   const facts: ChangeFact[] = []
   const claimed = new Set<AuditFinding>()
-  const fact = (code: string, finding: AuditFinding): void => {
+  const fact = (code: FactCode, finding: AuditFinding): void => {
     if (claimed.has(finding)) return
     claimed.add(finding)
     facts.push({

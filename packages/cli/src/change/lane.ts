@@ -5,13 +5,13 @@
  */
 import { posix } from 'node:path'
 
-import type { File } from '@babel/types'
+import type { File, ImportDeclaration, Statement } from '@babel/types'
 
 import { formatDestructiveFinding, judgeMigrations, readMigrationSources } from '@guren/orm/internal/migration-guard'
 
 import { parseSourceFile } from '../parse-cache'
 import { bracketedTokens, isAcceptanceId } from '../plan/acceptance-status'
-import { topLevelDeclaration } from '../ast-walk'
+import { objectLiteral, topLevelDeclaration, walk } from '../ast-walk'
 import { TEST_FILE_PATTERN, toPosixRelative } from '../discovery'
 import { extractClassDeclaration } from '../model-parser'
 import { isPlanRevisionsDirName, planSlug } from '../plan/beside'
@@ -19,15 +19,19 @@ import { readPolicyAbilities } from '../plan/policy-abilities'
 import { discoverPlanFiles, isPlanFileName, isPlanInput } from '../plan-check'
 import { parseSchemaSource, type SchemaTable } from '../schema-parser'
 import { auditCoverageGaps, auditFacts } from './audit-facts'
+import { LANES, type FactCode, type Lane } from './fact-classes'
+import { applyReviewPolicy, loadBaseReviewPolicy, REVIEW_POLICY_FILE, type LoadedReviewPolicy } from './review-policy'
 import type { ChangedPath, ChangeReader, ChangeSide, ResolvedChange } from './resolve'
 import type { ChangeAudits } from './revision-audit'
 
-export type Lane = 'low' | 'medium' | 'high'
+export type { FactCode, Lane } from './fact-classes'
 
 export interface ChangeFact {
-  code: string
+  code: FactCode
   /** The floor this fact sets. */
   lane: Lane
+  /** The lane the fact had before `guren.review.ts` set it. */
+  policyFrom?: Lane
   /** A table, a migration, a plan section: what the fact is about, when it is narrower than its files. */
   target?: string
   files: string[]
@@ -63,9 +67,9 @@ export interface ChangeLaneReport {
   /** `compared`: both sides were audited and compared. `loadedCode`: the run executed the application's code, compared or not. */
   audit: { compared: boolean; loadedCode: boolean }
   plans: ChangePlan[]
+  /** `guren.review.ts` at the merge base. */
+  policy: LoadedReviewPolicy
 }
-
-const LANES: readonly Lane[] = ['low', 'medium', 'high']
 
 export function highestLane(lanes: Iterable<Lane>): Lane {
   let highest = 0
@@ -160,7 +164,6 @@ function tableDifferences(before: SchemaTable, after: SchemaTable): string[] {
   if (changed.length > 0) differences.push(`columns changed: ${list(changed)}`)
   if (before.tableName !== after.tableName) differences.push(`table name ${before.tableName ?? '(none)'} to ${after.tableName ?? '(none)'}`)
   if (JSON.stringify(before.constraints) !== JSON.stringify(after.constraints)) differences.push('indexes or constraints changed')
-  if (differences.length === 0) differences.push('a part the reader does not follow changed')
   return differences
 }
 
@@ -278,7 +281,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     }
   }
 
-  const fallbackCode = (entry: ChangedPath): string => (entry.outsideApp ? 'outside-app' : entry.status === 'added' ? 'file-added' : entry.status === 'deleted' ? 'source-removed' : entry.status === 'renamed' ? 'source-renamed' : 'source-edited')
+  const fallbackCode = (entry: ChangedPath): FactCode => (entry.outsideApp ? 'outside-app' : entry.status === 'added' ? (SOURCE_FILE.test(entry.path) ? 'file-added' : 'non-source-added') : entry.status === 'deleted' ? 'source-removed' : entry.status === 'renamed' ? 'source-renamed' : 'source-edited')
   for (const entry of change.paths) {
     if (claimed.has(entry) || !touches(entry, (path) => posix.basename(path) === 'package.json')) continue
     const located = Object.values(sides(entry)).map((path) => fromRoot(entry, path))
@@ -365,12 +368,24 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     for (const [identifier, table] of afterTables) {
       const previous = beforeTables.get(identifier)
       if (!previous) fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)} added (${table.columns.length} columns)` })
-      else if (JSON.stringify(previous) !== JSON.stringify(table)) fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)}: ${tableDifferences(previous, table).join('; ')}` })
+      else if (JSON.stringify(previous) !== JSON.stringify(table)) {
+        const differences = tableDifferences(previous, table)
+        // What the reader did not follow is no table fact a policy may lower.
+        if (differences.length === 0) fact([entry], { code: 'source-edited', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)}: a part the reader does not follow changed` })
+        else fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)}: ${differences.join('; ')}` })
+      }
     }
     for (const [identifier, table] of beforeTables) {
       if (!afterTables.has(identifier)) fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)} removed` })
     }
     if (!claimed.has(entry)) fact([entry], { code: 'source-edited', lane: 'medium', evidence: 'static', message: `${entry.path}: no table the reader sees changed` })
+    else {
+      // A table fact is lowerable, and code beside the tables must not ride it.
+      const [residueBefore, residueAfter] = [schemaResidue(beforeText, base, before), schemaResidue(afterText, head, after)]
+      if (residueBefore === undefined || residueAfter === undefined || residueBefore !== residueAfter) {
+        fact([entry], { code: 'source-edited', lane: 'medium', evidence: 'static', message: `${entry.path}: a function inside its tables, or code beside them, changed` })
+      }
+    }
   }
 
   let existingIds: Promise<Set<string>> | undefined
@@ -404,7 +419,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     } else if (entry.status === 'added' && TESTS_DIR.test(entry.path)) {
       const existing = await idsAtBase()
       const repeated = acceptanceIds(afterText).filter((id) => existing.has(id))
-      if (repeated.length > 0) fact([entry], { code: 'file-added', lane: 'medium', evidence: 'static', message: `${entry.path}: a test added under ${list(repeated)}, which an existing test carries` })
+      if (repeated.length > 0) fact([entry], { code: 'acceptance-added', lane: 'medium', evidence: 'static', message: `${entry.path}: a test added under ${list(repeated)}, which an existing test carries` })
       else fact([entry], { code: 'test-added', lane: 'low', evidence: 'static', message: `${entry.path}: a test added, carrying no existing acceptance id` })
     }
   }
@@ -412,8 +427,13 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   for (const entry of inApp) {
     if (claimed.has(entry) || !touches(entry, isPolicyFile)) continue
     const { base, head } = sides(entry)
-    if (base === undefined || !isPolicyFile(base)) {
+    if (base === undefined) {
       fact([entry], { code: 'policy-added', lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}` })
+      continue
+    }
+    if (!isPolicyFile(base)) {
+      // Existing source moved in, not a policy the change wrote: not the declarable `policy-added`.
+      fact([entry], { code: 'source-renamed', lane: 'medium', evidence: 'path', message: `${base} renamed to ${entry.path}, where it is read as a policy` })
       continue
     }
     if (head === undefined || !isPolicyFile(head)) {
@@ -503,17 +523,71 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     unjudged.push({ reader: 'dependency-advisory', reason: 'the advisories of the changed dependencies were not compared with the base by this version', lane: 'medium', files: [...new Set(dependencies)] })
   }
 
+  const policy = await loadBaseReviewPolicy(reader)
+  const judged = policy.state === 'read' ? applyReviewPolicy(facts, change.paths, policy.policy) : facts
+  if (policy.state === 'unreadable') {
+    unjudged.push({ reader: 'review-policy', reason: `${REVIEW_POLICY_FILE} at the merge base was not applied, so a lane it raises would not show: ${policy.reason}`, lane: 'high', files: [REVIEW_POLICY_FILE] })
+  }
+
   return {
     schemaVersion: 1,
     base: change.base,
     mergeBase: change.mergeBase,
     head: change.head,
-    floor: highestLane([...facts.map((entry) => entry.lane), ...unjudged.map((entry) => entry.lane)]),
-    facts,
+    floor: highestLane([...judged.map((entry) => entry.lane), ...unjudged.map((entry) => entry.lane)]),
+    facts: judged,
     unjudged,
     audit,
     plans: await readChangePlans(reader, trees.head),
+    policy,
   }
+}
+
+const AST_POSITION_KEYS = new Set(['start', 'end', 'loc', 'range', 'extra', 'leadingComments', 'trailingComments', 'innerComments'])
+
+/** A node as its syntax, without positions or comments: a string literal keeps its exact value. */
+const canonical = (node: unknown): string => JSON.stringify(node, (key, value: unknown) => (AST_POSITION_KEYS.has(key) ? undefined : value))
+
+/**
+ * A schema file without its tables, its drizzle imports and an object listing only tables: what
+ * `schema-changed` does not account for, compared per statement as syntax. Inside a table what no
+ * column property states is kept: a function (but a foreign key's), a spread, a tagged template and
+ * any other name.
+ */
+function schemaResidue(text: string | null, file: string | undefined, tables: readonly SchemaTable[]): string | undefined {
+  if (text === null || file === undefined) return ''
+  const ast = parseSourceFile(text, file)
+  if (!ast) return undefined
+  const names = new Set(tables.map((table) => table.identifier))
+  const framework = (statement: Statement): statement is ImportDeclaration => statement.type === 'ImportDeclaration' && /^(?:drizzle-orm|@guren\/orm)(?:\/|$)/.test(statement.source.value) && statement.specifiers.length > 0
+  const builders = new Set(ast.program.body.filter(framework).flatMap((statement) => statement.specifiers.map((specifier) => specifier.local.name)))
+  const listsTables = (init: unknown): boolean => {
+    const object = objectLiteral(init as never)
+    return object !== null && object.properties.every((property) => property.type === 'ObjectProperty' && property.shorthand && property.value.type === 'Identifier' && names.has(property.value.name))
+  }
+  const kept: string[] = []
+  for (const statement of ast.program.body) {
+    if (framework(statement)) continue
+    const declaration = topLevelDeclaration(statement)
+    if (!declaration?.declarations.every((declarator) => declarator.id.type === 'Identifier' && (names.has(declarator.id.name) || listsTables(declarator.init)))) {
+      kept.push(canonical(statement))
+      continue
+    }
+    walk(declaration.declarations.map((declarator) => declarator.init), (node, parent) => {
+      // `.references(() => users.id)`: the foreign key the column reader states.
+      const body = node.type === 'ArrowFunctionExpression' ? (node.body as { type?: string; object?: { type?: string; name?: string }; computed?: boolean }) : undefined
+      if (body?.type === 'MemberExpression' && !body.computed && body.object?.type === 'Identifier' && names.has(String(body.object.name))) return false
+      if (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression' || node.type === 'SpreadElement' || node.type === 'TaggedTemplateExpression') {
+        kept.push(canonical(node))
+        return false
+      }
+      if (node.type !== 'Identifier' || builders.has(String(node.name)) || names.has(String(node.name))) return
+      const named = parent as { type?: string; key?: unknown; property?: unknown; computed?: boolean } | null
+      if (!named?.computed && ((named?.type === 'MemberExpression' && named.property === node) || (named?.type === 'ObjectProperty' && named.key === node))) return
+      kept.push(canonical(node))
+    })
+  }
+  return kept.join('\n')
 }
 
 /** The plans at the head with the standing each has there, read from the head's own records. */

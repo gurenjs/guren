@@ -1,7 +1,8 @@
 /**
- * `guren add review` (RFC 0040 §7, §8): the Change workflow that runs `change:evidence` on every
- * pull request and push to main, a pull request template that asks for the issue, the plan and a
- * `lane:` label, and two issue templates. Each file is written once; `--force` replaces it.
+ * `guren add review` (RFC 0040 §7, §8): `guren.review.ts`, the Change workflow that runs
+ * `change:evidence` on every pull request and push to main, a pull request template that asks for
+ * the issue, the plan and a `lane:` label, and two issue templates. Each file is written once;
+ * `--force` replaces it.
  */
 import { readFile, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -12,10 +13,11 @@ import { scaffoldTemplateFile } from './scaffold-templates'
 import { writeRoot, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
 const REVIEW_FILES = [
-  'workflows/change.yml',
-  'pull_request_template.md',
-  'ISSUE_TEMPLATE/feature.md',
-  'ISSUE_TEMPLATE/defect.md',
+  'guren.review.ts',
+  '.github/workflows/change.yml',
+  '.github/pull_request_template.md',
+  '.github/ISSUE_TEMPLATE/feature.md',
+  '.github/ISSUE_TEMPLATE/defect.md',
 ] as const
 
 export const REVIEW_LANE_LABELS = [
@@ -52,7 +54,7 @@ export function reviewNextSteps(result: Pick<AddReviewResult, 'duplicateGate'>):
 }
 
 export function reviewFileEntries(): ScaffoldFileEntry[] {
-  return REVIEW_FILES.map((file) => scaffoldTemplateFile('review', `.github/${file}`))
+  return REVIEW_FILES.map((file) => scaffoldTemplateFile('review', file))
 }
 
 export async function addReview(options: WriterOptions = {}): Promise<AddReviewResult> {

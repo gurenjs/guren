@@ -537,6 +537,7 @@ describe('blueprint scaffold templates are written by their blueprints', () => {
     'ai-chat': 'not a registry blueprint (make:ai-agent --chat copies it); pinned byte-identical in tests/make-ai-agent.test.ts',
     'browser-tests': 'not a registry blueprint (it reads the browser map); pinned byte-identical in tests/add-browser-tests.test.ts',
     ui: 'not a registry blueprint (guren add ui takes component names, --diff and --force); pinned byte-identical in tests/ui-components.test.ts',
+    review: 'not a registry blueprint (guren add review refuses an app below its repository root); pinned byte-identical in tests/add-review.test.ts',
   }
 
   it('add ai writes each provider template byte-identical and declares only what the companion does', async () => {
