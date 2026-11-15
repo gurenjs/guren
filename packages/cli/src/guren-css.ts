@@ -219,7 +219,7 @@ export async function updateTokenSheet(cwd: string): Promise<void> {
 export const UI_COMPONENTS_DIR = 'resources/js/components/ui'
 
 /** The components `guren add ui` copies, one file each under {@link UI_COMPONENTS_DIR}. */
-export const UI_COMPONENTS = ['Alert', 'Button', 'Card', 'Checkbox', 'Field', 'Input', 'Label', 'Select', 'Textarea'] as const
+export const UI_COMPONENTS = ['Alert', 'Button', 'Card', 'Checkbox', 'Field', 'Input', 'Label', 'Pagination', 'Select', 'Textarea'] as const
 export type UiComponentName = (typeof UI_COMPONENTS)[number]
 
 /**
@@ -238,6 +238,7 @@ export const SHIPPED_UI_COMPONENTS: Readonly<Record<UiComponentName, ReadonlySet
     '1db23cf34507ee9789fe6e0c8cca993f3a5efb0f1441eee318c9b74a22212ee8',
   ]),
   Label: new Set(['f6230461533783175f577743b33e3824e0a4dad8cbc5f939bdf315e56ad5cb53']),
+  Pagination: new Set(['2c9ecb88fdd8bdc8303b4dd09b21bf921e7dc3d47ed7e51f28f68f471e1c7cb0']),
   Select: new Set([
     'e8d24f137fc1f9a197522589ba6f54de547a9f00b64de31389f59b6a35ff2dea',
     '89bb37ed98e1fbe5a7e2613a2538619cd74c2c3ce291dfbd7ab39dd0311734f8',

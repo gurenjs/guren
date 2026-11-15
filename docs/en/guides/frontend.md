@@ -85,7 +85,7 @@ export default function Index({ posts }: Props) {
 
 ### UI components
 
-`bunx guren add ui` copies a small set of token-styled components into `resources/js/components/ui/` (`Button`, `Label`, `Input`, `Textarea`, `Select`, `Checkbox`, `Field`, `Card`, `Alert`), and the pages `make:feature` and `make:auth` write import them. The files belong to the app: change the focus ring in `Input.tsx` or the padding in `Button.tsx`, and every page that imports them follows.
+`bunx guren add ui` copies a small set of token-styled components into `resources/js/components/ui/` (`Button`, `Label`, `Input`, `Textarea`, `Select`, `Checkbox`, `Field`, `Card`, `Alert`, `Pagination`), and the pages `make:feature` and `make:auth` write import them. The files belong to the app: change the focus ring in `Input.tsx` or the padding in `Button.tsx`, and every page that imports them follows.
 
 ```tsx
 import { Button } from '@/resources/js/components/ui/Button'

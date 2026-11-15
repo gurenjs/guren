@@ -119,6 +119,7 @@ owns.
 | `Field.tsx` | label, control, hint and error for one form key (section 2.3) | `generateFormField()`'s fifteen lines |
 | `Card.tsx` | `<section>` with `rounded-g-card border-g-line bg-g-panel shadow-g-card`, optional `title` | the card markup on index pages |
 | `Alert.tsx` | `tone: 'ok' \| 'warn' \| 'danger'`; `role="alert"` for danger, `role="status"` otherwise | `calloutRow()` in `make-auth.ts` |
+| `Pagination.tsx` | **Amended in implementation:** `<nav>` of previous, page numbers and next as Inertia `<Link>`s from a paginator's `links`; the current page carries `aria-current="page"`, a page with no URL is not a link, a single page renders nothing, and `siblings` (default 1) sets how many numbers show around the current one before a gap | the page loop on index pages, which linked a page with no URL to `#` and listed every page |
 
 The components are native elements styled with `g-` utilities and nothing else:
 no raw colours, no Radix or other headless dependency, no `className` merging
@@ -758,7 +759,8 @@ SSR template's smoke checks labels after hydration, not in the server HTML.
   contract shape later.
 - PATCH-style submission of dirty fields only.
 - A component for every UI need. The set covers what the generators write and
-  what plan views name.
+  what plan views name. **Amended in implementation:** `Pagination` joined it
+  because `make:feature`'s index page wrote the same markup by hand.
 
 ## Milestones
 
