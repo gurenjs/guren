@@ -1276,7 +1276,9 @@ test('AC-posts-update-1 (6a2991): a signed-in user retitles a post', { session: 
   (`fill`), a `checkbox` given a boolean (`check` or `uncheck`) or a `select`
   (`selectOption` by value, since the plan's input is the submitted value),
   and the view names an action for the route, which is tapped. A `date`,
-  `datetime` or `file` control, an input the form does not label, and a route
+  `datetime` or `file` control, an input the form does not label or labels
+  twice, a value its control would not keep as written (a line break in a
+  `text` control, anything but a plain decimal in a `number` one), and a route
   no action names (the "submit the form" ending below) leave the behaviour to
   one agent step, which is all the rest of this section describes. A
   locator step needs no recording and no login, so a behaviour the plan fully
@@ -1702,7 +1704,10 @@ changes behaviour.
     deciding maintainer:** yes, with the runner's own locators, so the suite
     keeps one runner (§13.5). The nightly measurement plan names no submit
     action on its new and edit views, so three of its behaviours stay agent
-    steps that replay from the fixture, and its delete runs as locator steps.
+    steps that replay from the fixture, and its delete runs as locator steps;
+    `tests.json` lists both kinds, so a night that does not run either, or
+    passes one with no locator step and assertion in its report, is not
+    clean.
 15. (§13) Nothing removes the recording of a title `browser:map` no longer
     generates, and `e2e cache clear` removes every recording. Should
     `browser:map` delete them, which means reading the runner's own cache

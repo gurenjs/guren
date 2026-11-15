@@ -3,5 +3,8 @@
     "AC-posts-store-1 (efecb8): a signed-in user creates a post",
     "AC-posts-store-2 (9cd480): a title of spaces is refused",
     "AC-posts-update-1 (7d6eb4): a signed-in user retitles a post"
+  ],
+  "located": [
+    "AC-posts-destroy-1 (c86887): a signed-in user deletes a post"
   ]
 }

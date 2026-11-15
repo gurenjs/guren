@@ -194,6 +194,29 @@ describe('the behaviour specs', () => {
     expect(checkedText).toContain('agent.act')
   })
 
+  test('fill a number or textarea control only with what it keeps as written, and leave a doubly labelled or hidden key to the agent', () => {
+    const form = (fields: ReadonlyArray<{ field: string; label: string; input: 'text' | 'textarea' | 'number' | 'hidden' }>) =>
+      withView('view.posts.new', { form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [...fields] } })
+    const store = (values: Record<string, unknown>, views: ViewInput[]) => contentsOf([{ ...STORE, input: input(values) }], { views })
+    const rated = form([titleField, { field: 'rating', label: 'Rating', input: 'number' }, { field: 'body', label: 'Body', input: 'textarea' }])
+    const filled = store({ title: 'First', rating: 4, body: 'One\nTwo' }, rated)
+    expect(filled).toContain("await screen.getByLabel('Rating', { exact: true }).fill('4')")
+    expect(filled).toContain("await screen.getByLabel('Body', { exact: true }).fill('One\\nTwo')")
+    expect(filled).not.toContain('agent.act')
+    expect(store({ title: 'First', rating: '4.5' }, rated)).toContain(".fill('4.5')")
+    for (const [values, views] of [
+      [{ title: 'First', rating: 'four' }, rated],
+      [{ title: 'First', rating: '1e3' }, rated],
+      [{ title: 'One\nTwo' }, rated],
+      [{ title: 'First' }, form([titleField, { field: 'title', label: 'Final title', input: 'text' }])],
+      [{ title: 'First' }, form([{ field: 'title', label: 'Title', input: 'hidden' }])],
+    ] as const) {
+      const contents = store(values, views)
+      expect(contents).toContain('await agent.act(')
+      expect(contents).not.toContain('.fill(')
+    }
+  })
+
   test('run signed in whenever the app can sign in, and signed out on a guest-only route', () => {
     expect(contentsOf([STORE], { signIn: true })).toContain("{ session: 'browser' }")
     expect(contentsOf([STORE], { signIn: false })).not.toContain('session:')

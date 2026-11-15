@@ -189,23 +189,39 @@ function controlMayStop(plan: Plan, form: ViewForm, inputs: ReadonlyMap<string, 
 /**
  * The behaviour as locator steps, when the plan names every control it touches: each input a labelled
  * field of the submitting form whose control takes the value one way, and an action for the route to
- * tap. A date, datetime or file control, an action the plan does not name, or an input the form does
- * not label is left to the agent step. No step adds `.first()`: two matches fail as `LOCATOR_AMBIGUOUS`.
+ * tap. A date, datetime or file control, an action the plan does not name, an input the form does not
+ * label or labels twice, and a value the control would not keep as written are left to the agent step.
+ * No step adds `.first()`: two matches fail as `LOCATOR_AMBIGUOUS`.
  */
 function locatorSteps(view: PlanView, form: ViewForm | undefined, route: string, inputs: ReadonlyArray<[string, Primitive]>): string[] | undefined {
   const action = view.actions.find((entry) => entry.route === route)?.label
   if (action === undefined || (inputs.length > 0 && form === undefined)) return undefined
   const steps: string[] = []
   for (const [name, value] of inputs) {
-    const field = form!.fields.find((entry) => entry.field === name && entry.input !== 'hidden')
-    if (!field) return undefined
-    const control = labelLocator(field.label)
-    if ((field.input === 'text' || field.input === 'textarea' || field.input === 'number') && typeof value !== 'boolean') steps.push(`await ${control}.fill(${quoteString(String(value))})`)
-    else if (field.input === 'checkbox' && typeof value === 'boolean') steps.push(`await ${control}.${value ? 'check' : 'uncheck'}()`)
-    else if (field.input === 'select' && typeof value !== 'boolean') steps.push(`await ${control}.selectOption({ value: ${quoteString(String(value))} })`)
-    else return undefined
+    const fields = form!.fields.filter((entry) => entry.field === name && entry.input !== 'hidden')
+    if (fields.length !== 1) return undefined
+    const field = fields[0]!
+    const step = controlStep(field.input, value)
+    if (step === undefined) return undefined
+    steps.push(`await ${labelLocator(field.label)}.${step}`)
   }
   return [...steps, `await ${actionLocator(action)}.tap()`]
+}
+
+/** A plain decimal: what a number control keeps as typed. Playwright refuses any other text for one. */
+const NUMBER_TEXT = /^-?\d+(?:\.\d+)?$/u
+
+/** The locator call that sets `value` on a control of this kind, or none when the control would not keep it as written. */
+function controlStep(input: ViewForm['fields'][number]['input'], value: Primitive): string | undefined {
+  if (input === 'text' && typeof value !== 'boolean') {
+    // A single-line control drops a line break from what is typed into it.
+    return /[\r\n]/u.test(String(value)) ? undefined : `fill(${quoteString(String(value))})`
+  }
+  if (input === 'textarea' && typeof value !== 'boolean') return `fill(${quoteString(String(value))})`
+  if (input === 'number' && typeof value !== 'boolean') return NUMBER_TEXT.test(String(value)) ? `fill(${quoteString(String(value))})` : undefined
+  if (input === 'checkbox' && typeof value === 'boolean') return value ? 'check()' : 'uncheck()'
+  if (input === 'select' && typeof value !== 'boolean') return `selectOption({ value: ${quoteString(String(value))} })`
+  return undefined
 }
 
 interface Instruction {
