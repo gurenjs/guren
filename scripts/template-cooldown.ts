@@ -10,7 +10,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AI_PROVIDERS } from '../packages/cli/src/add-ai'
-import { BEHAVIOUR_DEV_PACKAGES, CLAUDE_CODE_ADAPTER } from '../packages/cli/src/add-browser-tests'
+import { BEHAVIOUR_AGENTS, BEHAVIOUR_DEV_PACKAGES } from '../packages/cli/src/add-browser-tests'
 import { RELEASE_AGE_SECONDS } from '../packages/cli/src/release-age'
 import { DATABASE_DEFAULTS } from '../packages/create-app/src/blueprints'
 import { collectLocalPackages, type DependencyManifest } from './smoke/local-packages'
@@ -73,7 +73,7 @@ export async function scaffoldThirdPartyRanges(templates: readonly string[]): Pr
     if (range === undefined) throw new Error(`packages/cli/package.json declares no devDependency on ${name}, which guren add browser-tests --behaviours installs at that version.`)
     ranges.push({ name, range, source: 'guren add browser-tests --behaviours' })
   }
-  ranges.push({ ...CLAUDE_CODE_ADAPTER, source: 'guren add browser-tests --behaviours' })
+  for (const { adapter } of Object.values(BEHAVIOUR_AGENTS)) ranges.push({ ...adapter, source: 'guren add browser-tests --behaviours' })
   for (const pkg of await collectLocalPackages()) {
     const manifest = await readManifest(join(pkg.sourceDir, 'package.json'))
     const optional = manifest.peerDependenciesMeta ?? {}
