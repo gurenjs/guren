@@ -5,7 +5,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, realpath, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { runGit } from '../changed-files'
@@ -64,7 +64,8 @@ export interface ChangeRecord {
   /** The readers that did not read, which is what a floor above its facts rests on. */
   unjudged: Array<{ reader: string; lane: Lane }>
   audit: ChangeLaneReport['audit'] | null
-  holds: ChangeHold[]
+  /** Codes and lanes: a hold's message may carry an error's text, which this record outlives. */
+  holds: Array<Omit<ChangeHold, 'message'>>
   eligible: boolean
   gate: { ok: boolean; deps: boolean; stages: Array<{ name: string; status: string }> }
   /** Per-route security records are not computed by this version: `unavailable`, never an empty list. */
@@ -105,12 +106,30 @@ async function runGateDefault(cwd: string, options: { deps: boolean; routesFile?
 // `runGit()` trims each line, so a porcelain line's status may have lost its leading space.
 const statusPath = (line: string): string => line.replace(/^[A-Z?!]{1,2}\s+/, '')
 
-const firstLine = (error: unknown): string => (error instanceof Error ? error.message : String(error)).split('\n')[0]!
+export function firstLine(error: unknown): string {
+  try {
+    return (error instanceof Error ? error.message : String(error)).split('\n')[0]!
+  } catch {
+    // A rejection with no string form (`Object.create(null)`) must not throw out of the catch that reads it.
+    return 'a value with no message'
+  }
+}
+
+/**
+ * Masks the credentials a failing command most often prints: a URL's user information and a
+ * `NAME=value` whose name reads as a secret. The files are uploaded as CI artifacts.
+ */
+export function redactSecrets(text: string): string {
+  return text
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@"']+@/gi, '$1[redacted]@')
+    .replace(/\b([A-Z0-9_]*(?:SECRET|PASSWORD|PASSWD|TOKEN|API_?KEY|PRIVATE_?KEY|APP_KEY)[A-Z0-9_]*)=([^\s"']+)/g, '$1=[redacted]')
+}
 
 /** Tracked paths that differ from the commit, over the whole worktree: an app's tsconfig may extend a file above it. */
 async function trackedChanges(cwd: string): Promise<string[] | null> {
   const root = (await runGit(cwd, ['rev-parse', '--show-toplevel']))?.[0]
-  return root === undefined ? null : runGit(root, ['status', '--porcelain', '--untracked-files=no'])
+  // `submodule.<name>.ignore` would hide edits inside a submodule the gate compiles.
+  return root === undefined ? null : runGit(root, ['status', '--porcelain', '--untracked-files=no', '--ignore-submodules=none'])
 }
 
 /**
@@ -118,7 +137,16 @@ async function trackedChanges(cwd: string): Promise<string[] | null> {
  * resolves (an isolated or a hoisted install leaves none beside the application).
  */
 async function serverVersion(cwd: string): Promise<string | null> {
-  const starts = [cwd, await realpath(join(cwd, 'node_modules/@guren/core')).catch(() => undefined)].filter((dir): dir is string => dir !== undefined)
+  // The core the application resolves may be hoisted to a directory above it, and link into an isolated store.
+  const cores: string[] = []
+  for (let dir = cwd; dir !== dirname(dir); dir = dirname(dir)) {
+    const core = await realpath(join(dir, 'node_modules/@guren/core')).catch(() => undefined)
+    if (core !== undefined) {
+      cores.push(core)
+      break
+    }
+  }
+  const starts = [cwd, ...cores]
   for (const start of starts) {
     for (let dir = start; dir !== dirname(dir); dir = dirname(dir)) {
       const path = join(dir, 'node_modules/@guren/server/package.json')
@@ -151,6 +179,11 @@ function ownVersion(): string | null {
 
 const BROWSER_CONFIGS = ['playwright.browser.config.ts', 'e2e.browser.config.ts']
 
+async function changedPaths(cwd: string, lane: ChangeLaneReport): Promise<string[]> {
+  const change = await resolveChange(cwd, lane.base, lane.head)
+  return change.paths.filter((entry) => !entry.outsideApp).flatMap((entry) => (entry.oldPath ? [entry.path, entry.oldPath] : [entry.path]))
+}
+
 export async function collectChangeEvidence(options: ChangeEvidenceOptions): Promise<ChangeEvidence> {
   const cwd = resolve(options.cwd)
   const holds: ChangeHold[] = []
@@ -180,6 +213,10 @@ export async function collectChangeEvidence(options: ChangeEvidenceOptions): Pro
     hold('gate-failed', `the gate failed: ${gate.stages.filter((stage) => stage.status === 'fail').map((stage) => stage.name).join(', ') || 'no stage reported'}`)
   }
   // The gate's codegen regenerates committed files, and the stages after it judge what it wrote, not the commit.
+  const checkoutAfter = (await runGit(cwd, ['rev-parse', 'HEAD']))?.[0]
+  if (checkout !== undefined && checkoutAfter !== checkout) {
+    hold('checkout-moved', `the checkout moved from ${checkout.slice(0, 12)} to ${checkoutAfter?.slice(0, 12) ?? 'no commit'} while the gate ran, so the gate judged code the change may not hold`)
+  }
   if (dirty !== null && dirty.length === 0) {
     const after = await trackedChanges(cwd)
     if (after === null) hold('checkout-unreadable', 'git status did not answer after the gate, so what the gate rewrote could not be ruled out')
@@ -211,8 +248,11 @@ export async function collectChangeEvidence(options: ChangeEvidenceOptions): Pro
     uncovered: [],
   }
   // A catalog is what a page renders as its labels, which the browser specs locate controls by.
-  const rendered = (path: string): boolean => rendersPages(path) || /^(?:modules\/[^/]+\/)?lang\//.test(path)
-  const pages = lane === undefined ? [] : [...new Set(lane.facts.flatMap((fact) => fact.files).filter(rendered))]
+  const routesEntry = options.routesFile === undefined ? undefined : relative(cwd, resolve(cwd, options.routesFile)).split(sep).join('/')
+  const rendered = (path: string): boolean => rendersPages(path) || /^(?:modules\/[^/]+\/)?lang\//.test(path) || path === routesEntry
+  // Both sides of each path, since a page moved out of `resources/js/pages/` is a page the change removed.
+  const touched = lane === undefined ? [] : await changedPaths(cwd, lane).catch(() => lane.facts.flatMap((fact) => fact.files))
+  const pages = [...new Set(touched.filter(rendered))]
   if (lane === undefined || pages.length > 0) {
     hold('browser-evidence-unavailable', `browser evidence is not gathered by this version${pages.length > 0 ? `, and the change edits what a page renders: ${pages.slice(0, 5).join(', ')}${pages.length > 5 ? ', …' : ''}` : ''}`)
   }
@@ -246,7 +286,7 @@ export async function changeRecord(cwd: string, base: string, head: string, evid
     facts: (evidence.lane?.facts ?? []).map(({ code, lane, target, files }) => ({ code, lane, ...(target ? { target } : {}), files })),
     unjudged: (evidence.lane?.unjudged ?? []).map(({ reader, lane }) => ({ reader, lane })),
     audit: evidence.lane?.audit ?? null,
-    holds: evidence.holds,
+    holds: evidence.holds.map(({ code, lane }) => ({ code, lane })),
     eligible: evidence.eligible,
     gate: { ok: evidence.gate.ok, deps, stages: evidence.gate.stages.map(({ name, status }) => ({ name, status })) },
     securityRecords: { unavailable: 'per-route security records are not computed by this version' },
@@ -289,9 +329,17 @@ export async function writeChangeEvidence(cwd: string, dir: string, evidence: Ch
       if (error.code !== 'EEXIST') throw error
     })
   }
-  await writeFileAtomic(join(target, 'evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`)
-  await writeFileAtomic(join(target, 'record.json'), `${JSON.stringify(record, null, 2)}\n`)
-  await writeFileAtomic(join(target, 'evidence.md'), renderEvidenceMarkdown(evidence))
+  const files: Array<[string, string]> = [
+    ['evidence.json', `${JSON.stringify(evidence, null, 2)}\n`],
+    ['record.json', `${JSON.stringify(record, null, 2)}\n`],
+    ['evidence.md', renderEvidenceMarkdown(evidence)],
+  ]
+  // Each file on its own: one that cannot be written leaves the others to be.
+  const failed: string[] = []
+  for (const [name, content] of files) {
+    await writeFileAtomic(join(target, name), redactSecrets(content)).catch((error: unknown) => failed.push(`${name}: ${firstLine(error)}`))
+  }
+  if (failed.length > 0) throw new Error(failed.join('; '))
   return target
 }
 

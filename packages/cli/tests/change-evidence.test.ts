@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 
 import { runCommand } from 'citty'
 
-import { changeRecord, collectChangeEvidence, renderEvidenceMarkdown, writeChangeEvidence, type ChangeEvidenceOptions } from '../src/change/evidence'
+import { changeRecord, collectChangeEvidence, redactSecrets, renderEvidenceMarkdown, writeChangeEvidence, type ChangeEvidenceOptions } from '../src/change/evidence'
 import { runWithCommandStatus } from '../src/command-status'
 import { builtinSubCommands } from '../src/commands'
 import type { GateReport } from '../src/gate'
@@ -169,6 +169,37 @@ describe('collectChangeEvidence', () => {
     expect(evidence.holds).toContainEqual(expect.objectContaining({ code: 'checkout-dirty', message: expect.stringContaining('tsconfig.base.json') }))
   })
 
+  test('should hold a checkout that moved while the gate ran', async () => {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n' })
+    const gate = async () => {
+      await git(repo, ['checkout', '-q', base])
+      return gateReport(true)
+    }
+
+    expect(holdCodes(await evidenceOf(repo, base, head, { gate }))).toEqual(['checkout-moved'])
+  })
+
+  test('should hold a change to the routes entry --routes names, and a page moved out of the pages directory', async () => {
+    const { repo, base } = await createRepo()
+    const custom = await evidenceOf(repo, base, await commit(repo, { 'docs/web.ts': 'export {}\n' }), { audit: false, routesFile: 'docs/web.ts' })
+    const withPage = await commit(repo, { 'resources/js/pages/About.tsx': 'export default function About() { return null }\n' })
+    await mkdir(join(repo, 'notes'), { recursive: true })
+    await git(repo, ['mv', 'resources/js/pages/About.tsx', 'notes/About.tsx'])
+    const moved = await evidenceOf(repo, withPage, await commit(repo, {}), { audit: false })
+
+    expect(custom.lane?.floor).toBe('low')
+    expect(holdCodes(custom)).toEqual(['browser-evidence-unavailable'])
+    expect(moved.holds).toContainEqual(expect.objectContaining({ code: 'browser-evidence-unavailable', message: expect.stringContaining('resources/js/pages/About.tsx') }))
+  })
+
+  test('should hold, not throw, on a rejection that has no string form', async () => {
+    const { repo, base } = await createRepo()
+    const evidence = await evidenceOf(repo, base, await commit(repo, { 'docs/guide.md': 'A longer guide.\n' }), { gate: async () => { throw Object.create(null) } })
+
+    expect(evidence.holds).toEqual([expect.objectContaining({ code: 'gate-failed', message: 'the gate could not run: a value with no message' })])
+  })
+
   test('should hold a change under a plan that is not closed', async () => {
     const { repo, base } = await createRepo()
     const evidence = await evidenceOf(repo, base, await commit(repo, { 'docs/plans/broken/plan.json': '{' }), { audit: false })
@@ -189,7 +220,7 @@ describe('the record and the summary', () => {
     expect(await readFile(join(dir, '.gitignore'), 'utf8')).toBe('*\n')
     expect(JSON.parse(await readFile(join(dir, 'evidence.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(evidence)))
     expect(await readFile(join(dir, 'evidence.md'), 'utf8')).toBe(renderEvidenceMarkdown(evidence))
-    expect(record).toMatchObject({ recordVersion: 1, base, head, mergeBase: base, floor: 'low', eligible: false, unjudged: [], audit: { compared: false, loadedCode: false }, gate: { ok: false, deps: false, stages: [{ name: 'test', status: 'fail' }] } })
+    expect(record).toMatchObject({ recordVersion: 1, base, head, mergeBase: base, floor: 'low', eligible: false, unjudged: [], audit: { compared: false, loadedCode: false }, holds: [{ code: 'gate-failed', lane: 'medium' }], gate: { ok: false, deps: false, stages: [{ name: 'test', status: 'fail' }] } })
     expect(record.securityRecords).toEqual({ unavailable: expect.any(String) })
     expect(typeof record.cli).toBe('string')
     expect(JSON.stringify(record)).not.toContain('1 test failed')
@@ -208,6 +239,50 @@ describe('the record and the summary', () => {
     const record = await changeRecord(repo, base, head, await evidenceOf(repo, base, head), true)
 
     expect(record.server).toBe('9.8.7')
+  })
+
+  test('should mask credentials in every file and keep error text out of the record\'s holds', async () => {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n' })
+    const gate = async (): Promise<GateReport> => ({ cwd: repo, ok: false, changed: false, stages: [{ name: 'test', status: 'fail', durationMs: 1, findings: ['DATABASE_URL=postgres://app:hunter2@db/app refused'] }] })
+    const lane = async () => {
+      throw new Error('connection failed: postgres://app:hunter2@db/app')
+    }
+    const evidence = await evidenceOf(repo, base, head, { gate, lane })
+    const record = await changeRecord(repo, base, head, evidence, false)
+
+    const dir = await writeChangeEvidence(repo, '.guren/evidence', evidence, record)
+    const written = await Promise.all(['evidence.json', 'record.json', 'evidence.md'].map((name) => readFile(join(dir, name), 'utf8')))
+
+    expect(written.join('\n')).not.toContain('hunter2')
+    expect(record.holds.every((hold) => Object.keys(hold).sort().join() === 'code,lane')).toBe(true)
+    expect(redactSecrets('https://alice:s3cret@host/x GITHUB_TOKEN=ghp_1 plain=ok')).toBe('https://[redacted]@host/x GITHUB_TOKEN=[redacted] plain=ok')
+  })
+
+  test('should write the files it can when one of them cannot be written', async () => {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n' })
+    const evidence = await evidenceOf(repo, base, head)
+    const out = join(repo, 'out')
+    await mkdir(join(out, 'evidence.json'), { recursive: true })
+
+    await expect(writeChangeEvidence(repo, out, evidence, await changeRecord(repo, base, head, evidence, false))).rejects.toThrow('evidence.json:')
+    expect(await readFile(join(out, 'record.json'), 'utf8')).toContain('"recordVersion": 1')
+    expect(await readFile(join(out, 'evidence.md'), 'utf8')).toBe(renderEvidenceMarkdown(evidence))
+  })
+
+  test('should read the server version through a @guren/core hoisted above the application', async () => {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, { 'apps/web/docs/guide.md': 'A guide.\n' })
+    const store = join(ROOT, `store-${repos++}`)
+    await mkdir(join(store, 'node_modules/@guren/core'), { recursive: true })
+    await mkdir(join(store, 'node_modules/@guren/server'), { recursive: true })
+    await writeFile(join(store, 'node_modules/@guren/server/package.json'), JSON.stringify({ name: '@guren/server', version: '1.2.3' }), 'utf8')
+    await mkdir(join(repo, 'node_modules/@guren'), { recursive: true })
+    await symlink(join(store, 'node_modules/@guren/core'), join(repo, 'node_modules/@guren/core'), 'dir')
+    const app = join(repo, 'apps/web')
+
+    expect((await changeRecord(app, base, head, await evidenceOf(app, base, head), false)).server).toBe('1.2.3')
   })
 
   test('should open the summary with the conclusion', async () => {

@@ -4,7 +4,7 @@ import { defineCommand } from '../define-command'
 import { judgeChangeLane, type ChangeFact, type ChangeLaneReport, type Lane } from '../change/lane'
 import { openChange, resolveChange } from '../change/resolve'
 import { auditChangeRevisions } from '../change/revision-audit'
-import { changeRecord, collectChangeEvidence, EVIDENCE_DIR, renderEvidenceMarkdown, writeChangeEvidence } from '../change/evidence'
+import { changeRecord, collectChangeEvidence, EVIDENCE_DIR, firstLine, redactSecrets, renderEvidenceMarkdown, writeChangeEvidence } from '../change/evidence'
 import { CliError } from '../cli-error'
 import { markCommandFailed } from '../command-status'
 
@@ -67,10 +67,10 @@ export const changeEvidenceCommand = defineCommand({
       written = await writeChangeEvidence(cwd, target, evidence, await changeRecord(cwd, base, head, evidence, deps))
     } catch (error) {
       // Nothing but the gate fails this command: a file it could not write is said, never an exit code.
-      console.error(`The evidence could not be written to ${target}: ${error instanceof Error ? error.message : String(error)}`)
+      console.error(redactSecrets(`The evidence could not be written to ${target}: ${firstLine(error)}`))
     }
-    if (args.json) console.log(JSON.stringify(evidence))
-    else console.log(`${renderEvidenceMarkdown(evidence)}${written ? `\nWritten to ${written}` : ''}`)
+    if (args.json) console.log(redactSecrets(JSON.stringify(evidence)))
+    else console.log(redactSecrets(`${renderEvidenceMarkdown(evidence)}${written ? `\nWritten to ${written}` : ''}`))
     if (!evidence.gate.ok) markCommandFailed()
   },
 })
