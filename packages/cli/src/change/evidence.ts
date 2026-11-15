@@ -14,6 +14,7 @@ import { writeFileAtomic } from '../plan/beside'
 import { judgeChangeLane, rendersPages, type ChangeLaneReport, type Lane } from './lane'
 import { policyNote, REVIEW_POLICY_FILE } from './review-policy'
 import { openChange, resolveChange } from './resolve'
+import { changeAdvisories } from './revision-advisories'
 import { auditChangeRevisions } from './revision-audit'
 
 export const EVIDENCE_DIR = '.guren/evidence'
@@ -87,14 +88,17 @@ export interface ChangeEvidenceOptions {
   /** Defaults to `runGate()`. */
   gate?: (cwd: string, options: { deps: boolean; routesFile?: string }) => Promise<GateReport>
   /** Defaults to `change:lane`'s own judgement. */
-  lane?: (cwd: string, base: string, head: string, audit: boolean) => Promise<ChangeLaneReport>
+  lane?: (cwd: string, base: string, head: string, audit: boolean, deps: boolean) => Promise<ChangeLaneReport>
 }
 
-async function judgeLane(cwd: string, base: string, head: string, audit: boolean): Promise<ChangeLaneReport> {
+async function judgeLane(cwd: string, base: string, head: string, audit: boolean, deps: boolean): Promise<ChangeLaneReport> {
   const change = await resolveChange(cwd, base, head)
   const { reader, dispose } = openChange(cwd, change)
   try {
-    return await judgeChangeLane(change, reader, audit ? { audit: () => auditChangeRevisions(cwd, change) } : {})
+    return await judgeChangeLane(change, reader, {
+      ...(audit ? { audit: () => auditChangeRevisions(cwd, change) } : {}),
+      ...(deps ? { advisories: () => changeAdvisories(cwd, change) } : {}),
+    })
   } finally {
     await dispose()
   }
@@ -227,7 +231,7 @@ export async function collectChangeEvidence(options: ChangeEvidenceOptions): Pro
 
   let lane: ChangeLaneReport | undefined
   try {
-    lane = await (options.lane ?? judgeLane)(cwd, options.base, options.head, options.audit)
+    lane = await (options.lane ?? judgeLane)(cwd, options.base, options.head, options.audit, options.deps)
   } catch (error) {
     hold('lane-unavailable', `the change could not be read: ${firstLine(error)}`)
   }

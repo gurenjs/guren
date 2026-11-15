@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { runCommand } from 'citty'
 
 import { judgeChangeLane, type ChangeLaneReport } from '../src/change/lane'
+import { changeAdvisories, type ChangeAdvisories } from '../src/change/revision-advisories'
 import { openChange, resolveChange } from '../src/change/resolve'
 import { builtinSubCommands } from '../src/commands'
 import { renderChangeLane } from '../src/commands/change'
@@ -298,6 +299,51 @@ describe('judgeChangeLane', () => {
     expect(codes(report)).toEqual(['dependencies-changed', 'dependencies-changed'])
     expect(report.unjudged.map((entry) => entry.reader)).toContain('dependency-advisory')
     expect(report.floor).toBe('medium')
+  })
+
+  test('should raise an advisory the head has and the base does not, and say why when none could be read', async () => {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, { 'package.json': JSON.stringify({ name: 'app', scripts: { test: 'bun test', lint: 'oxlint -c lint/rules.json' }, dependencies: { zod: '^4.1.0', minimist: '1.2.0' } }, null, 2), 'bun.lock': '{}' })
+    const judged = async (advisories: () => Promise<ChangeAdvisories>): Promise<ChangeLaneReport> => {
+      const change = await resolveChange(repo, base, head)
+      const { reader, dispose } = openChange(repo, change)
+      try {
+        return await judgeChangeLane(change, reader, { advisories })
+      } finally {
+        await dispose()
+      }
+    }
+
+    const raised = await judged(async () => ({ base: ['deps:zod:GHSA-aaaa-bbbb-cccc'], head: ['deps:minimist:GHSA-xvch-5gv4-984h', 'deps:zod:GHSA-aaaa-bbbb-cccc'] }))
+    expect(raised.facts.filter((fact) => fact.code === 'dependency-advisory')).toEqual([
+      expect.objectContaining({ lane: 'high', target: 'minimist:GHSA-xvch-5gv4-984h', files: ['package.json', 'bun.lock'] }),
+    ])
+    expect(raised.floor).toBe('high')
+    expect(raised.unjudged.map((entry) => entry.reader)).not.toContain('dependency-advisory')
+
+    const unread = await judged(async () => ({ unavailable: 'Dependencies could not be scanned (bun audit exited with code 2).' }))
+    expect(unread.unjudged).toContainEqual(expect.objectContaining({ reader: 'dependency-advisory', lane: 'medium', reason: expect.stringContaining('bun audit exited with code 2') }))
+    expect(unread.facts.some((fact) => fact.code === 'dependency-advisory')).toBe(false)
+  })
+
+  test('should not run bun audit for a change that touches no dependency', async () => {
+    let asked = false
+    const { repo, base } = await createRepo()
+    const change = await resolveChange(repo, base, await commit(repo, { 'README.md': '# app, again\n' }))
+    const { reader, dispose } = openChange(repo, change)
+    try {
+      await judgeChangeLane(change, reader, { advisories: async () => { asked = true; return { base: [], head: [] } } })
+    } finally {
+      await dispose()
+    }
+    expect(asked).toBe(false)
+  })
+
+  test('should call the advisories unavailable without a bun.lock at the head', async () => {
+    const { repo, base } = await createRepo()
+    const change = await resolveChange(repo, base, await commit(repo, { 'package.json': JSON.stringify({ name: 'app', dependencies: { zod: '^4.1.0' } }) }))
+
+    expect(await changeAdvisories(repo, change)).toEqual({ unavailable: expect.stringContaining('no bun.lock at the head') })
   })
 
   test('should not read an unparsable package.json as unchanged scripts', async () => {

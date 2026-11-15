@@ -72,13 +72,13 @@ async function repositoryPackage(root: string, directory: string): Promise<strin
  * would run the smudge and end-of-line filters, and what was audited would not be what was
  * committed. Returns why the commit cannot be exported, when it cannot.
  */
-async function exportBlobs(root: string, rev: string, tree: string, appPrefix: string): Promise<string | undefined> {
+export async function exportBlobs(root: string, rev: string, tree: string, appPrefix: string, select?: (path: string) => boolean): Promise<string | undefined> {
   const listing = await git(root, ['ls-tree', '-r', '-z', '--full-tree', rev])
   if (listing === undefined) return 'git could not list its files'
   const entries = listing.split('\0').filter((entry) => entry.length > 0).map((entry) => {
     const [mode, , sha] = entry.slice(0, entry.indexOf('\t')).split(' ')
     return { mode: mode!, sha: sha!, path: entry.slice(entry.indexOf('\t') + 1) }
-  })
+  }).filter((entry) => !select || select(entry.path))
   // A tracked link inside the application (`.guren` pointing into the install) would carry a child's writes out of the export.
   const link = entries.find((entry) => entry.mode === '120000' && entry.path.startsWith(appPrefix))
   if (link) return `it tracks the symlink ${link.path}, which an export would follow out of itself`

@@ -22,6 +22,7 @@ import { auditCoverageGaps, auditFacts } from './audit-facts'
 import { LANES, type FactCode, type Lane } from './fact-classes'
 import { applyReviewPolicy, loadBaseReviewPolicy, REVIEW_POLICY_FILE, type LoadedReviewPolicy } from './review-policy'
 import type { ChangedPath, ChangeReader, ChangeSide, ResolvedChange } from './resolve'
+import type { ChangeAdvisories } from './revision-advisories'
 import type { ChangeAudits } from './revision-audit'
 
 export type { FactCode, Lane } from './fact-classes'
@@ -213,6 +214,8 @@ function policyNames(ast: File): string[] {
 export interface JudgeChangeLaneOptions {
   /** Audits both sides; asked only when the change touches a file the audit reads. Without it the audit facts are not judged. */
   audit?: () => Promise<ChangeAudits>
+  /** `bun audit` on both sides' lockfiles; asked only when the change touches dependencies. Without it the advisories are not judged. */
+  advisories?: () => Promise<ChangeAdvisories>
 }
 
 /**
@@ -519,9 +522,21 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
       if (gaps.length > 0) unjudged.push({ reader: 'audit-coverage', reason: `the audit read less at the head than at the base: ${gaps.join('; ')}`, lane: 'medium' })
     }
   }
-  const dependencies = facts.filter((entry) => entry.code === 'dependencies-changed').flatMap((entry) => entry.files)
+  const dependencies = [...new Set(facts.filter((entry) => entry.code === 'dependencies-changed').flatMap((entry) => entry.files))]
   if (dependencies.length > 0) {
-    unjudged.push({ reader: 'dependency-advisory', reason: 'the advisories of the changed dependencies were not compared with the base by this version', lane: 'medium', files: [...new Set(dependencies)] })
+    const notJudged = (why: string): void => {
+      unjudged.push({ reader: 'dependency-advisory', reason: `${why}, so an advisory the changed dependencies bring in was not judged`, lane: 'medium', files: dependencies })
+    }
+    const advisories = await options.advisories?.()
+    if (!advisories) notJudged('`bun audit` was not run on the two sides')
+    else if ('unavailable' in advisories) notJudged(advisories.unavailable)
+    else {
+      const before = new Set(advisories.base)
+      for (const key of advisories.head.filter((entry) => !before.has(entry))) {
+        const target = key.slice('deps:'.length)
+        facts.push({ code: 'dependency-advisory', lane: 'high', target, files: dependencies, evidence: 'registered', message: "an advisory the base's dependencies do not have, both sides read against today's advisories" })
+      }
+    }
   }
 
   const policy = await loadBaseReviewPolicy(reader)

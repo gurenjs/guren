@@ -5,6 +5,7 @@ import { judgeChangeLane, type ChangeFact, type ChangeLaneReport, type Lane } fr
 import { openChange, resolveChange } from '../change/resolve'
 import { syncReviewDoc } from '../change/review-doc'
 import { policyNote, REVIEW_POLICY_FILE } from '../change/review-policy'
+import { changeAdvisories } from '../change/revision-advisories'
 import { auditChangeRevisions } from '../change/revision-audit'
 import { changeRecord, collectChangeEvidence, EVIDENCE_DIR, firstLine, redactSecrets, renderEvidenceMarkdown, writeChangeEvidence } from '../change/evidence'
 import { CliError } from '../cli-error'
@@ -87,6 +88,7 @@ export const changeLaneCommand = defineCommand({
     json: { type: 'boolean', description: 'Print the report as JSON.' },
     // Positive on purpose, so citty's negation lands on this key; `default: true` prints `--no-audit`.
     audit: { type: 'boolean', default: true, description: "Audit both sides of the change, which runs the application's code as `guren audit` does. Disable with --no-audit." },
+    deps: { type: 'boolean', default: true, description: "Run `bun audit` on both sides' lockfiles when the change touches dependencies (needs registry access). Disable with --no-deps." },
     app: { type: 'string', description: 'Application root directory.' },
   },
   async run({ args }) {
@@ -95,7 +97,10 @@ export const changeLaneCommand = defineCommand({
     const change = await resolveChange(cwd, String(args.base), String(args.head))
     const { reader, dispose } = openChange(cwd, change)
     try {
-      const report = await judgeChangeLane(change, reader, args.audit === false ? {} : { audit: () => auditChangeRevisions(cwd, change) })
+      const report = await judgeChangeLane(change, reader, {
+        ...(args.audit === false ? {} : { audit: () => auditChangeRevisions(cwd, change) }),
+        ...(args.deps === false ? {} : { advisories: () => changeAdvisories(cwd, change) }),
+      })
       console.log(args.json ? JSON.stringify(report) : renderChangeLane(report))
     } finally {
       await dispose()
