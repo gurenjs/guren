@@ -70,6 +70,29 @@ const deployTargets = [
   },
 ]
 
+const inertiaGuides = [
+  {
+    name: 'Inertia adapter',
+    detail: 'Partial reloads, deferred props and SSR, served from Bun. The protocol coverage, row by row.',
+    href: '/docs/guides/inertia',
+  },
+  {
+    name: 'Live props',
+    detail: 'A prop reloads when a broadcast event says its data changed. No Echo, Pusher or socket server to run.',
+    href: '/docs/guides/live-props',
+  },
+  {
+    name: 'MCP Apps',
+    detail: 'The Inertia page a route renders, shown inside Claude when an agent calls that route.',
+    href: '/docs/guides/mcp-apps',
+  },
+  {
+    name: 'Fullstack on Bun',
+    detail: 'What Bun, Hono and Elysia cover, and what is left for you to assemble.',
+    href: '/docs/guides/bun',
+  },
+]
+
 const TAB_KEYS = ['Routes', 'Controller', 'Model', 'View'] as const
 type TabKey = (typeof TAB_KEYS)[number]
 
@@ -322,6 +345,34 @@ export default function Home({ codeExamples }: Props) {
                 </div>
               </div>
             </div>
+          </Band>
+
+          <Band>
+            <div className="px-6 pb-12 pt-16 sm:px-10 md:pt-24">
+              <SectionLabel>Inertia on Bun</SectionLabel>
+              <SectionHeading>Inertia, without Laravel</SectionHeading>
+              <Lead>
+                Guren ships its own Inertia server adapter, listed among Inertia&apos;s community
+                adapters. Controllers render pages with typed props, as they would in Laravel.
+              </Lead>
+            </div>
+            <ul className="grid grid-cols-1 gap-px border-t border-home-line bg-home-line sm:grid-cols-2 lg:grid-cols-4">
+              {inertiaGuides.map((g) => (
+                <li key={g.href} className="bg-home-ground">
+                  <Link
+                    href={g.href}
+                    className="group flex h-full flex-col px-6 py-8 transition hover:bg-home-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-crimson-300 sm:px-8"
+                  >
+                    <span className="font-bold text-home-text">{g.name}</span>
+                    <span className="mt-2 flex-1 text-[0.9375rem] leading-relaxed text-home-text-2">{g.detail}</span>
+                    <span className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-home-text-2 transition group-hover:text-crimson-300">
+                      Guide
+                      <ChevronRightIcon aria-hidden className="size-3.5" />
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
           </Band>
 
           <Band>
