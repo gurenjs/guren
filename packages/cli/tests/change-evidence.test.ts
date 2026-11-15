@@ -292,6 +292,30 @@ describe('the record and the summary', () => {
     expect(renderEvidenceMarkdown(evidence).split('\n')[0]).toBe('## Change evidence: floor `low`, eligible for low')
   })
 
+  test('should hold a change whose REVIEW.md block is stale or could not be checked, and leave an app without one alone', async () => {
+    const { repo } = await createRepo()
+    const base = await commit(repo, { 'REVIEW.md': '# Review\n' })
+    const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n' })
+    const asked: string[] = []
+    const reviewDoc = (result: Awaited<ReturnType<NonNullable<ChangeEvidenceOptions['reviewDoc']>>>) => async (cwd: string) => {
+      asked.push(cwd)
+      return result
+    }
+
+    const stale = await evidenceOf(repo, base, head, { reviewDoc: reviewDoc({ state: 'read', files: [{ file: 'REVIEW.md', state: 'stale' }], gaps: [] }) })
+    const unread = await evidenceOf(repo, base, head, { reviewDoc: reviewDoc({ state: 'unreadable', reasons: ['the routes: no-entry'] }) })
+    const current = await evidenceOf(repo, base, head, { reviewDoc: reviewDoc({ state: 'read', files: [{ file: 'REVIEW.md', state: 'unchanged' }], gaps: [] }) })
+
+    expect(holdCodes(stale)).toEqual(['review-doc-stale'])
+    expect(stale.gate.ok).toBe(true)
+    expect(holdCodes(unread)).toEqual(['review-doc-unchecked'])
+    expect(holdCodes(current)).toEqual([])
+
+    const { repo: bare, base: bareBase } = await createRepo()
+    await evidenceOf(bare, bareBase, await commit(bare, { 'docs/guide.md': 'A longer guide.\n' }), { reviewDoc: reviewDoc({ state: 'unreadable', reasons: [] }) })
+    expect(asked).toHaveLength(3)
+  })
+
   test('should name the lane guren.review.ts set and the approvals it asks of the floor', async () => {
     const { repo } = await createRepo()
     const base = await commit(repo, { 'guren.review.ts': "export default { facts: { ambient: 'medium' }, approvals: { medium: 1 } }\n" })

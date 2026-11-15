@@ -6,6 +6,7 @@ import { judgeChangeLane } from '../src/change/lane'
 import { openChange, resolveChange } from '../src/change/resolve'
 import { BUGBOT_LIMIT, buildReviewBlock, renderBugbotDoc, renderReviewDoc, syncReviewDoc, type ReviewFacts } from '../src/change/review-doc'
 import { APPLICATION_GRAPH_RELATIONS_FIXTURE } from './application-graph-fixture'
+import { envFileNames } from '../src/introspect'
 import { createTempRoot, createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 
 // The application cases introspect the fixture in a child, past Bun's 5 s default under a loaded suite.
@@ -193,6 +194,31 @@ async function commit(repo: string, files: Record<string, string>): Promise<stri
   await git(repo, ['commit', '--allow-empty', '-m', 'change'])
   return git(repo, ['rev-parse', 'HEAD'])
 }
+
+describe('the environment the block is read under', () => {
+  test('should read the app without its env files, whatever this process loaded from them', async () => {
+    const workspace = await createTempWorkspace('guren-review-doc-env-')
+    const previous = process.env.GUREN_REVIEW_FEATURE
+    try {
+      await linkWorkspaceCore(workspace.dir)
+      const main = APPLICATION_GRAPH_RELATIONS_FIXTURE['src/main.ts']!.replace(".name('posts.update')", ".name('posts.update')\n  if (process.env.GUREN_REVIEW_FEATURE === '1') router.post('/feature', [PostController, 'store']).name('feature.store')")
+      await writeWorkspaceFiles(workspace.dir, { ...APPLICATION_GRAPH_RELATIONS_FIXTURE, 'src/main.ts': main })
+      await syncReviewDoc(workspace.dir)
+
+      // Bun loads `.env` into the CLI's own process too, which this stands in for.
+      await writeFile(join(workspace.dir, '.env'), 'GUREN_REVIEW_FEATURE=1\n', 'utf8')
+      process.env.GUREN_REVIEW_FEATURE = '1'
+
+      expect(await envFileNames(workspace.dir)).toEqual(['GUREN_REVIEW_FEATURE'])
+      expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ files: [{ file: 'REVIEW.md', state: 'unchanged' }] })
+      expect(await readFile(join(workspace.dir, 'REVIEW.md'), 'utf8')).not.toContain('/feature')
+    } finally {
+      if (previous === undefined) delete process.env.GUREN_REVIEW_FEATURE
+      else process.env.GUREN_REVIEW_FEATURE = previous
+      await workspace.cleanup()
+    }
+  })
+})
 
 describe('loadReviewFacts', () => {
   test('should say not read for a handler, an inherited action or a model the readers could not follow, through the graph', async () => {

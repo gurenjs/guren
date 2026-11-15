@@ -277,10 +277,10 @@ export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts
   const skippedModels: string[] = []
   const why = (error: unknown): string => (error instanceof Error ? error.message : String(error)).split('\n')[0]!.replaceAll(`${cwd}${sep}`, '')
   const [graph, models, introspection, policy] = await Promise.all([
-    loadApplicationGraph({ cwd, introspect: true }).catch((error: unknown) => ({ unreadable: why(error) })),
+    // Without the env files: a machine's git-ignored `.env` must not change the block `--check` compares in CI.
+    loadApplicationGraph({ cwd, introspect: true, withoutEnvFiles: true }).catch((error: unknown) => ({ unreadable: why(error) })),
     readModels(cwd, skippedModels).catch((error: unknown) => ({ unreadable: why(error) })),
-    // A run of its own: the memoised one would answer a second call in this process from the first.
-    introspectApp(cwd, { fresh: true }),
+    introspectApp(cwd, { withoutEnvFiles: true }),
     readPolicySummary(cwd),
   ])
   const unreadable: string[] = []

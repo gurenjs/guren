@@ -4,9 +4,11 @@
  * `guren dev` does, and reads the result the child writes to a temp file.
  * Type-only against `@guren/server`: the app may resolve an older one.
  */
+import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { promisify } from 'node:util'
 import type { AppManifest, RouteEntry } from '@guren/server'
 
 import { siblingEntry } from './cli-entry'
@@ -36,6 +38,12 @@ export interface IntrospectOptions {
   graph?: boolean
   /** Laid over the child's environment; a run given any is never memoised, since the key would not name it. */
   env?: Readonly<Record<string, string>>
+  /**
+   * Register the app without its env files: the child loads none (`--no-env-file`), and every name
+   * they set is left out of what it inherits, since this process may have loaded them already. What
+   * a machine's git-ignored `.env` turns on then reads alike on every machine. Never memoised.
+   */
+  withoutEnvFiles?: true
 }
 
 /**
@@ -119,7 +127,7 @@ export function introspectApp(cwd: string, options: IntrospectOptions = {}): Pro
   const root = resolve(cwd)
   const timeoutMs = options.timeoutMs ?? DEFAULT_INTROSPECT_TIMEOUT_MS
   const graph = options.graph === true
-  if (options.fresh || options.env) return runOrCrash(root, timeoutMs, graph, options.env)
+  if (options.fresh || options.env || options.withoutEnvFiles) return runOrCrash(root, timeoutMs, graph, options.env, options.withoutEnvFiles === true)
   const key = `${timeoutMs}:${graph}:${root}`
   let run = runs.get(key)
   if (!run) {
@@ -129,15 +137,22 @@ export function introspectApp(cwd: string, options: IntrospectOptions = {}): Pro
   return run
 }
 
-function runOrCrash(root: string, timeoutMs: number, graph: boolean, env?: Readonly<Record<string, string>>): Promise<Introspection> {
-  return runIntrospection(root, timeoutMs, graph, env).catch((error: unknown): Introspection => ({
+function runOrCrash(root: string, timeoutMs: number, graph: boolean, env?: Readonly<Record<string, string>>, withoutEnvFiles = false): Promise<Introspection> {
+  return runIntrospection(root, timeoutMs, graph, env, withoutEnvFiles).catch((error: unknown): Introspection => ({
     status: 'failed',
     reason: 'crashed',
     message: `The introspection process could not run: ${error instanceof Error ? error.message : String(error)}`,
   }))
 }
 
-async function runIntrospection(root: string, timeoutMs: number, graph: boolean, extraEnv?: Readonly<Record<string, string>>): Promise<Introspection> {
+/** The names Bun loads from the app's env files: a Bun started on nothing else in the app root holds exactly those. */
+export async function envFileNames(root: string): Promise<string[]> {
+  const seeded = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...(process.env.NODE_ENV ? { NODE_ENV: process.env.NODE_ENV } : {}) }
+  const { stdout } = await promisify(execFile)(bunExecutable(), ['-e', 'process.stdout.write(JSON.stringify(Object.keys(process.env)))'], { cwd: root, env: seeded, timeout: 30_000 })
+  return (JSON.parse(stdout) as string[]).filter((name) => !(name in seeded)).sort()
+}
+
+async function runIntrospection(root: string, timeoutMs: number, graph: boolean, extraEnv?: Readonly<Record<string, string>>, withoutEnvFiles = false): Promise<Introspection> {
   const child = siblingEntry('introspect-child')
   if (!child) {
     return { status: 'failed', reason: 'crashed', message: 'introspect-child is missing beside the CLI; rebuild @guren/cli.' }
@@ -147,7 +162,9 @@ async function runIntrospection(root: string, timeoutMs: number, graph: boolean,
 
   try {
     const started = Date.now()
-    const run = await runCaptured([bunExecutable(), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS)], root, {
+    const unset = withoutEnvFiles ? await envFileNames(root) : []
+    const run = await runCaptured([bunExecutable(), ...(withoutEnvFiles ? ['--no-env-file'] : []), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS)], root, {
+      unset,
       timeoutMs,
       // Always set, so a value inherited from this process cannot turn an ordinary run into a graph run or a target's.
       env: { [INTROSPECT_TARGET_ENV]: '', ...extraEnv, GUREN_INTROSPECT: '1', [INTROSPECT_GRAPH_ENV]: graph ? '1' : '0' },

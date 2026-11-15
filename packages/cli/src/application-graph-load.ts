@@ -85,7 +85,8 @@ async function readSources(cwd: string): Promise<{ sources: Record<string, strin
   return { sources, failures }
 }
 
-export async function loadApplicationGraph(options: { cwd: string; introspect?: boolean }): Promise<GurenApplicationGraph> {
+/** `withoutEnvFiles`: register the app without its env files, as `introspectApp()` takes it. */
+export async function loadApplicationGraph(options: { cwd: string; introspect?: boolean; withoutEnvFiles?: true }): Promise<GurenApplicationGraph> {
   const cwd = resolve(options.cwd)
   const input: ApplicationGraphInputs = { nodes: [], edges: [], unresolved: [], coverage: {}, capturedAt: new Date().toISOString() }
   let sources: Record<string, string> = {}
@@ -162,7 +163,7 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
     before = Object.fromEntries(Object.entries(sources).map(([file, source]) => [file, graphDigest(source)]))
   })
   // Started once the sources are fingerprinted, so registration overlaps the static readers, which read only `sources`.
-  const registration = options.introspect === false ? undefined : introspectApp(cwd, { fresh: true, graph: true, timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS })
+  const registration = options.introspect === false ? undefined : introspectApp(cwd, { fresh: true, graph: true, timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS, ...(options.withoutEnvFiles ? { withoutEnvFiles: true } : {}) })
 
   let controllers: ControllerDeclaration[] = []
   await section('controller', async () => {

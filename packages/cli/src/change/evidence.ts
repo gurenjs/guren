@@ -12,6 +12,7 @@ import { runGit } from '../changed-files'
 import type { GateReport } from '../gate'
 import { writeFileAtomic } from '../plan/beside'
 import { judgeChangeLane, rendersPages, type ChangeLaneReport, type Lane } from './lane'
+import { REVIEW_DOC_FILE, syncReviewDoc, type ReviewDocResult } from './review-doc'
 import { policyNote, REVIEW_POLICY_FILE } from './review-policy'
 import { openChange, resolveChange } from './resolve'
 import { changeAdvisories } from './revision-advisories'
@@ -87,6 +88,8 @@ export interface ChangeEvidenceOptions {
   routesFile?: string
   /** Defaults to `runGate()`. */
   gate?: (cwd: string, options: { deps: boolean; routesFile?: string }) => Promise<GateReport>
+  /** Defaults to `change:policy --check`; asked only where `REVIEW.md` exists. */
+  reviewDoc?: (cwd: string) => Promise<ReviewDocResult>
   /** Defaults to `change:lane`'s own judgement. */
   lane?: (cwd: string, base: string, head: string, audit: boolean, deps: boolean) => Promise<ChangeLaneReport>
 }
@@ -261,6 +264,22 @@ export async function collectChangeEvidence(options: ChangeEvidenceOptions): Pro
   const pages = [...new Set(touched.filter(rendered))]
   if (lane === undefined || pages.length > 0) {
     hold('browser-evidence-unavailable', `browser evidence is not gathered by this version${pages.length > 0 ? `, and the change edits what a page renders: ${pages.slice(0, 5).join(', ')}${pages.length > 5 ? ', …' : ''}` : ''}`)
+  }
+
+  // `change:policy --check`, run here so the workflow fails on the gate alone: a stale block misleads the reviewer, not the gate.
+  if (existsSync(join(cwd, REVIEW_DOC_FILE))) {
+    try {
+      const review = await (options.reviewDoc ?? ((root: string) => syncReviewDoc(root, { check: true })))(cwd)
+      if (review.state === 'unreadable') hold('review-doc-unchecked', `${REVIEW_DOC_FILE} was not checked against the application, which did not read: ${review.reasons.join('; ')}`)
+      else {
+        const stale = review.files.filter((file) => file.state === 'stale' || file.state === 'missing')
+        const refused = review.files.filter((file) => file.state === 'refused')
+        if (stale.length > 0) hold('review-doc-stale', `${stale.map((file) => `${file.file} is ${file.state}`).join(', ')}: the reviewer reads a block that does not describe this application; run \`guren change:policy\` and commit it`)
+        if (refused.length > 0) hold('review-doc-unchecked', `${refused.map((file) => `${file.file}: ${(file.problems ?? []).join('; ')}`).join(', ')}`)
+      }
+    } catch (error) {
+      hold('review-doc-unchecked', `${REVIEW_DOC_FILE} could not be checked: ${firstLine(error)}`)
+    }
   }
 
   const codes = new Set(lane?.facts.map((fact) => fact.code) ?? [])
