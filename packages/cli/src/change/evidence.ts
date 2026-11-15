@@ -97,7 +97,7 @@ async function judgeLane(cwd: string, base: string, head: string, audit: boolean
   try {
     return await judgeChangeLane(change, reader, {
       ...(audit ? { audit: () => auditChangeRevisions(cwd, change) } : {}),
-      ...(deps ? { advisories: () => changeAdvisories(cwd, change) } : {}),
+      ...(deps ? { advisories: (files) => changeAdvisories(cwd, change, files) } : {}),
     })
   } finally {
     await dispose()

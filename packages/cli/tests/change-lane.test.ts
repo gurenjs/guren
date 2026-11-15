@@ -4,8 +4,8 @@ import { dirname, join } from 'node:path'
 
 import { runCommand } from 'citty'
 
-import { judgeChangeLane, type ChangeLaneReport } from '../src/change/lane'
-import { changeAdvisories, type ChangeAdvisories } from '../src/change/revision-advisories'
+import { judgeChangeLane, type ChangeLaneReport, type JudgeChangeLaneOptions } from '../src/change/lane'
+import { changeAdvisories } from '../src/change/revision-advisories'
 import { openChange, resolveChange } from '../src/change/resolve'
 import { builtinSubCommands } from '../src/commands'
 import { renderChangeLane } from '../src/commands/change'
@@ -304,7 +304,7 @@ describe('judgeChangeLane', () => {
   test('should raise an advisory the head has and the base does not, and say why when none could be read', async () => {
     const { repo, base } = await createRepo()
     const head = await commit(repo, { 'package.json': JSON.stringify({ name: 'app', scripts: { test: 'bun test', lint: 'oxlint -c lint/rules.json' }, dependencies: { zod: '^4.1.0', minimist: '1.2.0' } }, null, 2), 'bun.lock': '{}' })
-    const judged = async (advisories: () => Promise<ChangeAdvisories>): Promise<ChangeLaneReport> => {
+    const judged = async (advisories: NonNullable<JudgeChangeLaneOptions['advisories']>): Promise<ChangeLaneReport> => {
       const change = await resolveChange(repo, base, head)
       const { reader, dispose } = openChange(repo, change)
       try {
@@ -314,14 +314,14 @@ describe('judgeChangeLane', () => {
       }
     }
 
-    const raised = await judged(async () => ({ base: ['deps:zod:GHSA-aaaa-bbbb-cccc'], head: ['deps:minimist:GHSA-xvch-5gv4-984h', 'deps:zod:GHSA-aaaa-bbbb-cccc'] }))
+    const raised = await judged(async (files) => [{ directory: '', files: files.map((entry) => entry.file), base: ['deps:zod:GHSA-aaaa-bbbb-cccc'], head: ['deps:minimist:GHSA-xvch-5gv4-984h', 'deps:zod:GHSA-aaaa-bbbb-cccc'] }])
     expect(raised.facts.filter((fact) => fact.code === 'dependency-advisory')).toEqual([
       expect.objectContaining({ lane: 'high', target: 'minimist:GHSA-xvch-5gv4-984h', files: ['package.json', 'bun.lock'] }),
     ])
     expect(raised.floor).toBe('high')
     expect(raised.unjudged.map((entry) => entry.reader)).not.toContain('dependency-advisory')
 
-    const unread = await judged(async () => ({ unavailable: 'Dependencies could not be scanned (bun audit exited with code 2).' }))
+    const unread = await judged(async (files) => [{ directory: '', files: files.map((entry) => entry.file), unavailable: 'Dependencies could not be scanned (bun audit exited with code 2).' }])
     expect(unread.unjudged).toContainEqual(expect.objectContaining({ reader: 'dependency-advisory', lane: 'medium', reason: expect.stringContaining('bun audit exited with code 2') }))
     expect(unread.facts.some((fact) => fact.code === 'dependency-advisory')).toBe(false)
   })
@@ -332,18 +332,75 @@ describe('judgeChangeLane', () => {
     const change = await resolveChange(repo, base, await commit(repo, { 'README.md': '# app, again\n' }))
     const { reader, dispose } = openChange(repo, change)
     try {
-      await judgeChangeLane(change, reader, { advisories: async () => { asked = true; return { base: [], head: [] } } })
+      await judgeChangeLane(change, reader, { advisories: async () => { asked = true; return [] } })
     } finally {
       await dispose()
     }
     expect(asked).toBe(false)
   })
 
-  test('should call the advisories unavailable without a bun.lock at the head', async () => {
-    const { repo, base } = await createRepo()
-    const change = await resolveChange(repo, base, await commit(repo, { 'package.json': JSON.stringify({ name: 'app', dependencies: { zod: '^4.1.0' } }) }))
+  describe('changeAdvisories', () => {
+    const MANIFEST = (deps: Record<string, string>): string => JSON.stringify({ name: 'app', dependencies: deps })
+    const LOCK = (version: string): string => `{ "packages": { "minimist": ["minimist@${version}"] } }\n`
+    // Stands in for `bun audit --json`: an advisory for the old minimist, nothing for the patched one, and nothing for a registry named evil.
+    const scan = async (directory: string) => {
+      const lock = await Bun.file(join(directory, 'bun.lock')).text()
+      const npmrc = await Bun.file(join(directory, '.npmrc')).text().catch(() => '')
+      const vulnerable = lock.includes('minimist@1.2.0') && !npmrc.includes('evil')
+      return { stdout: vulnerable ? JSON.stringify({ minimist: [{ url: 'https://github.com/advisories/GHSA-xvch-5gv4-984h', title: 'Prototype Pollution', severity: 'critical', vulnerable_versions: '<1.2.6' }] }) : '{}', stderr: '', exitCode: vulnerable ? 1 : 0 }
+    }
+    async function laneWith(baseFiles: Record<string, string>, headFiles: Record<string, string | null>): Promise<ChangeLaneReport> {
+      const { repo, base } = await createRepo({ 'README.md': '# app\n', ...baseFiles })
+      const change = await resolveChange(repo, base, await commit(repo, headFiles))
+      const { reader, dispose } = openChange(repo, change)
+      try {
+        return await judgeChangeLane(change, reader, { advisories: (files) => changeAdvisories(repo, change, files, { scan }) })
+      } finally {
+        await dispose()
+      }
+    }
+    const advisoryFacts = (report: ChangeLaneReport) => report.facts.filter((fact) => fact.code === 'dependency-advisory').map(({ target, files }) => [target, files])
+    const advisoryUnjudged = (report: ChangeLaneReport) => report.unjudged.filter((entry) => entry.reader === 'dependency-advisory').map(({ reason, files }) => [reason, files])
 
-    expect(await changeAdvisories(repo, change)).toEqual({ unavailable: expect.stringContaining('no bun.lock at the head') })
+    test('should raise what the change brings in and nothing for what it fixes', async () => {
+      const worse = await laneWith({ 'package.json': MANIFEST({ minimist: '1.2.8' }), 'bun.lock': LOCK('1.2.8') }, { 'package.json': MANIFEST({ minimist: '1.2.0' }), 'bun.lock': LOCK('1.2.0') })
+      const better = await laneWith({ 'package.json': MANIFEST({ minimist: '1.2.0' }), 'bun.lock': LOCK('1.2.0') }, { 'package.json': MANIFEST({ minimist: '1.2.8' }), 'bun.lock': LOCK('1.2.8') })
+
+      expect(advisoryFacts(worse)).toEqual([['minimist:GHSA-XVCH-5GV4-984H', ['package.json', 'bun.lock']]])
+      expect(advisoryFacts(better)).toEqual([])
+      expect(advisoryUnjudged(better)).toEqual([])
+    })
+
+    test('should scan the lockfile that governs each changed file, not the application\'s alone', async () => {
+      const report = await laneWith(
+        { 'package.json': MANIFEST({}), 'bun.lock': LOCK('1.2.8'), 'tools/site/package.json': MANIFEST({ minimist: '1.2.8' }), 'tools/site/bun.lock': LOCK('1.2.8') },
+        { 'tools/site/package.json': MANIFEST({ minimist: '1.2.0' }), 'tools/site/bun.lock': LOCK('1.2.0') },
+      )
+
+      expect(advisoryFacts(report)).toEqual([['minimist:GHSA-XVCH-5GV4-984H', ['tools/site/package.json', 'tools/site/bun.lock']]])
+    })
+
+    test('should not judge a manifest whose lockfile did not change, a binary lockfile, or a base with dependencies and no lockfile', async () => {
+      const stale = await laneWith({ 'package.json': MANIFEST({}), 'bun.lock': LOCK('1.2.8') }, { 'package.json': MANIFEST({ minimist: '1.2.0' }) })
+      const binary = await laneWith({ 'package.json': MANIFEST({}), 'bun.lockb': 'binary' }, { 'package.json': MANIFEST({ minimist: '1.2.0' }), 'bun.lockb': 'binary, changed' })
+      const unlocked = await laneWith({ 'package.json': MANIFEST({ minimist: '1.2.0' }) }, { 'package.json': MANIFEST({ minimist: '1.2.0', zod: '^4.0.0' }), 'bun.lock': LOCK('1.2.0') })
+      const fresh = await laneWith({ 'package.json': MANIFEST({}) }, { 'package.json': MANIFEST({ minimist: '1.2.0' }), 'bun.lock': LOCK('1.2.0') })
+
+      expect(advisoryUnjudged(stale)).toEqual([[expect.stringContaining('bun.lock did not'), ['package.json']]])
+      expect(advisoryUnjudged(binary)).toEqual([[expect.stringContaining('bun.lockb is binary'), ['package.json', 'bun.lockb']]])
+      expect(advisoryUnjudged(unlocked)).toEqual([[expect.stringContaining('the base declares dependencies in package.json and has no bun.lock'), ['package.json', 'bun.lock']]])
+      expect(advisoryFacts(fresh)).toEqual([['minimist:GHSA-XVCH-5GV4-984H', ['package.json', 'bun.lock']]])
+    })
+
+    test('should ask the registry the base names, whatever .npmrc the head adds, and read that .npmrc as a gate input', async () => {
+      const report = await laneWith(
+        { 'package.json': MANIFEST({ minimist: '1.2.8' }), 'bun.lock': LOCK('1.2.8') },
+        { 'package.json': MANIFEST({ minimist: '1.2.0' }), 'bun.lock': LOCK('1.2.0'), '.npmrc': 'registry=https://evil.example/\n' },
+      )
+
+      expect(advisoryFacts(report)).toEqual([['minimist:GHSA-XVCH-5GV4-984H', ['package.json', 'bun.lock']]])
+      expect(factAt(report, 'gate-input')).toMatchObject({ files: ['.npmrc'] })
+    })
   })
 
   test('should not read an unparsable package.json as unchanged scripts', async () => {

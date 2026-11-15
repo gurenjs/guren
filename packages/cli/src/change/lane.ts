@@ -22,7 +22,7 @@ import { auditCoverageGaps, auditFacts } from './audit-facts'
 import { LANES, type FactCode, type Lane } from './fact-classes'
 import { applyReviewPolicy, loadBaseReviewPolicy, REVIEW_POLICY_FILE, type LoadedReviewPolicy } from './review-policy'
 import type { ChangedPath, ChangeReader, ChangeSide, ResolvedChange } from './resolve'
-import type { ChangeAdvisories } from './revision-advisories'
+import type { ChangedDependencyFile, LockfileAdvisories } from './revision-advisories'
 import type { ChangeAudits } from './revision-audit'
 
 export type { FactCode, Lane } from './fact-classes'
@@ -84,6 +84,8 @@ export const GATE_FILES = new Set([
   'REVIEW.md', '.oxlintrc.json', 'tsconfig.json', 'bunfig.toml', 'guren.arch.ts', 'guren.review.ts', 'playwright.browser.config.ts', 'e2e.browser.config.ts',
   '.claude/settings.json', '.claude/settings.local.json', '.codex/hooks.json', '.cursor/hooks.json',
 ])
+// Wherever it sits: `.npmrc` names the registry `bun install` and `bun audit` ask.
+export const GATE_BASENAMES = new Set(['.npmrc'])
 export const GATE_PREFIXES = ['scripts/', 'bin/', '.github/', '.claude/hooks/', '.codex/hooks/', '.codex/rules/', '.cursor/hooks/']
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies', 'overrides', 'resolutions', 'trustedDependencies', 'patchedDependencies']
 const LOCKFILES = new Set(['bun.lock', 'bun.lockb'])
@@ -214,8 +216,8 @@ function policyNames(ast: File): string[] {
 export interface JudgeChangeLaneOptions {
   /** Audits both sides; asked only when the change touches a file the audit reads. Without it the audit facts are not judged. */
   audit?: () => Promise<ChangeAudits>
-  /** `bun audit` on both sides' lockfiles; asked only when the change touches dependencies. Without it the advisories are not judged. */
-  advisories?: () => Promise<ChangeAdvisories>
+  /** `bun audit` on the lockfile governing each changed dependency file, both sides; asked only when there is one. Without it the advisories are not judged. */
+  advisories?: (files: ChangedDependencyFile[]) => Promise<LockfileAdvisories[]>
 }
 
 /**
@@ -234,7 +236,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   const inApp = change.paths.filter((entry) => !entry.outsideApp)
   const touches = (entry: ChangedPath, test: (path: string) => boolean): boolean => Object.values(sides(entry)).some(test)
 
-  const isGatePath = (path: string): boolean => GATE_FILES.has(path) || GATE_PREFIXES.some((prefix) => path.startsWith(prefix))
+  const isGatePath = (path: string): boolean => GATE_FILES.has(path) || GATE_BASENAMES.has(posix.basename(path)) || GATE_PREFIXES.some((prefix) => path.startsWith(prefix))
   const fromRoot = (entry: ChangedPath, path: string): string => (entry.outsideApp ? path : `${change.appPrefix}${path}`)
   const readEntry = (entry: ChangedPath, side: ChangeSide, path: string | undefined): Promise<string | null> =>
     path === undefined ? Promise.resolve(null) : entry.outsideApp ? reader.readOutside(side, path) : reader.read(side, path)
@@ -524,17 +526,25 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   }
   const dependencies = [...new Set(facts.filter((entry) => entry.code === 'dependencies-changed').flatMap((entry) => entry.files))]
   if (dependencies.length > 0) {
-    const notJudged = (why: string): void => {
-      unjudged.push({ reader: 'dependency-advisory', reason: `${why}, so an advisory the changed dependencies bring in was not judged`, lane: 'medium', files: dependencies })
+    const notJudged = (why: string, files: string[]): void => {
+      unjudged.push({ reader: 'dependency-advisory', reason: `${why}, so an advisory the changed dependencies bring in was not judged`, lane: 'medium', files })
     }
-    const advisories = await options.advisories?.()
-    if (!advisories) notJudged('`bun audit` was not run on the two sides')
-    else if ('unavailable' in advisories) notJudged(advisories.unavailable)
+    if (!options.advisories) notJudged('`bun audit` was not run on the two sides', dependencies)
     else {
-      const before = new Set(advisories.base)
-      for (const key of advisories.head.filter((entry) => !before.has(entry))) {
-        const target = key.slice('deps:'.length)
-        facts.push({ code: 'dependency-advisory', lane: 'high', target, files: dependencies, evidence: 'registered', message: "an advisory the base's dependencies do not have, both sides read against today's advisories" })
+      const located = dependencies.map((file) => {
+        const entry = change.paths.find((candidate) => candidate.path === file)
+        return { file, fromRoot: entry ? fromRoot(entry, file) : `${change.appPrefix}${file}` }
+      })
+      for (const result of await options.advisories(located)) {
+        if ('unavailable' in result) {
+          notJudged(result.unavailable, result.files)
+          continue
+        }
+        const before = new Set(result.base)
+        for (const key of result.head.filter((entry) => !before.has(entry))) {
+          const target = key.slice('deps:'.length)
+          facts.push({ code: 'dependency-advisory', lane: 'high', target, files: result.files, evidence: 'static', message: `an advisory the base's ${result.directory}bun.lock does not have, both sides read against today's advisories` })
+        }
       }
     }
   }

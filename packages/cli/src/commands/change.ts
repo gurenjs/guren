@@ -99,7 +99,7 @@ export const changeLaneCommand = defineCommand({
     try {
       const report = await judgeChangeLane(change, reader, {
         ...(args.audit === false ? {} : { audit: () => auditChangeRevisions(cwd, change) }),
-        ...(args.deps === false ? {} : { advisories: () => changeAdvisories(cwd, change) }),
+        ...(args.deps === false ? {} : { advisories: (files) => changeAdvisories(cwd, change, files) }),
       })
       console.log(args.json ? JSON.stringify(report) : renderChangeLane(report))
     } finally {
