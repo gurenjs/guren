@@ -14,8 +14,10 @@ const SUPPORTED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts'])
 // hint for a folder that genuinely has no seeder.
 const DECLARATION_SUFFIXES = ['.d.ts', '.d.mts', '.d.cts']
 
+// A dot file is never a seeder. macOS writes `._seed.ts` AppleDouble files beside each file on a
+// non-HFS volume or in an archive, and importing one fails the seed run on its binary header.
 function isSeederCandidate(name: string): boolean {
-  return SUPPORTED_EXTENSIONS.has(extname(name)) && !DECLARATION_SUFFIXES.some((suffix) => name.endsWith(suffix))
+  return !name.startsWith('.') && SUPPORTED_EXTENSIONS.has(extname(name)) && !DECLARATION_SUFFIXES.some((suffix) => name.endsWith(suffix))
 }
 
 /**

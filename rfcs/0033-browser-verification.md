@@ -1363,8 +1363,9 @@ behaviour's `actor` means is still Open Question 5.
   that step went stale: `REPLAY_STALE`, exit 2, on macOS and on Linux alike.
   Recorded again against an empty database, it replayed against the empty one
   and against one holding rows. CI starts from an empty database, so a
-  recording is made against one. Nothing in the blueprint gives the developer
-  that database yet (Open Question 18).
+  recording is made against one. The blueprint gives the developer no such
+  database (Open Question 18, decided); the skill says so to the person when
+  a recorded step lands on a list.
 - **An upgrade** of the runner may re-key every recording (§13.3). The
   `@guren/cli` release that moves the versions says so. The nightly fixture
   (Open Question 13) then reads `missing` or `stale`, and the PR that moves
@@ -1677,9 +1678,15 @@ changes behaviour.
 17. (§13) `e2e explore`, its bug bash and `e2e mcp` were not measured. Should
     the skill name any of them as a live-drive option, as the Alternatives
     section allowed for?
-18. (§13.6) Should a behaviour run have a database of its own, migrated from
+18. ~~(§13.6) Should a behaviour run have a database of its own, migrated from
     empty at the start of each run? The config could pass `browser:serve` a
     `--database-url` and migrate it, which keeps a run's rows out of the
     developer's database and makes every recording start where CI starts.
     The price is one more database per app and a second migration path, in
-    three dialects.
+    three dialects.~~ **Decided 2026-11-15 by the deciding maintainer:** no.
+    A run uses the database `browser:serve` judges local, as every other
+    browser run does, and the `verify-in-browser` skill keeps telling the
+    person when a recorded step lands on a list, since CI replays against an
+    empty database. An app that wants a run of its own can already pass
+    `browser:serve --database-url` and migrate that database first
+    (measured on SQLite); Guren does not keep that path in three dialects.

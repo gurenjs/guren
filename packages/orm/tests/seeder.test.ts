@@ -260,6 +260,18 @@ describe('runSeeders run summary', () => {
     })
   })
 
+  // The bytes open an AppleDouble header, which is not a module: importing it would fail the whole run.
+  it('should skip dot files such as macOS AppleDouble companions', async () => {
+    await writeFile(join(tempDir, 'seed.ts'), `export default () => {};`)
+    await writeFile(join(tempDir, '._seed.ts'), Buffer.from([0x00, 0x05, 0x16, 0x07, 0x00, 0x02, 0x00, 0x00, 0x4d, 0x61, 0x63, 0x20]))
+
+    expect(await runSeeders({}, tempDir)).toEqual({
+      seedersFolder: tempDir,
+      seedersRan: 1,
+      filesWithoutSeeder: 0,
+    })
+  })
+
   // Non-seeder extensions were never candidates, so they are not "skipped".
   it('should not count files the loader never considered', async () => {
     await writeFile(join(tempDir, 'seed.ts'), `export default () => {};`)
