@@ -46,6 +46,8 @@ function literalValue(node: Node, at: string): unknown {
       for (const property of value.properties) {
         const key = property.type === 'ObjectProperty' ? memberKeyName({ computed: property.computed, key: property.key }) : undefined
         if (property.type !== 'ObjectProperty' || key === undefined) fail(`${label} (${lineOf(property)}) has a spread, a method or a computed key`)
+        // Assigning `__proto__` sets the prototype, a key no own-property check would see.
+        if (key === '__proto__') fail(`${label} (${lineOf(property)}) has a \`__proto__\` key`)
         const entry = property as Extract<typeof property, { type: 'ObjectProperty' }>
         object[key!] = literalValue(entry.value as Node, at === '' ? key! : `${at}.${key}`)
       }
@@ -85,11 +87,20 @@ function record(value: unknown, at: string, keys: readonly string[]): Record<str
   return value as Record<string, unknown>
 }
 
+// `*` and `**` are the whole vocabulary: a glob it would read as literal text matches nothing, and the raise it holds never shows.
+const FOREIGN_GLOB = /[{}[\]?!\\]|^\.?\/|\/$|^\s|\s$/
+
 function globs(value: unknown, at: string): string | string[] {
   const list = Array.isArray(value) ? value : [value]
-  if (list.length === 0 || !list.every((glob) => typeof glob === 'string' && glob.trim() !== '')) fail(`${at} is not a glob or a list of globs`)
+  if (list.length === 0 || !list.every((glob) => typeof glob === 'string' && glob !== '')) fail(`${at} is not a glob or a list of globs`)
+  for (const glob of list as string[]) {
+    if (FOREIGN_GLOB.test(glob)) fail(`${at} has ${JSON.stringify(glob)}: a glob is relative to the application root, with no leading ./ or /, no trailing /, and only * and ** as wildcards`)
+  }
   return value as string | string[]
 }
+
+/** A glob with no wildcard names a file or a directory, as CODEOWNERS does. */
+const matchesPolicyGlob = (path: string, glob: string): boolean => matchesAnyGlob(path, glob.includes('*') ? glob : [glob, `${glob}/**`])
 
 /** Validates a policy read as data; every message names the key it refuses. */
 export function validateReviewPolicy(value: unknown): ReviewPolicy {
@@ -120,7 +131,7 @@ export function validateReviewPolicy(value: unknown): ReviewPolicy {
         fail("review.reviewer is not 'claude-code-review', 'bugbot' or { check, app, conclusion }")
       }
     }
-    if (review.timeoutMinutes !== undefined && !(typeof review.timeoutMinutes === 'number' && review.timeoutMinutes > 0)) fail('review.timeoutMinutes is not a positive number')
+    if (review.timeoutMinutes !== undefined && !(Number.isFinite(review.timeoutMinutes) && (review.timeoutMinutes as number) > 0)) fail('review.timeoutMinutes is not a positive number')
   }
   if (top.identities !== undefined && !['auto', 'several', 'one-owner'].includes(top.identities as string)) fail("identities is not 'auto', 'several' or 'one-owner'")
   if (top.merge !== undefined) {
@@ -152,14 +163,14 @@ export async function loadBaseReviewPolicy(reader: ChangeReader): Promise<Loaded
  */
 export function applyReviewPolicy(facts: readonly ChangeFact[], paths: readonly ChangedPath[], policy: ReviewPolicy): ChangeFact[] {
   const applied = facts.map((fact) => {
-    const lane = policy.facts?.[fact.code as Exclude<FactCode, 'review-path'>]
+    const lane = policy.facts && Object.hasOwn(policy.facts, fact.code) ? policy.facts[fact.code as Exclude<FactCode, 'review-path'>] : undefined
     return lane === undefined || lane === fact.lane ? fact : { ...fact, lane, policyFrom: fact.lane }
   })
   const claimed = new Set<ChangedPath>()
   for (const lane of ['high', 'medium'] as const) {
-    const list = policy.paths?.[lane]
+    const list = policy.paths && Object.hasOwn(policy.paths, lane) ? policy.paths[lane] : undefined
     for (const glob of list === undefined ? [] : Array.isArray(list) ? list : [list]) {
-      const matched = paths.filter((entry) => !entry.outsideApp && !claimed.has(entry) && [entry.path, entry.oldPath].some((path) => path !== undefined && matchesAnyGlob(path, glob)))
+      const matched = paths.filter((entry) => !entry.outsideApp && !claimed.has(entry) && [entry.path, entry.oldPath].some((path) => path !== undefined && matchesPolicyGlob(path, glob)))
       if (matched.length === 0) continue
       for (const entry of matched) claimed.add(entry)
       applied.push({ code: 'review-path', lane, target: glob, files: matched.map((entry) => entry.path), evidence: 'path', message: `matches ${glob}, which ${REVIEW_POLICY_FILE} puts at ${lane}` })

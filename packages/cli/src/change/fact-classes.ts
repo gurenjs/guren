@@ -43,6 +43,8 @@ export const FACT_CLASSES = {
   'ambient': { kind: 'ambient', lowest: 'low' },
   'test-added': { kind: 'ambient', lowest: 'low' },
   'acceptance-added': { kind: 'fixed', lowest: 'medium' },
+  // An added file that is not source (a nested tsconfig.json, an .npmrc, a manifest): no plan element owns one.
+  'non-source-added': { kind: 'fixed', lowest: 'medium' },
   'source-edited': { kind: 'fixed', lowest: 'medium' },
   'source-removed': { kind: 'fixed', lowest: 'medium' },
   'source-renamed': { kind: 'fixed', lowest: 'medium' },

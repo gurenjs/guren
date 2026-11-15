@@ -476,7 +476,7 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey() })
     await git(repo, ['commit', '-m', 'add a submodule pointer'])
     const report = await laneOf(repo, base, await git(repo, ['rev-parse', 'HEAD']))
 
-    expect(report.facts).toEqual([expect.objectContaining({ code: 'file-added', lane: 'medium', files: ['vendor/lib'] })])
+    expect(report.facts).toEqual([expect.objectContaining({ code: 'non-source-added', lane: 'medium', files: ['vendor/lib'] })])
     expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'submodule', lane: 'high', files: ['vendor/lib'] }))
   })
 

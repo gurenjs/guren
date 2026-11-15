@@ -11,7 +11,7 @@ import { formatDestructiveFinding, judgeMigrations, readMigrationSources } from 
 
 import { parseSourceFile } from '../parse-cache'
 import { bracketedTokens, isAcceptanceId } from '../plan/acceptance-status'
-import { topLevelDeclaration } from '../ast-walk'
+import { objectLiteral, topLevelDeclaration } from '../ast-walk'
 import { TEST_FILE_PATTERN, toPosixRelative } from '../discovery'
 import { extractClassDeclaration } from '../model-parser'
 import { isPlanRevisionsDirName, planSlug } from '../plan/beside'
@@ -282,7 +282,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     }
   }
 
-  const fallbackCode = (entry: ChangedPath): FactCode => (entry.outsideApp ? 'outside-app' : entry.status === 'added' ? 'file-added' : entry.status === 'deleted' ? 'source-removed' : entry.status === 'renamed' ? 'source-renamed' : 'source-edited')
+  const fallbackCode = (entry: ChangedPath): FactCode => (entry.outsideApp ? 'outside-app' : entry.status === 'added' ? (SOURCE_FILE.test(entry.path) ? 'file-added' : 'non-source-added') : entry.status === 'deleted' ? 'source-removed' : entry.status === 'renamed' ? 'source-renamed' : 'source-edited')
   for (const entry of change.paths) {
     if (claimed.has(entry) || !touches(entry, (path) => posix.basename(path) === 'package.json')) continue
     const located = Object.values(sides(entry)).map((path) => fromRoot(entry, path))
@@ -375,6 +375,13 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
       if (!afterTables.has(identifier)) fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)} removed` })
     }
     if (!claimed.has(entry)) fact([entry], { code: 'source-edited', lane: 'medium', evidence: 'static', message: `${entry.path}: no table the reader sees changed` })
+    else {
+      // A table fact is lowerable, and code beside the tables must not ride it.
+      const [residueBefore, residueAfter] = [schemaResidue(beforeText, base, before), schemaResidue(afterText, head, after)]
+      if (residueBefore === undefined || residueAfter === undefined || residueBefore !== residueAfter) {
+        fact([entry], { code: 'source-edited', lane: 'medium', evidence: 'static', message: `${entry.path}: changed outside its tables` })
+      }
+    }
   }
 
   let existingIds: Promise<Set<string>> | undefined
@@ -416,8 +423,13 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   for (const entry of inApp) {
     if (claimed.has(entry) || !touches(entry, isPolicyFile)) continue
     const { base, head } = sides(entry)
-    if (base === undefined || !isPolicyFile(base)) {
+    if (base === undefined) {
       fact([entry], { code: 'policy-added', lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}` })
+      continue
+    }
+    if (!isPolicyFile(base)) {
+      // Existing source moved in, not a policy the change wrote: not the declarable `policy-added`.
+      fact([entry], { code: 'source-renamed', lane: 'medium', evidence: 'path', message: `${base} renamed to ${entry.path}, where it is read as a policy` })
       continue
     }
     if (head === undefined || !isPolicyFile(head)) {
@@ -525,6 +537,29 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     plans: await readChangePlans(reader, trees.head),
     policy,
   }
+}
+
+/**
+ * A schema file without its tables, its drizzle imports and an object listing only tables: what
+ * `schema-changed` does not account for, compared per statement. `undefined` when it does not parse.
+ */
+function schemaResidue(text: string | null, file: string | undefined, tables: readonly SchemaTable[]): string | undefined {
+  if (text === null || file === undefined) return ''
+  const ast = parseSourceFile(text, file)
+  if (!ast) return undefined
+  const names = new Set(tables.map((table) => table.identifier))
+  const listsTables = (init: unknown): boolean => {
+    const object = objectLiteral(init as never)
+    return object !== null && object.properties.every((property) => property.type === 'ObjectProperty' && property.shorthand && property.value.type === 'Identifier' && names.has(property.value.name))
+  }
+  const kept: string[] = []
+  for (const statement of ast.program.body) {
+    if (statement.type === 'ImportDeclaration' && /^(?:drizzle-orm|@guren\/orm)(?:\/|$)/.test(statement.source.value) && statement.specifiers.length > 0) continue
+    const declaration = topLevelDeclaration(statement)
+    if (declaration?.declarations.every((declarator) => declarator.id.type === 'Identifier' && (names.has(declarator.id.name) || listsTables(declarator.init)))) continue
+    kept.push(text.slice(statement.start!, statement.end!).replace(/\s+/g, ' '))
+  }
+  return kept.join('\n')
 }
 
 /** The plans at the head with the standing each has there, read from the head's own records. */
