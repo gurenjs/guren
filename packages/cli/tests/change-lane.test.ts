@@ -392,6 +392,34 @@ describe('judgeChangeLane', () => {
       expect(advisoryFacts(fresh)).toEqual([['minimist:GHSA-XVCH-5GV4-984H', ['package.json', 'bun.lock']]])
     })
 
+    test('should scan the root\'s lockfile and the application\'s apart when their files share a name', async () => {
+      const { repo, base } = await createRepo({
+        'package.json': MANIFEST({ minimist: '1.2.8' }), 'bun.lock': LOCK('1.2.8'),
+        'apps/web/package.json': MANIFEST({}), 'apps/web/bun.lock': '{ "packages": {} }\n',
+      })
+      const head = await commit(repo, { 'package.json': MANIFEST({ minimist: '1.2.0' }), 'bun.lock': LOCK('1.2.0'), 'apps/web/package.json': MANIFEST({ zod: '^4.0.0' }), 'apps/web/bun.lock': '{ "packages": { "zod": ["zod@4.0.0"] } }\n' })
+      const app = join(repo, 'apps/web')
+      const change = await resolveChange(app, base, head)
+      const { reader, dispose } = openChange(app, change)
+      try {
+        const report = await judgeChangeLane(change, reader, { advisories: (files) => changeAdvisories(app, change, files, { scan }) })
+        expect(advisoryFacts(report)).toEqual([['minimist:GHSA-XVCH-5GV4-984H', ['package.json', 'bun.lock']]])
+        expect(advisoryUnjudged(report)).toEqual([])
+      } finally {
+        await dispose()
+      }
+    })
+
+    test('should not read a workspace root with no lockfile at the base as one with no advisories', async () => {
+      const report = await laneWith(
+        { 'package.json': JSON.stringify({ name: 'app', workspaces: ['packages/*'] }), 'packages/a/package.json': MANIFEST({ minimist: '1.2.0' }) },
+        { 'bun.lock': LOCK('1.2.0'), 'packages/a/package.json': MANIFEST({ minimist: '1.2.0', zod: '^4.0.0' }) },
+      )
+
+      expect(advisoryFacts(report)).toEqual([])
+      expect(advisoryUnjudged(report)).toEqual([[expect.stringContaining('the base declares dependencies in package.json and has no bun.lock'), ['packages/a/package.json', 'bun.lock']]])
+    })
+
     test('should ask the registry the base names, whatever .npmrc the head adds, and read that .npmrc as a gate input', async () => {
       const report = await laneWith(
         { 'package.json': MANIFEST({ minimist: '1.2.8' }), 'bun.lock': LOCK('1.2.8') },

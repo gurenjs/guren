@@ -228,9 +228,14 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   const facts: ChangeFact[] = []
   const unjudged: ChangeUnjudged[] = []
   const claimed = new Set<ChangedPath>()
+  // The entries, not their names: an outside-app path is named from the root, as an app path of the same spelling is.
+  const dependencyEntries = new Set<ChangedPath>()
   const fact = (entries: readonly ChangedPath[], value: Omit<ChangeFact, 'files'>): void => {
     facts.push({ ...value, files: entries.map((entry) => entry.path) })
-    for (const entry of entries) claimed.add(entry)
+    for (const entry of entries) {
+      claimed.add(entry)
+      if (value.code === 'dependencies-changed') dependencyEntries.add(entry)
+    }
   }
   const read = (side: ChangeSide, path: string | undefined): Promise<string | null> => (path === undefined ? Promise.resolve(null) : reader.read(side, path))
   const inApp = change.paths.filter((entry) => !entry.outsideApp)
@@ -531,10 +536,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     }
     if (!options.advisories) notJudged('`bun audit` was not run on the two sides', dependencies)
     else {
-      const located = dependencies.map((file) => {
-        const entry = change.paths.find((candidate) => candidate.path === file)
-        return { file, fromRoot: entry ? fromRoot(entry, file) : `${change.appPrefix}${file}` }
-      })
+      const located = [...new Map([...dependencyEntries].map((entry) => [fromRoot(entry, entry.path), { file: entry.path, fromRoot: fromRoot(entry, entry.path) }])).values()]
       for (const result of await options.advisories(located)) {
         if ('unavailable' in result) {
           notJudged(result.unavailable, result.files)
