@@ -115,6 +115,54 @@ describe('lessons in check --docs', () => {
   })
 })
 
+describe('lessons check --docs cannot read', () => {
+  it('fails a block-scalar rule and an enforcedBy that is not one value, reads the name past the first #, and warns on an impossible date', async () => {
+    const workspace = await createTempWorkspace('guren-cli-lesson-unread-')
+    try {
+      await mkdir(join(workspace.dir, 'docs/lessons'), { recursive: true })
+      await mkdir(join(workspace.dir, 'tests'), { recursive: true })
+      await writeFile(join(workspace.dir, 'tests/auth.test.ts'), "test('[AC-auth-1] signs in', () => {})\n", 'utf8')
+      const files: Record<string, string> = {
+        'block.md': lessonDoc(`status: stable\nrule: |\n  ${'x'.repeat(200)}`),
+        'list.md': lessonDoc('rule: "r"\nenforcedBy: [tests/missing.test.ts#AC-auth-1]'),
+        'empty.md': lessonDoc('rule: "r"\nenforcedBy:'),
+        'hash.md': lessonDoc('rule: "r"\nenforcedBy: tests/auth.test.ts#AC-auth-1#removed'),
+        'date.md': lessonDoc('status: stable\nrule: "r"\nreview: 2027-02-30'),
+      }
+      for (const [name, content] of Object.entries(files)) await writeFile(join(workspace.dir, 'docs/lessons', name), content, 'utf8')
+
+      const results = (await runDocsCheck({ cwd: workspace.dir })).filter((result) => result.key.startsWith('docs-lesson-'))
+
+      expect(Object.fromEntries(results.map((result) => [result.key.replace('docs/lessons/', ''), result.status]))).toEqual({
+        'docs-lesson-rule:block.md': 'fail',
+        'docs-lesson-enforced:list.md': 'fail',
+        'docs-lesson-enforced:empty.md': 'fail',
+        'docs-lesson-enforced:hash.md': 'fail',
+        'docs-lesson-review:date.md': 'warn',
+      })
+      expect((await scanDocs(workspace.dir)).find((ref) => ref.path.endsWith('block.md'))?.lesson?.rule).toBe('')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('brings a lesson into a --changed run when a path it governs changed', async () => {
+    const workspace = await createTempWorkspace('guren-cli-lesson-paths-scope-')
+    try {
+      await mkdir(join(workspace.dir, 'docs/lessons'), { recursive: true })
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(join(workspace.dir, 'app/Http/Controllers/PostController.ts'), 'export class PostController {}\n', 'utf8')
+      await writeFile(join(workspace.dir, 'docs/lessons/0001-http.md'), lessonDoc('status: stable\nrule: "r"\npaths: ["app/Http/**"]\nreview: 2020-01-01'), 'utf8')
+
+      const scoped = await runDocsCheck({ cwd: workspace.dir, changedFiles: new Set(['app/Http/Controllers/PostController.ts']) })
+
+      expect(scoped.map((result) => result.key)).toContain('docs-lesson-review:docs/lessons/0001-http.md')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
 describe('lessons in guren context', () => {
   it('prints a stable lesson\'s rule and nothing of a draft one', async () => {
     const workspace = await createTempWorkspace('guren-cli-lesson-context-')

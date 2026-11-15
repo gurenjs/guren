@@ -89,9 +89,11 @@ export const LESSON_RULE_LIMIT = 160
 export interface DocLesson {
   /** `''` when present but not a scalar, so the checker can report it. */
   rule?: string
+  /** The rule was written as a YAML block scalar (`|`, `>`), which the frontmatter reader does not follow. */
+  ruleBlock?: true
   /** Globs a cross-cutting lesson governs. */
   paths: string[]
-  /** `<file>#<name>`: the check that enforces the rule. */
+  /** `<file>#<name>`: the check that enforces the rule; `''` when present but not a scalar. */
   enforcedBy?: string
   /** YYYY-MM-DD after which nobody has confirmed the lesson still applies. */
   review?: string
@@ -181,9 +183,10 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
               citations: parsed ? extractAcceptanceCitations(body) : [],
               uncitedRules: parsed ? extractUncitedRules(body) : [],
               ...(toScalar(data.type) === 'lesson' ? { lesson: {
-                ...('rule' in data ? { rule: toScalar(data.rule) ?? '' } : {}),
+                // A block scalar reads back as its indicator alone, so the rule it holds is unread rather than `|`.
+                ...('rule' in data ? (/^[|>][+-]?\d*$/u.test(toScalar(data.rule) ?? '') ? { rule: '', ruleBlock: true as const } : { rule: toScalar(data.rule) ?? '' }) : {}),
                 paths: toStringList(data.paths),
-                ...(toScalar(data.enforcedBy) ? { enforcedBy: toScalar(data.enforcedBy) } : {}),
+                ...('enforcedBy' in data ? { enforcedBy: toScalar(data.enforcedBy) ?? '' } : {}),
                 ...('review' in data ? { review: toScalar(data.review) ?? '' } : {}),
                 ...(toScalar(data.supersededBy) ? { supersededBy: toScalar(data.supersededBy) } : {}),
                 ...(data.source && typeof data.source === 'object' && !Array.isArray(data.source) ? { source: data.source } : {}),
