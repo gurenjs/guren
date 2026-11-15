@@ -11,7 +11,7 @@ import { formatDestructiveFinding, judgeMigrations, readMigrationSources } from 
 
 import { parseSourceFile } from '../parse-cache'
 import { bracketedTokens, isAcceptanceId } from '../plan/acceptance-status'
-import { objectLiteral, topLevelDeclaration } from '../ast-walk'
+import { nodeText, objectLiteral, topLevelDeclaration, walk } from '../ast-walk'
 import { TEST_FILE_PATTERN, toPosixRelative } from '../discovery'
 import { extractClassDeclaration } from '../model-parser'
 import { isPlanRevisionsDirName, planSlug } from '../plan/beside'
@@ -164,7 +164,6 @@ function tableDifferences(before: SchemaTable, after: SchemaTable): string[] {
   if (changed.length > 0) differences.push(`columns changed: ${list(changed)}`)
   if (before.tableName !== after.tableName) differences.push(`table name ${before.tableName ?? '(none)'} to ${after.tableName ?? '(none)'}`)
   if (JSON.stringify(before.constraints) !== JSON.stringify(after.constraints)) differences.push('indexes or constraints changed')
-  if (differences.length === 0) differences.push('a part the reader does not follow changed')
   return differences
 }
 
@@ -369,7 +368,12 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     for (const [identifier, table] of afterTables) {
       const previous = beforeTables.get(identifier)
       if (!previous) fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)} added (${table.columns.length} columns)` })
-      else if (JSON.stringify(previous) !== JSON.stringify(table)) fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)}: ${tableDifferences(previous, table).join('; ')}` })
+      else if (JSON.stringify(previous) !== JSON.stringify(table)) {
+        const differences = tableDifferences(previous, table)
+        // What the reader did not follow is no table fact a policy may lower.
+        if (differences.length === 0) fact([entry], { code: 'source-edited', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)}: a part the reader does not follow changed` })
+        else fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)}: ${differences.join('; ')}` })
+      }
     }
     for (const [identifier, table] of beforeTables) {
       if (!afterTables.has(identifier)) fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)} removed` })
@@ -379,7 +383,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
       // A table fact is lowerable, and code beside the tables must not ride it.
       const [residueBefore, residueAfter] = [schemaResidue(beforeText, base, before), schemaResidue(afterText, head, after)]
       if (residueBefore === undefined || residueAfter === undefined || residueBefore !== residueAfter) {
-        fact([entry], { code: 'source-edited', lane: 'medium', evidence: 'static', message: `${entry.path}: changed outside its tables` })
+        fact([entry], { code: 'source-edited', lane: 'medium', evidence: 'static', message: `${entry.path}: a function inside its tables, or code beside them, changed` })
       }
     }
   }
@@ -541,7 +545,8 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
 
 /**
  * A schema file without its tables, its drizzle imports and an object listing only tables: what
- * `schema-changed` does not account for, compared per statement. `undefined` when it does not parse.
+ * `schema-changed` does not account for, compared per statement. A function inside a table
+ * (`$defaultFn`, `$onUpdate`, the extra config) is kept: it runs, and no column property states it.
  */
 function schemaResidue(text: string | null, file: string | undefined, tables: readonly SchemaTable[]): string | undefined {
   if (text === null || file === undefined) return ''
@@ -556,7 +561,14 @@ function schemaResidue(text: string | null, file: string | undefined, tables: re
   for (const statement of ast.program.body) {
     if (statement.type === 'ImportDeclaration' && /^(?:drizzle-orm|@guren\/orm)(?:\/|$)/.test(statement.source.value) && statement.specifiers.length > 0) continue
     const declaration = topLevelDeclaration(statement)
-    if (declaration?.declarations.every((declarator) => declarator.id.type === 'Identifier' && (names.has(declarator.id.name) || listsTables(declarator.init)))) continue
+    if (declaration?.declarations.every((declarator) => declarator.id.type === 'Identifier' && (names.has(declarator.id.name) || listsTables(declarator.init)))) {
+      walk(declaration, (node) => {
+        if (node.type !== 'ArrowFunctionExpression' && node.type !== 'FunctionExpression') return
+        kept.push(nodeText(text, node as { start?: number | null; end?: number | null }).replace(/\s+/g, ' '))
+        return false
+      })
+      continue
+    }
     kept.push(text.slice(statement.start!, statement.end!).replace(/\s+/g, ' '))
   }
   return kept.join('\n')

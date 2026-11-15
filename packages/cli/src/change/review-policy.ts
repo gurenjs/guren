@@ -94,7 +94,7 @@ function globs(value: unknown, at: string): string | string[] {
   const list = Array.isArray(value) ? value : [value]
   if (list.length === 0 || !list.every((glob) => typeof glob === 'string' && glob !== '')) fail(`${at} is not a glob or a list of globs`)
   for (const glob of list as string[]) {
-    if (FOREIGN_GLOB.test(glob)) fail(`${at} has ${JSON.stringify(glob)}: a glob is relative to the application root, with no leading ./ or /, no trailing /, and only * and ** as wildcards`)
+    if (FOREIGN_GLOB.test(glob) || glob.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')) fail(`${at} has ${JSON.stringify(glob)}: a glob is relative to the application root, with no empty, . or .. segment, and only * and ** as wildcards`)
   }
   return value as string | string[]
 }

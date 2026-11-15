@@ -137,7 +137,7 @@ export default review({
   })
 
   test('should refuse a glob outside the * and ** it matches with', () => {
-    for (const glob of ['app/Billing/', './app/Billing/**', '/app/Billing/**', 'app/{Billing,Payments}/**', 'app/Billi?/**', 'app/[A-Z]*']) {
+    for (const glob of ['app/Billing/', './app/Billing/**', '/app/Billing/**', 'app/{Billing,Payments}/**', 'app/Billi?/**', 'app/[A-Z]*', '../config/**', 'app/./Billing/**', 'app//Billing/**', '.']) {
       expect(unreadable(policySource(`{ paths: { high: [${JSON.stringify(glob)}] } }`))).toContain(`paths.high has ${JSON.stringify(glob)}`)
     }
     expect(unreadable(policySource('{ review: { reviewer: "bugbot", timeoutMinutes: 1e400 } }'))).toContain('review.timeoutMinutes')
@@ -251,6 +251,16 @@ describe('judgeChangeLane: what a lowering may not reach', () => {
 
     expect(onlyTables.facts.map(({ code, lane }) => [code, lane])).toEqual([['schema-changed', 'low']])
     expect(beside.facts.map(({ code, lane }) => [code, lane])).toEqual([['schema-changed', 'low'], ['source-edited', 'medium']])
+  })
+
+  test('should keep a function inside a table, and a change the reader does not follow, at medium', async () => {
+    const withHook = (body: string): string => PG_SCHEMA_FIXTURE.replace("createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),", `createdAt: timestamp('created_at', { withTimezone: true }).notNull().$onUpdate(() => ${body}),`)
+    const hooked = await laneWithPolicy(lowering, { 'db/schema.ts': `${withHook('(globalThis.report?.(), new Date())')}\nexport const tags = pgTable('tags', { id: serial('id').primaryKey() })\n` })
+    expect(hooked.facts).toContainEqual(expect.objectContaining({ code: 'source-edited', lane: 'medium', message: 'db/schema.ts: a function inside its tables, or code beside them, changed' }))
+
+    const config = (body: string): string => `${PG_SCHEMA_FIXTURE}\nexport const tags = pgTable('tags', { id: serial('id').primaryKey() }, (t) => { ${body}; return [] })\n`
+    const before = await laneWithPolicy(lowering, { 'db/schema.ts': config('void t') })
+    expect(before.facts.map(({ code, lane }) => [code, lane])).toEqual([['schema-changed', 'low'], ['source-edited', 'medium']])
   })
 
   test('should not call existing source moved into app/Policies a policy the change added', async () => {
