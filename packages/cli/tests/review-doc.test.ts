@@ -116,6 +116,8 @@ describe('lessons across the code', () => {
   test('expands a brace for the agents whose scope is a comma-joined list', () => {
     expect(expandBraces('app/{Http,Jobs}/**/*.{ts,tsx}')).toEqual(['app/Http/**/*.ts', 'app/Http/**/*.tsx', 'app/Jobs/**/*.ts', 'app/Jobs/**/*.tsx'])
     expect(expandBraces('app/**')).toEqual(['app/**'])
+    expect(expandBraces('app/{legacy}/**/*.{ts,tsx}')).toEqual(['app/{legacy}/**/*.ts', 'app/{legacy}/**/*.tsx'])
+    expect(expandBraces('{a,{b}}/x')).toEqual(['a/x', '{b}/x'])
     const doc = { description: 'Lessons', paths: ['app/{Http,Jobs}/**'], body: '\n# Lessons\n' }
     expect(renderScopedRule('cursor', 'lessons', doc)?.content).toContain('globs: "app/Http/**,app/Jobs/**"')
     expect(renderScopedRule('claude', 'lessons', doc)?.content).toContain('  - "app/{Http,Jobs}/**"')

@@ -407,17 +407,26 @@ function renderCopilotRule(doc: RuleDoc): string {
 }
 
 /**
+ * `app/{Http,Jobs}/**` as `app/Http/**` and `app/Jobs/**`: Cursor's `globs` and Copilot's `applyTo`
+ * are comma-joined, so a brace's comma would split the glob. A group with no comma is literal, as
+ * minimatch reads it, and is set aside first so the groups around it still expand.
+ */
+export function expandBraces(glob: string): string[] {
+  const literals: string[] = []
+  const masked = glob.replace(/\{[^{},]*\}/gu, (group) => `\u0000${literals.push(group) - 1}\u0000`)
+  const expand = (value: string): string[] => {
+    const match = /\{([^{}]*)\}/u.exec(value)
+    if (!match) return [value]
+    return match[1]!.split(',').flatMap((part) => expand(`${value.slice(0, match.index)}${part}${value.slice(match.index + match[0].length)}`))
+  }
+  return expand(masked).map((value) => value.replace(/\u0000(\d+)\u0000/gu, (_, index: string) => literals[Number(index)]!))
+}
+
+/**
  * A path-scoped rule written outside the harness's templates (`change:policy`'s lessons file), at
  * one name in each component's rule directory. The name carries no `guren-` prefix, so the native
  * namespaces' prune pattern never claims it, and the canonical roots claim only the names they plan.
  */
-/** `app/{Http,Jobs}/**` as `app/Http/**` and `app/Jobs/**`: Cursor's `globs` and Copilot's `applyTo` are comma-joined, so a brace's comma would split the glob. */
-export function expandBraces(glob: string): string[] {
-  const match = /\{([^{}]*)\}/u.exec(glob)
-  if (!match || !match[1]!.includes(',')) return [glob]
-  return match[1]!.split(',').flatMap((part) => expandBraces(`${glob.slice(0, match.index)}${part}${glob.slice(match.index + match[0].length)}`))
-}
-
 export function renderScopedRule(component: HarnessComponent, name: string, doc: RuleDoc): { path: string; content: string } | undefined {
   const canonical = (root: '.claude' | '.agents') => ({ path: `${canonicalDirs(root).rules}/${name}.md`, content: `---\npaths:\n${doc.paths.map((path) => `  - ${yamlString(path)}`).join('\n')}\n---\n${doc.body}` })
   switch (component) {
