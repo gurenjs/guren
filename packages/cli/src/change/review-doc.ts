@@ -4,8 +4,8 @@
  * by a person, the models with sensitive columns, the routes that change data with what authorizes
  * them, and the routes agents can call, read from the Application Graph and the introspected app.
  */
-import { readFile } from 'node:fs/promises'
-import { join, sep } from 'node:path'
+import { mkdir, readFile } from 'node:fs/promises'
+import { dirname, join, sep } from 'node:path'
 
 import { controllerActionSource, type GurenApplicationGraph } from '../application-graph'
 import { escapeMarkdownTableCell } from '../docs-links'
@@ -199,27 +199,56 @@ function checked(text: string): { content: string } | { problems: string[] } {
   return problems.length > 0 ? { problems } : { content: text }
 }
 
-/** A new document, or the existing one with only its generated block replaced; text outside the markers is the author's. */
-export function renderReviewDoc(existing: string | undefined, content: readonly string[]): { content: string } | { problems: string[] } {
+interface DocTemplate {
+  title: string
+  intro: string
+  rules: readonly string[]
+}
+
+const REVIEW_TEMPLATE: DocTemplate = {
+  title: 'Review',
+  intro: 'What a reviewer of this repository checks. Claude Code Review reads this file. Write the rules for this codebase under Rules, and keep each one to a line a reviewer can act on.',
+  rules: ['- A change to authentication, authorization or a policy is read for who may now do what.'],
+}
+
+const BUGBOT_TEMPLATE: DocTemplate = {
+  title: 'Bugbot',
+  intro: 'What Cursor Bugbot checks in this repository; it includes this file on every review. Write the rules for this codebase under Rules, and keep each one to a line a reviewer can act on.',
+  rules: ['- A change to authentication, authorization or a policy is read for who may now do what.'],
+}
+
+function renderDoc(existing: string | undefined, content: readonly string[], template: DocTemplate): { content: string } | { problems: string[] } {
   if (existing === undefined) {
-    return checked([
-      '# Review',
-      '',
-      'What a reviewer of this repository checks. Claude Code Review reads this file. Write the rules for this codebase under Rules, and keep each one to a line a reviewer can act on.',
-      '',
-      '## Rules',
-      '',
-      '- A change to authentication, authorization or a policy is read for who may now do what.',
-      '',
-      `## ${SECTION}`,
-      '',
-      ...fenced(content),
-      '',
-    ].join('\n'))
+    return checked([`# ${template.title}`, '', template.intro, '', '## Rules', '', ...template.rules, '', `## ${SECTION}`, '', ...fenced(content), ''].join('\n'))
   }
   const { doc, problems } = readMarkedLines(existing, REVIEW_MARKERS)
   if (problems.length > 0) return { problems }
   return checked(spliceMarkedBlock(doc, BLOCK, fenced(content), { headings: new Set([SECTION]), newHeading: SECTION }).join(doc.eol))
+}
+
+/** A new document, or the existing one with only its generated block replaced; text outside the markers is the author's. */
+export function renderReviewDoc(existing: string | undefined, content: readonly string[]): { content: string } | { problems: string[] } {
+  return renderDoc(existing, content, REVIEW_TEMPLATE)
+}
+
+/** Bugbot cuts a rule file at 30,000 characters, measured over the whole file, the author's rules included. */
+export const BUGBOT_LIMIT = 30_000
+
+/**
+ * `.cursor/BUGBOT.md`: the same block, or, where the whole file would pass {@link BUGBOT_LIMIT},
+ * what is always read by a person and a pointer to `REVIEW.md` for the tables, since a cut file
+ * would end mid-table. A file that passes it even so is refused rather than written to be cut.
+ */
+export function renderBugbotDoc(existing: string | undefined, content: readonly string[]): { content: string } | { problems: string[] } {
+  const full = renderDoc(existing, content, BUGBOT_TEMPLATE)
+  if (!('content' in full) || full.content.length <= BUGBOT_LIMIT) return full
+  const tables = content.findIndex((line) => line.startsWith('**Models with sensitive columns**'))
+  const head = tables === -1 ? content : content.slice(0, tables)
+  const cut = renderDoc(existing, [...head, `The tables of what this application holds are in \`${REVIEW_DOC_FILE}\`: with them this file would pass the ${BUGBOT_LIMIT.toLocaleString('en-US')} characters Bugbot reads.`], BUGBOT_TEMPLATE)
+  if ('content' in cut && cut.content.length > BUGBOT_LIMIT) {
+    return { problems: [`${cut.content.length} characters even without the tables, past the ${BUGBOT_LIMIT.toLocaleString('en-US')} Bugbot reads: shorten the rules outside the markers or the paths in guren.review.ts`] }
+  }
+  return cut
 }
 
 /** The working tree's policy, for the block; the lane reads the merge base's. */
@@ -306,24 +335,57 @@ export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts
   }
 }
 
-export type ReviewDocResult =
-  | { state: 'written' | 'unchanged' | 'stale' | 'missing'; file: string; gaps: string[] }
-  | { state: 'refused'; file: string; problems: string[] }
-  | { state: 'unreadable'; file: string; reasons: string[] }
+export const BUGBOT_FILE = '.cursor/BUGBOT.md'
 
-/** `REVIEW.md` at the application root, its block regenerated; under `check` nothing is written. */
-export async function syncReviewDoc(cwd: string, options: { check?: boolean; facts?: ReviewFacts } = {}): Promise<ReviewDocResult> {
-  const file = join(cwd, REVIEW_DOC_FILE)
-  const loaded = options.facts ? { facts: options.facts } : await loadReviewFacts(cwd)
-  if ('unreadable' in loaded) return { state: 'unreadable', file, reasons: loaded.unreadable }
-  const existing = await readFile(file, 'utf8').catch((error: NodeJS.ErrnoException) => {
+export interface ReviewDocFile {
+  file: string
+  state: 'written' | 'unchanged' | 'stale' | 'missing' | 'refused'
+  problems?: string[]
+  /** Not written, though it would have been, because another file refused. */
+  held?: true
+}
+
+export type ReviewDocResult = { state: 'unreadable'; reasons: string[] } | { state: 'read'; files: ReviewDocFile[]; gaps: string[] }
+
+/** Whether the app reviews with Cursor: its agent harness has the Cursor component, the one opt-in `add review` and `change:policy` share. */
+export async function reviewsWithCursor(cwd: string): Promise<boolean> {
+  const { hasHarnessComponent } = await import('../agent-harness')
+  return hasHarnessComponent(cwd, 'cursor')
+}
+
+type Planned = { file: ReviewDocFile; path: string; content?: string }
+
+async function planFile(path: string, relative: string, render: (existing: string | undefined) => { content: string } | { problems: string[] }, check: boolean): Promise<Planned> {
+  const existing = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return undefined
     throw error
   })
-  const rendered = renderReviewDoc(existing, buildReviewBlock(loaded.facts))
-  if ('problems' in rendered) return { state: 'refused', file, problems: rendered.problems }
-  if (rendered.content === existing) return { state: 'unchanged', file, gaps: loaded.facts.gaps }
-  if (options.check) return { state: existing === undefined ? 'missing' : 'stale', file, gaps: loaded.facts.gaps }
-  await writeFileAtomic(file, rendered.content)
-  return { state: 'written', file, gaps: loaded.facts.gaps }
+  const rendered = render(existing)
+  if ('problems' in rendered) return { path, file: { file: relative, state: 'refused', problems: rendered.problems } }
+  if (rendered.content === existing) return { path, file: { file: relative, state: 'unchanged' } }
+  if (check) return { path, file: { file: relative, state: existing === undefined ? 'missing' : 'stale' } }
+  return { path, file: { file: relative, state: 'written' }, content: rendered.content }
+}
+
+/**
+ * `REVIEW.md` at the application root and, for an app that reviews with Cursor, `.cursor/BUGBOT.md`,
+ * each with its block regenerated; under `check` nothing is written.
+ */
+export async function syncReviewDoc(cwd: string, options: { check?: boolean; facts?: ReviewFacts; cursor?: boolean } = {}): Promise<ReviewDocResult> {
+  const loaded = options.facts ? { facts: options.facts } : await loadReviewFacts(cwd)
+  if ('unreadable' in loaded) return { state: 'unreadable', reasons: loaded.unreadable }
+  const block = buildReviewBlock(loaded.facts)
+  const check = options.check === true
+  const planned = [await planFile(join(cwd, REVIEW_DOC_FILE), REVIEW_DOC_FILE, (existing) => renderReviewDoc(existing, block), check)]
+  if (options.cursor ?? await reviewsWithCursor(cwd)) planned.push(await planFile(join(cwd, BUGBOT_FILE), BUGBOT_FILE, (existing) => renderBugbotDoc(existing, block), check))
+  // Every file is judged before the first write, so one that refuses leaves the other as it was.
+  if (planned.some((entry) => entry.file.state === 'refused')) {
+    return { state: 'read', files: planned.map((entry) => (entry.file.state === 'written' ? { file: entry.file.file, state: 'unchanged' as const, held: true } : entry.file)), gaps: loaded.facts.gaps }
+  }
+  for (const entry of planned) {
+    if (entry.content === undefined) continue
+    await mkdir(dirname(entry.path), { recursive: true })
+    await writeFileAtomic(entry.path, entry.content)
+  }
+  return { state: 'read', files: planned.map((entry) => entry.file), gaps: loaded.facts.gaps }
 }

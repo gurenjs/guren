@@ -182,6 +182,18 @@ export async function loadAgentTemplates(): Promise<TemplateFiles> {
   return files
 }
 
+async function componentInstalled(cwd: string, component: HarnessComponent, templates: TemplateFiles): Promise<boolean> {
+  for (const file of planComponents([component], templates, 'App').filter((planned) => planned.managed)) {
+    if (await fileExists(cwd, file.path)) return true
+  }
+  return false
+}
+
+/** Whether the app has a harness component, by the same evidence `agent:sync` detects it from. */
+export async function hasHarnessComponent(cwd: string, component: HarnessComponent): Promise<boolean> {
+  return componentInstalled(cwd, component, await loadAgentTemplates())
+}
+
 /**
  * Which harness components an app already has, evidenced by the plans
  * themselves: a component is installed when any managed file `planComponents`
@@ -194,13 +206,7 @@ async function detectInstalledComponents(
 ): Promise<HarnessComponent[]> {
   const components: HarnessComponent[] = []
   for (const component of DETECTABLE_COMPONENTS) {
-    const managed = planComponents([component], templates, 'App').filter((file) => file.managed)
-    for (const file of managed) {
-      if (await fileExists(cwd, file.path)) {
-        components.push(component)
-        break
-      }
-    }
+    if (await componentInstalled(cwd, component, templates)) components.push(component)
   }
   if (components.length === 0) {
     components.push('claude')
