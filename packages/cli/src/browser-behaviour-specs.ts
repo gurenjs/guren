@@ -1,7 +1,8 @@
 /**
  * The behaviour specs `guren browser:map` keeps under `tests/browser/behaviours/generated/` (RFC 0033
  * §13.5), pure: one e2e test per plan behaviour a view of the plan sends. The test opens the start
- * page, one agent step performs the behaviour, and locators pin the outcome. A behaviour it cannot
+ * page, performs the behaviour with locator steps where the plan names every control it touches and
+ * with one agent step otherwise, and locators pin the outcome. A behaviour it cannot
  * write is a skipped test naming why, never a pass. A title carries the id without brackets (§8)
  * and a digest of what was generated, so a changed test records anew and repairs nothing.
  */
@@ -40,6 +41,8 @@ interface BehaviourCase {
   /** Absent for a skipped test, whose title says why. */
   body?: string[]
   signedIn?: boolean
+  /** The behaviour is performed by an agent step rather than by locator steps. */
+  agent?: boolean
   screen?: boolean
   /** Input keys the sending view's form has no label for. */
   unlabelled?: string[]
@@ -183,6 +186,28 @@ function controlMayStop(plan: Plan, form: ViewForm, inputs: ReadonlyMap<string, 
   })
 }
 
+/**
+ * The behaviour as locator steps, when the plan names every control it touches: each input a labelled
+ * field of the submitting form whose control takes the value one way, and an action for the route to
+ * tap. A date, datetime or file control, an action the plan does not name, or an input the form does
+ * not label is left to the agent step. No step adds `.first()`: two matches fail as `LOCATOR_AMBIGUOUS`.
+ */
+function locatorSteps(view: PlanView, form: ViewForm | undefined, route: string, inputs: ReadonlyArray<[string, Primitive]>): string[] | undefined {
+  const action = view.actions.find((entry) => entry.route === route)?.label
+  if (action === undefined || (inputs.length > 0 && form === undefined)) return undefined
+  const steps: string[] = []
+  for (const [name, value] of inputs) {
+    const field = form!.fields.find((entry) => entry.field === name && entry.input !== 'hidden')
+    if (!field) return undefined
+    const control = labelLocator(field.label)
+    if ((field.input === 'text' || field.input === 'textarea' || field.input === 'number') && typeof value !== 'boolean') steps.push(`await ${control}.fill(${quoteString(String(value))})`)
+    else if (field.input === 'checkbox' && typeof value === 'boolean') steps.push(`await ${control}.${value ? 'check' : 'uncheck'}()`)
+    else if (field.input === 'select' && typeof value !== 'boolean') steps.push(`await ${control}.selectOption({ value: ${quoteString(String(value))} })`)
+    else return undefined
+  }
+  return [...steps, `await ${actionLocator(action)}.tap()`]
+}
+
 interface Instruction {
   text: string
   params: Array<[string, Primitive]>
@@ -306,11 +331,12 @@ function behaviourCase(file: string, plan: Plan, behaviour: PlanAcceptance, app:
   const pins = [...(urlPin === undefined ? [] : [urlPin]), ...screenPins]
   if (pins.length === 0) return skip(REASONS.outcome)
 
-  const instruction = buildInstruction(view, form, route.id, inputs)
+  const located = locatorSteps(view, form, route.id, inputs)
+  const instruction = located === undefined ? buildInstruction(view, form, route.id, inputs) : undefined
   const needsGiven = startParameters.size > 0
     ? `its start page ${start.path} takes a path parameter`
     : behaviour.given.length > 0 ? 'the plan gives it a starting state' : undefined
-  const params = instruction.params.length > 0 ? `, { params: { ${instruction.params.map(([param, value]) => `${param}: ${literal(value)}`).join(', ')} } }` : ''
+  const params = instruction && instruction.params.length > 0 ? `, { params: { ${instruction.params.map(([param, value]) => `${param}: ${literal(value)}`).join(', ')} } }` : ''
   const opened = startParameters.size === 0
     ? quoteString(start.path)
     : `\`${startParts.map((part) => typeof part === 'string' ? escapeTemplateLiteral(part) : `\${start.value(${quoteString(part.name)})}`).join('')}\``
@@ -318,19 +344,22 @@ function behaviourCase(file: string, plan: Plan, behaviour: PlanAcceptance, app:
     `await app.open(${opened})`,
     'await expectDefaultLocale(browser)',
     "const off = await browser.onDialog('accept')",
-    `await agent.act(${quoteString(instruction.text)}${params})`,
+    ...(instruction ? [`await agent.act(${quoteString(instruction.text)}${params})`] : located!),
     'await off()',
     ...pins,
   ]
   const begun = `await begin(${quoteString(behaviour.id)}, ${needsGiven === undefined ? 'undefined' : quoteString(needsGiven)}, { app, browser })`
   const body = [steps.some((line) => /\bstart[.)]/u.test(line)) ? `const start = ${begun}` : begun, ...steps]
   const digest = createHash('sha256').update(JSON.stringify([signedIn, body])).digest('hex').slice(0, 6)
-  return { title: `${behaviour.id} (${digest}): ${unbracketed(behaviour.description)}`, body, signedIn, screen: screenPins.length > 0, unlabelled: instruction.unlabelled }
+  return {
+    title: `${behaviour.id} (${digest}): ${unbracketed(behaviour.description)}`, body, signedIn,
+    agent: instruction !== undefined, screen: screenPins.length > 0 || located !== undefined, unlabelled: instruction?.unlabelled ?? [],
+  }
 }
 
 function renderCase(entry: BehaviourCase): string {
   if (!entry.body) return `test.skip(${quoteString(entry.title)}, async () => {})`
-  const fixtures = ['app', 'agent', ...(entry.screen ? ['screen'] : []), 'browser'].join(', ')
+  const fixtures = ['app', ...(entry.agent ? ['agent'] : []), ...(entry.screen ? ['screen'] : []), 'browser'].join(', ')
   const session = entry.signedIn ? `{ session: ${quoteString(BEHAVIOUR_SESSION)} }, ` : ''
   return [`test(${quoteString(entry.title)}, ${session}async ({ ${fixtures} }) => {`, ...entry.body.map((line) => `  ${line}`), '})'].join('\n')
 }

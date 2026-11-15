@@ -36,7 +36,11 @@ function replayCount(): number {
   return Number(raw)
 }
 
-/** The measurement plan with the rest of the posts resource and eight behaviours, of every kind the generator skips or writes. */
+/**
+ * The measurement plan with the rest of the posts resource and eight behaviours, of every kind the generator skips or
+ * writes. The new and edit views name no submit action, so storing and updating end "submit the form" and stay agent
+ * steps the fixture replays; deleting taps the named Delete action with locator steps, so both kinds run every night.
+ */
 function behaviourPlan(): PlanInput {
   const plan = measurementPlan()
   const existing = { kind: 'existing' } as const
@@ -67,7 +71,7 @@ function behaviourPlan(): PlanInput {
     })),
     routes: [...plan.routes!, route('show', 'GET', '/posts/:id'), route('edit', 'GET', '/posts/:id/edit'), route('update', 'PUT', '/posts/:id'), route('destroy', 'DELETE', '/posts/:id')],
     views: [
-      ...plan.views!,
+      ...plan.views!.map((view) => view.id === 'view.posts.new' ? { ...view, actions: [] } : view),
       {
         id: 'view.posts.show', change: existing, page: 'posts/Show', purpose: 'Shows a post.', props: [],
         actions: [{ label: 'Edit', route: 'route.posts.edit' }, { label: 'Delete', route: 'route.posts.destroy' }], states: {},
@@ -75,7 +79,7 @@ function behaviourPlan(): PlanInput {
       {
         id: 'view.posts.edit', change: existing, page: 'posts/Edit', purpose: 'Edits a post.', props: [],
         form: { validator: 'validator.post', submitsTo: 'route.posts.update', fields: [titleField] },
-        actions: [{ label: 'Save', route: 'route.posts.update' }], states: {},
+        actions: [], states: {},
       },
     ],
     tasks: [{
@@ -152,7 +156,7 @@ async function noLogin(root: string): Promise<Record<string, string | undefined>
   return { ...hidden, CLAUDE_CONFIG_DIR: await mkdtemp(join(root, 'no-claude-')), CODEX_HOME: await mkdtemp(join(root, 'no-codex-')) }
 }
 
-type Outcome = 'replayed' | 'live' | 'stale' | 'missing' | 'absent' | 'gap' | 'policy' | 'no-step' | 'failed' | 'not-run' | 'interrupted' | 'skipped'
+type Outcome = 'replayed' | 'located' | 'live' | 'stale' | 'missing' | 'absent' | 'gap' | 'policy' | 'failed' | 'not-run' | 'interrupted' | 'skipped'
 
 interface ReportStep { kind: string; status: string; cache?: { mode?: string }; error?: { code?: string } }
 interface ReportResult { titlePath: string[]; file: string; status: string; skip?: { cause?: string } | null; attempts?: Array<{ status: string; error?: { code?: string } | null; steps?: ReportStep[] }> }
@@ -164,8 +168,8 @@ function outcomeOf(result: ReportResult): Outcome {
   if (result.status === 'interrupted') return 'interrupted'
   const attempt = result.attempts?.at(-1)
   const agentSteps = (attempt?.steps ?? []).filter((step) => step.kind === 'agent')
-  // A generated behaviour test performs its behaviour in one agent step; a pass without one replayed nothing.
-  if (result.status === 'passed' && agentSteps.length === 0) return 'no-step'
+  // The plan named every control, so the generator wrote locator steps: a pass with no recording to replay.
+  if (result.status === 'passed' && agentSteps.length === 0) return 'located'
   if (result.status === 'passed') return agentSteps.every((step) => step.cache?.mode === 'self-finalized') ? 'replayed' : 'live'
   const failing = agentSteps.find((step) => step.status === 'failed')
   const code = attempt?.error?.code ?? failing?.error?.code
@@ -185,29 +189,33 @@ async function readReport(app: string): Promise<Report | undefined> {
 
 /**
  * Every generated test's outcome, a filtered one included as skipped (this passes no filter), and `absent` for each
- * test of the manifest the run did not run: the recordings are for tests the generator does not write as they were.
+ * test of the manifest the run did not replay (skipped, gone, or passing with locator steps only): the recordings
+ * are for tests the generator does not write as they were.
  */
 function outcomes(report: Report, expected: readonly string[]): Map<string, Outcome> {
   const seen = new Map((report.run?.results ?? [])
     .filter((result) => result.file.startsWith(GENERATED_BEHAVIOURS_DIR))
     .map((result) => [result.titlePath.join(' › '), outcomeOf(result)] as [string, Outcome]))
-  for (const test of expected) if ((seen.get(test) ?? 'skipped') === 'skipped') seen.set(test, 'absent')
+  for (const test of expected) {
+    const outcome = seen.get(test) ?? 'skipped'
+    if (outcome === 'skipped' || outcome === 'located') seen.set(test, 'absent')
+  }
   return seen
 }
 
-/** What makes a run exit non-zero; `replayed`, `skipped` and `absent` never do, so a run holding only those that did not exit 0 failed elsewhere. */
-const EXPLAINS_EXIT: ReadonlySet<Outcome> = new Set(['live', 'stale', 'missing', 'gap', 'policy', 'no-step', 'failed', 'not-run', 'interrupted'])
+/** What makes a run exit non-zero; `replayed`, `located`, `skipped` and `absent` never do, so a run holding only those that did not exit 0 failed elsewhere. */
+const EXPLAINS_EXIT: ReadonlySet<Outcome> = new Set(['live', 'stale', 'missing', 'gap', 'policy', 'failed', 'not-run', 'interrupted'])
 
 function runErrored(report: Report, exitCode: number, tonight: ReadonlyMap<string, Outcome>): boolean {
   return (report.run?.errors?.length ?? 0) > 0 || (exitCode !== 0 && ![...tonight.values()].some((outcome) => EXPLAINS_EXIT.has(outcome)))
 }
 
-type Verdict = 'pass' | 'skipped' | 'stale' | 'missing' | 'absent' | 'gap' | 'live' | 'policy' | 'no-step' | 'flaky' | 'defect' | 'not-run'
+type Verdict = 'pass' | 'skipped' | 'stale' | 'missing' | 'absent' | 'gap' | 'live' | 'policy' | 'flaky' | 'defect' | 'not-run'
 
 /** One word for the table; the summary counts each kind of outcome on its own, so this order hides nothing. */
 function verdictOf(seen: readonly Outcome[]): Verdict {
   if (seen.every((outcome) => outcome === 'skipped')) return 'skipped'
-  const kind = (['stale', 'missing', 'absent', 'gap', 'live', 'policy', 'no-step'] as const).find((outcome) => seen.includes(outcome))
+  const kind = (['stale', 'missing', 'absent', 'gap', 'live', 'policy'] as const).find((outcome) => seen.includes(outcome))
   if (kind) return kind
   if (isDefect(seen)) return 'defect'
   if (seen.includes('failed') || seen.includes('interrupted')) return 'flaky'
@@ -217,7 +225,7 @@ function verdictOf(seen: readonly Outcome[]): Verdict {
 
 /** Failed on every run that reached its step, as against failing on some. */
 function isDefect(seen: readonly Outcome[]): boolean {
-  const ran = seen.filter((outcome) => outcome === 'replayed' || outcome === 'failed')
+  const ran = seen.filter((outcome) => outcome === 'replayed' || outcome === 'located' || outcome === 'failed')
   return ran.length > 0 && ran.every((outcome) => outcome === 'failed')
 }
 
@@ -226,7 +234,9 @@ interface Summary {
   /** `current` while every recording replays; otherwise what a Guren change did to the fixture, which `--record` makes again. */
   fixture: 'current' | 'stale' | 'missing' | 'empty'
   clean: boolean
-  flaky: number; defects: number; notRun: number; gap: number; live: number; policy: number; noStep: number; unreported: number; runErrors: number
+  flaky: number; defects: number; notRun: number; gap: number; live: number; policy: number; unreported: number; runErrors: number
+  /** Tests that passed with locator steps only, which have no recording; not a failure. */
+  located: number
 }
 interface Metrics {
   measuredAt: string
@@ -240,7 +250,7 @@ interface Metrics {
 
 /** Everything but the fixture's state: a night with any of these breaks the streak, whatever the fixture. */
 function failuresOf(summary: Summary): number {
-  return summary.flaky + summary.defects + summary.notRun + summary.gap + summary.live + summary.policy + summary.noStep + summary.unreported + summary.runErrors
+  return summary.flaky + summary.defects + summary.notRun + summary.gap + summary.live + summary.policy + summary.unreported + summary.runErrors
 }
 
 function summarize(seen: ReadonlyMap<string, Outcome[]>, replays: readonly ReplayRecord[], entries: number): Pick<Metrics, 'tests' | 'summary'> {
@@ -256,7 +266,7 @@ function summarize(seen: ReadonlyMap<string, Outcome[]>, replays: readonly Repla
   const summary: Summary = {
     fixture, clean: false,
     flaky: failing.filter((list) => !isDefect(list)).length, defects: failing.filter(isDefect).length,
-    notRun: having('not-run'), gap: having('gap'), live: having('live'), policy: having('policy'), noStep: having('no-step'),
+    notRun: having('not-run'), gap: having('gap'), live: having('live'), policy: having('policy'), located: having('located'),
     unreported: replays.filter((entry) => !entry.reported).length, runErrors: replays.filter((entry) => entry.runError).length,
   }
   return { tests, summary: { ...summary, clean: fixture === 'current' && failuresOf(summary) === 0 } }
@@ -288,7 +298,7 @@ function summaryLines(metrics: Metrics): string[] {
     '## Behaviour specs replay (RFC 0033 §13, Open Question 13)',
     '',
     `${metrics.replays.length} replay(s) of ${metrics.fixture.entries} recording(s) for ${metrics.fixture.tests} test(s), each against a database migrated from empty and with no agent login. Fixture: ${summary.fixture}, ${fixtureLine[summary.fixture]}.`,
-    `${summary.clean ? 'Clean' : 'Not clean'}: flaky ${summary.flaky}, defects ${summary.defects}, not run ${summary.notRun}, a recording with a gap ${summary.gap}, ran live ${summary.live}, policy ${summary.policy}, passed with no agent step ${summary.noStep}, unreported runs ${summary.unreported}, runs that failed outside a test ${summary.runErrors}.`,
+    `${summary.clean ? 'Clean' : 'Not clean'}: flaky ${summary.flaky}, defects ${summary.defects}, not run ${summary.notRun}, a recording with a gap ${summary.gap}, ran live ${summary.live}, policy ${summary.policy}, unreported runs ${summary.unreported}, runs that failed outside a test ${summary.runErrors}. ${summary.located} test(s) ran with locator steps only.`,
     walls.length > 0 ? `One replay: ${(Math.min(...walls) / 1000).toFixed(1)}-${(Math.max(...walls) / 1000).toFixed(1)} s, the app's start included.` : 'No replay produced a report.',
     '',
     '| Test | Verdict | Outcomes |', '| --- | --- | --- |',
@@ -319,7 +329,7 @@ async function replay(): Promise<void> {
     fixture: { entries: fixture.length, tests: expected.length },
     replays: [],
     tests: [],
-    summary: { fixture: 'empty', clean: false, flaky: 0, defects: 0, notRun: 0, gap: 0, live: 0, policy: 0, noStep: 0, unreported: 0, runErrors: 0 },
+    summary: { fixture: 'empty', clean: false, flaky: 0, defects: 0, notRun: 0, gap: 0, live: 0, policy: 0, unreported: 0, runErrors: 0, located: 0 },
   }
   const seen = new Map<string, Outcome[]>()
   for (let index = 1; index <= replays; index += 1) {
@@ -386,14 +396,14 @@ async function record(): Promise<void> {
   await resetDatabase(app)
   const live = await run(app, ['bun', 'run', 'test:behaviours'])
   const recorded = await readReport(app)
-  const failed = [...(recorded ? outcomes(recorded, []) : new Map<string, Outcome>())].filter(([, outcome]) => outcome !== 'skipped' && outcome !== 'live' && outcome !== 'replayed')
+  const failed = [...(recorded ? outcomes(recorded, []) : new Map<string, Outcome>())].filter(([, outcome]) => outcome !== 'skipped' && outcome !== 'live' && outcome !== 'replayed' && outcome !== 'located')
   if (live !== 0 || !recorded || failed.length > 0) throw new Error(`The live run did not pass (exit ${live}): ${failed.map(([test, outcome]) => `${test}: ${outcome}`).join('; ') || 'no report'}. Nothing was written.`)
 
   await resetDatabase(app)
   const replayed = await run(app, ['bun', 'run', 'test:behaviours:ci'], await noLogin(root))
   const check = await readReport(app)
   const results = [...(check ? outcomes(check, []) : new Map<string, Outcome>())]
-  const unreplayed = results.filter(([, outcome]) => outcome !== 'skipped' && outcome !== 'replayed')
+  const unreplayed = results.filter(([, outcome]) => outcome !== 'skipped' && outcome !== 'replayed' && outcome !== 'located')
   const tests = results.filter(([, outcome]) => outcome === 'replayed').map(([test]) => test).sort()
   if (replayed !== 0 || !check || (check.run?.errors?.length ?? 0) > 0 || unreplayed.length > 0 || tests.length === 0) {
     throw new Error(`The recordings did not replay with no login (exit ${replayed}): ${unreplayed.map(([test, outcome]) => `${test}: ${outcome}`).join('; ') || (tests.length === 0 ? 'no test replayed' : 'no report, or a run error')}. Nothing was written.`)

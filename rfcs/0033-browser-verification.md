@@ -1268,6 +1268,29 @@ test('AC-posts-update-1 (6a2991): a signed-in user retitles a post', { session: 
   behaviour with `given` text or a path parameter and no entry is skipped from
   the body with that reason. An entry prepares its data however the app can: a
   seeder that runs at boot, or the app's own pages.
+- **Amended in implementation (Open Question 14): locator steps where the
+  plan names every control.** The runner performs locator actions with no
+  model call, so the behaviour is written as locator steps when the plan names
+  every control it touches: each input key is a labelled field of the form
+  that submits to the route, on a `text`, `textarea` or `number` control
+  (`fill`), a `checkbox` given a boolean (`check` or `uncheck`) or a `select`
+  (`selectOption` by value, since the plan's input is the submitted value),
+  and the view names an action for the route, which is tapped. A `date`,
+  `datetime` or `file` control, an input the form does not label, and a route
+  no action names (the "submit the form" ending below) leave the behaviour to
+  one agent step, which is all the rest of this section describes. A
+  locator step needs no recording and no login, so a behaviour the plan fully
+  names never goes stale. It takes no `.first()`: two controls with one
+  label fail as `LOCATOR_AMBIGUOUS`, a finding against the page or the plan,
+  where an agent would have picked one. A changed label fails the test, as it
+  already failed the pins; the spec is regenerated from the plan, never edited.
+  The example above names `Save`, so it is now written as
+  `await screen.getByLabel('Title', { exact: true }).fill('Retitled post')`
+  and a tap on the `Save` button or link, with no `agent` fixture; its agent
+  step is what a view naming no action gets, ending "submit the form" in
+  place of "use "Save"". The blueprint still installs an agent adapter for the steps
+  that remain; whether an app whose every behaviour is located needs one is
+  left open.
 - **The instruction is built from the plan.** A behaviour's `input` is a list
   of `{ name, json }` entries, one per field. Every entry becomes a parameter
   holding its decoded value, as the `TestApp` skeleton builds its body from
@@ -1531,6 +1554,13 @@ form that appears after a click. Each needs a rule in the generator and a
 `fixme` where the rule runs out, and every markup change is a failing test
 someone edits by hand. It remains the fallback if §13.9 does not hold in M6,
 and is the stronger choice for an app whose forms are all plain text.
+**Amended in implementation (2026-11-15):** adopted inside the runner rather
+than beside it (§13.5, Open Question 14). The runner's own locators perform
+the steps, so there is no second runner, and what the plan does not say is
+left to one agent step rather than to a `fixme`: a checkbox and a `select`
+are covered, a date or file control and an unnamed action are not. A changed
+label is a finding against the plan or the page, as it was for the pins; the
+generated spec is regenerated, never edited by hand.
 
 **Make the runner the engine of every spec.** The smoke, view and
 accessibility specs need no agent, were measured for M4 on Playwright's runner,
@@ -1665,10 +1695,14 @@ changes behaviour.
     live steps every night but never whether a change re-keys a recording,
     and live steps change only with the runner's pins, which are measured
     when they move.
-14. (§13) Should the generator write plain Playwright steps where the view's
+14. ~~(§13) Should the generator write plain Playwright steps where the view's
     form labels every input (§13.10) and an agent step only where that rule
     runs out? One suite would then hold two kinds of step, and the app would
-    still install the runner for the second.
+    still install the runner for the second.~~ **Decided 2026-11-15 by the
+    deciding maintainer:** yes, with the runner's own locators, so the suite
+    keeps one runner (§13.5). The nightly measurement plan names no submit
+    action on its new and edit views, so three of its behaviours stay agent
+    steps that replay from the fixture, and its delete runs as locator steps.
 15. (§13) Nothing removes the recording of a title `browser:map` no longer
     generates, and `e2e cache clear` removes every recording. Should
     `browser:map` delete them, which means reading the runner's own cache

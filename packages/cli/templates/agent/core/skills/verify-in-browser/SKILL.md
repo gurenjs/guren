@@ -44,7 +44,9 @@ collects `*.spec.ts`. Write your own beside `tests/browser/generated/`, which
 When the app has `e2e.browser.config.ts` (`guren add browser-tests
 --behaviours`), `tests/browser/behaviours/generated/` holds one test per
 behaviour of an approved plan: it opens the start page, performs the behaviour
-in one agent step, and checks the outcome with locators. A step replays from
+with locator steps where the plan names every control it touches and in one
+agent step otherwise, and checks the outcome with locators. A locator step
+needs no recording and no login. An agent step replays from
 its recording under `.e2e/cache/`. Only a step with no recording, or one whose
 recording no longer matches the page, runs live, under the person's login for
 the agent that config names (Claude Code or Codex), and records again.
