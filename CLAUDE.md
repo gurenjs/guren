@@ -178,6 +178,7 @@ bunx guren add browser-tests                # Playwright browser tests (RFC 0033
 bunx guren make:policy Post     # Authorization policy scaffold (app/Policies)
 bunx guren make:validator Post --fields "title:string,body:text"  # Zod schemas (route params, list query, payload) in app/Http/Validators
 bunx guren make:adr "Billing cycle is end-of-month"  # Numbered ADR under docs/adr with linkable frontmatter (entities/related)
+bunx guren make:lesson "Load a comment through its post" --entity Comment --from 412  # Numbered lesson under docs/lessons (RFC 0040 §11): one `rule:` line (the title without --rule), `status: draft` until a person merges it as stable, `entities`/`paths`/`source` (`--from <commit|pr>`, `--kind`)/`review` (six months on); `guren context <Entity>` prints a stable lesson's rule under Lessons, and `check --docs` fails a missing or past-160-character rule and an `enforcedBy: <file>#<name>` the file does not hold, and warns on a passed `review` date or a deprecated lesson with no `supersededBy`
 
 # Application modules (RFC 0002) — self-contained modules/<name>/ directories
 bunx guren make:module Billing              # Scaffold modules/billing/{index.ts,routes.ts,db/schema.ts}, wire into src/app.ts

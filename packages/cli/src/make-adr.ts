@@ -56,7 +56,7 @@ function issueYamlEntries(entries: string[]): string[] {
   })
 }
 
-interface AdrPrefill {
+export interface AdrPrefill {
   entities: string[]
   related: string[]
 }
@@ -74,7 +74,7 @@ const ENTITY_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/
  * the decision before the code, and `guren check --docs` failing until the
  * model lands is the intended "implementation missing" signal.
  */
-async function resolveAdrPrefill(entity: string, moduleName?: string): Promise<AdrPrefill> {
+export async function resolveAdrPrefill(entity: string, moduleName?: string): Promise<AdrPrefill> {
   if (!ENTITY_NAME_RE.test(entity)) {
     throw new Error(
       `Invalid entity name "${entity}" — it is written into YAML frontmatter, so it must be a plain class identifier (letters, digits, underscores).`,
@@ -144,7 +144,7 @@ async function gitAuthorActor(): Promise<string | null> {
   return ACTOR_RE.test(`human:${name}`) ? `human:${name}` : null
 }
 
-async function resolveActor(by?: string): Promise<string | null> {
+export async function resolveActor(by?: string): Promise<string | null> {
   if (by !== undefined) {
     if (!ACTOR_RE.test(by)) {
       throw new Error(
@@ -204,8 +204,8 @@ export function adrSlug(title: string): string {
   return slugifyProse(title, '-', 'adr')
 }
 
-/** Highest existing `NNNN-` prefix in `dir`, plus one, zero-padded to four digits. */
-async function nextSequenceNumber(dir: string): Promise<string> {
+/** Highest existing `NNNN-` prefix in `dir`, plus one, zero-padded to four digits; `make:lesson` numbers alike. */
+export async function nextSequenceNumber(dir: string): Promise<string> {
   let entries: string[] = []
 
   try {

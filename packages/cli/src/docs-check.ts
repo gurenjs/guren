@@ -10,7 +10,7 @@ import {
 } from './discovery'
 import { matchesGlob } from './glob-match'
 import { parseModelFile } from './model-parser'
-import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './docs-index'
+import { scanDocs, extractDocsTags, buildEntityDocIndex, LESSON_RULE_LIMIT, type DocRef } from './docs-index'
 import { ISSUE_REF_FORMS } from './issue-refs'
 import type { ParseCache } from './parse-cache'
 import { advisory, check, type CheckResult } from './check-result'
@@ -150,6 +150,7 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     results.push(...(await checkDocRelations(ref, modelNames, probes)))
     results.push(...checkProvenanceFields(ref))
     results.push(...checkIssueRefs(ref))
+    results.push(...(await checkLesson(cwd, ref, probes)))
   }
 
   results.push(...checkConformance(refs, docsWithFrontmatter.length > 0, changedFiles ?? null))
@@ -312,6 +313,46 @@ function changedScope(refs: DocRef[], changedFiles: Set<string> | null): Set<str
   }
 
   return new Set(refs.filter(inScope).map((ref) => ref.path))
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/u
+
+/**
+ * A lesson (RFC 0040 §11): one rule line, an `enforcedBy` that names a check which exists, a
+ * `review` date nobody let pass, and a `supersededBy` on a retired one. A rule or a check that
+ * does not hold fails; the dates and the retirement are advisory, since time alone breaks them.
+ */
+async function checkLesson(cwd: string, ref: DocRef, probes: PathProbes): Promise<CheckResult[]> {
+  const lesson = ref.lesson
+  if (!lesson) return []
+  const results: CheckResult[] = []
+  const rule = lesson.rule?.trim() ?? ''
+  if (rule === '') {
+    results.push(check(`docs-lesson-rule:${ref.path}`, `${ref.path} rule`, 'fail', 'A lesson has no `rule:`, the one line `guren context` delivers.', `Add \`rule: "<one line>"\` to ${ref.path}.`, ref.path))
+  } else if (rule.length > LESSON_RULE_LIMIT) {
+    results.push(check(`docs-lesson-rule:${ref.path}`, `${ref.path} rule`, 'fail', `The rule is ${rule.length} characters; a lesson's rule is one line of at most ${LESSON_RULE_LIMIT}.`, 'Keep the rule to what a reviewer acts on and move the rest into the body.', ref.path))
+  }
+  if (lesson.enforcedBy) {
+    const [file, name] = lesson.enforcedBy.split('#', 2) as [string, string | undefined]
+    const target = posix.normalize(file)
+    const text = isAppRootRelative(target) && (await probes.exists(target)) ? await readFile(`${cwd}/${target}`, 'utf8').catch(() => undefined) : undefined
+    if (text === undefined) {
+      results.push(check(`docs-lesson-enforced:${ref.path}`, `${ref.path} enforcedBy`, 'fail', `\`enforcedBy: ${lesson.enforcedBy}\` names ${file}, which does not exist.`, 'Name the check as <file>#<name>, relative to the application root.', ref.path))
+    } else if (name !== undefined && name !== '' && !text.includes(name)) {
+      results.push(check(`docs-lesson-enforced:${ref.path}`, `${ref.path} enforcedBy`, 'fail', `\`enforcedBy: ${lesson.enforcedBy}\`: ${file} does not mention ${name}.`, 'Name a rule or a test the file holds, as it is written there.', ref.path))
+    }
+  }
+  if (lesson.review !== undefined) {
+    if (!ISO_DATE.test(lesson.review)) {
+      results.push(advisory(`docs-lesson-review:${ref.path}`, `${ref.path} review`, 'warn', `\`review: ${lesson.review}\` is not a YYYY-MM-DD date.`, 'Write the date after which the lesson should be confirmed again.', ref.path))
+    } else if ((ref.status ?? 'stable') === 'stable' && lesson.review < new Date().toISOString().slice(0, 10)) {
+      results.push(advisory(`docs-lesson-review:${ref.path}`, `${ref.path} review`, 'warn', `Nobody has confirmed since ${lesson.review} that this lesson still applies.`, 'Confirm it and move `review:` forward, or deprecate it with `supersededBy:`.', ref.path))
+    }
+  }
+  if (ref.status === 'deprecated' && !lesson.supersededBy) {
+    results.push(advisory(`docs-lesson-superseded:${ref.path}`, `${ref.path} supersededBy`, 'warn', 'A deprecated lesson names no `supersededBy:`, so a reader cannot tell what replaced it.', 'Name the lesson, the check or the ADR that replaced it.', ref.path))
+  }
+  return results
 }
 
 /** `type` is the one field OKF requires on a concept document. */

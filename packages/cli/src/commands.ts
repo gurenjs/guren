@@ -12,6 +12,7 @@ import { showUsage } from 'citty'
 import {
   makeCommands,
   makeAdrCommand,
+  makeLessonCommand,
   makeValidatorCommand,
   makeTestCommand,
   makeAuthCommand,
@@ -1799,6 +1800,7 @@ const deployCommand = defineCommand({
 export const builtinSubCommands = {
   ...makeCommands,
   'make:adr': makeAdrCommand,
+  'make:lesson': makeLessonCommand,
   'make:validator': makeValidatorCommand,
   'spec:generate': specGenerateCommand,
   'docs:graph': docsGraphCommand,

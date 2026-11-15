@@ -24,6 +24,7 @@ import { makeModule } from '../make-module'
 import { makeNotification } from '../make-notification'
 import { makeProvider } from '../make-provider'
 import { makeAdr } from '../make-adr'
+import { LESSON_SOURCE_KINDS, makeLesson, type LessonSourceKind } from '../make-lesson'
 import { makeResource } from '../make-resource'
 import { makeRoute } from '../make-route'
 import { makeSeeder } from '../make-seeder'
@@ -119,6 +120,36 @@ export const makeCommands = Object.fromEntries(
 )
 
 // Its own command rather than a makeCommandSpecs entry, for the extra flags.
+export const makeLessonCommand = defineCommand({
+  meta: {
+    name: 'make:lesson',
+    description: 'Generate a numbered lesson under docs/lessons: one rule line, which guren context delivers once it is stable (RFC 0040).',
+  },
+  args: {
+    name: { type: 'positional', required: true, description: 'Lesson title (quoted prose)' },
+    rule: { type: 'string', description: 'The one-line rule; the title when omitted.' },
+    entity: { type: 'string', description: 'Model class name the lesson governs (case-insensitive).' },
+    paths: { type: 'string', description: 'Globs a cross-cutting lesson governs, comma-separated.' },
+    from: { type: 'string', description: 'Where it came from: a commit SHA or a pull request number.' },
+    kind: { type: 'string', description: `What it came from: ${LESSON_SOURCE_KINDS.join(', ')}. Read from --from when omitted.` },
+    by: { type: 'string', description: 'OKF actor for generated.by. Defaults to the git author.' },
+    force: FORCE_ARG,
+    module: MODULE_ARG,
+  },
+  async run({ args }) {
+    const file = await makeLesson(args.name, {
+      ...toWriterOptions(args),
+      rule: args.rule,
+      entity: args.entity,
+      paths: args.paths ? String(args.paths).split(',') : undefined,
+      from: args.from,
+      kind: args.kind as LessonSourceKind | undefined,
+      by: args.by,
+    })
+    consola.success(`Lesson created at ${file}. It is a draft: merging it as \`status: stable\` is what delivers its rule.`)
+  },
+})
+
 export const makeAdrCommand = defineCommand({
   meta: {
     name: 'make:adr',
