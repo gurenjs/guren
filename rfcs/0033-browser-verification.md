@@ -1335,7 +1335,7 @@ test('AC-posts-update-1 (6a2991): a signed-in user retitles a post', { session: 
   generated (start route, instruction, pins). A regenerated test that differs
   gets a new title, so a new recording, and never repairs an old one (§13.1).
   The recording of the previous title stays on disk until `e2e cache clear`
-  (Open Question 15).
+  (Open Question 15, decided: removing only those is the runner's to offer).
 
 A signed-in route runs under the session `browser`, the seeded account of §6;
 ~~any other route runs signed out~~. **Amended in implementation:** every other
@@ -1708,10 +1708,20 @@ changes behaviour.
     `tests.json` lists both kinds, so a night that does not run either, or
     passes one with no locator step and assertion in its report, is not
     clean.
-15. (§13) Nothing removes the recording of a title `browser:map` no longer
+15. ~~(§13) Nothing removes the recording of a title `browser:map` no longer
     generates, and `e2e cache clear` removes every recording. Should
     `browser:map` delete them, which means reading the runner's own cache
-    format, or is that the runner's to offer?
+    format, or is that the runner's to offer?~~ **Decided 2026-11-15 by the
+    deciding maintainer:** the runner's. `browser:map` does not read the
+    runner's cache format, which a pin upgrade may change. The skill and the
+    CLI guide say that a regenerated test leaves its old recording behind and
+    that `e2e cache clear` followed by `test:behaviours` records every agent
+    step again. The runner's draft e2e-inc/e2e#1692 (one readable file per
+    test) proposes that a successful read-write run remove the recordings of
+    tests its collection proves gone; a pin upgrade that brings it changes the
+    recordings' format, so the fixture and an app's recordings are made again
+    then (§13.6). Since locator steps (Open Question 14) need no recording,
+    fewer recordings are left behind.
 16. (§13) No other agent runner was measured. Is a comparison needed before a
     blueprint names a dependency this young?
 17. (§13) `e2e explore`, its bug bash and `e2e mcp` were not measured. Should

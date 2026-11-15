@@ -72,7 +72,10 @@ Run `bun run test:behaviours` (port 4319), then `git status --short .e2e/cache`:
 CI runs `bun run test:behaviours:ci`, which replays only. When it reports
 `REPLAY_STALE` (exit 2), that is no verdict yet: run `bun run test:behaviours`
 here before anything else and apply the list above. A test `browser:map`
-regenerated under another title has no recording; the same run records it.
+regenerated under another title has no recording; the same run records it,
+and the recording of its old title stays. Leave it: `bunx e2e cache clear`
+removes every recording and runs each agent step live again, which is the
+person's call.
 A skipped test names why in its title; a path parameter with no `given.ts`
 entry is the person's to add.
 
