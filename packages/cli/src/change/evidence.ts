@@ -281,9 +281,10 @@ export function renderEvidenceMarkdown(evidence: ChangeEvidence): string {
 }
 
 /** Writes the three files into `target`, which ignores itself when it is the application's `.guren/evidence/`. */
-export async function writeChangeEvidence(cwd: string, target: string, evidence: ChangeEvidence, record: ChangeRecord): Promise<string> {
+export async function writeChangeEvidence(cwd: string, dir: string, evidence: ChangeEvidence, record: ChangeRecord): Promise<string> {
+  const target = resolve(cwd, dir)
   await mkdir(target, { recursive: true })
-  if (resolve(cwd, EVIDENCE_DIR) === resolve(target)) {
+  if (resolve(cwd, EVIDENCE_DIR) === target) {
     await writeFile(join(target, '.gitignore'), '*\n', { flag: 'wx' }).catch((error: NodeJS.ErrnoException) => {
       if (error.code !== 'EEXIST') throw error
     })
