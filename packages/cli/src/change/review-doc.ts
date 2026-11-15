@@ -57,7 +57,7 @@ export interface ReviewRoute {
   action?: string
   middleware: string[]
   authentication?: 'required' | 'guest-only'
-  /** Policies the action or its middleware names; `<Policy> (through the gate)` for one paired by name only. */
+  /** Policies the action or its middleware names, which is not proof it enforces one; `<Policy> (through the gate)` for one paired by name only. */
   authorizes: string[]
   /** Why what authorizes the action could not be read: an inline handler, a controller the graph did not resolve. */
   unread?: string
@@ -67,7 +67,7 @@ export interface ReviewFacts {
   policy: { paths: { high: string[]; medium: string[] }; facts: Array<[string, Lane]> } | { unreadable: string } | undefined
   models: { sensitive: Array<{ model: string; file: string; columns: string[] }>; unread: Array<{ model: string; file: string; reason: string }> }
   routes: ReviewRoute[]
-  tools: Array<{ tool: string; method: string; path: string; readOnly: boolean; destructive: boolean; ability?: string }>
+  tools: Array<{ tool: string; method: string; path: string; readOnly: boolean; destructive: boolean; ability?: string; surfaces: string[] }>
   /** Graph sections that did not read whole, each with its reason codes. */
   gaps: string[]
 }
@@ -167,10 +167,10 @@ export function buildReviewBlock(facts: ReviewFacts): string[] {
   else lines.push('| Model | File | Columns |', '| --- | --- | --- |', ...sensitive.map((entry) => `| ${cell(entry.model)} | ${cell(entry.file)} | ${cell(entry.columns.join(', '))} |`))
   if (unread.length > 0) lines.push('', 'Not read, so they may hold one:', '', ...unread.map((entry) => `- ${entry.model} (${code(entry.file)}): ${entry.reason}`))
 
-  lines.push('', '**Routes that change data**, with the middleware they pass through and what authorizes them. A route with no policy and no authorization middleware is one to read for who may call it.', '')
+  lines.push('', '**Routes that change data**, with the middleware they pass through and the policies they name. A policy named is not proof it is enforced (an action can construct one and never ask it), so the column says where to look, and a route that names none is one to read for who may call it.', '')
   if (facts.routes.length === 0) lines.push('None found.')
   else {
-    lines.push('| Method | Path | Name | Action | Middleware | Signed in | Authorizes |', '| --- | --- | --- | --- | --- | --- | --- |')
+    lines.push('| Method | Path | Name | Action | Middleware | Signed in | Policies named |', '| --- | --- | --- | --- | --- | --- | --- |')
     for (const route of facts.routes) {
       const signedIn = route.authentication === 'required' ? 'required' : route.authentication === 'guest-only' ? 'guests only' : 'none declared'
       const authorizes = [...route.authorizes, ...(route.unread ? [`not read (${route.unread})`] : [])].join(', ') || 'none found'
@@ -178,11 +178,11 @@ export function buildReviewBlock(facts: ReviewFacts): string[] {
     }
   }
 
-  lines.push('', '**Routes agents can call** (`.agent()`, exposed as MCP tools): a tool that is not read-only acts for whoever holds the token.', '')
+  lines.push('', '**Routes agents can call** (`.agent()`, on the surfaces it is exposed to): a tool that is not read-only acts for whoever holds the token.', '')
   if (facts.tools.length === 0) lines.push('None.')
   else {
-    lines.push('| Tool | Route | Read-only | Destructive | Ability |', '| --- | --- | --- | --- | --- |')
-    for (const tool of facts.tools) lines.push(`| ${cell(tool.tool)} | ${cell(`${tool.method} ${tool.path}`)} | ${tool.readOnly ? 'yes' : 'no'} | ${tool.destructive ? 'yes' : 'no'} | ${cell(tool.ability ?? 'not derivable')} |`)
+    lines.push('| Tool | Route | Exposed to | Read-only | Destructive | Ability |', '| --- | --- | --- | --- | --- | --- |')
+    for (const tool of facts.tools) lines.push(`| ${cell(tool.tool)} | ${cell(`${tool.method} ${tool.path}`)} | ${tool.surfaces.join(', ')} | ${tool.readOnly ? 'yes' : 'no'} | ${tool.destructive ? 'yes' : 'no'} | ${cell(tool.ability ?? 'not derivable')} |`)
   }
 
   if (facts.gaps.length > 0) lines.push('', '**What the tables may be missing**, since the graph did not read these whole:', '', ...facts.gaps.map((gap) => `- ${gap}`))
@@ -223,8 +223,13 @@ export function renderReviewDoc(existing: string | undefined, content: readonly 
 
 /** The working tree's policy, for the block; the lane reads the merge base's. */
 export async function readPolicySummary(cwd: string): Promise<ReviewFacts['policy']> {
-  const source = await readFile(join(cwd, REVIEW_POLICY_FILE), 'utf8').catch(() => undefined)
-  if (source === undefined) return undefined
+  let source: string
+  try {
+    source = await readFile(join(cwd, REVIEW_POLICY_FILE), 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    return { unreadable: `it could not be read (${(error as NodeJS.ErrnoException).code ?? 'error'})` }
+  }
   const loaded = readReviewPolicySource(source)
   if (loaded.state !== 'read') return { unreadable: loaded.state === 'unreadable' ? loaded.reason : 'absent' }
   const list = (value: string | string[] | undefined): string[] => (value === undefined ? [] : Array.isArray(value) ? value : [value])
@@ -258,13 +263,23 @@ export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts
   if (unreadable.length > 0 || 'unreadable' in graph || 'unreadable' in models || introspection.status !== 'ok') return { unreadable }
 
   const unreadModels: ReviewFacts['models']['unread'] = skippedModels.sort().map((file) => ({ model: file.split('/').pop()!.replace(/\.[cm]?[jt]sx?$/u, ''), file, reason: 'the file did not parse, or holds no class' }))
+  // The model reader reads one class per file; every other model the graph found there is unread.
+  const readKeys = new Set(models.map((entry) => `${entry.model.file}#${entry.model.className}`))
+  for (const node of graph.nodes) {
+    if (node.kind === 'model' && node.file && !readKeys.has(`${node.file}#${node.label}`) && !skippedModels.includes(node.file)) {
+      unreadModels.push({ model: node.label, file: node.file, reason: 'not the first class in its file, the one the model reader reads' })
+    }
+  }
+  unreadModels.sort((a, b) => a.file.localeCompare(b.file) || a.model.localeCompare(b.model))
   const sensitive: ReviewFacts['models']['sensitive'] = []
   for (const entry of [...models].sort((a, b) => a.model.file.localeCompare(b.model.file))) {
     const reason = entry.columns === null ? 'its table was not found in a schema the reader parses'
       : entry.opaqueColumns ? 'its table builds columns the reader does not follow'
-        : entry.hidden === 'unreadable' ? '`hidden` is not a list written in place' : undefined
+        : entry.hidden === 'unreadable' ? '`hidden` is not a list written in place'
+          : entry.appends === 'unreadable' ? '`appends` is not a list written in place' : undefined
     if (reason) unreadModels.push({ model: entry.model.className, file: entry.model.file, reason })
-    const columns = [...new Set([...(entry.columns ?? []), ...(Array.isArray(entry.hidden) ? entry.hidden : [])])].filter((column) => sensitiveIn(entry, column))
+    // Appended attributes serialize like columns, so a credential-like one is as sensitive.
+    const columns = [...new Set([...(entry.columns ?? []), ...(Array.isArray(entry.hidden) ? entry.hidden : []), ...(Array.isArray(entry.appends) ? entry.appends : [])])].filter((column) => sensitiveIn(entry, column))
     if (columns.length > 0) sensitive.push({ model: entry.model.className, file: entry.model.file, columns })
   }
   const scan = await parseControllerMethods(cwd)
@@ -279,9 +294,11 @@ export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts
       policy,
       models: { sensitive, unread: unreadModels },
       routes: reviewRoutes(graph, actionsOf),
-      tools: derived.tools.map((tool) => ({
+      // An adapter filters on `expose`, so a tool exposed to no surface is not one an agent can call.
+      tools: derived.tools.filter((tool) => tool.expose.mcp || tool.expose.webMcp).map((tool) => ({
         tool: tool.toolName, method: tool.method, path: tool.path, readOnly: tool.annotations.readOnlyHint, destructive: tool.annotations.destructiveHint,
         ...(tool.authorization ? { ability: tool.authorization.ability } : {}),
+        surfaces: [...(tool.expose.mcp ? ['MCP'] : []), ...(tool.expose.webMcp ? ['WebMCP'] : [])],
       })),
       gaps: reviewGraphGaps(graph),
     },

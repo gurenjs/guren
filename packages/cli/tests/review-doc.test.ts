@@ -29,7 +29,7 @@ const FACTS: ReviewFacts = {
     { method: 'POST', path: '/posts', name: 'posts.store', action: 'PostController.store', middleware: ['auth'], authentication: 'required', authorizes: ['PostPolicy'] },
     { method: 'POST', path: '/hook', middleware: ['<anonymous> (inline)'], authorizes: [], unread: 'an inline handler' },
   ],
-  tools: [{ tool: 'posts_store', method: 'POST', path: '/posts', readOnly: false, destructive: false, ability: 'create' }],
+  tools: [{ tool: 'posts_store', method: 'POST', path: '/posts', readOnly: false, destructive: false, ability: 'create', surfaces: ['MCP'] }],
   gaps: [],
 }
 
@@ -51,7 +51,8 @@ describe('buildReviewBlock', () => {
     expect(block).toContain('| User | app/Models/User.ts | passwordHash |')
     expect(block).toContain('| POST | /posts | posts.store | PostController.store | auth | required | PostPolicy |')
     expect(block).toContain('| POST | /hook |  |  | &lt;anonymous&gt; (inline) | none declared | not read (an inline handler) |')
-    expect(block).toContain('| posts_store | POST /posts | no | no | create |')
+    expect(block).toContain('| posts_store | POST /posts | MCP | no | no | create |')
+    expect(block).toContain('| Method | Path | Name | Action | Middleware | Signed in | Policies named |')
     expect(block.split('\n').some((line) => line.startsWith('#'))).toBe(false)
   })
 
@@ -150,13 +151,15 @@ describe('loadReviewFacts', () => {
       await linkWorkspaceCore(workspace.dir)
       const main = APPLICATION_GRAPH_RELATIONS_FIXTURE['src/main.ts']!
         .replace("import { createApp } from '@guren/core'", "import { createApp, Controller, authorizeMiddleware } from '@guren/core'\nimport { ChildController } from '../app/Http/Controllers/ChildController'\nclass InlineController extends Controller { async destroy() { return this.json({}) } }")
-        .replace(".name('posts.update')", ".name('posts.update')\n  router.delete('/posts/:post', [InlineController, 'destroy']).name('posts.destroy')\n  router.patch('/posts/:post', [PostController, 'index']).name('posts.patch').middleware(authorizeMiddleware('update'))\n  router.post('/child', [ChildController, 'store']).name('child.store').agent({})\n  router.post('/hook', async (c: { text: (body: string) => Response }) => c.text('ok')).name('hook')")
+        .replace(".name('posts.update')", ".name('posts.update')\n  router.delete('/posts/:post', [InlineController, 'destroy']).name('posts.destroy')\n  router.patch('/posts/:post', [PostController, 'index']).name('posts.patch').middleware(authorizeMiddleware('update'))\n  router.post('/child', [ChildController, 'store']).name('child.store').agent({})\n  router.post('/hidden', [PostController, 'store']).name('hidden.store').agent({ expose: { mcp: false, webMcp: false } })\n  router.post('/hook', async (c: { text: (body: string) => Response }) => c.text('ok')).name('hook')")
       await writeWorkspaceFiles(workspace.dir, {
         ...APPLICATION_GRAPH_RELATIONS_FIXTURE,
         'src/main.ts': main,
         'app/Http/Controllers/BaseController.ts': "import { Controller } from '@guren/core'\nimport { PostPolicy } from '../../Policies/PostPolicy'\nexport class BaseController extends Controller { async store() { return new PostPolicy() } }\n",
         'app/Http/Controllers/ChildController.ts': "import { BaseController } from './BaseController'\nexport class ChildController extends BaseController {}\n",
         'app/Models/Broken.ts': 'export class {\n',
+        'app/Models/Pair.ts': "export class Tag {}\nexport class Secret { static hidden = ['token'] }\n",
+        'app/Models/Account.ts': "export class Account { static appends = ['apiToken'] }\n",
       })
 
       expect(await syncReviewDoc(workspace.dir)).toMatchObject({ state: 'written' })
@@ -166,7 +169,11 @@ describe('loadReviewFacts', () => {
       expect(written).toContain('| PATCH | /posts/:post | posts.patch | PostController.index | &lt;anonymous&gt; (inline) | none declared | update (middleware) |')
       expect(written).toContain('| POST | /child | child.store | ChildController.store |  | none declared | not read (an inherited action, whose body is in a base class) |')
       expect(written).toContain('| POST | /hook | hook |  |  | none declared | not read (an inline handler) |')
-      expect(written).toContain('| child.store | POST /child | no | yes | not derivable |')
+      expect(written).toContain('| child.store | POST /child | MCP, WebMCP | no | yes | not derivable |')
+      expect(written).toContain('| POST | /hidden | hidden.store |')
+      expect(written).not.toContain('| hidden.store | POST /hidden |')
+      expect(written).toContain('- Secret (`app/Models/Pair.ts`): not the first class in its file, the one the model reader reads')
+      expect(written).toContain('| Account | app/Models/Account.ts | apiToken |')
       expect(written).toContain('- Broken (`app/Models/Broken.ts`): the file did not parse, or holds no class')
     } finally {
       await workspace.cleanup()
