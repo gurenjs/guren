@@ -29,6 +29,7 @@ export const FACT_CLASSES = {
   'sensitive-exposure': { kind: 'always-high', lowest: 'high' },
   'csrf-exemption': { kind: 'always-high', lowest: 'high' },
   'audit-warn-changed': { kind: 'always-high', lowest: 'high' },
+  'dependency-advisory': { kind: 'always-high', lowest: 'high' },
   // Not emitted until the route graph and the declaration matcher ship; named so a policy can raise them now.
   'route-added': { kind: 'declarable', lowest: 'low' },
   'route-changed': { kind: 'declarable', lowest: 'low' },

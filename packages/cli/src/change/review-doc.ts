@@ -13,7 +13,7 @@ import { describeMethod } from '../http-methods'
 import { readMarkedLines, spliceMarkedBlock, type MarkerSyntax } from '../marker-blocks'
 import { writeFileAtomic } from '../plan/beside'
 import { FACT_CLASSES, type FactCode, type Lane } from './fact-classes'
-import { GATE_FILES, GATE_PREFIXES } from './lane'
+import { GATE_BASENAMES, GATE_FILES, GATE_PREFIXES } from './lane'
 import { readReviewPolicySource, REVIEW_POLICY_FILE } from './review-policy'
 
 export const REVIEW_DOC_FILE = 'REVIEW.md'
@@ -37,7 +37,7 @@ type AlwaysHighCode = { [K in FactCode]: (typeof FACT_CLASSES)[K]['kind'] extend
 
 /** One line per always-high fact; a code added to `FACT_CLASSES` does not compile until it is described here. */
 const ALWAYS_HIGH: Record<AlwaysHighCode, string> = {
-  'gate-input': `what the gate, the harness or the reviewer runs or reads: ${[...GATE_FILES].sort().map((file) => `\`${file}\``).join(', ')}, everything under ${GATE_PREFIXES.map((prefix) => `\`${prefix}\``).join(', ')}, the \`package.json\` scripts and every file a script names`,
+  'gate-input': `what the gate, the harness or the reviewer runs or reads: ${[...GATE_FILES].sort().map((file) => `\`${file}\``).join(', ')}, any ${[...GATE_BASENAMES].map((file) => `\`${file}\``).join(', ')}, everything under ${GATE_PREFIXES.map((prefix) => `\`${prefix}\``).join(', ')}, the \`package.json\` scripts and every file a script names`,
   'plan-record': 'a plan, its approvals, its decision log or its closing document',
   'migration-destructive': 'an existing migration edited or deleted, or an added one that drops or rewrites data',
   'acceptance-changed': 'a test that carries an acceptance id (`[AC-…]`) edited, or renamed so it no longer carries it',
@@ -48,6 +48,7 @@ const ALWAYS_HIGH: Record<AlwaysHighCode, string> = {
   'sensitive-exposure': 'a sensitive or hidden column newly reaching a response',
   'csrf-exemption': 'a new CSRF exemption',
   'audit-warn-changed': 'a security default switched off, or a policy or forced-write warning on a file the change touches',
+  'dependency-advisory': 'a dependency change that brings in an advisory the base did not have',
 }
 
 export interface ReviewRoute {
