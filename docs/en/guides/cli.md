@@ -137,10 +137,10 @@ A re-run writes only the components that are missing and lists the ones it left 
 
 ### `add review`
 
-`add review` installs the Change workflow, which runs `bunx guren change:evidence` on every pull request and every push to `main`. The command writes four files once, and a re-run leaves each one that exists alone unless you pass `--force`:
+`add review` installs the Change workflow, which runs `bunx guren change:evidence` on every pull request and every push to `main`. It is for an application at the root of its repository, since GitHub reads workflows from there alone, and it refuses one below it. The command writes four files once, and a re-run leaves each one that exists alone unless you pass `--force`:
 
-- `.github/workflows/change.yml` checks out the pull request's head commit (not GitHub's merge commit) with its full history, runs the evidence, adds `evidence.md` to the job summary, and uploads `record.json` as `guren-record-<head sha>`. The job fails only when the gate fails, and the summary and the record are kept when it does.
-- `.github/pull_request_template.md` asks for the issue, the plan, and one `lane:` label: the review the change needed in the reviewer's own judgement, whatever floor the workflow printed.
+- `.github/workflows/change.yml` checks out the pull request's head commit (not GitHub's merge commit) with its full history, runs the evidence, adds `evidence.md` to the job summary, and uploads `record.json` as `guren-record-<head sha>`. The job fails only when the gate fails: the summary and the record are kept when it does, and a failed upload does not fail it. Add `--no-deps` to the evidence step if the runner cannot reach the npm registry.
+- `.github/pull_request_template.md` asks for the issue and the plan, and asks the reviewer, in text the pull request shows, for one `lane:` label: the review the change needed in their own judgement, whatever floor the workflow printed. The job summary repeats the request, since a pull request opened with `gh pr create --body` never uses the template.
 - `.github/ISSUE_TEMPLATE/feature.md` and `defect.md`.
 
 The labels have to exist before a reviewer can pick one, so the command prints the three `gh label create` lines. The Change workflow runs the same gate as the scaffolded `ci.yml`, and the command says so when that file still has its `bunx guren gate` step, which can go once the Change workflow has passed on a pull request.

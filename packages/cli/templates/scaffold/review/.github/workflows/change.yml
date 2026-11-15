@@ -28,21 +28,26 @@ jobs:
         run: bun install --frozen-lockfile
 
       # Runs the gate as `bunx guren gate --deps` does and fails exactly when it does. Everything
-      # else it could not establish is a hold in the evidence, never a failed build. Drop --deps,
-      # here and in ci.yml, if this runner cannot reach the npm registry.
+      # else it could not establish is a hold in the evidence, never a failed build. Add --no-deps
+      # if this runner cannot reach the npm registry.
       - name: Change evidence
-        run: bunx guren change:evidence --base "$BASE" --head "$HEAD" --deps
+        run: bunx guren change:evidence --base "$BASE" --head "$HEAD"
+        env:
+          # The Bun advisory check asks api.github.com, which allows 60 unauthenticated requests an hour.
+          GITHUB_TOKEN: ${{ github.token }}
 
+      # The job's result is the gate's: a summary or an upload that fails is not a failed change.
       - name: Summary
         if: ${{ !cancelled() && hashFiles('.guren/evidence/evidence.md') != '' }}
+        continue-on-error: true
         run: cat .guren/evidence/evidence.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record
         if: ${{ !cancelled() && hashFiles('.guren/evidence/record.json') != '' }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: guren-record-${{ env.HEAD }}
           path: .guren/evidence/record.json
-          # The record is the base later changes are compared with; keep it as long as the repository allows.
-          retention-days: 90
+          # No retention-days: the record is the base later changes are compared with, so it keeps the repository's own limit.
           overwrite: true

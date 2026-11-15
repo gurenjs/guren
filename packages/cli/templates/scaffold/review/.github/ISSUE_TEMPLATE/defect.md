@@ -1,7 +1,6 @@
 ---
 name: Defect
 about: Something the application does wrong
-labels: defect
 ---
 
 ## What happens

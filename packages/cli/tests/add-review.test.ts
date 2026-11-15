@@ -1,8 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { addReview, REVIEW_LANE_LABELS, reviewFileEntries } from '../src/add-review'
+import { runCommand } from 'citty'
+import { consola } from 'consola'
+
+import { addReview, REVIEW_LANE_LABELS, reviewFileEntries, runsBareGate } from '../src/add-review'
 import { builtinSubCommands } from '../src/commands'
 import { PLAN_COMMAND_CLASSES } from '../src/plan/command-allowlist'
 import { createTempRoot } from './helpers'
@@ -51,6 +54,23 @@ describe('guren add review', () => {
     expect(await readFile(join(app, '.github/pull_request_template.md'), 'utf8')).toContain('lane:low')
   })
 
+  test('should refuse an application below the root of its repository, writing nothing', async () => {
+    const repo = await createApp()
+    await Bun.spawn(['git', 'init', '-q'], { cwd: repo }).exited
+    const app = join(repo, 'apps/web')
+    await mkdir(app, { recursive: true })
+
+    await expect(addReview({ cwd: app })).rejects.toThrow('GitHub would never run a workflow there')
+    expect(await Bun.file(join(app, '.github/workflows/change.yml')).exists()).toBe(false)
+  })
+
+  test('should read a bare gate step in any form, and not a comment naming it', () => {
+    expect(runsBareGate('      - run: bunx guren gate --deps\n')).toBe(true)
+    expect(runsBareGate('        run: |\n          bunx guren gate\n')).toBe(true)
+    expect(runsBareGate('        run: "bun x guren gate --deps"\n')).toBe(true)
+    expect(runsBareGate('      # `bunx guren gate` runs the same stages locally.\n        run: bunx guren change:evidence\n')).toBe(false)
+  })
+
   test('should say the gate runs twice while the scaffolded CI still runs it', async () => {
     const app = await createApp()
     await mkdir(join(app, '.github/workflows'), { recursive: true })
@@ -65,8 +85,9 @@ describe('guren add review', () => {
 
     expect(workflow).toContain('ref: ${{ env.HEAD }}')
     expect(workflow).toContain('fetch-depth: 0')
-    expect(workflow).toContain('bunx guren change:evidence --base "$BASE" --head "$HEAD" --deps')
-    expect(workflow.match(/if: \$\{\{ !cancelled\(\) && hashFiles\('\.guren\/evidence\/[a-z.]+'\) != '' \}\}/g)).toHaveLength(2)
+    expect(workflow).toContain('run: bunx guren change:evidence --base "$BASE" --head "$HEAD"\n')
+    expect(workflow.match(/if: \$\{\{ !cancelled\(\) && hashFiles\('\.guren\/evidence\/[a-z.]+'\) != '' \}\}\n {8}continue-on-error: true/g)).toHaveLength(2)
+    expect(workflow).not.toContain('retention-days')
     expect(workflow).toContain('name: guren-record-${{ env.HEAD }}')
   })
 
@@ -74,6 +95,25 @@ describe('guren add review', () => {
     const template = reviewFileEntries().find((entry) => entry.path === '.github/pull_request_template.md')!.contents
 
     for (const label of REVIEW_LANE_LABELS) expect(template).toContain(label.name)
+  })
+
+  test('should print the label commands through the command', async () => {
+    const app = await createApp()
+    const info = spyOn(consola, 'info').mockImplementation((() => {}) as never)
+    const success = spyOn(consola, 'success').mockImplementation((() => {}) as never)
+    const cwd = process.cwd()
+    try {
+      process.chdir(app)
+      await runCommand((builtinSubCommands.add as { subCommands: Record<string, Parameters<typeof runCommand>[0]> }).subCommands.review!, { rawArgs: [] })
+    } finally {
+      process.chdir(cwd)
+      info.mockRestore()
+      success.mockRestore()
+    }
+    const printed = info.mock.calls.map((call) => String(call[0])).join('\n')
+
+    for (const label of REVIEW_LANE_LABELS) expect(printed).toContain(`gh label create ${label.name} --color ${label.color}`)
+    expect(success.mock.calls).toHaveLength(4)
   })
 
   test('should be registered, and refused to a plan', () => {

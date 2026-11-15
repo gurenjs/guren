@@ -1,7 +1,6 @@
 ---
 name: Feature
 about: Something the application should do that it does not
-labels: feature
 ---
 
 ## What a user should be able to do

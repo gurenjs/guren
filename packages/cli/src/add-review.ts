@@ -3,13 +3,14 @@
  * pull request and push to main, a pull request template that asks for the issue, the plan and a
  * `lane:` label, and two issue templates. Each file is written once; `--force` replaces it.
  */
-import { readFile } from 'node:fs/promises'
+import { readFile, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { loadScaffoldTemplate } from './scaffold-templates'
+import { runGit } from './changed-files'
+import { CliError } from './cli-error'
+import { scaffoldTemplateFile } from './scaffold-templates'
 import { writeRoot, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
-/** Shipped as `github/`, since a packed tarball is not trusted to keep a dot-directory. */
 const REVIEW_FILES = [
   'workflows/change.yml',
   'pull_request_template.md',
@@ -23,8 +24,12 @@ export const REVIEW_LANE_LABELS = [
   { name: 'lane:high', color: 'cf222e', description: 'A careful read, or a second person' },
 ] as const
 
-/** The scaffolded CI's gate step, which the Change workflow now runs as well. */
-const SCAFFOLDED_GATE_STEP = /^\s*run:\s*bunx guren gate\b/m
+const CI_WORKFLOWS = ['.github/workflows/ci.yml', '.github/workflows/ci.yaml']
+
+/** A line of a workflow that runs the bare gate, in any step form; a comment naming it is not one. */
+export function runsBareGate(workflow: string): boolean {
+  return workflow.split('\n').some((line) => !/^\s*#/.test(line) && /\bguren gate\b/.test(line))
+}
 
 export interface AddReviewResult {
   created: string[]
@@ -33,12 +38,17 @@ export interface AddReviewResult {
 }
 
 export function reviewFileEntries(): ScaffoldFileEntry[] {
-  return REVIEW_FILES.map((file) => ({ path: `.github/${file}`, contents: loadScaffoldTemplate(`review/github/${file}`) }))
+  return REVIEW_FILES.map((file) => scaffoldTemplateFile('review', `.github/${file}`))
 }
 
 export async function addReview(options: WriterOptions = {}): Promise<AddReviewResult> {
   const cwd = writeRoot(options)
+  // GitHub reads workflows from the repository root alone, and the workflow runs there.
+  const top = (await runGit(cwd, ['rev-parse', '--show-toplevel']))?.[0]
+  if (top !== undefined && (await realpath(top)) !== (await realpath(cwd))) {
+    throw new CliError(`guren add review writes .github/ for an application at the root of its repository, and ${cwd} sits below ${top}: GitHub would never run a workflow there. Nothing was written.`)
+  }
   const created = await writeScaffoldFiles(reviewFileEntries(), { ...options, skipExisting: !options.force })
-  const ci = await readFile(join(cwd, '.github/workflows/ci.yml'), 'utf8').catch(() => '')
-  return { created, duplicateGate: SCAFFOLDED_GATE_STEP.test(ci) }
+  const workflows = await Promise.all(CI_WORKFLOWS.map((file) => readFile(join(cwd, file), 'utf8').catch(() => '')))
+  return { created, duplicateGate: workflows.some(runsBareGate) }
 }

@@ -317,6 +317,8 @@ export function renderEvidenceMarkdown(evidence: ChangeEvidence): string {
     }
     if (lane.unjudged.length > 0) lines.push('', '### Not judged', '', ...lane.unjudged.map((entry) => `- \`${entry.reader}\` (${entry.lane}): ${entry.reason}`))
   }
+  // The person's judgement beside the floor is what the shadow comparison of RFC 0040 §8 reads.
+  lines.push('', 'Reviewer: before merging, label the pull request `lane:low`, `lane:medium` or `lane:high` for the review it needed in your judgement, whatever the floor above says.')
   return `${lines.join('\n')}\n`
 }
 
