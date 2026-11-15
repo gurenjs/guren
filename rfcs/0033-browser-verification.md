@@ -1487,6 +1487,19 @@ Three items were added at acceptance. Nothing in §13.1 covers them:
   empty string. A fake `OPENAI_API_KEY` in `.env`, emptied with the rest, did
   not keep Codex from running a step under the ChatGPT login. The blueprint
   offers `--agent codex` since (§13.4).
+- **Devin, not offered (measured 2026-11-15).** `@e2e-dev/acp` 0.1.2 has no
+  Devin preset, so the probe ran Devin CLI 3000.12.59 through the generic
+  `acp()` executor (`devin acp --model swe-2`), with its config directory
+  pointed at one that turns off every import from other tools and denies its
+  built-in tools. The first live step was `POLICY_DENIED`: before calling a
+  step tool, Devin ran its own `mcp_list_tools`, which its permission layer
+  approves without asking, so the runner never saw a permission request. The
+  session also loaded the plugins the seat's organization requires, which a
+  user cannot turn off: rules, skills and MCP servers, one of which started a
+  process on the machine. An agent whose session holds tools the config
+  cannot remove does not meet §13.7, whatever the runner does, so
+  `--agent devin` is not offered; a Devin preset in `@e2e-dev/acp` that
+  closes both is the runner's to ship.
 - **A CI runner.** Every run in §13.1 was on macOS. On the Linux runner CI
   uses, `test:behaviours:ci` replays recordings made on macOS with no model
   call and no login. Measured on 2026-11-14 on Linux, not on that runner: in a
