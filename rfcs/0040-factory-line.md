@@ -262,9 +262,16 @@ equal security:
 | A validator whose source changed and whose schema did not | `validation-edited`, medium: the schema does not render a `.refine()` or a transform, so a person reads the hunk |
 | `requireGuest` removed | No fact: a guest-only guard keeps nobody out |
 
-A new mutating route with no authorization is `audit-warn-changed` already,
-and an added route to an action that has others is compared with them, so a
-second path with fewer guards is Weaker. An ambiguous match is `unjudged` at
+A new mutating route with no authentication is not high on that alone. The
+audit reports it as an `authz:` warning, which `escalatesOnChange()` does not
+select, so it is the `route-added` fact, medium unless a plan declares it
+(**decided 2026-11-15** by the maintainer, over raising every new `authz:`
+warning to high: a plan that adds a public form would be high each time, and
+the measured applications have no install to measure that on). It is
+`audit-warn-changed` when its action names a model that has a policy and
+shows no authorization, which is the `policy` warning. An added route to an
+action that has others is compared with them, so a second path with fewer
+guards is Weaker. An ambiguous match is `unjudged` at
 high: unreadable authorization is not a medium question. The graph's listing
 of an `authorize()` call as unresolved is not such a verdict. Read as one, as
 the first text had it, 16 to 30 of the 43 measured tasks would be high for a

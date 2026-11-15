@@ -280,7 +280,7 @@ describe('judgeChangeLane', () => {
       ['gate-input', 'high', ['package.json']],
       ['dependencies-changed', 'medium', ['bun.lock']],
     ])
-    expect(report.unjudged.map((entry) => entry.reader)).toEqual(['dependency-advisory'])
+    expect(report.unjudged.map((entry) => entry.reader)).toEqual(['audit', 'dependency-advisory'])
   })
 
   test('should read the scripts of a package a root script enters with --cwd', async () => {
