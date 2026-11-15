@@ -10,6 +10,7 @@ import { judgeChangeLane, type ChangeLaneReport } from '../src/change/lane'
 import { openChange, resolveChange, type ChangedPath, type ChangeReader, type ResolvedChange } from '../src/change/resolve'
 import { auditChangeRevisions } from '../src/change/revision-audit'
 import { builtinSubCommands } from '../src/commands'
+import { renderChangeLane } from '../src/commands/change'
 import { createTempRoot, DEFAULT_ROUTES_FIXTURE, linkWorkspaceCore } from './helpers'
 
 // Each case exports two commits and runs the CLI on both, past Bun's 5 s default under a loaded suite.
@@ -73,7 +74,7 @@ async function laneOf(repo: string, base: string, head: string): Promise<ChangeL
   const change = await resolveChange(repo, base, head)
   const { reader, dispose } = openChange(repo, change)
   try {
-    return await judgeChangeLane(change, reader, { audit: () => auditChangeRevisions(repo, change, reader) })
+    return await judgeChangeLane(change, reader, { audit: () => auditChangeRevisions(repo, change) })
   } finally {
     await dispose()
   }
@@ -127,7 +128,7 @@ describe('change:lane with the audit of both sides', () => {
     const report = await laneOf(join(repo, 'apps/web'), base, await commit(repo, { [`apps/web/${CONTROLLER_PATH}`]: controller(`    ${RAW_SQL}`) }))
 
     expect(report.facts).toContainEqual(expect.objectContaining({ code: 'audit-fail', files: [CONTROLLER_PATH] }))
-    expect(report.audited).toBe(true)
+    expect(report.audit).toEqual({ compared: true, loadedCode: true })
   })
 
   test('should audit a file the lane calls a test where the audit scans it', async () => {
@@ -142,7 +143,7 @@ describe('change:lane with the audit of both sides', () => {
     const report = await laneOf(repo, base, await commit(repo, { 'bun.lock': '{ "changed": true }' }))
 
     expect(readers(report)).toEqual(['audit', 'dependency-advisory'])
-    expect(report.audited).toBe(false)
+    expect(report.audit).toEqual({ compared: false, loadedCode: false })
   })
 
   test('should not audit where a package is linked from the repository itself', async () => {
@@ -155,6 +156,61 @@ describe('change:lane with the audit of both sides', () => {
 
     expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'audit', reason: expect.stringContaining('@acme/shared is installed as a link into this repository') }))
     expect(report.facts.map((fact) => fact.code)).not.toContain('audit-fail')
+  })
+
+  test('should audit a helper under a module\'s tests directory, which the audit scans', async () => {
+    const { repo, base } = await createApp()
+    const report = await laneOf(repo, base, await commit(repo, { 'modules/shop/tests/helper.ts': 'export const options = { autoCsrf: false }\n' }))
+
+    expect(report.facts).toContainEqual(expect.objectContaining({ code: 'audit-warn-changed', lane: 'high', files: ['modules/shop/tests/helper.ts'] }))
+  })
+
+  test('should audit what was committed, whatever a checkout filter would make of it', async () => {
+    const { repo, base } = await createApp({ ...APP_FILES, '.gitattributes': 'app/Http/Controllers/*.ts filter=strip\n' })
+    await git(repo, ['config', 'filter.strip.smudge', "sed '/sql.raw/d'"])
+    await git(repo, ['config', 'filter.strip.clean', 'cat'])
+    const report = await laneOf(repo, base, await commit(repo, { [CONTROLLER_PATH]: controller(`    ${RAW_SQL}`) }))
+
+    expect(report.facts).toContainEqual(expect.objectContaining({ code: 'audit-fail', files: [CONTROLLER_PATH] }))
+  })
+
+  test('should not audit a commit that tracks a symlink inside the application', async () => {
+    const { repo, base } = await createApp()
+    await symlink('node_modules/.cache', join(repo, '.guren-cache'))
+    const report = await laneOf(repo, base, await commit(repo, { [CONTROLLER_PATH]: controller(`    ${RAW_SQL}`) }))
+
+    expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'audit', reason: expect.stringContaining('it tracks the symlink .guren-cache') }))
+    expect(report.audit).toEqual({ compared: false, loadedCode: false })
+  })
+
+  test('should tell two binary lockfiles apart by their bytes', async () => {
+    const { repo } = await createApp()
+    await writeFile(join(repo, 'bun.lockb'), Buffer.from([0x80]))
+    const base = await commit(repo, {})
+    await writeFile(join(repo, 'bun.lockb'), Buffer.from([0x81]))
+    const report = await laneOf(repo, base, await commit(repo, { [CONTROLLER_PATH]: controller(`    ${RAW_SQL}`) }))
+
+    expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'audit', reason: expect.stringContaining('the base was not audited: bun.lockb at') }))
+  })
+
+  test('should not audit an application whose manifest declares workspaces', async () => {
+    const { repo, base } = await createApp({ ...APP_FILES, 'package.json': JSON.stringify({ name: 'app', type: 'module', workspaces: ['packages/*'] }) })
+    const report = await laneOf(repo, base, await commit(repo, { [CONTROLLER_PATH]: controller(`    ${RAW_SQL}`) }))
+
+    expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'audit', reason: expect.stringContaining('package.json declares workspaces') }))
+  })
+
+  test('should say the application\'s code ran when an audit that started did not report', async () => {
+    const { repo, base } = await createApp()
+    const head = await commit(repo, { [CONTROLLER_PATH]: `${controller()}\n` })
+    const change = await resolveChange(repo, base, head)
+    const { reader, dispose } = openChange(repo, change)
+
+    const report = await judgeChangeLane(change, reader, { audit: async () => ({ unavailable: 'the head was not audited: the audit did not finish there', loadedCode: true }) })
+    await dispose()
+
+    expect(report.audit).toEqual({ compared: false, loadedCode: true })
+    expect(renderChangeLane(report)).toContain("The audit loaded the application's code")
   })
 
   test('should say what the audit read less of at the head', async () => {
@@ -172,7 +228,7 @@ describe('change:lane with the audit of both sides', () => {
       await runCommand(builtinSubCommands['change:lane'], { rawArgs: ['--base', base, '--head', head, '--app', repo, '--json', '--no-audit'] })
       const report = JSON.parse(String(log.mock.calls[0]?.[0])) as ChangeLaneReport
 
-      expect(report.audited).toBe(false)
+      expect(report.audit).toEqual({ compared: false, loadedCode: false })
       expect(report.unjudged).toContainEqual(expect.objectContaining({ reader: 'audit', reason: expect.stringContaining('the audit was not run on the two sides') }))
     } finally {
       log.mockRestore()
@@ -186,7 +242,7 @@ describe('change:lane with the audit of both sides', () => {
     const { reader, dispose } = openChange(repo, change)
     let asked = 0
 
-    const report = await judgeChangeLane(change, reader, { audit: () => { asked++; return auditChangeRevisions(repo, change, reader) } })
+    const report = await judgeChangeLane(change, reader, { audit: () => { asked++; return auditChangeRevisions(repo, change) } })
     await dispose()
 
     expect(asked).toBe(0)
@@ -246,7 +302,16 @@ describe('auditFacts', () => {
     expect(await codes(head, head, edited, sink)).toEqual([])
   })
 
+  test('should not let a finding answer for one of the same key in another file', async () => {
+    const ignored = (filePath: string) => report([{ key: 'mass-assignment:Post', status: 'ignored', filePath }])
+    const facts = await auditFacts(edited, noFiles, ignored('modules/a/app/Models/Post.ts'), ignored('modules/b/app/Models/Post.ts'))
+
+    expect(facts.map((fact) => [fact.code, fact.files])).toEqual([['audit-suppressed', ['modules/b/app/Models/Post.ts']]])
+  })
+
   test('should list what the head could not read that the base could', () => {
+    expect(auditCoverageGaps(report([]), report([{ key: 'ai-local-tools-unreadable:SupportAgent' }]))).toEqual(['ai-local-tools-unreadable:SupportAgent: a finding'])
+
     const partial = report([{ key: 'controller-unparsed:app/Http/Controllers/PostController.ts' }, { key: 'policy:POST /posts', message: 'could not be verified' }, { key: 'raw-sql:app/x.ts:1', status: 'fail' }])
 
     expect(auditCoverageGaps(report([]), partial)).toEqual(['controller-unparsed:app/Http/Controllers/PostController.ts: a finding', 'policy:POST /posts: could not be verified'])

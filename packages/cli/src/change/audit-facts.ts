@@ -25,10 +25,11 @@ async function identities(reader: ChangeReader, side: ChangeSide, findings: read
     if (finding.filePath === undefined) return key
     const file = posixPath(finding.filePath)
     const now = side === 'base' ? (renamed.get(file) ?? file) : file
-    key = key.split(finding.filePath).join(now).split(file).join(now)
+    // The file is part of the identity whatever the key holds: `mass-assignment:Post` names a class two modules may both have.
+    key = `${key.split(finding.filePath).join(now).split(file).join(now)}\n${now}`
     if (finding.line === undefined || !finding.key.endsWith(`:${finding.line}`)) return key
     const text = (await reader.read(side, file))?.split('\n')[finding.line - 1]?.trim()
-    return text === undefined ? key : `${key.slice(0, -`:${finding.line}`.length)}\n${text}`
+    return text === undefined ? key : `${key.replace(`:${finding.line}\n`, '\n')}\n${text}`
   }))
 }
 
@@ -80,12 +81,14 @@ export async function auditFacts(change: ResolvedChange, reader: ChangeReader, b
   return facts
 }
 
-const PARTIAL_KEYS = ['routes:load', 'routes:module-load:', 'introspection-unavailable', 'controller-unreadable:', 'controller-unparsed:', 'csrf-scan:', 'audit-config:load']
+const PARTIAL_KEYS = ['routes:load', 'routes:module-load:', 'csrf-scan:', 'audit-config:load']
+// The rules name a reader that failed in their key: `controller-unparsed`, `ai-local-tools-unreadable`, `introspection-unavailable`.
+const PARTIAL_RULE = /(?:unreadable|unparsed|unavailable|unverified)/
 
 /** What an audit says it could not read: a rule that did not run finds nothing, which is not a pass. */
 function partialSignals(report: AuditReport): string[] {
   const findings = report.findings
-    .filter((finding) => finding.status !== 'pass' && (PARTIAL_KEYS.some((prefix) => finding.key.startsWith(prefix)) || (finding.key.startsWith('policy:') && finding.filePath === undefined)))
+    .filter((finding) => finding.status !== 'pass' && (PARTIAL_KEYS.some((prefix) => finding.key.startsWith(prefix)) || PARTIAL_RULE.test(finding.key.split(':')[0]!) || (finding.key.startsWith('policy:') && finding.filePath === undefined)))
     .map((finding) => `${finding.key}: ${finding.message}`)
   const unread = (report.dataExposure?.unread ?? []).map((entry) => `a response value not followed at ${posixPath(entry.file)} (${entry.where}): ${entry.reason}`)
   return [...(report.routesAnalyzed ? [] : ['the routes did not load, so the route-level rules did not run']), ...findings, ...unread]

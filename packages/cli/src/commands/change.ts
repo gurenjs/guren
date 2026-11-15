@@ -34,7 +34,7 @@ function trustBoundary(report: ChangeLaneReport): string[] {
   return [
     'The floor guards against mistakes. It does not stop an author who writes code to defeat it.',
     'Facts are lower bounds: a fact that did not appear has not proved the code unchanged.',
-    ...(report.audited ? ["The audit loaded the code of both commits under this shell's environment, so it is no evidence about a change that attacks the runner."] : []),
+    ...(report.audit.loadedCode ? ["The audit loaded the application's code at the commits it exported, under this shell's environment, so it is no evidence about a change that attacks the runner."] : []),
   ]
 }
 
@@ -54,7 +54,7 @@ export const changeLaneCommand = defineCommand({
     const change = await resolveChange(cwd, String(args.base), String(args.head))
     const { reader, dispose } = openChange(cwd, change)
     try {
-      const report = await judgeChangeLane(change, reader, args.audit === false ? {} : { audit: () => auditChangeRevisions(cwd, change, reader) })
+      const report = await judgeChangeLane(change, reader, args.audit === false ? {} : { audit: () => auditChangeRevisions(cwd, change) })
       console.log(args.json ? JSON.stringify(report) : renderChangeLane(report))
     } finally {
       await dispose()
