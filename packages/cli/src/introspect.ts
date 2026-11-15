@@ -4,9 +4,11 @@
  * `guren dev` does, and reads the result the child writes to a temp file.
  * Type-only against `@guren/server`: the app may resolve an older one.
  */
+import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { promisify } from 'node:util'
 import type { AppManifest, RouteEntry } from '@guren/server'
 
 import { siblingEntry } from './cli-entry'
@@ -36,6 +38,12 @@ export interface IntrospectOptions {
   graph?: boolean
   /** Laid over the child's environment; a run given any is never memoised, since the key would not name it. */
   env?: Readonly<Record<string, string>>
+  /**
+   * Register the app without its env files: the child loads none (`--no-env-file`), and every name
+   * they set is left out of what it inherits, since this process may have loaded them already. What
+   * a machine's git-ignored `.env` turns on then reads alike on every machine. Never memoised.
+   */
+  withoutEnvFiles?: true
 }
 
 /**
@@ -119,7 +127,7 @@ export function introspectApp(cwd: string, options: IntrospectOptions = {}): Pro
   const root = resolve(cwd)
   const timeoutMs = options.timeoutMs ?? DEFAULT_INTROSPECT_TIMEOUT_MS
   const graph = options.graph === true
-  if (options.fresh || options.env) return runOrCrash(root, timeoutMs, graph, options.env)
+  if (options.fresh || options.env || options.withoutEnvFiles) return runOrCrash(root, timeoutMs, graph, options.env, options.withoutEnvFiles === true)
   const key = `${timeoutMs}:${graph}:${root}`
   let run = runs.get(key)
   if (!run) {
@@ -129,15 +137,71 @@ export function introspectApp(cwd: string, options: IntrospectOptions = {}): Pro
   return run
 }
 
-function runOrCrash(root: string, timeoutMs: number, graph: boolean, env?: Readonly<Record<string, string>>): Promise<Introspection> {
-  return runIntrospection(root, timeoutMs, graph, env).catch((error: unknown): Introspection => ({
+function runOrCrash(root: string, timeoutMs: number, graph: boolean, env?: Readonly<Record<string, string>>, withoutEnvFiles = false): Promise<Introspection> {
+  return runIntrospection(root, timeoutMs, graph, env, withoutEnvFiles).catch((error: unknown): Introspection => ({
     status: 'failed',
     reason: 'crashed',
     message: `The introspection process could not run: ${error instanceof Error ? error.message : String(error)}`,
   }))
 }
 
-async function runIntrospection(root: string, timeoutMs: number, graph: boolean, extraEnv?: Readonly<Record<string, string>>): Promise<Introspection> {
+// Bun picks the env files by NODE_ENV, and one file may set NODE_ENV itself, so every mode is asked: unset (Bun's development), production, test.
+const ENV_FILE_MODES: ReadonlyArray<string | undefined> = [undefined, 'production', 'test']
+
+/** What a Bun started in `directory` on nothing but PATH, HOME and `mode` holds: exactly what its env files set there. */
+async function envFilesIn(directory: string, mode: string | undefined, scratch: string): Promise<Record<string, string>> {
+  const seeded: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...(mode ? { NODE_ENV: mode } : {}) }
+  // To a file, not stdout: a `bunfig.toml` preload runs for `bun -e` too and may print first.
+  const out = join(scratch, `${mode ?? 'default'}-${Math.random().toString(36).slice(2)}.json`)
+  await promisify(execFile)(bunExecutable(), ['-e', 'require("node:fs").writeFileSync(process.argv.at(-1), JSON.stringify(process.env))', '--', out], { cwd: directory, env: seeded, timeout: 30_000 })
+  const loaded = JSON.parse(await readFile(out, 'utf8')) as Record<string, string>
+  return Object.fromEntries(Object.entries(loaded).filter(([name]) => !(name in seeded)))
+}
+
+// The files Bun reads under the three modes; a line among them that interpolates (`$`) expands against whatever environment reads it.
+const ENV_FILES = ['.env', '.env.local', ...['development', 'production', 'test'].flatMap((mode) => [`.env.${mode}`, `.env.${mode}.local`])]
+const ENV_LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/u
+
+/** The names an env file in `directory` gives a value that interpolates another variable. */
+async function interpolatedIn(directory: string): Promise<string[]> {
+  const names: string[] = []
+  for (const file of ENV_FILES) {
+    const text = await readFile(join(directory, file), 'utf8').catch(() => '')
+    for (const line of text.split(/\r?\n/u)) {
+      const match = ENV_LINE.exec(line)
+      if (match && match[2]!.includes('$')) names.push(match[1]!)
+    }
+  }
+  return names
+}
+
+/**
+ * The names this process holds at a value one of the app's env files gives them: what Bun loaded
+ * into it from the app root, or from the directory the command started in, under any mode. A name
+ * the shell exports at another value is the shell's and stays, unless a file interpolates it, since
+ * an interpolated value expands against this process's environment and matches nothing the probe saw.
+ */
+export async function envFileNames(root: string): Promise<string[]> {
+  const scratch = await mkdtemp(join(tmpdir(), 'guren-env-files-'))
+  try {
+    const directories = [...new Set([resolve(root), resolve(process.cwd())])]
+    const values = new Map<string, Set<string>>()
+    for (const directory of directories) {
+      for (const mode of ENV_FILE_MODES) {
+        for (const [name, value] of Object.entries(await envFilesIn(directory, mode, scratch))) values.set(name, (values.get(name) ?? new Set()).add(value))
+      }
+    }
+    const interpolated = new Set((await Promise.all(directories.map(interpolatedIn))).flat())
+    return [...values]
+      .filter(([name, seen]) => process.env[name] !== undefined && (seen.has(process.env[name]!) || interpolated.has(name)))
+      .map(([name]) => name)
+      .sort()
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
+}
+
+async function runIntrospection(root: string, timeoutMs: number, graph: boolean, extraEnv?: Readonly<Record<string, string>>, withoutEnvFiles = false): Promise<Introspection> {
   const child = siblingEntry('introspect-child')
   if (!child) {
     return { status: 'failed', reason: 'crashed', message: 'introspect-child is missing beside the CLI; rebuild @guren/cli.' }
@@ -146,8 +210,10 @@ async function runIntrospection(root: string, timeoutMs: number, graph: boolean,
   const resultFile = join(dir, 'result.json')
 
   try {
+    const unset = withoutEnvFiles ? await envFileNames(root) : []
     const started = Date.now()
-    const run = await runCaptured([bunExecutable(), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS)], root, {
+    const run = await runCaptured([bunExecutable(), ...(withoutEnvFiles ? ['--no-env-file'] : []), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS)], root, {
+      unset,
       timeoutMs,
       // Always set, so a value inherited from this process cannot turn an ordinary run into a graph run or a target's.
       env: { [INTROSPECT_TARGET_ENV]: '', ...extraEnv, GUREN_INTROSPECT: '1', [INTROSPECT_GRAPH_ENV]: graph ? '1' : '0' },
