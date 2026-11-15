@@ -137,7 +137,7 @@ A re-run writes only the components that are missing and lists the ones it left 
 
 ### `add review`
 
-`add review` installs the Change workflow, which runs `bunx guren change:evidence` on every pull request and every push to `main`. It is for an application at the root of its repository, since GitHub reads workflows from there alone, and it refuses one below it. The command writes six files once, and a re-run leaves each one that exists alone unless you pass `--force`, which replaces every one but `REVIEW.md`:
+`add review` installs the Change workflow, which runs `bunx guren change:evidence` on every pull request and every push to `main`. It is for an application at the root of its repository, since GitHub reads workflows from there alone, and it refuses one below it. The command writes six files once (eight for an app whose harness includes Cursor, with `APPROVAL_POLICY.md` and `.cursor/BUGBOT.md`), and a re-run leaves each one that exists alone unless you pass `--force`, which replaces every one but `REVIEW.md`:
 
 - `guren.review.ts`, the review policy (below).
 - `REVIEW.md`, which Claude Code Review reads: your rules for a reviewer, and a block `bunx guren change:policy` generates from the application (what `change:lane` always puts at `high`, the models with sensitive columns, the routes that change data with the middleware and the policies their action names, which says where to look rather than that a policy is enforced, and the routes agents can call on the surfaces they are exposed to). Once it exists, only its generated block is rewritten, by `change:policy`. It is not written when the application does not load, since a block describing nothing would read as current.

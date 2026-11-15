@@ -166,8 +166,9 @@ describe('syncReviewDoc', () => {
       expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ files: [{ file: 'REVIEW.md', state: 'stale' }] })
       expect(await readFile(join(workspace.dir, 'REVIEW.md'), 'utf8')).toBe(written)
 
-      // An app that reviews with Cursor keeps `.cursor/BUGBOT.md` beside it, judged by --check alike.
-      expect(await syncReviewDoc(workspace.dir, { cursor: true })).toMatchObject({ files: [{ file: 'REVIEW.md', state: 'written' }, { file: '.cursor/BUGBOT.md', state: 'written' }] })
+      // An app whose harness has the Cursor component keeps `.cursor/BUGBOT.md` beside it, judged by --check alike.
+      await writeWorkspaceFiles(workspace.dir, { '.cursor/rules/guren-comments.mdc': 'managed\n' })
+      expect(await syncReviewDoc(workspace.dir)).toMatchObject({ files: [{ file: 'REVIEW.md', state: 'written' }, { file: '.cursor/BUGBOT.md', state: 'written' }] })
       expect(await readFile(join(workspace.dir, '.cursor/BUGBOT.md'), 'utf8')).toContain('<!-- guren:review generated -->')
       expect(await syncReviewDoc(workspace.dir, { check: true })).toMatchObject({ files: [{ state: 'unchanged' }, { file: '.cursor/BUGBOT.md', state: 'unchanged' }] })
     } finally {
