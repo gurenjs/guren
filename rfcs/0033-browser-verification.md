@@ -1349,6 +1349,16 @@ behaviour's `actor` means is still Open Question 5.
   The instruction rule of §13.5 puts every value in a parameter, which the
   runner replays; a behaviour that still records a gap is reworded or left
   out of CI, and the run's summary names it.
+- **Amended in implementation: a recording depends on the rows the page
+  showed.** The runner stores the state the page was in when a step ended and
+  checks it on replay. The measurement app's delete behaviour lands on the
+  list of posts, and its recording, made on a database earlier runs had
+  written to, held two of their rows. Against a database migrated from empty
+  that step went stale: `REPLAY_STALE`, exit 2, on macOS and on Linux alike.
+  Recorded again against an empty database, it replayed against the empty one
+  and against one holding rows. CI starts from an empty database, so a
+  recording is made against one. Nothing in the blueprint gives the developer
+  that database yet (Open Question 18).
 - **An upgrade** of the runner may re-key every recording (§13.3). The
   `@guren/cli` release that moves the versions says so.
 
@@ -1459,6 +1469,17 @@ Three items were added at acceptance. Nothing in §13.1 covers them:
   `--agent codex` is offered, a test records in one live run and replays with
   no model call under it, and `POLICY_DENIED` is counted over at least fifty
   live steps. Until then `--agent codex` refuses and says it is not measured.
+  Measured on 2026-11-15 on the measurement app, with `codex()` from
+  `@e2e-dev/acp` 0.1.2, `@agentclientprotocol/codex-acp` 2.6.0 and a ChatGPT
+  login (the adapter chose `gpt-6.1-sol`): the four behaviours recorded in one
+  live run (16 to 27 s a step), and replayed with no model call and no login,
+  against the database that run left and against an empty one. Then 52 live
+  steps of the generated shape (`--no-cache --repeat-each 13`): all passed,
+  none was `POLICY_DENIED`, which by the rule of three puts the rate under
+  5.8% at 95% confidence; 16.6 s and 65,000 tokens a step, 86% of them cache
+  reads. The adapter's processes held each name of the app's env files as an
+  empty string. The blueprint still refuses `--agent codex`: offering it is a
+  change to the blueprint that follows.
 - **A CI runner.** Every run in §13.1 was on macOS. On the Linux runner CI
   uses, `test:behaviours:ci` replays recordings made on macOS with no model
   call and no login. Measured on 2026-11-14 on Linux, not on that runner: in a
@@ -1466,7 +1487,11 @@ Three items were added at acceptance. Nothing in §13.1 covers them:
   measurement app's four recordings, made on macOS, replayed with no model
   call (exit 0, 9 s). Without Chromium's system libraries
   (`playwright-core install-deps chromium`) the browser did not start and the
-  run exited 3. The hosted x64 runner is still to be measured.
+  run exited 3. On the hosted runner (`ubuntu-latest`, x64, 2026-11-15) the
+  same app, shipped as a snapshot with no `.env` and no database, was
+  migrated from empty and replayed all four with no login and no model call
+  (exit 0, 8.8 s). The snapshot's recordings had to be made against an empty
+  database first (§13.6).
 - **The agent's environment after it starts.** §13.1 read the environment each
   process is started with. Either what the agent's process loads afterwards is
   checked too, or the guide says that it was not. The guide says that it was
@@ -1613,3 +1638,9 @@ changes behaviour.
 17. (§13) `e2e explore`, its bug bash and `e2e mcp` were not measured. Should
     the skill name any of them as a live-drive option, as the Alternatives
     section allowed for?
+18. (§13.6) Should a behaviour run have a database of its own, migrated from
+    empty at the start of each run? The config could pass `browser:serve` a
+    `--database-url` and migrate it, which keeps a run's rows out of the
+    developer's database and makes every recording start where CI starts.
+    The price is one more database per app and a second migration path, in
+    three dialects.

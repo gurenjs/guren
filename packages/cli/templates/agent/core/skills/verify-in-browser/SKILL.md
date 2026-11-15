@@ -54,6 +54,9 @@ Run `bun run test:behaviours` (port 4319), then `git status --short .e2e/cache`:
 - It passes and no recording changed: nothing to do.
 - It passes and a recording is new or changed: that step ran live. Commit the
   recording with the page change, and tell the person which tests recorded.
+  A recording also holds the rows the page showed when the step ended, and CI
+  replays against an empty database: say so when the step lands on a list, and
+  leave the person's database as it is.
 - A test fails: the page no longer does what the plan says, or the plan no
   longer describes the page. Report it as a finding with the test's title and
   error. Never edit a recording, a generated spec or the plan to make it pass;

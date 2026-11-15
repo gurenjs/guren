@@ -186,6 +186,8 @@ bun run test:behaviours:ci    # replays only (--strict-cache)
 
 Run `bun run test:behaviours` after approving a plan or changing a page, and commit `.e2e/cache/`. A recording is test data, so its diff belongs in the commit that changed the page. Measured on a small app with `sonnet`, a step run on the model took about ten seconds and 41,000 tokens (88% of them cache reads), and four recorded tests replayed in seven seconds. The first run downloads the Chromium build the runner pins, beside the one Playwright installed.
 
+Make recordings against an empty database, which is what CI starts from. A recording also holds what the page showed when its step ended. One made while a list held rows from earlier runs went stale against an empty database (`REPLAY_STALE`), and one made against an empty database replayed against both. To keep these runs out of your development database, give them a database of their own: add `'--database-url', './data/behaviours.db'` (or the URL of any other local database) to `args` in `e2e.browser.config.ts`, and migrate it with `DATABASE_URL=./data/behaviours.db bunx guren db:migrate`. Before recording, delete that database and migrate it again.
+
 CI runs `bun run test:behaviours:ci`, which needs no login and no API key. A recording made on macOS replays on Linux (measured in a Debian container). On a slim Linux image, install Chromium's system libraries first with `bunx playwright-core install-deps chromium`; without them the browser does not start and the run exits 3. The exit code says what happened:
 
 | Exit code | Meaning | What to do |
