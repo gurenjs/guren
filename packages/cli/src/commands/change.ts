@@ -2,7 +2,9 @@ import { defineCommand } from '../define-command'
 import { judgeChangeLane, type ChangeFact, type ChangeLaneReport, type Lane } from '../change/lane'
 import { openChange, resolveChange } from '../change/resolve'
 import { auditChangeRevisions } from '../change/revision-audit'
+import { changeRecord, collectChangeEvidence, EVIDENCE_DIR, renderEvidenceMarkdown, writeChangeEvidence } from '../change/evidence'
 import { CliError } from '../cli-error'
+import { markCommandFailed } from '../command-status'
 
 const short = (sha: string): string => sha.slice(0, 12)
 
@@ -37,6 +39,30 @@ function trustBoundary(report: ChangeLaneReport): string[] {
     ...(report.audit.loadedCode ? ["The audit loaded the application's code at the commits it exported, under this shell's environment, so it is no evidence about a change that attacks the runner."] : []),
   ]
 }
+
+export const changeEvidenceCommand = defineCommand({
+  meta: { name: 'change:evidence', description: "Run the gate as `guren gate --deps` does and write the change's evidence, record and job summary (RFC 0040 §4). Fails exactly when the gate fails." },
+  args: {
+    base: { type: 'string', description: 'The commit the change is measured against, by SHA.' },
+    head: { type: 'string', description: 'The last commit of the change, by SHA; the checkout should be at it.' },
+    output: { type: 'string', alias: 'o', description: `Directory for evidence.json, record.json and evidence.md (default ${EVIDENCE_DIR}, which ignores itself).` },
+    // Positive on purpose, so citty's negation lands on this key; `default: true` prints `--no-deps`.
+    deps: { type: 'boolean', default: true, description: "Scan dependencies in the gate's audit stage, as `guren gate --deps` does (needs registry access). Disable with --no-deps." },
+    audit: { type: 'boolean', default: true, description: "Audit both sides of the change, which loads the application's code. Disable with --no-audit." },
+    json: { type: 'boolean', description: 'Print the evidence as JSON.' },
+    app: { type: 'string', description: 'Application root directory.' },
+  },
+  async run({ args }) {
+    if (!args.base || !args.head) throw new CliError('change:evidence needs both --base <sha> and --head <sha>: a change is the commits between two named commits.')
+    const cwd = args.app ?? process.cwd()
+    const [base, head] = [String(args.base), String(args.head)]
+    const evidence = await collectChangeEvidence({ cwd, base, head, deps: args.deps !== false, audit: args.audit !== false })
+    const dir = await writeChangeEvidence(cwd, args.output ?? EVIDENCE_DIR, evidence, await changeRecord(cwd, base, head, evidence))
+    if (args.json) console.log(JSON.stringify(evidence))
+    else console.log(`${renderEvidenceMarkdown(evidence)}\nWritten to ${dir}`)
+    if (!evidence.gate.ok) markCommandFailed()
+  },
+})
 
 export const changeLaneCommand = defineCommand({
   meta: { name: 'change:lane', description: "Print the facts of a change and the review lane they set as a floor (RFC 0040). Reads git objects and, to audit both commits, loads the application's code; writes nothing in the repository." },

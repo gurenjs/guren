@@ -99,6 +99,11 @@ const SOURCE_FILE = /\.[cm]?[jt]sx?$/
 const SCHEMA_FILE = new RegExp(`^${MODULE}db/schema\\.ts$`)
 const POLICY_FILE = new RegExp(`^${MODULE}app/Policies/.+\\.[cm]?[jt]s$`)
 const SECURITY_SURFACE = new RegExp(`^${MODULE}(?:routes(?:/.+)?\\.[cm]?[jt]s|app/Policies/|app/Http/(?:Controllers|Middleware)/)`)
+const ROUTES_FILE = new RegExp(`^${MODULE}routes(?:/.+)?\\.[cm]?[jt]s$`)
+const PAGE_FILE = new RegExp(`^${MODULE}resources/js/pages/.+\\.[cm]?[jt]sx?$`)
+
+/** A page, or a routes file whose routes render one: what the browser evidence of RFC 0040 §4 covers. */
+export const rendersPages = (path: string): boolean => (PAGE_FILE.test(path) || ROUTES_FILE.test(path)) && !TEST_FILE.test(path)
 
 const isTestFile = (path: string): boolean => TEST_FILE.test(path) || BROWSER_SPEC.test(path)
 // The files `discoverPolicyFiles()` reads: every source under the directory but a `.test.` sibling.
