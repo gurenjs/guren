@@ -42,10 +42,12 @@ describe('guren add review', () => {
     await writeFile(join(app, '.github/pull_request_template.md'), 'Our own template.\n', 'utf8')
 
     const kept = await addReview({ cwd: app })
+    const before = await readFile(join(app, '.github/pull_request_template.md'), 'utf8')
     const overwritten: string[] = []
     const forced = await addReview({ cwd: app, force: true, overwritten })
 
     expect(kept.created).toHaveLength(3)
+    expect(before).toBe('Our own template.\n')
     expect(forced.created).toHaveLength(4)
     expect(overwritten).toContain(join(app, '.github/pull_request_template.md'))
     expect(await readFile(join(app, '.github/pull_request_template.md'), 'utf8')).toContain('lane:low')
@@ -65,7 +67,10 @@ describe('guren add review', () => {
     expect(runsBareGate('      - run: bunx guren gate --deps\n')).toBe(true)
     expect(runsBareGate('        run: |\n          bunx guren gate\n')).toBe(true)
     expect(runsBareGate('        run: "bun x guren gate --deps"\n')).toBe(true)
+    expect(runsBareGate('        run: bunx guren  gate\n')).toBe(true)
     expect(runsBareGate('      # `bunx guren gate` runs the same stages locally.\n        run: bunx guren change:evidence\n')).toBe(false)
+    expect(runsBareGate('      - run: bun run verify # formerly bunx guren gate\n')).toBe(false)
+    expect(runsBareGate('      - name: Replacement for guren gate\n')).toBe(false)
   })
 
   test('should say the gate runs twice while the scaffolded CI still runs it', async () => {
@@ -85,6 +90,9 @@ describe('guren add review', () => {
     expect(workflow).toContain('run: bunx guren change:evidence --base "$BASE" --head "$HEAD"\n')
     expect(workflow.match(/if: \$\{\{ !cancelled\(\) && hashFiles\('\.guren\/evidence\/[a-z.]+'\) != '' \}\}\n {8}continue-on-error: true/g)).toHaveLength(2)
     expect(workflow).not.toMatch(/^\s*retention-days:/m)
+    expect(workflow).toContain('types: [opened, synchronize, reopened, edited]')
+    expect(workflow).toContain("if: ${{ github.event.action != 'edited' || github.event.changes.base != null }}")
+    expect(workflow).toContain('git fetch --no-tags origin "$BASE"')
     expect(workflow).toContain('name: guren-record-${{ env.HEAD }}')
   })
 
@@ -99,7 +107,7 @@ describe('guren add review', () => {
 
     for (const label of REVIEW_LANE_LABELS) expect(plain).toContain(`gh label create ${label.name} --color ${label.color}`)
     expect(plain).not.toContain('ci.yml')
-    expect(reviewNextSteps({ duplicateGate: true })[0]).toContain('ci.yml still runs')
+    expect(reviewNextSteps({ duplicateGate: true })[0]).toContain('ci.yml appears to run')
   })
 
   test('should be registered, and refused to a plan', () => {

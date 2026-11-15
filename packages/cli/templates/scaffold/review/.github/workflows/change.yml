@@ -5,9 +5,12 @@ on:
     branches:
       - main
   pull_request:
+    # `edited` for a pull request retargeted to another base, whose merge base and facts change with it.
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   change:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base != null }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,6 +24,13 @@ jobs:
           ref: ${{ env.HEAD }}
           # The change is read from the merge base of BASE and HEAD, which a shallow clone does not hold.
           fetch-depth: 0
+
+      # A force push names a base no branch keeps, which the checkout does not fetch. Without it the
+      # evidence holds the change as unread, never as clean; a first push names no base at all.
+      - name: Fetch the base
+        if: ${{ env.BASE != '0000000000000000000000000000000000000000' }}
+        continue-on-error: true
+        run: git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch --no-tags origin "$BASE"
 
       - uses: oven-sh/setup-bun@v2
 
