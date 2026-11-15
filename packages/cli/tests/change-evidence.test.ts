@@ -301,7 +301,7 @@ describe('the record and the summary', () => {
     expect(evidence.lane?.floor).toBe('medium')
     expect(markdown).toContain('(raised by guren.review.ts from low)')
     expect(markdown).toContain('guren.review.ts at the merge base applies: a medium change needs 1 approval where someone other than the author can approve. Nothing enforces it yet.')
-    expect((await changeRecord(repo, base, evidence.lane!.head, evidence, false)).facts).toEqual([{ code: 'ambient', lane: 'medium', policyFrom: 'low', files: ['docs/guide.md'] }])
+    expect((await changeRecord(repo, base, evidence.lane!.head, evidence, false)).facts).toEqual([{ code: 'ambient', lane: 'medium', policyFrom: 'low', target: 'documentation', files: ['docs/guide.md'] }])
   })
 })
 

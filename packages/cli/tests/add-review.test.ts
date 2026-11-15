@@ -53,9 +53,9 @@ describe('guren add review', () => {
     const overwritten: string[] = []
     const forced = await addReview({ cwd: app, force: true, overwritten })
 
-    expect(kept.created).toHaveLength(3)
+    expect(kept.created).toHaveLength(4)
     expect(before).toBe('Our own template.\n')
-    expect(forced.created).toHaveLength(4)
+    expect(forced.created).toHaveLength(5)
     expect(overwritten).toContain(join(app, '.github/pull_request_template.md'))
     expect(await readFile(join(app, '.github/pull_request_template.md'), 'utf8')).toContain('lane:low')
   })
