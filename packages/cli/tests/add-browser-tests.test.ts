@@ -631,7 +631,8 @@ describe('guren add browser-tests --behaviours', () => {
   test('needs an agent, since whose login runs the steps has no default', () => {
     expect(behaviourAgent({})).toBeUndefined()
     expect(behaviourAgent({ behaviours: true, agent: 'claude-code' })).toBe('claude-code')
-    expect(() => behaviourAgent({ behaviours: true })).toThrow('--behaviours needs --agent claude-code or --agent codex')
+    expect(() => behaviourAgent({ behaviours: true })).toThrow('--behaviours needs --agent claude-code, --agent codex or --agent none')
+    expect(behaviourAgent({ behaviours: true, agent: 'none' })).toBe('none')
     expect(() => behaviourAgent({ agent: 'claude-code' })).toThrow('it goes with --behaviours')
     expect(behaviourAgent({ behaviours: true, agent: 'codex' })).toBe('codex')
     expect(() => behaviourAgent({ behaviours: true, agent: 'cursor' })).toThrow('--agent cursor names no agent')
@@ -705,6 +706,41 @@ describe('guren add browser-tests --behaviours', () => {
     }
   })
 
+  test('with --agent none, writes a config with no agent and names only the runner to install', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-none-')
+    const info = spyOn(consola, 'info').mockImplementation((() => {}) as never)
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST })
+      const result = await addBrowserTests({ install: false, behaviours: true, agent: 'none', loadMap: async () => mapOf([POSTS]) })
+      expect(result.behaviours).toBe('none')
+      const config = await readFile(join(workspace.dir, BEHAVIOURS_CONFIG), 'utf8')
+      expect(config).not.toContain('@e2e-dev/acp')
+      expect(config).not.toContain('agents:')
+      expect(config).not.toContain('emptied')
+      expect(config).toContain('credentials: { browser:')
+      expect(await Bun.file(join(workspace.dir, BEHAVIOURS_GIVEN_FILE)).exists()).toBe(true)
+      const install = info.mock.calls.map((call) => String(call[0])).find((line) => line.startsWith('Run: bun add -d '))
+      for (const name of ['e2e', '@e2e-dev/web']) expect(install).toContain(` ${name}@${cliDependencyRange('devDependencies', name)}`)
+      expect(install).not.toContain('@e2e-dev/acp')
+      expect(install).not.toContain('agentclientprotocol')
+    } finally {
+      info.mockRestore()
+      await workspace.cleanup()
+    }
+  })
+
+  test('takes the agent out of the config for none, and refuses a template that lost a line it cuts', async () => {
+    const shipped = { path: BEHAVIOURS_CONFIG, contents: await template(BEHAVIOURS_CONFIG) }
+    const none = agentConfig(shipped, 'none').contents
+    const removed = shipped.contents.split('\n').filter((line) => !none.split('\n').includes(line))
+    expect(removed.some((line) => line.startsWith("import { claudeCode }"))).toBe(true)
+    expect(removed.some((line) => line.includes('agents: { default:'))).toBe(true)
+    expect(removed.some((line) => line.startsWith('const emptied'))).toBe(true)
+    expect(none.split('\n').filter((line) => !shipped.contents.split('\n').includes(line))).toEqual([])
+    expect(() => agentConfig({ path: BEHAVIOURS_CONFIG, contents: shipped.contents.replace('const emptied', 'const blank') }, 'none')).toThrow('to take the agent out at')
+  })
+
   test('rewrites only the three lines of the config that name the agent', async () => {
     const shipped = { path: BEHAVIOURS_CONFIG, contents: await template(BEHAVIOURS_CONFIG) }
     expect(agentConfig(shipped, 'claude-code')).toEqual(shipped)
@@ -725,7 +761,7 @@ describe('guren add browser-tests --behaviours', () => {
   test('says so when a config kept from an earlier run names another agent, and rewrites it under --force', async () => {
     const workspace = await createTempWorkspace('guren-add-behaviours-switch-')
     const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
-    const mismatch = (): string[] => warn.mock.calls.map((call) => String(call[0])).filter((line) => line.includes('run on another agent'))
+    const mismatch = (): string[] => warn.mock.calls.map((call) => String(call[0])).filter((line) => line.includes('run on another agent') || line.includes('--agent none does not install'))
     try {
       await seedInertiaApp(workspace.dir)
       await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST })
@@ -743,6 +779,15 @@ describe('guren add browser-tests --behaviours', () => {
       await run('codex', true)
       expect(mismatch()).toEqual([])
       expect(await readFile(join(workspace.dir, BEHAVIOURS_CONFIG), 'utf8')).toContain("import { codex } from '@e2e-dev/acp'")
+
+      warn.mockClear()
+      await run('none')
+      expect(mismatch()).toHaveLength(1)
+      await run('none', true)
+      expect(await readFile(join(workspace.dir, BEHAVIOURS_CONFIG), 'utf8')).not.toContain('@e2e-dev/acp')
+      warn.mockClear()
+      await run('claude-code')
+      expect(mismatch()).toHaveLength(1)
     } finally {
       warn.mockRestore()
       await workspace.cleanup()

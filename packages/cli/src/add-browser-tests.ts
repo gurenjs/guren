@@ -13,7 +13,7 @@ import { consola } from 'consola'
 
 import { readAppLocale } from './app-locale'
 import { assertNotApiOnly } from './app-surface'
-import { BEHAVIOUR_PACKAGES, BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP } from './browser-behaviour-specs'
+import { BEHAVIOUR_AGENT_PACKAGE, BEHAVIOUR_PACKAGES, BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP } from './browser-behaviour-specs'
 import { loadBrowserMap, runBrowserMap } from './browser-map-files'
 import type { ApprovedPlanInput, BrowserMap } from './browser-map'
 import {
@@ -51,9 +51,12 @@ export const BEHAVIOUR_AGENTS = {
   },
 } as const
 export type BehaviourAgent = keyof typeof BEHAVIOUR_AGENTS
+/** `none` sets up the runner with no agent: only behaviours the plan names every control of run, as locator steps. */
+export type BehaviourAgentChoice = BehaviourAgent | 'none'
 const AGENT_NAMES = Object.keys(BEHAVIOUR_AGENTS) as BehaviourAgent[]
+const AGENT_CHOICES: BehaviourAgentChoice[] = [...AGENT_NAMES, 'none']
 /** Installed at the exact versions package.json declares, the copies the config template is typechecked against. */
-export const BEHAVIOUR_DEV_PACKAGES = [...BEHAVIOUR_PACKAGES, '@e2e-dev/acp'] as const
+export const BEHAVIOUR_DEV_PACKAGES = [...BEHAVIOUR_PACKAGES, BEHAVIOUR_AGENT_PACKAGE] as const
 const BEHAVIOURS_RUN = `E2E_TELEMETRY_DISABLED=1 bunx --bun e2e run --config ${BEHAVIOURS_CONFIG}`
 /** `--bun`, so the suite needs no Node; `--strict-cache` fails a stale recording with no model call. */
 export const BEHAVIOUR_SCRIPTS = [
@@ -83,7 +86,7 @@ export interface AddBrowserTestsResult {
   /** What the closing `browser:map` run wrote and removed, app-relative. */
   mapped: { changed: string[]; removed: string[]; held?: string; accessibilityOff?: string; behavioursOff?: string; unlabelledInputs?: string[] }
   /** The agent the behaviour specs were set up for, when `--behaviours` was passed. */
-  behaviours?: BehaviourAgent
+  behaviours?: BehaviourAgentChoice
   /** A setup project signs in as the seeded browser account. */
   signIn: boolean
   map: BrowserMap
@@ -120,11 +123,25 @@ const CONFIG_AGENT_LINES = (agent: BehaviourAgent): string[] => [
   `// Steps run under this machine's ${BEHAVIOUR_AGENTS[agent].label} login;`,
 ]
 
-/** The behaviour config for `agent`: the template with the three lines that name Claude Code rewritten. */
-export function agentConfig(config: ScaffoldFileEntry, agent: BehaviourAgent): ScaffoldFileEntry {
+/** What `--agent none` takes out of the template: the executor's import, the agent, and the environment only an agent is handed. */
+const NO_AGENT_CUTS = [
+  "import { claudeCode } from '@e2e-dev/acp'\n",
+  "  // Steps run under this machine's Claude Code login; a recorded step replays with no model call.\n  agents: { default: { executor: claudeCode({ model: 'sonnet', env: emptied }) } },\n",
+  "// Bun loads the app's env files into this process and again into the agent's adapter, and replaces no name\n// already set. So each name goes to the agent as an empty string, over this process's value and the files'.\nconst emptied = Object.fromEntries([...loaded.flatMap((names) => Object.keys(names)), 'BROWSER_TEST_PASSWORD'].sort().map((name) => [name, '']))\n\n",
+]
+
+/** The behaviour config for `agent`: the template with the three lines that name Claude Code rewritten, or with no agent for `none`. */
+export function agentConfig(config: ScaffoldFileEntry, agent: BehaviourAgentChoice): ScaffoldFileEntry {
+  let contents = config.contents
+  if (agent === 'none') {
+    for (const cut of NO_AGENT_CUTS) {
+      if (contents.split(cut).length !== 2) throw new Error(`${config.path} has no single "${cut.trim().split('\n')[0]}" to take the agent out at.`)
+      contents = contents.replace(cut, '')
+    }
+    return { ...config, contents }
+  }
   const shipped = CONFIG_AGENT_LINES('claude-code')
   const wanted = CONFIG_AGENT_LINES(agent)
-  let contents = config.contents
   shipped.forEach((line, index) => {
     if (contents.split(line).length !== 2) throw new Error(`${config.path} has no single "${line.trim()}" to name the agent on.`)
     contents = contents.replace(line, () => wanted[index]!)
@@ -154,19 +171,19 @@ async function readManifest(cwd: string, scripts: readonly Script[], force: bool
 }
 
 /**
- * `--behaviours` and `--agent` name each other: whose login runs the steps is the person's choice,
- * so there is no default, and `--agent` alone would set up nothing.
+ * `--behaviours` and `--agent` name each other: whose login runs the steps, or `none`, is the person's
+ * choice, so there is no default, and `--agent` alone would set up nothing.
  */
-export function behaviourAgent(options: Pick<AddBrowserTestsOptions, 'behaviours' | 'agent'>): BehaviourAgent | undefined {
-  const choices = AGENT_NAMES.map((agent) => `--agent ${agent}`).join(' or ')
+export function behaviourAgent(options: Pick<AddBrowserTestsOptions, 'behaviours' | 'agent'>): BehaviourAgentChoice | undefined {
+  const choices = `${AGENT_NAMES.map((agent) => `--agent ${agent}`).join(', ')} or --agent none`
   if (!options.behaviours) {
     if (options.agent !== undefined) throw new CliError(`--agent chooses whose login runs the behaviour specs, so it goes with --behaviours. Nothing was written.`)
     return undefined
   }
   if (options.agent === undefined) {
-    throw new CliError(`--behaviours needs ${choices}: the steps run under that agent's login on this machine, and there is no default. Nothing was written.`)
+    throw new CliError(`--behaviours needs ${choices}: the steps run under that agent's login on this machine (none runs only the behaviours the plan names every control of), and there is no default. Nothing was written.`)
   }
-  const agent = AGENT_NAMES.find((name) => name === options.agent)
+  const agent = AGENT_CHOICES.find((name) => name === options.agent)
   if (agent === undefined) throw new CliError(`--agent ${options.agent} names no agent the behaviour specs run on; pass ${choices}. Nothing was written.`)
   return agent
 }
@@ -199,10 +216,12 @@ async function olderPlaywright(cwd: string): Promise<{ installed: string; pinned
 }
 
 /** Only what the manifest does not declare, so a rerun on an app that has Playwright adds axe alone. */
-async function installDevPackages(cwd: string, install: boolean, agent: BehaviourAgent | undefined): Promise<void> {
+async function installDevPackages(cwd: string, install: boolean, agent: BehaviourAgentChoice | undefined): Promise<void> {
+  const range = (name: string) => ({ name, range: cliDependencyRange('devDependencies', name) })
   const wanted = [
-    ...DEV_PACKAGES.map((name) => ({ name, range: cliDependencyRange('devDependencies', name) })),
-    ...(agent ? [...BEHAVIOUR_DEV_PACKAGES.map((name) => ({ name, range: cliDependencyRange('devDependencies', name) })), BEHAVIOUR_AGENTS[agent].adapter] : []),
+    ...DEV_PACKAGES.map(range),
+    ...(agent === 'none' ? BEHAVIOUR_PACKAGES.map(range) : []),
+    ...(agent && agent !== 'none' ? [...BEHAVIOUR_DEV_PACKAGES.map(range), BEHAVIOUR_AGENTS[agent].adapter] : []),
   ]
   const missing: string[] = []
   for (const { name, range } of wanted) {
@@ -239,7 +258,7 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
     cwd, write: false, map,
     ...(options.plans ? { plans: options.plans } : {}),
     specs: { signIn: account !== undefined, accessibility: true },
-    ...(agent ? { behaviours: { signIn: account !== undefined } } : {}),
+    ...(agent ? { behaviours: { signIn: account !== undefined, agent: agent !== 'none' } } : {}),
   })
 
   const pinned = locale.kind === 'locale' ? locale.locale : undefined
@@ -255,9 +274,12 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
       : []),
   ]
   const created = await writeScaffoldFiles(files, { force: options.force, overwritten: options.overwritten, skipExisting: true })
-  // A config kept from an earlier run may name the other agent, while this run installs this one's adapter.
-  if (agent && !created.includes(resolve(cwd, BEHAVIOURS_CONFIG)) && !(await readIfExists(cwd, BEHAVIOURS_CONFIG))?.includes(CONFIG_AGENT_LINES(agent)[0]!.trim())) {
-    consola.warn(`${BEHAVIOURS_CONFIG} was left as it is and does not import ${BEHAVIOUR_AGENTS[agent].executor} from @e2e-dev/acp, so its steps run on another agent than --agent ${agent}. Pass --force to rewrite it, or change its executor by hand.`)
+  // A config kept from an earlier run may name another agent, or one at all, than this run installs an adapter for.
+  const kept = agent && !created.includes(resolve(cwd, BEHAVIOURS_CONFIG)) ? await readIfExists(cwd, BEHAVIOURS_CONFIG) : null
+  if (agent === 'none' && kept?.includes(`from '${BEHAVIOUR_AGENT_PACKAGE}'`)) {
+    consola.warn(`${BEHAVIOURS_CONFIG} was left as it is and still imports an executor from ${BEHAVIOUR_AGENT_PACKAGE}, which --agent none does not install. Pass --force to rewrite it with no agent, or install the agent's packages.`)
+  } else if (agent && agent !== 'none' && kept !== null && !kept?.includes(CONFIG_AGENT_LINES(agent)[0]!.trim())) {
+    consola.warn(`${BEHAVIOURS_CONFIG} was left as it is and does not import ${BEHAVIOUR_AGENTS[agent].executor} from ${BEHAVIOUR_AGENT_PACKAGE}, so its steps run on another agent than --agent ${agent}. Pass --force to rewrite it, or change its executor by hand.`)
   }
   // The entries in given.ts are the author's work, so --force never replaces it.
   if (agent && (await readIfExists(cwd, BEHAVIOURS_GIVEN_FILE)) === null) {

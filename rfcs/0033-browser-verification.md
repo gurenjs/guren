@@ -1129,7 +1129,7 @@ do (Open Question 3).
 
 #### 13.4 Installation
 
-`guren add browser-tests --behaviours --agent <claude-code|codex>`, on an app
+`guren add browser-tests --behaviours --agent <claude-code|codex|none>`, on an app
 that already has the blueprint or in the same run. `--behaviours` without
 `--agent` refuses and names both: whose login runs the steps is the person's
 choice, and there is no default. ~~`--agent codex` refuses until §13.9's Codex
@@ -1137,8 +1137,16 @@ item is measured.~~ **Amended in implementation:** `--agent codex` is offered
 since §13.9's Codex item was measured (2026-11-15). The config differs from
 the Claude Code one in the three lines that name the agent, and a recording
 made under one agent replays under the other (measured). A config kept from a
-run for the other agent is warned about, and `--force` rewrites it. It writes,
-once:
+run for the other agent is warned about, and `--force` rewrites it.
+**Amended in implementation (2026-11-15):** `--agent none` sets up the runner
+with no agent. The config has no `agents` entry, no `@e2e-dev/acp` import and
+no environment emptied for an agent, and only `e2e` and `@e2e-dev/web` are
+installed. `browser:map` then writes a behaviour as locator steps where the
+plan names every control it touches (§13.5) and skips the rest naming why, as
+it does for any behaviour that needs an agent step in an app that declares no
+`@e2e-dev/acp`. No login is used and nothing is recorded. A config kept from a
+run with an agent is warned about, as is one kept from a `none` run when an
+agent is asked for. It writes, once:
 
 - `e2e.browser.config.ts`: the target on `http://127.0.0.1:4319`, started by
   `app.command` as `guren browser:serve --port 4319` with `reuseExisting: false`,
@@ -1220,6 +1228,7 @@ skipped test naming why, never left out and never passed:
 | no view of the plan sends the route | nothing says which page to start on |
 | the route, or the page's route, is not registered yet | as §6 |
 | a signed-in route with no password sign-in | as §6 |
+| an agent step (§13.5) in an app that declares no `@e2e-dev/acp` (**amended in implementation**, `--agent none`, §13.4) | the config names no agent |
 | no outcome a browser can check | every expectation is a status or a database row, an `errors` key has no labelled field, or the view `expect.inertia` names has no label and no action |
 | an input that is not a string, a number or a boolean | nothing says how a control takes it |
 | a `validation` behaviour whose input ~~leaves empty a key that the route's form contract (RFC 0036 §2.1) renders with `required`~~ the form's own control may stop or change (**amended in implementation**, below) | the browser stops the submit, so no request is sent and no error is rendered (§13.1); `TestApp` pins it |
@@ -1290,9 +1299,8 @@ test('AC-posts-update-1 (6a2991): a signed-in user retitles a post', { session: 
   `await screen.getByLabel('Title', { exact: true }).fill('Retitled post')`
   and a tap on the `Save` button or link, with no `agent` fixture; its agent
   step is what a view naming no action gets, ending "submit the form" in
-  place of "use "Save"". The blueprint still installs an agent adapter for the steps
-  that remain; whether an app whose every behaviour is located needs one is
-  left open.
+  place of "use "Save"". An app that needs no agent step sets up the runner
+  with `--agent none` (§13.4), and then installs no agent adapter.
 - **The instruction is built from the plan.** A behaviour's `input` is a list
   of `{ name, json }` entries, one per field. Every entry becomes a parameter
   holding its decoded value, as the `TestApp` skeleton builds its body from

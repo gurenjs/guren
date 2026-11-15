@@ -49,7 +49,9 @@ agent step otherwise, and checks the outcome with locators. A locator step
 needs no recording and no login. An agent step replays from
 its recording under `.e2e/cache/`. Only a step with no recording, or one whose
 recording no longer matches the page, runs live, under the person's login for
-the agent that config names (Claude Code or Codex), and records again.
+the agent that config names (Claude Code or Codex), and records again. A
+config set up with `--agent none` names no agent: a behaviour that needs an
+agent step is a skipped test saying so, and nothing runs live.
 
 Run `bun run test:behaviours` (port 4319), then `git status --short .e2e/cache`:
 
