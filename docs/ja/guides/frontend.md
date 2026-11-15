@@ -85,7 +85,7 @@ export default function Index({ posts }: Props) {
 
 ### UI コンポーネント
 
-`bunx guren add ui` は、トークンでスタイルを付けた少数のコンポーネント(`Button`、`Label`、`Input`、`Textarea`、`Select`、`Checkbox`、`Field`、`Card`、`Alert`)を `resources/js/components/ui/` にコピーします。`make:feature` と `make:auth` が書き出すページも、これらを import します。ファイルはアプリのものなので、`Input.tsx` のフォーカスリングや `Button.tsx` の余白を変えれば、import しているすべてのページに反映されます。
+`bunx guren add ui` は、トークンでスタイルを付けた少数のコンポーネント(`Button`、`Label`、`Input`、`Textarea`、`Select`、`Checkbox`、`Field`、`Card`、`Alert`、`Pagination`)を `resources/js/components/ui/` にコピーします。`make:feature` と `make:auth` が書き出すページも、これらを import します。ファイルはアプリのものなので、`Input.tsx` のフォーカスリングや `Button.tsx` の余白を変えれば、import しているすべてのページに反映されます。
 
 ```tsx
 import { Button } from '@/resources/js/components/ui/Button'

@@ -574,7 +574,7 @@ function generateIndexPage(
 import type { PaginatedPageProps } from '@guren/core'
 ${resourceImport}
 import { route } from '@/.guren/routes.gen'
-${uiImports(['Button', 'Card'], { Button: 'buttonClass' })}
+${uiImports(['Button', 'Card', 'Pagination'], { Button: 'buttonClass' })}
 interface Props extends PaginatedPageProps<${singular}ResourceData> {}
 
 export default function ${collection}Index({ data, pagination }: Props) {
@@ -597,15 +597,7 @@ ${summaryField ? `              <p className="mt-2 text-sm text-g-text-2">{${var
             </Card>
           ))}
         </div>
-        {pagination?.links?.pages && (
-          <nav className="flex gap-2 font-mono text-sm">
-            {pagination.links.pages.map((page) => (
-              <Link key={page.page} href={page.url ?? '#'} className="rounded-g-ctl border border-g-line px-3 py-1 text-g-text-2 transition hover:border-g-line-strong hover:text-g-heading">
-                {page.page}
-              </Link>
-            ))}
-          </nav>
-        )}
+        <Pagination links={pagination.links} />
       </div>
     </main>
   )

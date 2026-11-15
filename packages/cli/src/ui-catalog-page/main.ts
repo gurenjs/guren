@@ -50,6 +50,16 @@ const ALERT_TEXT: Record<string, string> = { ok: 'The post was saved.', warn: 'T
 
 const prevent = (event: { preventDefault(): void }) => event.preventDefault()
 
+/** The links a paginator sends; every URL is a fragment, and the demos cancel each click before Inertia visits it. */
+function paginationLinks(current: number, last: number) {
+  const url = (page: number) => `#page-${page}`
+  return {
+    prev: current > 1 ? url(current - 1) : null,
+    next: current < last ? url(current + 1) : null,
+    pages: Array.from({ length: last }, (_, index) => ({ page: index + 1, url: url(index + 1), active: index + 1 === current })),
+  }
+}
+
 const OPTIONS = [{ value: 'draft', label: 'Draft' }, { value: 'published', label: 'Published' }]
 
 /** Each takes the export named after its component; `missingExport()` stands in when the copy lost it. */
@@ -82,6 +92,10 @@ const DEMOS: Record<UiComponentName, (Shown: AnyComponent, module: Module) => Re
     example('aria-invalid (an error)', h(Input, { defaultValue: 'not-an-email', 'aria-invalid': true, 'aria-label': 'Email' }))),
   Label: (Label) => example('for a control', h(Label, { htmlFor: 'guren-ui-label-example' }, 'Title'),
     h('input', { id: 'guren-ui-label-example', type: 'text', style: { padding: '4px 8px', border: '1px solid var(--g-line-strong)', borderRadius: '4px' } })),
+  Pagination: (Pagination) => h('div', { style: stack },
+    example('page 6 of 12', h('div', { onClickCapture: prevent }, h(Pagination, { links: paginationLinks(6, 12) }))),
+    example('page 1 of 3', h('div', { onClickCapture: prevent }, h(Pagination, { links: paginationLinks(1, 3) }))),
+    example('page 6 of 12, siblings={2}', h('div', { onClickCapture: prevent }, h(Pagination, { links: paginationLinks(6, 12), siblings: 2 })))),
   Select: (Select) => h('div', { style: stack },
     example('options', h(Select, { options: OPTIONS, 'aria-label': 'Status' })),
     example('disabled', h(Select, { options: OPTIONS, disabled: true, 'aria-label': 'Status' })),
