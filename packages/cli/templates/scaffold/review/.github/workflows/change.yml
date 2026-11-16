@@ -51,8 +51,14 @@ jobs:
         run: |
           merge_base=$(git merge-base "$BASE" "$HEAD")
           run_id=$(gh run list --workflow change.yml --event push --branch "$DEFAULT_BRANCH" --commit "$merge_base" --limit 1 --json databaseId --jq '.[0].databaseId // empty')
-          if [ -z "$run_id" ]; then exit 0; fi
-          gh run download "$run_id" --name "guren-record-$merge_base" --dir "$RUNNER_TEMP/base-record"
+          if [ -z "$run_id" ]; then
+            echo "No push run on $DEFAULT_BRANCH stored a record for the merge base $merge_base."
+            exit 0
+          fi
+          gh run download "$run_id" --name "guren-record-$merge_base" --dir "$RUNNER_TEMP/base-record" || {
+            echo "Run $run_id holds no guren-record-$merge_base (expired, or the upload failed)."
+            exit 0
+          }
 
       # Runs the gate as `bunx guren gate --deps` does and fails exactly when it does. Everything
       # else it could not establish is a hold in the evidence, never a failed build. Add --no-deps

@@ -9,7 +9,10 @@ import type { MiddlewareEntry } from '@guren/server'
 import { CONTRACT_SEGMENTS, type ContractSegment } from '../contract-segments'
 import type { ChangeFact } from './lane'
 
-/** Bumped whenever a field's meaning changes: a stored record of another version is not compared. */
+/**
+ * Bumped whenever a field's meaning changes, a digest's inputs included: a stored record of another
+ * version is not compared, and a differing `@guren/cli` is only named, so this is the one guard.
+ */
 export const SECURITY_RECORD_VERSION = 1
 
 const CONTRACT_KEYS = CONTRACT_SEGMENTS
