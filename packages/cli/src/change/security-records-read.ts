@@ -29,7 +29,8 @@ import {
 import { resolveImportPath } from '../import-resolution'
 import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, type GraphRouteEntry } from '../introspect'
 import { introspectedRoutes, skippedRegistrars } from '../manifest-section'
-import { ParseCache } from '../parse-cache'
+import { walk, type BabelNode } from '../ast-walk'
+import { ParseCache, parseSourceFile } from '../parse-cache'
 import { routesEntryOrDefault } from '../route-registrar'
 import { importsByLocal, specifierBase, type ImportEntry } from '../schema-binding'
 import { SECURITY_RECORD_VERSION, type ActionRecord, type RouteSecurityRecord, type SecurityRecords, type ValidateCall } from './security-records'
@@ -43,6 +44,10 @@ interface ModuleBindings {
   text: string
   /** Top-level declarations by the names they bind, exported or not, as their statement's text. */
   declared: Map<string, string>
+  /** The statement node of each declared name, what its references are read from. */
+  statements: Map<string, BabelNode>
+  /** A declared class's parent as written: `extends Base`, or `extends ns.Base`. */
+  parents: Map<string, { local: string; member?: string }>
   imports: Map<string, ImportEntry>
   /** `export { name } from` and `export { local as name } from`: the source and its name there. */
   reexported: Map<string, { source: string; name: string }>
@@ -68,23 +73,44 @@ interface DeclarationNode { key: string; unit: string; next: Target[] }
 
 const NOT_BINDINGS = new Set(['this', 'super', 'true', 'false', 'null', 'undefined', 'new', 'typeof', 'instanceof', 'void', 'await', 'async', 'function', 'return', 'const', 'let', 'var', 'if', 'else', 'in', 'of', 'as', 'Number', 'String', 'Boolean', 'Object', 'Array', 'JSON', 'Math', 'Date', 'Promise', 'Error', 'Symbol', 'BigInt', 'RegExp', 'Map', 'Set'])
 
-/** `text` with each string's contents gone and a template literal reduced to its `${}` expressions. */
-const withoutStrings = (text: string): string => text
-  .replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/gu, "''")
-  .replace(/`(?:\\.|[^`\\])*`/gu, (literal) => [...literal.matchAll(/\$\{([^}]*)\}/gu)].map((part) => `(${part[1]})`).join(' + ') || "''")
+// Subtrees that only type the code: a name read there reaches nothing at run time.
+const TYPE_ONLY = new Set(['TSTypeAnnotation', 'TSTypeParameterInstantiation', 'TSTypeParameterDeclaration', 'TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSDeclareFunction'])
+const KEYED = new Set(['ObjectProperty', 'ObjectMethod', 'ClassProperty', 'ClassMethod', 'ClassPrivateProperty', 'ClassAccessorProperty', 'TSPropertySignature'])
+const LABELLED = new Set(['LabeledStatement', 'BreakStatement', 'ContinueStatement'])
 
-/** The identifiers `text` reads as values: not inside a string, not a member after `.`, not an object key before `:`. */
-export function freeIdentifiers(source: string): string[] {
-  const text = withoutStrings(source)
+/** The identifiers a syntax tree reads as values, from the tree itself: not a member name, a key, a label or a type. */
+export function referencedIdentifiers(node: unknown): string[] {
   const found = new Set<string>()
-  for (const match of text.matchAll(IDENTIFIER)) {
-    const before = text.slice(0, match.index).trimEnd()
-    const after = text.slice(match.index + match[0].length).trimStart()
-    if (before.endsWith('.')) continue
-    if ((before.endsWith('{') || before.endsWith(',')) && after.startsWith(':')) continue
-    found.add(match[0])
-  }
+  walk(node, (current, parent) => {
+    if (TYPE_ONLY.has(current.type)) return false
+    if (current.type !== 'Identifier') return
+    const holder = parent as (BabelNode & { property?: unknown; key?: unknown; computed?: boolean }) | null
+    if (holder && (holder.type === 'MemberExpression' || holder.type === 'OptionalMemberExpression') && holder.property === current && !holder.computed) return
+    if (holder && KEYED.has(holder.type) && holder.key === current && !holder.computed) return
+    if (holder && LABELLED.has(holder.type)) return
+    found.add((current as BabelNode & { name: string }).name)
+  })
   return [...found]
+}
+
+/** Whether a syntax tree reads a member of `this`. */
+function readsThisMember(node: unknown): boolean {
+  let found = false
+  walk(node, (current) => {
+    if (found) return false
+    if ((current.type === 'MemberExpression' || current.type === 'OptionalMemberExpression') && (current as BabelNode & { object: BabelNode }).object.type === 'ThisExpression') found = true
+  })
+  return found
+}
+
+/**
+ * The identifiers source text reads, parsed through `parseSourceFile()`; `undefined` when it does
+ * not parse, so a caller can widen rather than read nothing. `wrap` makes a fragment a program.
+ */
+function sourceIdentifiers(text: string, file: string, wrap: (text: string) => string): { names: string[]; thisMember: boolean } | undefined {
+  const ast = parseSourceFile(wrap(text), file)
+  if (!ast) return undefined
+  return { names: referencedIdentifiers(ast.program), thisMember: readsThisMember(ast.program) }
 }
 
 /**
@@ -119,24 +145,52 @@ class Declarations {
     return digest(`${text}\n${await this.reach(names.flatMap((name) => this.target(module, name) ?? []))}`)
   }
 
-  /** The class statements along `extends` from `name` in `file`: what a `this.<member>` can reach. */
+  /**
+   * The class statements along `extends` from `name` in `file`, each parent found through imports,
+   * re-exports and `export *`: what a `this.<member>` or an inherited action can reach. A hop it
+   * cannot follow is its whole file or specifier, never nothing.
+   */
   async classChain(file: string, name: string): Promise<string> {
     const units: string[] = []
     const visited = new Set<string>()
-    let current: Target | undefined = { file, name }
-    while (current && 'file' in current) {
-      const module = await this.module(current.file)
-      if (!module || 'unparsed' in module) { units.push(module ? `file:${digest(module.unparsed)}` : `missing:${this.relative(current.file)}`); break }
-      const statement = module.declared.get(current.name)
-      const key = `${module.path}#${current.name}`
-      if (statement === undefined || visited.has(key)) break
+    let current: { file: string; name: string } | undefined = { file, name }
+    while (current) {
+      const found = await this.locate(current.file, current.name)
+      if ('leaf' in found) { units.push(found.leaf); break }
+      const key = `${found.module.path}#${found.name}`
+      if (visited.has(key)) break
       visited.add(key)
-      units.push(statement)
-      const parent = /\bclass\s+[A-Za-z_$][\w$]*\s+extends\s+([A-Za-z_$][\w$]*)/u.exec(statement)?.[1]
-      current = parent ? this.target(module, parent) : undefined
-      if (current && 'leaf' in current) units.push(current.leaf)
+      units.push(found.module.declared.get(found.name)!)
+      const parent = found.module.parents.get(found.name)
+      if (!parent) break
+      const target = this.target(found.module, parent.local)
+      if (!target) { units.push(`unbound:${parent.local}`); break }
+      if ('leaf' in target) { units.push(target.leaf); break }
+      current = parent.member === undefined ? target : target.name === '*' ? { file: target.file, name: parent.member } : undefined
+      if (!current) units.push(`member:${parent.local}.${parent.member}`)
     }
     return `class:${digest(units.join('\n'))}`
+  }
+
+  /** The module that declares `name` as reached from `file`, following re-exports and `export *`; a leaf where it stops. */
+  private async locate(file: string, name: string, depth = 0): Promise<{ module: ModuleBindings; name: string } | { leaf: string }> {
+    const module = await this.module(file)
+    if (!module) return { leaf: `missing:${this.relative(file)}` }
+    if ('unparsed' in module) return { leaf: `file:${digest(module.unparsed)}` }
+    if (module.declared.has(name)) return { module, name }
+    if (depth > 32) return { leaf: `file:${digest(module.text)}` }
+    const reexport = module.reexported.get(name)
+    if (reexport) {
+      const base = specifierBase(this.cwd, module.path, reexport.source)
+      return base === null ? { leaf: `package:${reexport.source}` } : this.locate(base, reexport.name, depth + 1)
+    }
+    const imported = this.target(module, name)
+    if (imported) return 'leaf' in imported ? imported : imported.name === '*' ? { leaf: `file:${digest(module.text)}` } : this.locate(imported.file, imported.name, depth + 1)
+    for (const source of module.starred) {
+      const base = specifierBase(this.cwd, module.path, source)
+      if (base !== null && (await this.provides(base, name, new Set()))) return this.locate(base, name, depth + 1)
+    }
+    return { leaf: `file:${digest(module.text)}` }
   }
 
   /** What a name `module` binds resolves to, or undefined for a name it does not bind. */
@@ -183,7 +237,7 @@ class Declarations {
     if (name === '*') return { key, unit: `file:${digest(module.text)}`, next: [] }
     const declaration = module.declared.get(name)
     if (declaration !== undefined) {
-      const next = freeIdentifiers(declaration).filter((other) => other !== name).flatMap((other) => this.target(module, other) ?? [])
+      const next = referencedIdentifiers(module.statements.get(name)).filter((other) => other !== name).flatMap((other) => this.target(module, other) ?? [])
       return { key, unit: declaration, next }
     }
     const reexport = module.reexported.get(name)
@@ -242,6 +296,8 @@ class Declarations {
     const text = outcome.source
     const body = outcome.ast.program.body as Statement[]
     const declared = new Map<string, string>()
+    const statements = new Map<string, BabelNode>()
+    const parents = new Map<string, { local: string; member?: string }>()
     const reexported = new Map<string, { source: string; name: string }>()
     const starred: string[] = []
     for (const statement of body) {
@@ -255,17 +311,24 @@ class Declarations {
         }
         continue
       }
-      const node = (statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportDefaultDeclaration' ? statement.declaration : statement) as { type: string; id?: { name?: string } | null; declarations?: Array<{ id: PatternNode }> } | null
-      if (statement.type === 'ExportDefaultDeclaration') declared.set('default', slice)
+      const node = (statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportDefaultDeclaration' ? statement.declaration : statement) as { type: string; id?: { name?: string } | null; declarations?: Array<{ id: PatternNode }>; superClass?: BabelNode | null } | null
+      const bind = (name: string): void => {
+        declared.set(name, slice)
+        statements.set(name, statement as unknown as BabelNode)
+        const parent = node?.superClass as (BabelNode & { name?: string; object?: BabelNode & { name?: string }; property?: BabelNode & { name?: string }; computed?: boolean }) | null | undefined
+        if (parent?.type === 'Identifier' && parent.name) parents.set(name, { local: parent.name })
+        else if (parent?.type === 'MemberExpression' && !parent.computed && parent.object?.type === 'Identifier' && parent.property?.type === 'Identifier') parents.set(name, { local: parent.object.name!, member: parent.property.name! })
+      }
+      if (statement.type === 'ExportDefaultDeclaration') bind('default')
       if (!node) continue
       if (node.type === 'VariableDeclaration') {
-        for (const entry of node.declarations ?? []) for (const name of patternNames(entry.id)) declared.set(name, slice)
+        for (const entry of node.declarations ?? []) for (const name of patternNames(entry.id)) bind(name)
       } else if (node.id?.name) {
         // A function, a class, an enum, a namespace: whatever binds a top-level name.
-        declared.set(node.id.name, slice)
+        bind(node.id.name)
       }
     }
-    return { path, text, declared, imports: importsByLocal(body), reexported, starred }
+    return { path, text, declared, statements, parents, imports: importsByLocal(body), reexported, starred }
   }
 
   relative(file: string): string {
@@ -389,12 +452,16 @@ async function actionRecord(
   }
   let unseen: string | undefined
   if (unfollowed.length > 0) {
-    const names = freeIdentifiers(unfollowed.join('\n'))
+    // Parsed, so a string, a comment, a spread or a template is read as code reads it.
+    const args = sourceIdentifiers(unfollowed.join(', '), filePath, (text) => `__args__(${text})`)
+    const whole = sourceIdentifiers(rawBody, filePath, (text) => (text.trimStart().startsWith('{') ? `async function __action__() ${text}` : `async function __action__() { return (${text}) }`))
+    const binds = (name: string): boolean => !!local && (local.declared.has(name) || local.imports.has(name))
     // An argument naming a local of the action reaches whatever the action assigns it: the whole body is the scope.
-    const local = names.some((name) => !NOT_BINDINGS.has(name) && !(module && !('unparsed' in module) && (module.declared.has(name) || module.imports.has(name))))
-    const parts = [await declarations.closure(controllerFile, rawBody, local ? freeIdentifiers(rawBody) : names)]
+    const widened = !args || args.names.some((name) => name !== '__args__' && !NOT_BINDINGS.has(name) && !binds(name))
+    const names = widened ? (whole?.names ?? rawBody.match(IDENTIFIER) ?? []) : args.names
+    const parts = [await declarations.closure(controllerFile, rawBody, names)]
     // `this.<member>` names the class's own field or method, which only the class statements hold.
-    if (/\bthis\s*\.\s*[A-Za-z_$]/u.test(unfollowed.join('\n'))) parts.push(await declarations.classChain(controllerFile, lookup.className))
+    if (!args || args.thisMember || (widened && (whole?.thisMember ?? true))) parts.push(await declarations.classChain(controllerFile, lookup.className))
     unseen = digest(parts.join('\n'))
   }
   return {

@@ -254,4 +254,67 @@ export function registerWebRoutes(router: Router): void {
     await update('dense', "    await this.authorize(String(t0), 'Post')")
     expect(Date.now() - started).toBeLessThan(20_000)
   })
+  test('reads names from the syntax tree: a spread, a comment with an apostrophe, destructuring, a default import and a re-exported parent', async () => {
+    const validators = `import { z } from 'zod'
+import fallback from './Fallback.js'
+
+const baseShape = { title: z.string().min(1) }
+const { bodyRule } = { bodyRule: z.string().min(1) }
+
+export const SpreadSchema = z.object({
+  // the author's id is set by the server
+  ...baseShape,
+  body: bodyRule,
+  note: fallback,
+})
+`
+    const base = `import { Controller } from '@guren/core'
+
+export class BaseController extends Controller {
+  async destroy(): Promise<Response> {
+    await this.authorize('delete', 'Post')
+    return this.json({})
+  }
+}
+`
+    const files = (extra: Record<string, string> = {}): Record<string, string> => ({
+      ...FILES,
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.put('/posts/:id', { name: 'posts.update' }, [PostController, 'update'])
+  router.delete('/posts/:id', { name: 'posts.destroy' }, [PostController, 'destroy'])
+}
+`,
+      'app/Http/Controllers/PostController.ts': `import { BaseController } from './Base/index.js'
+import { SpreadSchema } from '../Validators/PostValidator.js'
+
+export class PostController extends BaseController {
+  async update(): Promise<Response> {
+    await this.validateBody(SpreadSchema)
+    return this.json({})
+  }
+}
+`,
+      'app/Http/Controllers/Base/index.ts': "export * from '../BaseController.js'\n",
+      'app/Http/Controllers/BaseController.ts': base,
+      'app/Http/Validators/PostValidator.ts': validators,
+      'app/Http/Validators/Fallback.ts': "import { z } from 'zod'\n\nexport default z.string().min(1)\n",
+      ...extra,
+    })
+    const read = async (name: string, extra?: Record<string, string>) => {
+      const records = await readSecurityRecords(await app(name, files(extra)))
+      if ('unreadable' in records) throw new Error(records.unreadable)
+      const of = (method: string) => JSON.stringify(records.routes.find((route) => route.method === method)!.handler)
+      return { update: of('PUT'), destroy: of('DELETE') }
+    }
+    const before = await read('tree-a')
+    const loosen = (find: string, replace: string) => ({ 'app/Http/Validators/PostValidator.ts': validators.replace(find, replace) })
+
+    expect((await read('tree-b', loosen('const baseShape = { title: z.string().min(1) }', 'const baseShape = { title: z.string() }'))).update).not.toBe(before.update)
+    expect((await read('tree-c', loosen('bodyRule: z.string().min(1)', 'bodyRule: z.string()'))).update).not.toBe(before.update)
+    expect((await read('tree-d', { 'app/Http/Validators/Fallback.ts': "import { z } from 'zod'\n\nexport default z.string()\n" })).update).not.toBe(before.update)
+    expect((await read('tree-e', { 'app/Http/Controllers/BaseController.ts': base.replace("    await this.authorize('delete', 'Post')\n", '') })).destroy).not.toBe(before.destroy)
+  })
 })
