@@ -140,16 +140,22 @@ async function auditExport(appDir: string): Promise<RevisionAudit> {
   return report ? { report } : { unavailable: 'the audit printed no report there' }
 }
 
+/** Each revision exported with the install on disk linked in, or why they could not be; never some alone. */
+export type RevisionExports<Side extends string> =
+  | { trees: Record<Side, string>; dispose: () => Promise<void> }
+  | { unavailable: string }
+
 /**
- * Audits both sides of `change`, or neither. A commit whose lockfile is not the one installed on
- * disk is not audited: its dependencies are not here, and another install's would answer for the
- * wrong code.
+ * Exports every revision of `revisions` under one temp directory, each with the install on disk
+ * linked in, and returns the application directory in each. A revision whose lockfile is not the
+ * one installed is refused: its dependencies are not here, and another install's would answer for
+ * the wrong code. `verb` completes "the <side> was not …" in a refusal.
  */
-export async function auditChangeRevisions(cwd: string, change: ResolvedChange): Promise<ChangeAudits> {
-  const unavailable = (reason: string): ChangeAudits => ({ unavailable: reason })
+export async function exportRevisions<Side extends string>(cwd: string, appPrefix: string, revisions: Record<Side, string>, verb: string): Promise<RevisionExports<Side>> {
+  const unavailable = (reason: string): RevisionExports<Side> => ({ unavailable: reason })
   const root = await git(cwd, ['rev-parse', '--show-toplevel'])
   if (root === undefined) return unavailable('git could not name the repository root')
-  const directories = installDirectories(change.appPrefix)
+  const directories = installDirectories(appPrefix)
   const installs = directories.filter((directory) => existsSync(join(root, directory, 'node_modules')))
   if (installs.length === 0) return unavailable('no node_modules is installed here; run bun install')
   for (const directory of directories) {
@@ -161,20 +167,21 @@ export async function auditChangeRevisions(cwd: string, change: ResolvedChange):
   const lockfiles = directories.flatMap((directory) => LOCKFILES.map((lockfile) => `${directory}${lockfile}`))
   const installed = new Map(await Promise.all(lockfiles.map(async (path) => [path, existsSync(join(root, path)) ? await git(root, ['hash-object', '--no-filters', '--', path]) : undefined] as const)))
   if ([...installed.values()].every((id) => id === undefined)) return unavailable('no lockfile here says which install this is')
-  const revisions = { head: change.head, base: change.mergeBase }
-  for (const side of ['head', 'base'] as const) {
+  const sides = Object.keys(revisions) as Side[]
+  for (const side of sides) {
     for (const path of lockfiles) {
       if ((await git(root, ['rev-parse', '--verify', '--quiet', `${revisions[side]}:${path}`])) !== installed.get(path)) {
-        return unavailable(`the ${side} was not audited: ${path} at ${revisions[side].slice(0, 12)} is not the lockfile installed here`)
+        return unavailable(`the ${side} was not ${verb}: ${path} at ${revisions[side].slice(0, 12)} is not the lockfile installed here`)
       }
     }
   }
 
   const scratch = await mkdtemp(join(tmpdir(), 'guren-change-audit-'))
-  const exportSide = async (side: ChangeSide): Promise<string | undefined> => {
+  const dispose = (): Promise<void> => rm(scratch, { recursive: true, force: true })
+  const exportSide = async (side: Side): Promise<string | undefined> => {
     const tree = join(scratch, side)
     try {
-      const refused = await exportBlobs(root, revisions[side], tree, change.appPrefix)
+      const refused = await exportBlobs(root, revisions[side], tree, appPrefix)
       if (refused) return refused
       for (const directory of installs) {
         await mkdir(join(tree, directory), { recursive: true })
@@ -185,17 +192,27 @@ export async function auditChangeRevisions(cwd: string, change: ResolvedChange):
       return (error as Error).message.split('\n')[0]
     }
   }
-  try {
-    // Both exports stand before either runs: a commit that cannot be exported leaves no code loaded.
-    for (const side of ['head', 'base'] as const) {
-      const refused = await exportSide(side)
-      if (refused !== undefined) return unavailable(`the ${side} was not audited: ${revisions[side].slice(0, 12)} could not be exported: ${refused}`)
+  // Every export stands before any runs: a commit that cannot be exported leaves no code loaded.
+  for (const side of sides) {
+    const refused = await exportSide(side)
+    if (refused !== undefined) {
+      await dispose()
+      return unavailable(`the ${side} was not ${verb}: ${revisions[side].slice(0, 12)} could not be exported: ${refused}`)
     }
-    const [base, head] = [await auditExport(join(scratch, 'base', change.appPrefix)), await auditExport(join(scratch, 'head', change.appPrefix))]
+  }
+  return { trees: Object.fromEntries(sides.map((side) => [side, join(scratch, side, appPrefix)])) as Record<Side, string>, dispose }
+}
+
+/** Audits both sides of `change`, or neither. */
+export async function auditChangeRevisions(cwd: string, change: ResolvedChange): Promise<ChangeAudits> {
+  const exported = await exportRevisions<ChangeSide>(cwd, change.appPrefix, { head: change.head, base: change.mergeBase }, 'audited')
+  if ('unavailable' in exported) return { unavailable: exported.unavailable }
+  try {
+    const [base, head] = [await auditExport(exported.trees.base), await auditExport(exported.trees.head)]
     if ('unavailable' in head) return { unavailable: `the head was not audited: ${head.unavailable}`, loadedCode: true }
     if ('unavailable' in base) return { unavailable: `the base was not audited: ${base.unavailable}`, loadedCode: true }
     return { base: base.report, head: head.report }
   } finally {
-    await rm(scratch, { recursive: true, force: true })
+    await exported.dispose()
   }
 }

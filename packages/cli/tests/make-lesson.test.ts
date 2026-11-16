@@ -7,6 +7,7 @@ import { runDocsCheck } from '../src/docs-check'
 import { scanDocs } from '../src/docs-index'
 import { generateEntityContext, renderEntityContextMarkdown } from '../src/entity-context'
 import { makeLesson } from '../src/make-lesson'
+import { reproduceLesson } from '../src/lesson-reproduce'
 import { createTempWorkspace } from './helpers'
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -53,6 +54,38 @@ describe('makeLesson', () => {
       // Bare digits are a pull request unless git reads them as this repository's commit.
       expect(readFileSync(await makeLesson('Bare number', { from: '412' }), 'utf8')).toContain('source: { pr: 412, kind: review-finding }')
       await expect(makeLesson('Kind alone', { kind: 'revert' })).rejects.toThrow('--kind says what --from came from')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('writes --enforced-by and a not-run reproduced wherever no commit can be run, and refuses a check that does not exist', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-lesson-enforced-')
+    try {
+      await mkdir(join(workspace.dir, 'tests'), { recursive: true })
+      await writeFile(join(workspace.dir, 'tests/posts.test.ts'), "test('page 2 [fix-page-2]', () => {})\n", 'utf8')
+      const enforcedBy = 'tests/posts.test.ts#fix-page-2'
+
+      const fromPr = readFileSync(await makeLesson('From a pull request', { from: '#412', enforcedBy }), 'utf8')
+      expect(fromPr).toContain(`enforcedBy: "${enforcedBy}"\nreproduced: not-run\nreproducedBecause: "--from #412 names a pull request, whose commits this does not read"\n`)
+      expect(fromPr).not.toContain('name it in enforcedBy')
+      expect(readFileSync(await makeLesson('No source', { enforcedBy }), 'utf8')).toContain('reproducedBecause: "no --from names the commit that removed the defect"')
+      expect(readFileSync(await makeLesson('Skipped', { from: '#1', enforcedBy, reproduce: false }), 'utf8')).toContain('reproducedBecause: "make:lesson ran with --no-reproduce"')
+
+      await expect(makeLesson('Missing name', { enforcedBy: 'tests/posts.test.ts#fix-page' })).rejects.toThrow('does not hold fix-page')
+      await expect(makeLesson('Missing file', { enforcedBy: 'tests/none.test.ts#x' })).rejects.toThrow('which is not a file in the application')
+      await expect(makeLesson('Outside', { enforcedBy: '../tests/posts.test.ts#fix-page-2' })).rejects.toThrow('which is not a file in the application')
+      await expect(makeLesson('No name', { enforcedBy: 'tests/posts.test.ts' })).rejects.toThrow('names no check')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('runs only a test file as the reproducing check', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-lesson-arch-')
+    try {
+      await writeFile(join(workspace.dir, 'guren.arch.ts'), "export default { 'controllers-no-drizzle': {} }\n", 'utf8')
+      expect(await reproduceLesson(workspace.dir, 'deadbeef', 'guren.arch.ts#controllers-no-drizzle')).toEqual({ value: 'not-run', because: 'guren.arch.ts is not a test file, and only a test is run' })
     } finally {
       await workspace.cleanup()
     }

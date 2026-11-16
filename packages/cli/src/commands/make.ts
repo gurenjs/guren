@@ -132,6 +132,8 @@ export const makeLessonCommand = defineCommand({
     paths: { type: 'string', description: 'Globs a cross-cutting lesson governs, comma-separated.' },
     from: { type: 'string', description: 'Where it came from: a commit SHA or a pull request number.' },
     kind: { type: 'string', description: `What it came from: ${LESSON_SOURCE_KINDS.join(', ')}. Read from --from when omitted.` },
+    'enforced-by': { type: 'string', description: 'The check that catches the failure, as <file>#<name>. With --from <commit>, its test is run at the commit and its parent to record `reproduced`.' },
+    reproduce: { type: 'boolean', default: true, description: 'Run the --enforced-by test at the --from commit and its parent (--no-reproduce records not-run).' },
     by: { type: 'string', description: 'OKF actor for generated.by. Defaults to the git author.' },
     force: FORCE_ARG,
     module: MODULE_ARG,
@@ -144,6 +146,9 @@ export const makeLessonCommand = defineCommand({
       paths: args.paths ? String(args.paths).split(',') : undefined,
       from: args.from,
       kind: args.kind as LessonSourceKind | undefined,
+      enforcedBy: args['enforced-by'] === undefined ? undefined : String(args['enforced-by']),
+      reproduce: args.reproduce !== false,
+      onReproduce: (enforcedBy, commit) => consola.info(`Running ${enforcedBy.split('#', 1)[0]} at ${commit.slice(0, 12)} and its parent, each exported with this install and this environment, to record whether it catches the failure.`),
       by: args.by,
     })
     consola.success(`Lesson created at ${file}. It is a draft: merging it as \`status: stable\` is what delivers its rule.`)
