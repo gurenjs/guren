@@ -75,7 +75,8 @@ const NOT_BINDINGS = new Set(['this', 'super', 'true', 'false', 'null', 'undefin
 
 // Subtrees that only type the code: a name read there reaches nothing at run time.
 const TYPE_ONLY = new Set(['TSTypeAnnotation', 'TSTypeParameterInstantiation', 'TSTypeParameterDeclaration', 'TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSDeclareFunction'])
-const KEYED = new Set(['ObjectProperty', 'ObjectMethod', 'ClassProperty', 'ClassMethod', 'ClassPrivateProperty', 'ClassAccessorProperty', 'TSPropertySignature'])
+// A member of an object or a class literal, whose non-computed key is a name and no reference.
+const KEYED = /^(?:Object|Class)(?:Property|Method|PrivateProperty|AccessorProperty)$|^TSPropertySignature$/u
 const LABELLED = new Set(['LabeledStatement', 'BreakStatement', 'ContinueStatement'])
 
 /** The identifiers a syntax tree reads as values, from the tree itself: not a member name, a key, a label or a type. */
@@ -86,7 +87,7 @@ export function referencedIdentifiers(node: unknown): string[] {
     if (current.type !== 'Identifier') return
     const holder = parent as (BabelNode & { property?: unknown; key?: unknown; computed?: boolean }) | null
     if (holder && (holder.type === 'MemberExpression' || holder.type === 'OptionalMemberExpression') && holder.property === current && !holder.computed) return
-    if (holder && KEYED.has(holder.type) && holder.key === current && !holder.computed) return
+    if (holder && KEYED.test(holder.type) && holder.key === current && !holder.computed) return
     if (holder && LABELLED.has(holder.type)) return
     found.add((current as BabelNode & { name: string }).name)
   })
