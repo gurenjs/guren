@@ -28,8 +28,10 @@ the version PR also waits for the user to say so. Everything else is yours.
   `bun install`. It can stop partway; its message says why.
 - `.github/workflows/release.yml` runs on `release: published`. Its `validate`
   job builds, typechecks, tests and runs the smokes; its `publish` job runs
-  `changeset publish` with npm trusted publishing. Never run `bun run release`
-  locally.
+  `changeset publish` with npm trusted publishing. `publish` runs in the `npm`
+  environment, which waits for the user's approval after `validate` passes;
+  each package's trusted publisher names that environment. Never run
+  `bun run release` locally.
 - The tag is `v<@guren/server version>` when the server moved and that tag is
   free. Otherwise it is the newest `v*` tag with its patch number raised by
   one: after `v2.37.0`, a release that leaves the server at 2.37.0 is
@@ -188,6 +190,11 @@ prompts.
 ```bash
 gh run list --workflow release.yml --limit 1 --json databaseId,status,headSha
 ```
+
+Once `validate` passes, `publish` waits in the `npm` environment. Tell the user
+it is waiting and leave the approval to them (the run's **Review deployments**
+button); never approve it yourself. A run that stops there is waiting, not
+wedged.
 
 Wait for that run in the background (the loop is in troubleshooting), then
 judge it by job and step conclusions, not by grepping the log. The `New tag:`
