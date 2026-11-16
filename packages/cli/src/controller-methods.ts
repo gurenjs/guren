@@ -232,15 +232,27 @@ export const AUTHORIZATION_CALL_PATTERN = controllerMemberCall('authorize', 'can
  */
 const GATE_CALL_PATTERN = /\b[gG]ate\s*\.\s*(?:allows|denies|any|all|none|authorize|inspect|check|forUser)\s*\(/
 
-const ABILITY_LITERAL_PATTERN = /\bthis\s*\.\s*(?:authorize|can)\s*\(\s*(['"`])([^'"`]+)\1/g
+const ABILITY_LITERAL_PATTERN = /\bthis\s*\.\s*(authorize|can)\s*\(\s*(['"`])([^'"`]+)\2/g
+
+/** One `this.authorize()` / `this.can()` call whose ability is a string literal, in source order. */
+export interface LiteralAuthorizationCall {
+  member: 'authorize' | 'can'
+  ability: string
+}
 
 /**
- * The abilities an action names as string literals in `this.authorize()` / `this.can()`, read
- * from `rawBody` where the blanked `body` (same offsets) still holds code, so a comment or a
- * string that spells one is not a check.
+ * The `this.authorize()` / `this.can()` calls an action makes with a literal ability, read from
+ * `rawBody` where the blanked `body` (same offsets) still holds code, so a comment or a string
+ * that spells one is not a check.
  */
+export function literalAuthorizationCalls(body: string, rawBody: string): LiteralAuthorizationCall[] {
+  return [...rawBody.matchAll(ABILITY_LITERAL_PATTERN)].filter((match) => body.startsWith('this', match.index))
+    .map((match) => ({ member: match[1] as LiteralAuthorizationCall['member'], ability: match[3]! }))
+}
+
+/** The abilities an action names as string literals in `this.authorize()` / `this.can()`. */
 export function literalAbilities(body: string, rawBody: string): string[] {
-  return [...rawBody.matchAll(ABILITY_LITERAL_PATTERN)].filter((match) => body.startsWith('this', match.index)).map((match) => match[2]!)
+  return literalAuthorizationCalls(body, rawBody).map((call) => call.ability)
 }
 
 /** Whether an action body shows an authorization decision: {@link AUTHORIZATION_CALL_PATTERN} or a gate asked by hand. */

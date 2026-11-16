@@ -108,6 +108,35 @@ export const changeLaneCommand = defineCommand({
   },
 })
 
+export const changeRecordsCommand = defineCommand({
+  meta: { name: 'change:records', description: "Print each route's security record (RFC 0040 §3): its middleware with their capabilities, its contract schemas and the validator exports they are, and the authorize(), can() and validate calls of its action. Introspects the application (without its env files), so its code runs; exits 1 when it cannot be read." },
+  args: {
+    json: { type: 'boolean', description: 'Print the records as JSON, the form change:lane compares.' },
+    app: { type: 'string', description: 'Application root directory.' },
+  },
+  async run({ args }) {
+    const cwd = resolve(args.app ?? process.cwd())
+    const { readSecurityRecords } = await import('../change/security-records-read')
+    const records = await readSecurityRecords(cwd)
+    if ('unreadable' in records) {
+      console.error(`No security records: ${records.unreadable}`)
+      markCommandFailed()
+      return
+    }
+    if (args.json) {
+      console.log(JSON.stringify(records))
+      return
+    }
+    for (const route of records.routes) {
+      const guards = route.middleware.map((entry) => entry.name ?? `(inline ${entry.kind})`).join(', ') || 'no middleware'
+      const action = 'unread' in route.handler ? `action not read: ${route.handler.unread}`
+        : [...route.handler.authorizes.map((call) => `${call.member}('${call.ability}')`), ...route.handler.validates.map((schema) => `validates ${schema}`)].join(', ') || 'no authorize or validate call'
+      const contracts = Object.keys(route.contracts).join(', ')
+      console.log(`${route.method} ${route.path}${route.action ? ` → ${route.action}` : ''}\n  middleware: ${guards}\n  contracts: ${contracts || 'none'}\n  action: ${action}`)
+    }
+  },
+})
+
 export const changePolicyCommand = defineCommand({
   meta: { name: 'change:policy', description: "Regenerate the block of REVIEW.md, and of .cursor/BUGBOT.md for an app that reviews with Cursor, that lists what a reviewer must read (RFC 0040 §7), and each installed agent's lessons rule, from the application as registered; --check writes nothing and exits 1 on a stale or missing file." },
   args: {

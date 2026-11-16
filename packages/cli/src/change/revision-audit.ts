@@ -14,6 +14,7 @@ import { promisify } from 'node:util'
 import type { AuditReport } from '../audit'
 import { cliEntry } from '../cli-entry'
 import type { ChangeSide, ResolvedChange } from './resolve'
+import type { SecurityRecordPair, SecurityRecords } from './security-records'
 
 const execute = promisify(execFile)
 
@@ -29,7 +30,10 @@ type RevisionAudit = { report: AuditReport } | { unavailable: string }
  * The audit of both sides, or why the two could not be compared; never one side alone.
  * `loadedCode` is set once a child ran in an export, whether or not it reported.
  */
-export type ChangeAudits = { base: AuditReport; head: AuditReport } | { unavailable: string; loadedCode?: true }
+export type ChangeAudits = ({ base: AuditReport; head: AuditReport } | { unavailable: string; loadedCode?: true }) & {
+  /** Each side's per-route security records, read in the same exports (RFC 0040 §3). */
+  records?: SecurityRecordPair
+}
 
 /** The repository root, then each directory down to the application root, each with its trailing slash. */
 function installDirectories(appPrefix: string): string[] {
@@ -123,6 +127,22 @@ function parseReport(stdout: string): AuditReport | undefined {
   }
 }
 
+async function recordsExport(appDir: string): Promise<SecurityRecords | { unavailable: string }> {
+  try {
+    const { stdout } = await execute(process.execPath, [cliEntry(), 'change:records', '--json', '--app', appDir], { cwd: appDir, timeout: AUDIT_TIMEOUT_MS, maxBuffer: OUTPUT_LIMIT })
+    // A module the application imports may print ahead of the records.
+    const line = stdout.trimEnd().split('\n').at(-1) ?? ''
+    const value: unknown = JSON.parse(line)
+    if (typeof value === 'object' && value !== null && Array.isArray((value as { routes?: unknown }).routes)) return value as SecurityRecords
+    return { unavailable: 'change:records printed no records there' }
+  } catch (error) {
+    const failure = error as { stderr?: unknown; killed?: boolean }
+    if (failure.killed) return { unavailable: 'change:records did not finish there' }
+    const reason = typeof failure.stderr === 'string' ? failure.stderr.trim().split('\n').at(-1) : undefined
+    return { unavailable: reason ? reason.replace(/^No security records: /u, '') : 'change:records printed no records there' }
+  }
+}
+
 async function auditExport(appDir: string): Promise<RevisionAudit> {
   const run = (args: string[], timeout: number) => execute(process.execPath, [cliEntry(), ...args, '--app', appDir], { cwd: appDir, timeout, maxBuffer: OUTPUT_LIMIT })
   // Where `.guren/` is not committed, the routes file does not load without it; a codegen that fails shows in the audit.
@@ -203,15 +223,19 @@ export async function exportRevisions<Side extends string>(cwd: string, appPrefi
   return { trees: Object.fromEntries(sides.map((side) => [side, join(scratch, side, appPrefix)])) as Record<Side, string>, dispose }
 }
 
-/** Audits both sides of `change`, or neither. */
+/** Audits both sides of `change`, or neither, and reads both sides' security records in the same exports. */
 export async function auditChangeRevisions(cwd: string, change: ResolvedChange): Promise<ChangeAudits> {
   const exported = await exportRevisions<ChangeSide>(cwd, change.appPrefix, { head: change.head, base: change.mergeBase }, 'audited')
-  if ('unavailable' in exported) return { unavailable: exported.unavailable }
+  if ('unavailable' in exported) return { unavailable: exported.unavailable, records: { unavailable: exported.unavailable.replace(' was not audited: ', ' was not read: ') } }
   try {
     const [base, head] = [await auditExport(exported.trees.base), await auditExport(exported.trees.head)]
-    if ('unavailable' in head) return { unavailable: `the head was not audited: ${head.unavailable}`, loadedCode: true }
-    if ('unavailable' in base) return { unavailable: `the base was not audited: ${base.unavailable}`, loadedCode: true }
-    return { base: base.report, head: head.report }
+    const [baseRecords, headRecords] = [await recordsExport(exported.trees.base), await recordsExport(exported.trees.head)]
+    const records: SecurityRecordPair = 'unavailable' in headRecords ? { unavailable: `the head's records were not read: ${headRecords.unavailable}` }
+      : 'unavailable' in baseRecords ? { unavailable: `the base's records were not read: ${baseRecords.unavailable}` }
+        : { base: baseRecords, head: headRecords }
+    if ('unavailable' in head) return { unavailable: `the head was not audited: ${head.unavailable}`, loadedCode: true, records }
+    if ('unavailable' in base) return { unavailable: `the base was not audited: ${base.unavailable}`, loadedCode: true, records }
+    return { base: base.report, head: head.report, records }
   } finally {
     await exported.dispose()
   }
