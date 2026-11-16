@@ -127,6 +127,13 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The `npm` environment's required reviewers hold this job until approved,
+    # and each package's npm trusted publisher names this environment, so an
+    # OIDC token from any other job or workflow is refused by the registry.
+    # Its deployment rule admits `v*` tags only.
+    environment:
+      name: npm
+      url: https://www.npmjs.com/org/guren
     # id-token: write belongs to this job only. It lets every step of the job
     # request an OIDC token for this workflow, the credential npm trusted
     # publishing accepts, and validate's smokes run dependencies that
