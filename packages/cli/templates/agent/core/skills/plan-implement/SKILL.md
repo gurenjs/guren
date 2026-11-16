@@ -219,6 +219,9 @@ working tree shows nothing: give the agent the commit the task starts from,
 the parent of the oldest commit naming its first step's id. Ids carry `.` and
 `+`, so match them literally:
 `git log --reverse --fixed-strings --grep '<step-id>' --format=%H | head -1`.
+Without such an agent, the `review-change` skill carries the same contract:
+follow it on that change from the same start commit, in a fresh session when
+your client can start one.
 
 Its findings are advisory: a reviewer asked for gaps reports some whether or
 not they exist, so weigh each one against the plan before acting on it. A

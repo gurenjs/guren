@@ -5,6 +5,8 @@ import { RETIRED_CANONICAL_RULES, RETIRED_CANONICAL_SKILLS } from '../src/agent-
 // `agent:sync --prune` claims every skill directory and rule file the harness ships; these
 // sentences spell both sets out by hand, and `plan-implement` (#1060) shipped missing from every skill list.
 const SKILLS_DIR = new URL('../templates/agent/core/skills/', import.meta.url)
+// Skills only the `.agents` family installs (the review contract Claude Code reads as an agent instead).
+const AGENTS_SKILLS_DIR = new URL('../templates/agent/targets/agents/skills/', import.meta.url)
 const RULES_DIR = new URL('../templates/agent/core/rules/', import.meta.url)
 
 const SKILL_LISTS = [
@@ -20,7 +22,7 @@ const RULE_LISTS = [
 ]
 
 async function shippedSkillNames(): Promise<string[]> {
-  const entries = await readdir(SKILLS_DIR, { withFileTypes: true })
+  const entries = [...(await readdir(SKILLS_DIR, { withFileTypes: true })), ...(await readdir(AGENTS_SKILLS_DIR, { withFileTypes: true }))]
   return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
 }
 
