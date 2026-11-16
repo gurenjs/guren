@@ -232,12 +232,32 @@ export async function auditChangeRevisions(cwd: string, change: ResolvedChange):
     const [baseRecords, headRecords] = [await recordsExport(exported.trees.base), await recordsExport(exported.trees.head)]
     // Only the head unreadable is the change's doing; a base that will not read says nothing against it.
     const records: SecurityRecordPair = 'unavailable' in baseRecords
-      ? { unavailable: `the base's records were not read: ${baseRecords.unavailable}`, side: 'base' }
+      ? { unavailable: `the base's records were not read: ${baseRecords.unavailable}`, side: 'base', ...('unavailable' in headRecords ? {} : { head: headRecords }) }
       : 'unavailable' in headRecords ? { unavailable: `the head's records were not read: ${headRecords.unavailable}`, side: 'head' }
         : { base: baseRecords, head: headRecords }
     if ('unavailable' in head) return { unavailable: `the head was not audited: ${head.unavailable}`, loadedCode: true, records }
     if ('unavailable' in base) return { unavailable: `the base was not audited: ${base.unavailable}`, loadedCode: true, records }
     return { base: base.report, head: head.report, records }
+  } finally {
+    await exported.dispose()
+  }
+}
+
+/** The head's records alone, or why not; `exported` says the head did export, so its own code would not read. */
+export type HeadRecords = SecurityRecords | { unavailable: string; exported: boolean }
+
+/**
+ * Exports the head alone and reads its security records: what a stored base record is compared
+ * with, and what every run writes into its record for later changes, whether or not the base exported.
+ */
+export async function readHeadRecords(cwd: string, change: ResolvedChange): Promise<HeadRecords> {
+  const exported = await exportRevisions(cwd, change.appPrefix, { head: change.head }, 'read')
+  if ('unavailable' in exported) return { unavailable: exported.unavailable, exported: false }
+  try {
+    // Where `.guren/` is not committed, the routes file does not load without it.
+    await execute(process.execPath, [cliEntry(), 'codegen', '--app', exported.trees.head], { cwd: exported.trees.head, timeout: CODEGEN_TIMEOUT_MS, maxBuffer: OUTPUT_LIMIT }).catch(() => undefined)
+    const records = await recordsExport(exported.trees.head)
+    return 'unavailable' in records ? { unavailable: `the head's records were not read: ${records.unavailable}`, exported: true } : records
   } finally {
     await exported.dispose()
   }

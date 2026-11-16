@@ -16,8 +16,9 @@ import { REVIEW_DOC_FILE, syncReviewDoc, type ReviewDocResult } from './review-d
 import { policyNote, REVIEW_POLICY_FILE } from './review-policy'
 import { openChange, resolveChange } from './resolve'
 import { changeAdvisories } from './revision-advisories'
-import { auditChangeRevisions } from './revision-audit'
-import type { SecurityRecordPair, SecurityRecords } from './security-records'
+import { loadBaseRecord } from './base-record'
+import { auditChangeRevisions, readHeadRecords, type HeadRecords } from './revision-audit'
+import type { SecurityRecords } from './security-records'
 
 export const EVIDENCE_DIR = '.guren/evidence'
 export const RECORD_VERSION = 1
@@ -55,7 +56,7 @@ export interface ChangeEvidence {
 }
 
 /** Why a record holds no security records: a code, since the reason may carry an application's error text. */
-export type SecurityRecordsUnavailable = 'no-source' | 'no-audit' | 'not-exported' | 'base' | 'head'
+export type SecurityRecordsUnavailable = 'no-audit' | 'not-exported' | 'head'
 
 /** What outlives the run: the base record of later changes (RFC 0040 §4). Never finding text. */
 export interface ChangeRecord {
@@ -96,18 +97,43 @@ export interface ChangeEvidenceOptions {
   gate?: (cwd: string, options: { deps: boolean; routesFile?: string }) => Promise<GateReport>
   /** Defaults to `change:policy --check`; asked only where `REVIEW.md` exists. */
   reviewDoc?: (cwd: string) => Promise<ReviewDocResult>
-  /** Defaults to `change:lane`'s own judgement; `records` takes the two sides' security records when they were read. */
-  lane?: (cwd: string, base: string, head: string, audit: boolean, deps: boolean, records?: (pair: SecurityRecordPair | undefined) => void) => Promise<ChangeLaneReport>
+  /** The merge base's stored record, read where the base does not rebuild from this install (`--base-record`). */
+  baseRecord?: string
+  /** Defaults to `change:lane`'s own judgement; `records` takes the head's security records, or why there are none. */
+  lane?: (cwd: string, base: string, head: string, audit: boolean, deps: boolean, records?: HeadRecordsSink, baseRecord?: string) => Promise<ChangeLaneReport>
 }
 
-async function judgeLane(cwd: string, base: string, head: string, audit: boolean, deps: boolean, records?: (pair: SecurityRecordPair | undefined) => void): Promise<ChangeLaneReport> {
+/** Takes the head's security records, or why there are none: what the record of this run carries for later changes. */
+export type HeadRecordsSink = (head: SecurityRecords | { unavailable: string; code: SecurityRecordsUnavailable }) => void
+
+async function judgeLane(cwd: string, base: string, head: string, audit: boolean, deps: boolean, records?: HeadRecordsSink, baseRecord?: string): Promise<ChangeLaneReport> {
   const change = await resolveChange(cwd, base, head)
   const { reader, dispose } = openChange(cwd, change)
+  let kept = false
+  const keep = (value: Parameters<HeadRecordsSink>[0]): void => { kept = true; records?.(value) }
+  const headAlone = async (): Promise<HeadRecords> => {
+    const read = await readHeadRecords(cwd, change)
+    keep('unavailable' in read ? { unavailable: read.unavailable, code: read.exported ? 'head' : 'not-exported' } : read)
+    return read
+  }
   try {
-    return await judgeChangeLane(change, reader, {
-      ...(audit ? { audit: () => auditChangeRevisions(cwd, change).then((result) => { records?.(result.records); return result }) } : {}),
+    const report = await judgeChangeLane(change, reader, {
+      ...(audit ? {
+        audit: () => auditChangeRevisions(cwd, change).then((result) => {
+          const pair = result.records
+          if (pair && !('unavailable' in pair)) keep(pair.head)
+          else if (pair?.head) keep(pair.head)
+          else if (pair?.side === 'head') keep({ unavailable: pair.unavailable, code: 'head' })
+          return result
+        }),
+        headRecords: headAlone,
+      } : {}),
       ...(deps ? { advisories: (files) => changeAdvisories(cwd, change, files) } : {}),
+      ...(baseRecord ? { baseRecord: await loadBaseRecord(baseRecord, { mergeBase: change.mergeBase, recordVersion: RECORD_VERSION, target: 'default', environment: process.env.NODE_ENV ?? null }) } : {}),
     })
+    // Every run's record carries the head's records, whatever the change touched: a later change's base is read from it.
+    if (audit && !kept) await headAlone()
+    return report
   } finally {
     await dispose()
   }
@@ -240,13 +266,11 @@ export async function collectChangeEvidence(options: ChangeEvidenceOptions): Pro
 
   let lane: ChangeLaneReport | undefined
   let securityRecords: ChangeEvidence['securityRecords'] = options.audit
-    ? { unavailable: 'the two sides were not exported, since the change touched no application source', code: 'no-source' }
+    ? { unavailable: 'the head was not read', code: 'not-exported' }
     : { unavailable: 'change:evidence ran with --no-audit, which reads no application code', code: 'no-audit' }
-  const keepRecords = (pair: SecurityRecordPair | undefined): void => {
-    if (pair) securityRecords = 'unavailable' in pair ? { unavailable: pair.unavailable, code: pair.side ?? 'not-exported' } : pair.head
-  }
+  const keepRecords: HeadRecordsSink = (head) => { securityRecords = head }
   try {
-    lane = await (options.lane ?? judgeLane)(cwd, options.base, options.head, options.audit, options.deps, keepRecords)
+    lane = await (options.lane ?? judgeLane)(cwd, options.base, options.head, options.audit, options.deps, keepRecords, options.baseRecord)
   } catch (error) {
     hold('lane-unavailable', `the change could not be read: ${firstLine(error)}`)
   }
@@ -342,6 +366,8 @@ export function renderEvidenceMarkdown(evidence: ChangeEvidence): string {
     `Gate: **${evidence.gate.ok ? 'passed' : 'failed'}**. Migration impact: ${evidence.migrationImpact}.`,
   ]
   if (lane) lines.push('', `Read from ${lane.mergeBase.slice(0, 12)}..${lane.head.slice(0, 12)}.`)
+  const stored = lane?.records.stored
+  if (stored) lines.push('', `Security records were compared with the base record stored for ${stored.head.slice(0, 12)} (@guren/cli ${stored.cli ?? 'unknown'}, @guren/server ${stored.server ?? 'unknown'}).`)
   if (lane?.policy.state === 'read') {
     const approvals = lane.policy.policy.approvals?.[lane.floor]
     lines.push('', `${REVIEW_POLICY_FILE} at the merge base applies${approvals === undefined ? '' : `: a ${lane.floor} change needs ${approvals} ${approvals === 1 ? 'approval' : 'approvals'} where someone other than the author can approve`}. Nothing enforces it yet.`)

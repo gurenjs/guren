@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # To find the merge base's record among this workflow's runs and download it.
+      actions: read
     env:
       # The record names the pull request's own head, never GitHub's merge commit (RFC 0040 §8).
       BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -37,11 +39,29 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # The merge base's record, taken only from a push run on the default branch, which no pull
+      # request writes. It is read where this install cannot rebuild the base; without one that
+      # base stays unread at medium.
+      - name: Base record
+        if: ${{ env.BASE != '0000000000000000000000000000000000000000' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          merge_base=$(git merge-base "$BASE" "$HEAD")
+          run_id=$(gh run list --workflow change.yml --event push --branch "$DEFAULT_BRANCH" --commit "$merge_base" --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -z "$run_id" ]; then exit 0; fi
+          gh run download "$run_id" --name "guren-record-$merge_base" --dir "$RUNNER_TEMP/base-record"
+
       # Runs the gate as `bunx guren gate --deps` does and fails exactly when it does. Everything
       # else it could not establish is a hold in the evidence, never a failed build. Add --no-deps
       # if this runner cannot reach the npm registry.
       - name: Change evidence
-        run: bunx guren change:evidence --base "$BASE" --head "$HEAD"
+        run: |
+          args=()
+          if [ -f "$RUNNER_TEMP/base-record/record.json" ]; then args+=(--base-record "$RUNNER_TEMP/base-record/record.json"); fi
+          bunx guren change:evidence --base "$BASE" --head "$HEAD" "${args[@]}"
         env:
           # The Bun advisory check asks api.github.com, which allows 60 unauthenticated requests an hour.
           GITHUB_TOKEN: ${{ github.token }}

@@ -121,13 +121,23 @@ describe('guren add review', () => {
 
     expect(workflow).toContain('ref: ${{ env.HEAD }}')
     expect(workflow).toContain('fetch-depth: 0')
-    expect(workflow).toContain('run: bunx guren change:evidence --base "$BASE" --head "$HEAD"\n')
+    expect(workflow).toContain('bunx guren change:evidence --base "$BASE" --head "$HEAD" "${args[@]}"\n')
     expect(workflow.match(/if: \$\{\{ !cancelled\(\) && hashFiles\('\.guren\/evidence\/[a-z.]+'\) != '' \}\}\n {8}continue-on-error: true/g)).toHaveLength(2)
     expect(workflow).not.toMatch(/^\s*retention-days:/m)
     expect(workflow).toContain('types: [opened, synchronize, reopened, edited]')
     expect(workflow).toContain("if: ${{ github.event.action != 'edited' || github.event.changes.base != null }}")
     expect(workflow).toContain('git fetch --no-tags origin "$BASE"')
     expect(workflow).toContain('name: guren-record-${{ env.HEAD }}')
+  })
+
+  test('should read the base record only from a push run on the default branch', () => {
+    const workflow = reviewFileEntries().find((entry) => entry.path === '.github/workflows/change.yml')!.contents
+
+    expect(workflow).toContain('actions: read')
+    expect(workflow).toContain('gh run list --workflow change.yml --event push --branch "$DEFAULT_BRANCH" --commit "$merge_base"')
+    expect(workflow).toContain('gh run download "$run_id" --name "guren-record-$merge_base"')
+    expect(workflow).toContain('args+=(--base-record "$RUNNER_TEMP/base-record/record.json")')
+    expect(workflow).not.toMatch(/run: [^\n]*\$\{\{/)
   })
 
   test('should ask for each lane label the command offers to create', async () => {

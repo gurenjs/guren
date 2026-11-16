@@ -80,7 +80,7 @@ export interface SecurityRecords {
  * The two sides' records, or why they could not both be read. `side` names the one the reader
  * could not read, when only one: a head the change made unreadable is not a missing base.
  */
-export type SecurityRecordPair = { base: SecurityRecords; head: SecurityRecords } | { unavailable: string; side?: 'base' | 'head' }
+export type SecurityRecordPair = { base: SecurityRecords; head: SecurityRecords } | { unavailable: string; side?: 'base' | 'head'; head?: SecurityRecords }
 
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, entry: unknown) =>
   entry && typeof entry === 'object' && !Array.isArray(entry)
