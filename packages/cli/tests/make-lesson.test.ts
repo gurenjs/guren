@@ -149,7 +149,7 @@ describe('lessons in check --docs', () => {
 })
 
 describe('lessons check --docs cannot read', () => {
-  it('fails a block-scalar rule and an enforcedBy that is not one value, reads the name past the first #, and warns on an impossible date', async () => {
+  it('fails a block-scalar rule and an enforcedBy that is not one value, reads the name past the first #, and warns on an impossible date and a reproduced value make:lesson never writes', async () => {
     const workspace = await createTempWorkspace('guren-cli-lesson-unread-')
     try {
       await mkdir(join(workspace.dir, 'docs/lessons'), { recursive: true })
@@ -161,6 +161,8 @@ describe('lessons check --docs cannot read', () => {
         'empty.md': lessonDoc('rule: "r"\nenforcedBy:'),
         'hash.md': lessonDoc('rule: "r"\nenforcedBy: tests/auth.test.ts#AC-auth-1#removed'),
         'date.md': lessonDoc('status: stable\nrule: "r"\nreview: 2027-02-30'),
+        'reproduced.md': lessonDoc('rule: "r"\nreproduced: yes'),
+        'reproduced-ok.md': lessonDoc('rule: "r"\nreproduced: not-run'),
       }
       for (const [name, content] of Object.entries(files)) await writeFile(join(workspace.dir, 'docs/lessons', name), content, 'utf8')
 
@@ -172,6 +174,7 @@ describe('lessons check --docs cannot read', () => {
         'docs-lesson-enforced:empty.md': 'fail',
         'docs-lesson-enforced:hash.md': 'fail',
         'docs-lesson-review:date.md': 'warn',
+        'docs-lesson-reproduced:reproduced.md': 'warn',
       })
       expect((await scanDocs(workspace.dir)).find((ref) => ref.path.endsWith('block.md'))?.lesson?.rule).toBe('')
     } finally {

@@ -13,6 +13,7 @@ import { parseModelFile } from './model-parser'
 import { scanDocs, extractDocsTags, buildEntityDocIndex, LESSON_RULE_LIMIT, type DocRef } from './docs-index'
 import { ISSUE_REF_FORMS } from './issue-refs'
 import { enforcedByProblem } from './lesson-enforced'
+import { isAppRootRelative, normalizeTarget } from './app-relative'
 import type { ParseCache } from './parse-cache'
 import { advisory, check, type CheckResult } from './check-result'
 import { acceptanceIdEntity, acceptanceTestsLoader, type AcceptanceTestRef } from './docs-acceptance'
@@ -31,26 +32,6 @@ export interface DocsCheckOptions {
 
 function hasGlobChars(entry: string): boolean {
   return entry.includes('*')
-}
-
-/**
- * Backslashes count as separators and a drive letter is absolute, as Windows
- * `path.resolve` treats them — a `..\..\outside.md` judged by `/` rules alone
- * slips past containment. Both containment checks below start here so they
- * cannot disagree about what a separator is.
- */
-function normalizeTarget(target: string): { path: string; absolute: boolean } {
-  const path = target.replace(/\\/g, '/')
-  return { path, absolute: path.startsWith('/') || /^[A-Za-z]:/.test(path) }
-}
-
-/**
- * Doc links are app-root-relative by convention; absolute paths and `..`
- * segments would validate files outside the project.
- */
-function isAppRootRelative(entry: string): boolean {
-  const { path, absolute } = normalizeTarget(entry)
-  return !absolute && !path.split('/').includes('..')
 }
 
 /**
@@ -321,14 +302,14 @@ function changedScope(refs: DocRef[], changedFiles: Set<string> | null): Set<str
   return new Set(refs.filter(inScope).map((ref) => ref.path))
 }
 
+// What `make:lesson --enforced-by` writes; `check --docs` never runs the check again.
+const REPRODUCED_VALUES = new Set(['true', 'false', 'not-run'])
+
 /**
  * A lesson (RFC 0040 §11): one rule line, an `enforcedBy` that names a check which exists, a
  * `review` date nobody let pass, and a `supersededBy` on a retired one. A rule or a check that
  * does not hold fails; the dates and the retirement are advisory, since time alone breaks them.
  */
-// What `make:lesson --enforced-by` writes; `check --docs` never runs the check again.
-const REPRODUCED_VALUES = new Set(['true', 'false', 'not-run'])
-
 async function checkLesson(cwd: string, ref: DocRef, probes: PathProbes): Promise<CheckResult[]> {
   const lesson = ref.lesson
   if (!lesson) return []
@@ -343,7 +324,7 @@ async function checkLesson(cwd: string, ref: DocRef, probes: PathProbes): Promis
   }
   if (lesson.enforcedBy !== undefined) {
     const problem = await enforcedByProblem(lesson.enforcedBy, async (file) =>
-      isAppRootRelative(file) && (await probes.exists(file)) ? readFile(`${cwd}/${file}`, 'utf8').catch(() => undefined) : undefined)
+      (await probes.exists(file)) ? readFile(`${cwd}/${file}`, 'utf8').catch(() => undefined) : undefined)
     if (problem) {
       results.push(check(`docs-lesson-enforced:${ref.path}`, `${ref.path} enforcedBy`, 'fail', problem, 'Name the check as <file>#<name>: a file relative to the application root, and a rule or a test it holds, as it is written there.', ref.path))
     }

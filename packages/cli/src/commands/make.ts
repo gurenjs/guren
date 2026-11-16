@@ -130,7 +130,7 @@ export const makeLessonCommand = defineCommand({
     rule: { type: 'string', description: 'The one-line rule; the title when omitted.' },
     entity: { type: 'string', description: 'Model class name the lesson governs (case-insensitive).' },
     paths: { type: 'string', description: 'Globs a cross-cutting lesson governs, comma-separated.' },
-    from: { type: 'string', description: 'Where it came from: a commit SHA or a pull request number.' },
+    from: { type: 'string', description: 'Where it came from: a pull request number, or the commit that removed the defect (a fix or a revert), whose parent still has it.' },
     kind: { type: 'string', description: `What it came from: ${LESSON_SOURCE_KINDS.join(', ')}. Read from --from when omitted.` },
     'enforced-by': { type: 'string', description: 'The check that catches the failure, as <file>#<name>. With --from <commit>, its test is run at the commit and its parent to record `reproduced`.' },
     reproduce: { type: 'boolean', default: true, description: 'Run the --enforced-by test at the --from commit and its parent (--no-reproduce records not-run).' },

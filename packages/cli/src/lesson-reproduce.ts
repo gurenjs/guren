@@ -6,10 +6,11 @@
  */
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix } from 'node:path'
 
 import { runGit } from './changed-files'
 import { cliEntry } from './cli-entry'
+import { isAppRootRelative } from './app-relative'
 import { exportRevisions } from './change/revision-audit'
 import { parseEnforcedBy } from './lesson-enforced'
 import { acceptanceStatus } from './plan/acceptance-status'
@@ -31,7 +32,16 @@ type Outcome = 'fails' | 'passes' | { unread: string }
 
 const notRun = (because: string): Reproduced => ({ value: 'not-run', because })
 
+/** A spawn that fails (no `bun` on PATH), or an overlay that cannot be written, is a check that could not be run. */
 async function runCheck(appDir: string, file: string, name: string, overlay: string, exec: CapturedExec): Promise<Outcome> {
+  try {
+    return await runCheckIn(appDir, file, name, overlay, exec)
+  } catch (error) {
+    return { unread: (error as Error).message.split('\n')[0] ?? 'the check could not be run' }
+  }
+}
+
+async function runCheckIn(appDir: string, file: string, name: string, overlay: string, exec: CapturedExec): Promise<Outcome> {
   const target = join(appDir, file)
   await mkdir(dirname(target), { recursive: true })
   await writeFile(target, overlay)
@@ -40,12 +50,14 @@ async function runCheck(appDir: string, file: string, name: string, overlay: str
   const scratch = await mkdtemp(join(tmpdir(), 'guren-lesson-junit-'))
   try {
     const outfile = join(scratch, 'junit.xml')
-    const run = await exec([bunExecutable(), 'test', file, '--reporter=junit', `--reporter-outfile=${outfile}`], appDir, { timeoutMs: TEST_TIMEOUT_MS })
+    // `./`: a bare path is a substring filter to `bun test`, which would also run `modules/*/tests/<file>`.
+    const run = await exec([bunExecutable(), 'test', `./${file}`, '--reporter=junit', `--reporter-outfile=${outfile}`], appDir, { timeoutMs: TEST_TIMEOUT_MS })
     if (run.timedOut) return { unread: `bun test did not finish within ${TEST_TIMEOUT_MS / 1000} s` }
     const report = acceptanceStatus(await readFile(outfile, 'utf8').catch(() => undefined), [name])
     if (report.state === 'blocked') return { unread: report.reason }
+    if (report.state === 'invalid' && report.errors.some((error) => error.kind === 'id-in-several-files' && error.id === name)) return { unread: `[${name}] is carried by test cases in more than one file` }
     const behaviour = (report.state === 'judged' ? report.behaviours : report.observed).find((entry) => entry.id === name)
-    const cases = behaviour?.cases ?? []
+    const cases = (behaviour?.cases ?? []).filter((entry) => posix.normalize(entry.file) === file)
     if (cases.length === 0) return { unread: `no test case in ${file} carries [${name}] in its title` }
     if (cases.some((entry) => entry.outcome === 'skipped')) return { unread: `a test case carrying [${name}] was skipped` }
     return cases.some((entry) => entry.outcome === 'failed') ? 'fails' : 'passes'
@@ -62,6 +74,7 @@ async function runCheck(appDir: string, file: string, name: string, overlay: str
 export async function reproduceLesson(cwd: string, commit: string, enforcedBy: string, exec: CapturedExec = runCaptured): Promise<Reproduced> {
   const { file, path, name } = parseEnforcedBy(enforcedBy)
   if (!name) return notRun(`${enforcedBy} names no check`)
+  if (!isAppRootRelative(file)) return notRun(`${file} is not a path inside the application`)
   if (!TEST_FILE.test(path)) return notRun(`${file} is not a test file, and only a test is run`)
   const overlay = await readFile(join(cwd, path), 'utf8').catch(() => undefined)
   if (overlay === undefined) return notRun(`${file} could not be read here`)

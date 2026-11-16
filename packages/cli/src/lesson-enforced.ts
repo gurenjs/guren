@@ -4,6 +4,8 @@
  */
 import { posix } from 'node:path'
 
+import { isAppRootRelative } from './app-relative'
+
 export interface EnforcedBy {
   /** As written. */
   file: string
@@ -29,14 +31,14 @@ export function holdsName(text: string, name: string): boolean {
 }
 
 /**
- * Why `value` names no check that exists, or `undefined` when it does. `read` returns the file's
- * text, or `undefined` for a path outside the application or a file that is not there.
+ * Why `value` names no check that exists, or `undefined` when it does. `read` is asked only for
+ * a path inside the application, and returns `undefined` for a file that is not there.
  */
 export async function enforcedByProblem(value: string, read: (file: string) => Promise<string | undefined>): Promise<string | undefined> {
   if (value.trim() === '') return '`enforcedBy:` is present but names nothing (empty, or not a single value), so no check is followed.'
   const { file, path, name } = parseEnforcedBy(value)
   if (!name) return `\`enforcedBy: ${value}\` names no check in ${file}: a file existing is not a check that catches the failure.`
-  const text = await read(path)
+  const text = isAppRootRelative(file) ? await read(path) : undefined
   if (text === undefined) return `\`enforcedBy: ${value}\` names ${file}, which is not a file in the application.`
   if (!holdsName(text, name)) return `\`enforcedBy: ${value}\`: ${file} does not hold ${name}.`
   return undefined

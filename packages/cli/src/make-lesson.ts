@@ -4,7 +4,6 @@
  * the acceptance, and only then does `guren context` print its rule.
  */
 import { readFile } from 'node:fs/promises'
-import { posix } from 'node:path'
 
 import { safeModuleName, assertCwdUnsupported, slugifyProse, writeScaffoldFile, type WriterOptions } from './utils'
 import { runGit } from './changed-files'
@@ -122,8 +121,7 @@ export async function makeLesson(title: string, options: MakeLessonOptions = {})
   const enforcedBy = options.enforcedBy?.trim()
   if (enforcedBy !== undefined) {
     quoted(enforcedBy, 'enforcedBy')
-    const problem = await enforcedByProblem(enforcedBy, (file) =>
-      posix.isAbsolute(file) || file.split('/').includes('..') ? Promise.resolve(undefined) : readFile(file, 'utf8').catch(() => undefined))
+    const problem = await enforcedByProblem(enforcedBy, (file) => readFile(file, 'utf8').catch(() => undefined))
     if (problem) throw new Error(problem)
   }
   const [prefill, actor, source] = await Promise.all([
