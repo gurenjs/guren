@@ -283,6 +283,8 @@ export default function Show({ post }: Props) {
 }
 ```
 
+   Keep the `type` keyword on that import. A value import of the Resource puts the class, and everything it imports, in the client bundle; the `guren.arch.ts` a new app ships with makes `guren check` fail on it (see [Architecture boundaries](./cli-checks.md#architecture-boundaries)).
+
 2. **Codegen extracts Props.** Running `bun run codegen` (or automatically during `bun run dev`) scans every page component, extracts the `interface Props`, and writes them into `.guren/pages.gen.ts`:
 
 ```ts
