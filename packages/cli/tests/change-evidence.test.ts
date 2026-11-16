@@ -222,7 +222,7 @@ describe('the record and the summary', () => {
     expect(JSON.parse(await readFile(join(dir, 'evidence.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(evidence)))
     expect(await readFile(join(dir, 'evidence.md'), 'utf8')).toBe(renderEvidenceMarkdown(evidence))
     expect(record).toMatchObject({ recordVersion: 1, base, head, mergeBase: base, floor: 'low', eligible: false, unjudged: [], audit: { compared: false, loadedCode: false }, holds: [{ code: 'gate-failed', lane: 'medium' }], gate: { ok: false, deps: false, stages: [{ name: 'test', status: 'fail' }] } })
-    expect(record.securityRecords).toEqual({ unavailable: expect.any(String) })
+    expect(record.securityRecords).toEqual({ unavailable: 'no-source' })
     expect(typeof record.cli).toBe('string')
     expect(JSON.stringify(record)).not.toContain('1 test failed')
   })
@@ -236,7 +236,8 @@ describe('the record and the summary', () => {
     const unread = await evidenceOf(repo, base, head, { lane: async (...args) => { args[5]?.({ unavailable: 'the base was not audited: bun.lock differs' }); return lane } })
 
     expect((await changeRecord(repo, base, head, read, false)).securityRecords).toEqual(routes)
-    expect((await changeRecord(repo, base, head, unread, false)).securityRecords).toEqual({ unavailable: 'the base was not audited: bun.lock differs' })
+    expect((await changeRecord(repo, base, head, unread, false)).securityRecords).toEqual({ unavailable: 'not-exported' })
+    expect(unread.securityRecords).toEqual({ unavailable: 'the base was not audited: bun.lock differs', code: 'not-exported' })
   })
 
   test('should read the server version through the application\'s @guren/core when none sits beside it', async () => {

@@ -240,6 +240,8 @@ export interface LiteralAuthorizationCall {
   ability: string
   /** The arguments after the ability, as written and with whitespace collapsed: what the policy is asked about. */
   subject: string
+  /** A template literal with a placeholder (`posts.${action}`): the ability is built at request time. */
+  templated?: true
 }
 
 /** Where the call opened at `open` closes, judged on the blanked body so a parenthesis in a string is not counted. */
@@ -263,7 +265,7 @@ export function literalAuthorizationCalls(body: string, rawBody: string): Litera
     const close = closingParen(body, open)
     const after = match.index + match[0].length
     const subject = close === -1 ? '' : rawBody.slice(after, close).replace(/^\s*,/u, '').replace(/\s+/gu, ' ').trim()
-    return { member: match[1] as LiteralAuthorizationCall['member'], ability: match[3]!, subject }
+    return { member: match[1] as LiteralAuthorizationCall['member'], ability: match[3]!, subject, ...(match[2] === '`' && match[3]!.includes('${') ? { templated: true as const } : {}) }
   })
 }
 
@@ -314,6 +316,33 @@ export function validateCallSites(body: string): ValidateCallSite[] {
     member: match[1] as ValidateCallSite['member'],
     ...(match[2] && match[3] ? { schema: match[2].replace(/\s+/g, '') } : {}),
   }))
+}
+
+const UNFOLLOWED_CANDIDATES = new RegExp(
+  `${AUTHORIZATION_CALL_PATTERN.source}|${GATE_CALL_PATTERN.source}|${controllerMemberCall(...VALIDATE_MEMBERS).source}`,
+  'g',
+)
+
+/**
+ * The argument text, as written, of each call in an action whose ability or schema a record cannot
+ * name: `this.authorize()`/`this.can()` with no plain literal ability, a gate asked by hand, and a
+ * validate call whose argument is not one identifier (or `a.b`) passed alone.
+ */
+export function unfollowedCallArguments(body: string, rawBody: string): string[] {
+  const found: string[] = []
+  for (const match of body.matchAll(UNFOLLOWED_CANDIDATES)) {
+    const open = match.index + match[0].length - 1
+    const close = closingParen(body, open)
+    const args = rawBody.slice(open + 1, close === -1 ? rawBody.length : close)
+    const call = match[0]
+    if (/\b(?:authorize|can)\s*(?:<[^()]*>)?\s*\($/u.test(call) && /^\s*this\b/u.test(call)) {
+      if (/^\s*(['"])[^'"`]+\1/u.test(args) || /^\s*`[^`$]*`/u.test(args)) continue
+    } else if (/^\s*this\b/u.test(call)) {
+      if (/^\s*[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*(?:[),]|$)/u.test(args)) continue
+    }
+    found.push(args.replace(/\s+/gu, ' ').trim())
+  }
+  return found
 }
 
 /** An Inertia page response, which carries no JSON schema an agent could read. */

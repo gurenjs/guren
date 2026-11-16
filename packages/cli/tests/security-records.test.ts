@@ -69,6 +69,17 @@ describe('compareRecords', () => {
     expect(verdict(route({ middleware: [both] }), route({ middleware: [grouped({ authorization: { abilities: ['admin'], mode: 'all' } })] }))).toBe('weaker')
   })
 
+  test('is incomparable for a group whose members, or a kept entry, run in another order', () => {
+    const group = (members: string[]): MiddlewareRecord => ({ kind: 'group', name: 'web', capabilities: { authentication: { mode: 'required' } }, members })
+    expect(verdict(route({ middleware: [group(['auth', 'throttle'])] }), route({ middleware: [group(['throttle', 'auth'])] }))).toBe('incomparable')
+    expect(verdict(route({ middleware: [can(['update']), throttle] }), route({ middleware: [throttle, can(['update', 'publish'])] }))).toBe('incomparable')
+  })
+
+  test('compares an action it could not read by the digest of what declares its class', () => {
+    expect(verdict(route({ handler: { unread: 'not found', digest: 'a' } }), route({ handler: { unread: 'not found', digest: 'a' } }))).toBe('same')
+    expect(verdict(route({ handler: { unread: 'not found', digest: 'a' } }), route({ handler: { unread: 'not found', digest: 'b' } }))).toBe('incomparable')
+  })
+
   test('is incomparable for a group that lost a member or names one nothing registers', () => {
     const group = (members: string[], extra: Partial<MiddlewareRecord> = {}): MiddlewareRecord => ({ kind: 'group', name: 'admin', capabilities: { authentication: { mode: 'required' } }, members, ...extra })
     expect(verdict(route({ middleware: [group(['auth', 'role'])] }), route({ middleware: [group(['auth'])] }))).toBe('incomparable')

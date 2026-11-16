@@ -130,10 +130,16 @@ export const changeRecordsCommand = defineCommand({
     for (const route of records.routes) {
       const guards = route.middleware.map((entry) => entry.name ?? `(inline ${entry.kind})`).join(', ') || 'no middleware'
       const action = 'unread' in route.handler ? `action not read: ${route.handler.unread}`
-        : [...route.handler.authorizes.map((call) => `${call.member}('${call.ability}')`), ...route.handler.validates.map((schema) => `validates ${schema}`)].join(', ') || 'no authorize or validate call'
-      const contracts = Object.keys(route.contracts).join(', ')
+        : [
+          ...(route.handler.authenticates ? ['auth.userOrFail()'] : []),
+          ...route.handler.authorizes.map((call) => `${call.member}('${call.ability}'${call.subject ? `, ${call.subject}` : ''})`),
+          ...route.handler.validates.map((call) => `${call.member}(${call.schema || 'a schema written in place'})`),
+          ...(route.handler.unseen ? ['a call the reader cannot follow, compared by digest'] : []),
+        ].join(', ') || 'no authentication, authorize or validate call'
+      const contracts = Object.entries(route.contracts).map(([key, contract]) => `${key} ${contract.exports.join(', ') || '(no validator export)'}`).join('; ')
       console.log(`${route.method} ${route.path}${route.action ? ` → ${route.action}` : ''}\n  middleware: ${guards}\n  contracts: ${contracts || 'none'}\n  action: ${action}`)
     }
+    if (records.skipped) console.log(`Introspection skipped ${records.skipped.join(', ')}: a route registered there is not listed.`)
   },
 })
 

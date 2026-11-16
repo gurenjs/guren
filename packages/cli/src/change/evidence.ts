@@ -51,8 +51,11 @@ export interface ChangeEvidence {
   /** Low floor and no hold. */
   eligible: boolean
   /** The head's per-route security records, which a later change's base record is read from; why there are none otherwise. */
-  securityRecords: SecurityRecords | { unavailable: string }
+  securityRecords: SecurityRecords | { unavailable: string; code: SecurityRecordsUnavailable }
 }
+
+/** Why a record holds no security records: a code, since the reason may carry an application's error text. */
+export type SecurityRecordsUnavailable = 'no-source' | 'no-audit' | 'not-exported' | 'base' | 'head'
 
 /** What outlives the run: the base record of later changes (RFC 0040 §4). Never finding text. */
 export interface ChangeRecord {
@@ -75,8 +78,8 @@ export interface ChangeRecord {
   holds: Array<Omit<ChangeHold, 'message'>>
   eligible: boolean
   gate: { ok: boolean; deps: boolean; stages: Array<{ name: string; status: string }> }
-  /** The head's per-route security records, or why there are none: `unavailable`, never an empty list. */
-  securityRecords: SecurityRecords | { unavailable: string }
+  /** The head's per-route security records, or why there are none as a code: never an empty list, never an error's text. */
+  securityRecords: SecurityRecords | { unavailable: SecurityRecordsUnavailable }
 }
 
 export interface ChangeEvidenceOptions {
@@ -236,9 +239,11 @@ export async function collectChangeEvidence(options: ChangeEvidenceOptions): Pro
   }
 
   let lane: ChangeLaneReport | undefined
-  let securityRecords: ChangeEvidence['securityRecords'] = { unavailable: options.audit ? 'the two sides were not exported, since the change touched no application source' : 'change:evidence ran with --no-audit, which reads no application code' }
+  let securityRecords: ChangeEvidence['securityRecords'] = options.audit
+    ? { unavailable: 'the two sides were not exported, since the change touched no application source', code: 'no-source' }
+    : { unavailable: 'change:evidence ran with --no-audit, which reads no application code', code: 'no-audit' }
   const keepRecords = (pair: SecurityRecordPair | undefined): void => {
-    if (pair) securityRecords = 'unavailable' in pair ? { unavailable: pair.unavailable } : pair.head
+    if (pair) securityRecords = 'unavailable' in pair ? { unavailable: pair.unavailable, code: pair.side ?? 'not-exported' } : pair.head
   }
   try {
     lane = await (options.lane ?? judgeLane)(cwd, options.base, options.head, options.audit, options.deps, keepRecords)
@@ -322,7 +327,7 @@ export async function changeRecord(cwd: string, base: string, head: string, evid
     holds: evidence.holds.map(({ code, lane }) => ({ code, lane })),
     eligible: evidence.eligible,
     gate: { ok: evidence.gate.ok, deps, stages: evidence.gate.stages.map(({ name, status }) => ({ name, status })) },
-    securityRecords: evidence.securityRecords,
+    securityRecords: 'routes' in evidence.securityRecords ? evidence.securityRecords : { unavailable: evidence.securityRecords.code },
   }
 }
 

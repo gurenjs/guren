@@ -6,13 +6,14 @@
  */
 import type { MiddlewareEntry } from '@guren/server'
 
+import { CONTRACT_SEGMENTS, type ContractSegment } from '../contract-segments'
 import type { ChangeFact } from './lane'
 
 /** Bumped whenever a field's meaning changes: a stored record of another version is not compared. */
 export const SECURITY_RECORD_VERSION = 1
 
-const CONTRACT_KEYS = ['params', 'query', 'body'] as const
-type ContractKey = (typeof CONTRACT_KEYS)[number]
+const CONTRACT_KEYS = CONTRACT_SEGMENTS
+type ContractKey = ContractSegment
 
 type MiddlewareCapabilities = MiddlewareEntry['capabilities']
 
@@ -53,14 +54,15 @@ export type ActionRecord =
     /** A digest of the body as written, set when a call's ability or schema the reader cannot follow. */
     unseen?: string
   }
-  | { unread: string }
+  /** `digest`: of what declares the class, when the class is known though the body was not read. */
+  | { unread: string; digest?: string }
 
 export interface RouteSecurityRecord {
   method: string
   path: string
   name?: string
   module: string | null
-  /** `Class.action`, what a route is matched to its base counterpart by first. */
+  /** `file#export.action` (or `Class.action` where introspection placed no file), what a route is matched to its base counterpart by first. */
   action?: string
   middleware: MiddlewareRecord[]
   contracts: Partial<Record<ContractKey, ContractRecord>>
@@ -167,18 +169,26 @@ function compareChain(base: RouteSecurityRecord, head: RouteSecurityRecord, out:
     if (authz?.mode === 'mixed') out.incomparable.push(`${entryName(entry)} combines authorization checks whose ability is not derivable`)
     if (authz?.resource && !authz.resource.fromMethodMap) out.incomparable.push(`${entryName(entry)} resolves its ability at request time`)
   }
-  if (!same(matchedInOrder(base.middleware, head.middleware, entryKey), matchedInOrder(head.middleware, base.middleware, entryKey))) {
-    out.incomparable.push('the chain runs the same middleware in another order')
+  // Each base entry paired with at most one head entry, by index: equal first, then kept or same-named.
+  const pairs: Array<[number, number]> = []
+  const free = new Set(head.middleware.keys())
+  const gone: number[] = []
+  for (const [index, entry] of base.middleware.entries()) {
+    const at = [...free].find((other) => entryKey(head.middleware[other]!) === entryKey(entry))
+    if (at === undefined) gone.push(index)
+    else { free.delete(at); pairs.push([index, at]) }
   }
-  const { gone, added } = unmatched(base.middleware, head.middleware, entryKey)
   const authenticationKept = requiresAuthentication(head.middleware)
-  for (const entry of gone) {
-    const sameGroup = entry.kind === 'group' ? added.findIndex((other) => other.kind === 'group' && other.name === entry.name) : -1
-    if (sameGroup !== -1) {
-      const group = added[sameGroup]!
-      const lost = (entry.members ?? []).filter((member) => !(group.members ?? []).includes(member))
+  for (const index of gone) {
+    const entry = base.middleware[index]!
+    const sameGroup = entry.kind === 'group' ? [...free].find((other) => head.middleware[other]!.kind === 'group' && head.middleware[other]!.name === entry.name) : undefined
+    if (sameGroup !== undefined) {
+      const group = head.middleware[sameGroup]!
+      const [before, after] = [entry.members ?? [], group.members ?? []]
+      const lost = before.filter((member) => !after.includes(member))
       if (lost.length > 0) { out.incomparable.push(`the group ${entryName(entry)} no longer runs ${lost.join(', ')}`); continue }
-      if (same(entry.capabilities, group.capabilities) && same(entry.ability ?? null, group.ability ?? null)) { added.splice(sameGroup, 1); stronger = true; continue }
+      if (!same(before, after.filter((member) => before.includes(member)))) { out.incomparable.push(`the group ${entryName(entry)} runs its members in another order`); continue }
+      if (same(entry.capabilities, group.capabilities) && same(entry.ability ?? null, group.ability ?? null)) { free.delete(sameGroup); pairs.push([index, sameGroup]); stronger = true; continue }
     }
     if (!hasCapability(entry)) { out.incomparable.push(`${entryName(entry)}, a middleware that declares no capability, was removed or changed`); continue }
     const authn = entry.capabilities.authentication
@@ -188,15 +198,19 @@ function compareChain(base: RouteSecurityRecord, head: RouteSecurityRecord, out:
       if (!authnKept) out.authorization.push(`${entryName(entry)} (${describeCapabilities(entry.capabilities)}) is no longer on the chain`)
       continue
     }
-    const kept = added.findIndex((other) => {
-      const theirs = other.capabilities.authorization
-      if (!theirs || theirs.mode !== authz.mode || (other.ability ?? null) !== (entry.ability ?? null)) return false
+    const kept = [...free].find((other) => {
+      const candidate = head.middleware[other]!
+      const theirs = candidate.capabilities.authorization
+      if (!theirs || theirs.mode !== authz.mode || (candidate.ability ?? null) !== (entry.ability ?? null)) return false
       return authz.mode === 'all' ? authz.abilities.every((ability) => theirs.abilities.includes(ability)) : theirs.abilities.every((ability) => authz.abilities.includes(ability))
     })
-    if (kept !== -1 && authnKept) { added.splice(kept, 1); stronger = true; continue }
+    if (kept !== undefined && authnKept) { free.delete(kept); pairs.push([index, kept]); stronger = true; continue }
     out.authorization.push(`${entryName(entry)} (${describeCapabilities(entry.capabilities)}) is no longer on the chain`)
   }
-  return stronger || added.length > 0
+  // The paired entries in base order must stay in head order: a changed order is incomparable.
+  const order = pairs.sort(([a], [b]) => a - b).map(([, at]) => at)
+  if (order.some((at, i) => i > 0 && at < order[i - 1]!)) out.incomparable.push('the chain runs the same middleware in another order')
+  return stronger || free.size > 0
 }
 
 /** Compares one route's two records by RFC 0040 §3's table. */

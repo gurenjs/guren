@@ -135,4 +135,59 @@ describe('readSecurityRecords', () => {
     expect(validates(after)[1]!.declaration).not.toBe(validates(before)[1]!.declaration)
     expect(after.contracts.body?.declarations).not.toEqual(before.contracts.body?.declarations)
   })
+  test('digests a call it cannot name, a body it cannot find, and nothing it does not reach', async () => {
+    const controller = (body: string) => `import { Controller } from '@guren/core'
+import { unrelated } from '../../Unrelated.js'
+import { BaseController } from './BaseController.js'
+
+export class PostController extends BaseController {
+  async update(): Promise<Response> {
+${body}
+    return this.json({ unrelated })
+  }
+}
+`
+    const base = `import { Controller } from '@guren/core'
+
+export class BaseController extends Controller {
+  async destroy(): Promise<Response> {
+    await this.authorize('delete', 'Post')
+    return this.json({})
+  }
+}
+`
+    const files = (body: string, extra: Record<string, string> = {}): Record<string, string> => ({
+      ...FILES,
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.put('/posts/:id', { name: 'posts.update' }, [PostController, 'update'])
+  router.delete('/posts/:id', { name: 'posts.destroy' }, [PostController, 'destroy'])
+}
+`,
+      'app/Http/Controllers/PostController.ts': controller(body),
+      'app/Http/Controllers/BaseController.ts': base,
+      'app/Unrelated.ts': 'export const unrelated = 1\n',
+      ...extra,
+    })
+    const handlers = async (name: string, body: string, extra?: Record<string, string>) => {
+      const records = await readSecurityRecords(await app(name, files(body, extra)))
+      if ('unreadable' in records) throw new Error(records.unreadable)
+      const of = (method: string) => records.routes.find((route) => route.method === method)!.handler
+      return { update: of('PUT'), destroy: of('DELETE') }
+    }
+    const templated = "    const action = 'publish'\n    await this.authorize(`posts.${action}`, 'Post')"
+    const gate = "    const gate = this.make('gate')\n    await gate.authorize('manage-posts')"
+
+    const before = await handlers('digest-a', templated)
+    expect(before.update).toMatchObject({ authorizes: [], unseen: expect.any(String) })
+    expect(before.destroy).toMatchObject({ unread: expect.stringContaining('was not found'), digest: expect.any(String) })
+    expect((await handlers('digest-b', templated.replace("'publish'", "'view'"))).update).not.toEqual(before.update)
+    expect((await handlers('digest-c', templated, { 'app/Unrelated.ts': 'export const unrelated = 2\n' })).update).toEqual(before.update)
+    expect((await handlers('digest-d', templated, { 'app/Http/Controllers/BaseController.ts': base.replace("    await this.authorize('delete', 'Post')\n", '') })).destroy).not.toEqual(before.destroy)
+    const gated = await handlers('digest-e', gate)
+    expect(gated.update).toMatchObject({ unseen: expect.any(String) })
+    expect((await handlers('digest-f', "    const gate = this.make('gate')")).update).not.toEqual(gated.update)
+  })
 })

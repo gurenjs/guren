@@ -235,6 +235,22 @@ describe('change:lane with the audit of both sides', () => {
     }
   })
 
+  test('should read each side\'s security records in its export, and say which side would not read', async () => {
+    const MAIN = "import { createApp } from '@guren/core'\nimport { registerWebRoutes } from '../routes/web.js'\n\nexport default createApp({ routes: registerWebRoutes, providers: [] })\n"
+    const security = (report: ChangeLaneReport) => report.unjudged.filter((entry) => entry.reader === 'security-records').map((entry) => [entry.lane, entry.reason])
+
+    const readable = await createApp({ ...APP_FILES, 'src/main.ts': MAIN })
+    const same = await laneOf(readable.repo, readable.base, await commit(readable.repo, { [CONTROLLER_PATH]: controller('    // listing\n') }))
+    expect(same.records).toEqual({ compared: true })
+    expect(security(same)).toEqual([])
+    const broken = await laneOf(readable.repo, readable.base, await commit(readable.repo, { 'src/main.ts': "throw new Error('no boot')\n", [CONTROLLER_PATH]: controller('    // broken\n') }))
+    expect(security(broken)).toEqual([['high', expect.stringContaining("the head's records were not read")]])
+
+    const unreadable = await createApp()
+    const late = await laneOf(unreadable.repo, unreadable.base, await commit(unreadable.repo, { 'src/main.ts': MAIN, [CONTROLLER_PATH]: controller('    // listing\n') }))
+    expect(security(late)).toEqual([['medium', expect.stringContaining("the base's records were not read")]])
+  })
+
   test('should not run the audit for a change that touches nothing it reads', async () => {
     const { repo, base } = await createApp()
     const head = await commit(repo, { 'docs/guide.md': 'A guide.\n' })
