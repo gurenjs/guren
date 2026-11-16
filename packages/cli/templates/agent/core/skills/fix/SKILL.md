@@ -75,8 +75,10 @@ git commit -m "fix: <what was wrong> (#<issue>)"
 bunx guren change:evidence --base <the base from step 0> --head "$(git rev-parse HEAD)"
 ```
 
-It runs the gate again and writes `evidence.md` under `.guren/evidence/`.
-Report the lane and every hold as it prints them, with the two commits. The
+It runs the gate again and writes `evidence.md` under `.guren/evidence/`, so
+run it once and read that file rather than running it again to see more of
+the output. Report the lane and every hold as it prints them, with the two
+commits. The
 lane is the change's, not yours to lower: a medium or high lane means a
 person reads the change, and a hold says what is missing.
 
