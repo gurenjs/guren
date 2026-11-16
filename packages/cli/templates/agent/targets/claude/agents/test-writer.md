@@ -162,6 +162,25 @@ manager. Leaving `default` out leaves it at `smtp` and the send throws. The asse
 take the event or job **class**, never its name as a string; `assertPushed`
 needs the payload type explicitly, or the predicate receives `unknown`.
 
+## A plan's tests step
+
+When the caller hands you a plan's tests step (the plan file, the step id, a
+skeleton under `tests/plans/` and the step as `plan:next` printed it), the
+implementation does not exist yet, and your tests are what it will be built
+against. The rules are the `tests` bullet of
+`__SKILLS_DIR__/plan-implement/SKILL.md`; read it first. In short:
+
+- Replace each `given()` and `unwritten()` call with what it names, from the
+  plan's behaviours and nothing else. Keep every title's `[AC-…]` id and every
+  request as the skeleton spells it.
+- Leave each test failing, apart from a behaviour marked `"alreadyHolds":
+  true`, which is written to pass. No `test.skip` or `test.todo`.
+- Run `bun test <the file>` and read why each one fails: on the assertion the
+  behaviour states, not on a setup error or a boot failure.
+- Edit nothing outside the file, and do not run `plan:verify`; the caller
+  does. Report each behaviour whose expectation the plan leaves unclear rather
+  than guessing it.
+
 ## Test File Locations
 
 ```

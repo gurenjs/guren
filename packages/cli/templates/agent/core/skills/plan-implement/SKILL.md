@@ -103,6 +103,12 @@ it, and do not edit the application back or the plan to make it pass.
   and path). That observation is kept: once the implementation exists no run
   can make it again, so a later `plan:verify` of the step does not ask a
   behaviour it covers to fail again.
+  When the harness has a `test-writer` agent (Claude Code's does), hand it the
+  bodies once `plan:scaffold` has written the file, so they are written from
+  the plan alone. Give it the plan file, the step id, the skeleton's path and
+  the step as `bunx guren plan:next <plan> --json` printed it, and nothing
+  about how you mean to implement it. Then run `plan:verify --step` yourself.
+  Without such an agent, write the bodies yourself by the rules above.
 - **`data`**: the schema, migration and model; verified by `db:migrate` and
   `typecheck`. After a scaffold step, what is left is the migration and any
   relationship `plan:scaffold` reported as left out. One it reported with a
