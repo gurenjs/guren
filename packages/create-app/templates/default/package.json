@@ -22,10 +22,10 @@
     "db:seed": "bunx guren db:seed"
   },
   "dependencies": {
-    "@guren/cli": "^2.36.4",
+    "@guren/cli": "^2.37.0",
     "@guren/core": "^1.27.0",
     "@guren/inertia-client": "^1.4.0",
-    "@guren/orm": "^2.16.1",
+    "@guren/orm": "^2.16.2",
     "@inertiajs/react": "^3.11.0",
     "drizzle-orm": "1.0.0-rc.4",
     "react": "^19.0.0",
