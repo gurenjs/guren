@@ -63,83 +63,150 @@ function patternNames(node: PatternNode | null | undefined, into: string[] = [])
   return into
 }
 
+type Target = { file: string; name: string } | { leaf: string }
+interface DeclarationNode { key: string; unit: string; next: Target[] }
+
+const NOT_BINDINGS = new Set(['this', 'super', 'true', 'false', 'null', 'undefined', 'new', 'typeof', 'instanceof', 'void', 'await', 'async', 'function', 'return', 'const', 'let', 'var', 'if', 'else', 'in', 'of', 'as', 'Number', 'String', 'Boolean', 'Object', 'Array', 'JSON', 'Math', 'Date', 'Promise', 'Error', 'Symbol', 'BigInt', 'RegExp', 'Map', 'Set'])
+
+/** `text` with each string's contents gone and a template literal reduced to its `${}` expressions. */
+const withoutStrings = (text: string): string => text
+  .replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/gu, "''")
+  .replace(/`(?:\\.|[^`\\])*`/gu, (literal) => [...literal.matchAll(/\$\{([^}]*)\}/gu)].map((part) => `(${part[1]})`).join(' + ') || "''")
+
+/** The identifiers `text` reads as values: not inside a string, not a member after `.`, not an object key before `:`. */
+export function freeIdentifiers(source: string): string[] {
+  const text = withoutStrings(source)
+  const found = new Set<string>()
+  for (const match of text.matchAll(IDENTIFIER)) {
+    const before = text.slice(0, match.index).trimEnd()
+    const after = text.slice(match.index + match[0].length).trimStart()
+    if (before.endsWith('.')) continue
+    if ((before.endsWith('{') || before.endsWith(',')) && after.startsWith(':')) continue
+    found.add(match[0])
+  }
+  return [...found]
+}
+
 /**
- * Digests what a schema or an ability is built from: a declaration together with every top-level
- * binding it names, followed through imports and re-exports, so loosening a base schema a
- * declaration extends, or one a barrel re-exports, changes its digest. What cannot be followed (a
- * module that will not parse, a namespace import) is digested as its whole file, and a bare
- * specifier as itself: only `.` and `@/` are app paths, as `specifierBase()` reads them.
+ * Digests what a schema or an ability is built from: the declarations reachable from a name
+ * through the top-level bindings each reads (imports, re-exports, `export *`), hashed as one
+ * sorted set, so it is one walk and the same whichever name was asked first. A module that will
+ * not parse, or a namespace import, is its whole file; a bare specifier is itself, since only `.`
+ * and `@/` are app paths to `specifierBase()`.
  */
 class Declarations {
   private readonly digests = new Map<string, Promise<string>>()
+  private readonly nodes = new Map<string, Promise<DeclarationNode>>()
   private readonly modules = new Map<string, Promise<ModuleBindings | { unparsed: string } | undefined>>()
   constructor(private readonly cwd: string, private readonly cache: ParseCache) {}
 
   /** `file` absolute, as an import names it (extension optional). */
-  of(file: string, name: string, seen: ReadonlySet<string> = new Set()): Promise<string> {
+  of(file: string, name: string): Promise<string> {
     const key = `${file}#${name}`
-    if (seen.has(key)) return Promise.resolve(`cycle:${name}`)
-    // Only a digest computed from no cycle is the same whichever declaration was asked first.
-    if (seen.size > 0) return this.read(file, name, new Set([...seen, key]))
     let found = this.digests.get(key)
     if (!found) {
-      found = this.read(file, name, new Set([key]))
+      found = this.reach([{ file, name }])
       this.digests.set(key, found)
     }
     return found
   }
 
-  /** A digest of `text` with the top-level bindings of `file` that `names` names. */
-  async closure(file: string, text: string, names: string, seen: ReadonlySet<string> = new Set()): Promise<string> {
+  /** A digest of `text` with the declarations reachable from the identifiers of `names` that `file` binds. */
+  async closure(file: string, text: string, names: string[]): Promise<string> {
     const module = await this.module(file)
     if (!module) return `missing:${digest(text)}`
     if ('unparsed' in module) return `file:${digest(text + module.unparsed)}`
-    const named = [...new Set(names.match(IDENTIFIER) ?? [])].filter((name) => module.declared.has(name) || module.imports.has(name)).sort()
-    const parts = [text]
-    for (const name of named) parts.push(`${name}=${await this.binding(module, name, seen)}`)
-    return digest(parts.join('\n'))
+    return digest(`${text}\n${await this.reach(names.flatMap((name) => this.target(module, name) ?? []))}`)
   }
 
-  private async binding(module: ModuleBindings, name: string, seen: ReadonlySet<string>): Promise<string> {
-    if (module.declared.has(name)) return this.of(module.path, name, seen)
-    const entry = module.imports.get(name)!
+  /** The class statements along `extends` from `name` in `file`: what a `this.<member>` can reach. */
+  async classChain(file: string, name: string): Promise<string> {
+    const units: string[] = []
+    const visited = new Set<string>()
+    let current: Target | undefined = { file, name }
+    while (current && 'file' in current) {
+      const module = await this.module(current.file)
+      if (!module || 'unparsed' in module) { units.push(module ? `file:${digest(module.unparsed)}` : `missing:${this.relative(current.file)}`); break }
+      const statement = module.declared.get(current.name)
+      const key = `${module.path}#${current.name}`
+      if (statement === undefined || visited.has(key)) break
+      visited.add(key)
+      units.push(statement)
+      const parent = /\bclass\s+[A-Za-z_$][\w$]*\s+extends\s+([A-Za-z_$][\w$]*)/u.exec(statement)?.[1]
+      current = parent ? this.target(module, parent) : undefined
+      if (current && 'leaf' in current) units.push(current.leaf)
+    }
+    return `class:${digest(units.join('\n'))}`
+  }
+
+  /** What a name `module` binds resolves to, or undefined for a name it does not bind. */
+  private target(module: ModuleBindings, name: string): Target | undefined {
+    if (module.declared.has(name)) return { file: module.path, name }
+    const entry = module.imports.get(name)
+    if (!entry) return undefined
     const base = specifierBase(this.cwd, module.path, entry.source)
-    if (base === null) return `package:${entry.source}`
-    if (entry.kind === 'named') return this.of(base, entry.imported, seen)
-    if (entry.kind === 'default') return this.of(base, 'default', seen)
-    return this.whole(base)
+    if (base === null) return { leaf: `package:${entry.source}` }
+    if (entry.kind === 'named') return { file: base, name: entry.imported }
+    if (entry.kind === 'default') return { file: base, name: 'default' }
+    return { file: base, name: '*' }
   }
 
-  private async whole(file: string): Promise<string> {
-    const module = await this.module(file)
-    if (!module) return `missing:${this.relative(file)}`
-    return `file:${digest('unparsed' in module ? module.unparsed : module.text)}`
+  /** Every declaration reachable from `roots`, hashed as one sorted set. */
+  private async reach(roots: Target[]): Promise<string> {
+    const units = new Map<string, string>()
+    const queue = [...roots]
+    for (let target = queue.shift(); target; target = queue.shift()) {
+      if ('leaf' in target) { units.set(target.leaf, target.leaf); continue }
+      const node = await this.node(target.file, target.name)
+      if (units.has(node.key)) continue
+      units.set(node.key, node.unit)
+      queue.push(...node.next)
+    }
+    return digest([...units].sort(([a], [b]) => a.localeCompare(b)).map(([key, unit]) => `${key}\0${unit}`).join('\n'))
   }
 
-  private async read(file: string, name: string, seen: ReadonlySet<string>): Promise<string> {
+  private node(file: string, name: string): Promise<DeclarationNode> {
+    const key = `${file}#${name}`
+    let found = this.nodes.get(key)
+    if (!found) {
+      found = this.build(file, name)
+      this.nodes.set(key, found)
+    }
+    return found
+  }
+
+  private async build(file: string, name: string): Promise<DeclarationNode> {
     const module = await this.module(file)
-    if (!module) return `missing:${this.relative(file)}`
-    if ('unparsed' in module) return `file:${digest(module.unparsed)}`
+    if (!module) return { key: `missing:${this.relative(file)}`, unit: '', next: [] }
+    const key = `${this.relative('path' in module ? module.path : file)}#${name}`
+    if ('unparsed' in module) return { key, unit: `file:${digest(module.unparsed)}`, next: [] }
+    if (name === '*') return { key, unit: `file:${digest(module.text)}`, next: [] }
     const declaration = module.declared.get(name)
-    if (declaration !== undefined) return `declaration:${await this.closure(module.path, declaration, declaration, seen)}`
+    if (declaration !== undefined) {
+      const next = freeIdentifiers(declaration).filter((other) => other !== name).flatMap((other) => this.target(module, other) ?? [])
+      return { key, unit: declaration, next }
+    }
     const reexport = module.reexported.get(name)
     if (reexport) {
       const base = specifierBase(this.cwd, module.path, reexport.source)
-      return base === null ? `package:${reexport.source}` : this.of(base, reexport.name, seen)
+      return { key, unit: 'reexport', next: [base === null ? { leaf: `package:${reexport.source}` } : { file: base, name: reexport.name }] }
     }
-    if (module.imports.has(name)) return this.binding(module, name, seen)
+    const imported = this.target(module, name)
+    if (imported) return { key, unit: 'import', next: [imported] }
     // Through `export *`: the module that provides the name, so a barrel gaining another line changes nothing.
     for (const source of module.starred) {
       const base = specifierBase(this.cwd, module.path, source)
-      if (base !== null && (await this.provides(base, name, new Set()))) return this.of(base, name, seen)
+      if (base !== null && (await this.provides(base, name, new Set()))) return { key, unit: 'star', next: [{ file: base, name }] }
     }
     // Not found: every file on the way is what a change would alter.
-    const parts = [`file:${digest(module.text)}`]
-    for (const source of module.starred) {
-      const base = specifierBase(this.cwd, module.path, source)
-      parts.push(base === null ? `package:${source}` : await this.whole(base))
+    return {
+      key,
+      unit: `file:${digest(module.text)}`,
+      next: module.starred.map((source) => {
+        const base = specifierBase(this.cwd, module.path, source)
+        return base === null ? { leaf: `package:${source}` } : { file: base, name: '*' }
+      }),
     }
-    return `reexport:${digest(parts.join('\n'))}`
   }
 
   /** Whether `file` declares, imports or re-exports `name`, through its own `export *` lines too. */
@@ -218,7 +285,13 @@ async function routesDigest(cwd: string): Promise<string> {
   }
   await walk(join(cwd, 'routes'))
   const modules = join(cwd, 'modules')
-  for (const name of await readdir(modules).catch(() => [] as string[])) await walk(join(modules, name, 'routes'))
+  for (const name of await readdir(modules).catch(() => [] as string[])) {
+    await walk(join(modules, name, 'routes'))
+    // The routes file `make:module` writes beside the module's descriptor.
+    for (const entry of await readdir(join(modules, name)).catch(() => [] as string[])) {
+      if (/^routes\.[cm]?[jt]sx?$/u.test(entry)) files.push(join(modules, name, entry))
+    }
+  }
   const parts = await Promise.all(files.sort().map(async (file) => `${relative(cwd, file)}:${await readFile(file, 'utf8').catch(() => '')}`))
   return `routes:${digest(parts.join('\n'))}`
 }
@@ -283,8 +356,10 @@ async function actionRecord(
   // Unread, but the class is known: the digest of what declares it says whether it changed.
   const unread = async (why: string): Promise<ActionRecord> => {
     const declared = scan.declarations.filter((entry) => entry.className === lookup.className)
-    if (declared.length === 0) return { unread: why }
-    const parts = await Promise.all(declared.map(async (entry) => `${entry.file}:${await declarations.of(resolve(cwd, entry.file), entry.className)}`))
+    // Declared in no controller file (the routes file, the entry): the routes files are where it would be.
+    if (declared.length === 0) return { unread: why, digest: await routesDigest(cwd) }
+    // The class statements along `extends`: what declares the action, and nothing else the class reads.
+    const parts = await Promise.all(declared.map(async (entry) => `${entry.file}:${await declarations.classChain(resolve(cwd, entry.file), entry.className)}`))
     return { unread: why, digest: digest(parts.sort().join('\n')) }
   }
   // Read by name where two classes share it: the body may be the other class's.
@@ -314,10 +389,13 @@ async function actionRecord(
   }
   let unseen: string | undefined
   if (unfollowed.length > 0) {
-    const names = unfollowed.join('\n')
-    // `this.<member>` names the class's own field or method, which only the class statement holds.
-    const own = /\bthis\s*\.\s*[A-Za-z_$]/u.test(names) ? lookup.className : ''
-    unseen = await declarations.closure(controllerFile, rawBody, `${names}\n${own}`)
+    const names = freeIdentifiers(unfollowed.join('\n'))
+    // An argument naming a local of the action reaches whatever the action assigns it: the whole body is the scope.
+    const local = names.some((name) => !NOT_BINDINGS.has(name) && !(module && !('unparsed' in module) && (module.declared.has(name) || module.imports.has(name))))
+    const parts = [await declarations.closure(controllerFile, rawBody, local ? freeIdentifiers(rawBody) : names)]
+    // `this.<member>` names the class's own field or method, which only the class statements hold.
+    if (/\bthis\s*\.\s*[A-Za-z_$]/u.test(unfollowed.join('\n'))) parts.push(await declarations.classChain(controllerFile, lookup.className))
+    unseen = digest(parts.join('\n'))
   }
   return {
     authenticates: AUTH_CALL_PATTERN.test(body),

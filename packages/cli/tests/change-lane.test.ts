@@ -767,6 +767,12 @@ describe('judgeChangeLane with per-route security records', () => {
     expect(report.facts).toContainEqual(expect.objectContaining({ code: 'authorization-removed', files: ['config/app.ts'] }))
   })
 
+  test('should hold a registrar only the head skipped at high, and one both sides skipped at medium', async () => {
+    const skipped = (...names: string[]) => ({ ...records(route([auth])), skipped: names })
+    expect(security(await laneWith({ 'src/app.ts': 'export default {}\n' }, { base: records(route([auth])), head: skipped('the createApp({ boot }) callback') }))).toEqual(['high'])
+    expect(security(await laneWith(controller, { base: skipped('the createApp({ boot }) callback'), head: skipped('the createApp({ boot }) callback') }))).toEqual(['medium'])
+  })
+
   test('should keep a base it cannot read at medium, and a head the change made unreadable at high', async () => {
     expect(security(await laneWith(controller, { unavailable: "the base's records were not read: x", side: 'base' }))).toEqual(['medium'])
     expect(security(await laneWith(controller, { unavailable: 'the base was not audited: bun.lock differs' }))).toEqual(['medium'])

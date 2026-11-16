@@ -240,7 +240,7 @@ export interface LiteralAuthorizationCall {
   ability: string
   /** The arguments after the ability, as written and with whitespace collapsed: what the policy is asked about. */
   subject: string
-  /** A template literal with a placeholder (`posts.${action}`): the ability is built at request time. */
+  /** A template literal with a placeholder (`posts.${action}`), or a literal concatenated with more: the ability is built at request time. */
   templated?: true
 }
 
@@ -265,7 +265,9 @@ export function literalAuthorizationCalls(body: string, rawBody: string): Litera
     const close = closingParen(body, open)
     const after = match.index + match[0].length
     const subject = close === -1 ? '' : rawBody.slice(after, close).replace(/^\s*,/u, '').replace(/\s+/gu, ' ').trim()
-    return { member: match[1] as LiteralAuthorizationCall['member'], ability: match[3]!, subject, ...(match[2] === '`' && match[3]!.includes('${') ? { templated: true as const } : {}) }
+    // A literal that is only part of the ability (`'posts.' + action`) names no ability either.
+    const partial = !/^\s*[,)]/u.test(rawBody.slice(after))
+    return { member: match[1] as LiteralAuthorizationCall['member'], ability: match[3]!, subject, ...((match[2] === '`' && match[3]!.includes('${')) || partial ? { templated: true as const } : {}) }
   })
 }
 
@@ -336,7 +338,7 @@ export function unfollowedCallArguments(body: string, rawBody: string): string[]
     const args = rawBody.slice(open + 1, close === -1 ? rawBody.length : close)
     const call = match[0]
     if (/\b(?:authorize|can)\s*(?:<[^()]*>)?\s*\($/u.test(call) && /^\s*this\b/u.test(call)) {
-      if (/^\s*(['"])[^'"`]+\1/u.test(args) || /^\s*`[^`$]*`/u.test(args)) continue
+      if (/^\s*(?:(['"])[^'"`]+\1|`[^`$]*`)\s*(?:,|$)/u.test(args)) continue
     } else if (/^\s*this\b/u.test(call)) {
       if (/^\s*[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*(?:[),]|$)/u.test(args)) continue
     }

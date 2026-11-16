@@ -194,4 +194,63 @@ export function registerWebRoutes(router: Router): void {
     expect(gated.update).toMatchObject({ unseen: expect.any(String) })
     expect(text((await handlers('digest-f', "    const gate = this.make('gate')")).update)).not.toBe(gatedText)
   })
+  test('follows a local an unnamed call passes, the class chain for this.<member>, and a dense graph in one walk', async () => {
+    const validators = `import { z } from 'zod'
+
+export const PostSchema = z.object({ title: z.string().min(1) })
+export const AdminPostSchema = z.object({ title: z.string() })
+`
+    const controller = (body: string) => `import { z } from 'zod'
+import { Controller } from '@guren/core'
+import { PostSchema, AdminPostSchema } from '../Validators/PostValidator.js'
+import { pages } from '../../Pages.js'
+import { t0 } from '../../Dense.js'
+
+export class PostController extends Controller {
+  schema = z.object({ title: z.string().min(1) })
+  isAdmin(): boolean {
+    return pages.a > 0
+  }
+
+  async update(): Promise<Response> {
+${body}
+    return this.json({})
+  }
+}
+`
+    const dense = Array.from({ length: 40 }, (_, i) => `export function t${i}(): unknown {\n  return [${[i + 1, i + 2, i - 1].filter((n) => n >= 0 && n < 40).map((n) => `t${n}`).join(', ')}]\n}`).join('\n')
+    const files = (body: string, extra: Record<string, string> = {}): Record<string, string> => ({
+      ...FILES,
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.put('/posts/:id', { name: 'posts.update' }, [PostController, 'update'])
+}
+`,
+      'app/Http/Controllers/PostController.ts': controller(body),
+      'app/Http/Validators/PostValidator.ts': validators,
+      'app/Pages.ts': 'export const pages = { a: 1 }\n',
+      'app/Dense.ts': `${dense}\n`,
+      ...extra,
+    })
+    const update = async (name: string, body: string, extra?: Record<string, string>): Promise<string> => {
+      const records = await readSecurityRecords(await app(name, files(body, extra)))
+      if ('unreadable' in records) throw new Error(records.unreadable)
+      return JSON.stringify(records.routes.find((route) => route.method === 'PUT')!.handler)
+    }
+    const local = '    const schema = this.isAdmin() ? AdminPostSchema : PostSchema\n    await this.validateBody(schema)'
+    const own = '    await this.validateBody(this.schema)'
+    const loosened = { 'app/Http/Validators/PostValidator.ts': validators.replace('z.string().min(1)', 'z.string()') }
+    const page = { 'app/Pages.ts': 'export const pages = { a: 2 }\n' }
+
+    const localBefore = await update('local-a', local)
+    expect(await update('local-b', local, loosened)).not.toBe(localBefore)
+    const ownBefore = await update('own-a', own)
+    expect(await update('own-b', own, page)).toBe(ownBefore)
+    expect(await update('own-c', own, { 'app/Http/Controllers/PostController.ts': controller(own).replace('title: z.string().min(1)', 'title: z.string()') })).not.toBe(ownBefore)
+    const started = Date.now()
+    await update('dense', "    await this.authorize(String(t0), 'Post')")
+    expect(Date.now() - started).toBeLessThan(20_000)
+  })
 })
