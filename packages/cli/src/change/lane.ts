@@ -525,6 +525,8 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     const touched = change.paths.filter((entry) => !entry.outsideApp).map((entry) => entry.path)
     facts.push(...comparison.facts.map((fact) => ({ ...fact, files: files.length > 0 ? files : touched })))
     if (comparison.incomparable.length > 0) unjudged.push({ reader: 'security-records', reason: `routes whose records cannot be ordered against the base: ${comparison.incomparable.join('; ')}`, lane: 'high', files: files.length > 0 ? files : touched })
+    const skipped = [...new Set([...(pair.base.skipped ?? []), ...(pair.head.skipped ?? [])])]
+    if (skipped.length > 0 && files.length > 0) unjudged.push({ reader: 'security-records', reason: `introspection skipped ${skipped.join(', ')}, so a route either registers was not compared`, lane: 'medium', files })
   } else if (pair && 'unavailable' in pair && pair.side === 'head') {
     // The change made its own head unreadable: what it did to its routes cannot be ordered.
     unjudged.push({ reader: 'security-records', reason: `${pair.unavailable}, while the base's were, so authorization-removed and validation-removed were not judged`, lane: 'high', files })

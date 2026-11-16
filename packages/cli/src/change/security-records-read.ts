@@ -38,36 +38,142 @@ const AUTHORIZATION_CALLS = new RegExp(AUTHORIZATION_CALL_PATTERN.source, 'g')
 
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 16)
 
-/** Reads source declarations by digest: an export's own declaration, else its whole file. */
+const IDENTIFIER = /[A-Za-z_$][\w$]*/gu
+
+interface ModuleBindings {
+  path: string
+  text: string
+  /** Top-level declarations by name, exported or not, as their statement's text. */
+  declared: Map<string, string>
+  imports: Map<string, ImportEntry>
+  /** `export { name } from` and `export { local as name } from`: the source and its name there. */
+  reexported: Map<string, { source: string; name: string }>
+  /** `export * from` sources. */
+  starred: string[]
+}
+
+/**
+ * Digests what a schema or an ability is built from: a declaration together with every top-level
+ * binding it names, followed through imports and re-exports, so loosening a base schema a
+ * declaration extends, or one a barrel re-exports, changes its digest. What cannot be followed
+ * (a package, a default export, a module that will not parse) is digested as its whole file or
+ * its specifier, which is what a change there would have to alter.
+ */
 class Declarations {
   private readonly digests = new Map<string, Promise<string>>()
+  private readonly modules = new Map<string, Promise<ModuleBindings | undefined>>()
   constructor(private readonly cwd: string, private readonly cache: ParseCache) {}
 
   /** `file` absolute, as an import names it (extension optional). */
-  of(file: string, name: string): Promise<string> {
+  of(file: string, name: string, seen: ReadonlySet<string> = new Set()): Promise<string> {
     const key = `${file}#${name}`
+    if (seen.has(key)) return Promise.resolve(`cycle:${name}`)
     let found = this.digests.get(key)
     if (!found) {
-      found = this.read(file, name)
+      found = this.read(file, name, new Set([...seen, key]))
       this.digests.set(key, found)
     }
     return found
   }
 
-  private async read(file: string, name: string): Promise<string> {
+  /** A digest of `text` with the top-level bindings of `file` it names, as `of` follows them. */
+  async closure(file: string, text: string, seen: ReadonlySet<string> = new Set()): Promise<string> {
+    const module = await this.module(file)
+    if (!module) return `unread:${digest(text)}`
+    const names = [...new Set(text.match(IDENTIFIER) ?? [])].filter((name) => module.declared.has(name) || module.imports.has(name)).sort()
+    const parts = [text]
+    for (const name of names) parts.push(`${name}=${await this.binding(module, name, seen)}`)
+    return digest(parts.join('\n'))
+  }
+
+  private async binding(module: ModuleBindings, name: string, seen: ReadonlySet<string>): Promise<string> {
+    if (module.declared.has(name)) return this.of(module.path, name, seen)
+    const entry = module.imports.get(name)!
+    const base = specifierBase(this.cwd, module.path, entry.source)
+    if (base === null) return `package:${entry.source}`
+    if (entry.kind === 'named') return this.of(base, entry.imported, seen)
+    const target = await this.module(base)
+    return target ? `file:${digest(target.text)}` : 'unread'
+  }
+
+  private async read(file: string, name: string, seen: ReadonlySet<string>): Promise<string> {
+    const module = await this.module(file)
+    if (!module) return 'unread'
+    const declaration = module.declared.get(name)
+    if (declaration !== undefined) return `declaration:${await this.closure(module.path, declaration, seen)}`
+    const reexport = module.reexported.get(name)
+    if (reexport) {
+      const base = specifierBase(this.cwd, module.path, reexport.source)
+      return base === null ? `package:${reexport.source}` : this.of(base, reexport.name, seen)
+    }
+    if (module.imports.has(name)) return this.binding(module, name, seen)
+    // Through `export *`: the module that provides the name, so a barrel gaining another line changes nothing.
+    for (const source of module.starred) {
+      const base = specifierBase(this.cwd, module.path, source)
+      if (base !== null && (await this.provides(base, name, new Set(seen)))) return this.of(base, name, seen)
+    }
+    // Not found: every file on the way is what a change would alter.
+    const parts = [`file:${digest(module.text)}`]
+    for (const source of module.starred) {
+      const base = specifierBase(this.cwd, module.path, source)
+      parts.push(base === null ? `package:${source}` : await this.of(base, name, seen))
+    }
+    return `reexport:${digest(parts.join('\n'))}`
+  }
+
+  /** Whether `file` declares, imports or re-exports `name`, through its own `export *` lines too. */
+  private async provides(file: string, name: string, visited: Set<string>): Promise<boolean> {
+    if (visited.has(file)) return false
+    visited.add(file)
+    const module = await this.module(file)
+    if (!module) return false
+    if (module.declared.has(name) || module.reexported.has(name) || module.imports.has(name)) return true
+    for (const source of module.starred) {
+      const base = specifierBase(this.cwd, module.path, source)
+      if (base !== null && (await this.provides(base, name, visited))) return true
+    }
+    return false
+  }
+
+  module(file: string): Promise<ModuleBindings | undefined> {
+    let found = this.modules.get(file)
+    if (!found) {
+      found = this.parse(file)
+      this.modules.set(file, found)
+    }
+    return found
+  }
+
+  private async parse(file: string): Promise<ModuleBindings | undefined> {
     const path = await resolveImportPath(file)
-    if (!path) return 'unread'
+    if (!path) return undefined
     const outcome = await this.cache.read(path)
-    if (outcome.status !== 'parsed') return 'unread'
+    if (outcome.status !== 'parsed') return undefined
     const text = outcome.source
-    for (const statement of outcome.ast.program.body as Statement[]) {
-      const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : null
-      if (declaration?.type === 'VariableDeclaration' && declaration.declarations.some((entry) => entry.id.type === 'Identifier' && entry.id.name === name)) {
-        return `declaration:${digest(text.slice(statement.start ?? 0, statement.end ?? text.length))}`
+    const body = outcome.ast.program.body as Statement[]
+    const declared = new Map<string, string>()
+    const reexported = new Map<string, { source: string; name: string }>()
+    const starred: string[] = []
+    for (const statement of body) {
+      const slice = text.slice(statement.start ?? 0, statement.end ?? text.length)
+      if (statement.type === 'ExportAllDeclaration') { starred.push(statement.source.value); continue }
+      if (statement.type === 'ExportNamedDeclaration' && statement.source) {
+        for (const specifier of statement.specifiers) {
+          if (specifier.type !== 'ExportSpecifier') continue
+          const exported = specifier.exported.type === 'Identifier' ? specifier.exported.name : specifier.exported.value
+          reexported.set(exported, { source: statement.source.value, name: specifier.local.name })
+        }
+        continue
+      }
+      const node = statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportDefaultDeclaration' ? statement.declaration : statement
+      if (!node) continue
+      if (node.type === 'VariableDeclaration') {
+        for (const entry of node.declarations) if (entry.id.type === 'Identifier') declared.set(entry.id.name, slice)
+      } else if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration') && node.id) {
+        declared.set(node.id.name, slice)
       }
     }
-    // Re-exported or declared apart from its export: the file is what can be compared.
-    return `file:${digest(text)}`
+    return { path, text, declared, imports: importsByLocal(body), reexported, starred }
   }
 
   relative(file: string): string {
@@ -83,8 +189,8 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
   const described = await introspectedRoutes(() => Promise.resolve(introspection))
   if (described.status !== 'described') return { unreadable: described.reason ?? 'the introspected routes are not complete' }
   const { manifest } = described
+  // A registrar introspection skipped may register routes this list lacks; the routes it lists still compare.
   const skipped = skippedRegistrars(manifest)
-  if (skipped.length > 0) return { unreadable: `introspection skipped what may register routes: ${skipped.join(', ')}` }
   const cache = new ParseCache()
   const scan = await parseControllerMethods(cwd, cache)
   const targets = manifestRouteTargets(manifest, await routeSourceClasses(cwd, manifest, resolve(cwd, await routesEntryOrDefault(cwd)), cache))
@@ -121,7 +227,7 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
       handler: route.controller ? await actionRecord(cwd, scan, route.controller, reachedByName, cache, declarations) : { unread: 'an inline handler, whose body the reader does not follow' },
     })
   }
-  return { recordVersion: SECURITY_RECORD_VERSION, routes }
+  return { recordVersion: SECURITY_RECORD_VERSION, routes, ...(skipped.length > 0 ? { skipped } : {}) }
 }
 
 async function actionRecord(
@@ -136,10 +242,15 @@ async function actionRecord(
   const sites = validateCallSites(body)
   const outcome = await cache.read(resolve(cwd, filePath))
   const imports: Map<string, ImportEntry> = outcome.status === 'parsed' ? importsByLocal(outcome.ast.program.body) : new Map()
+  const controllerFile = resolve(cwd, filePath)
+  const local = await declarations.module(controllerFile)
   const validates: ValidateCall[] = []
   let unseen = [...body.matchAll(AUTHORIZATION_CALLS)].length > authorizes.length || [...body.matchAll(VALIDATE_MEMBER_CALL_PATTERN)].length > sites.length
   for (const site of sites) {
-    const target = site.schema ? importedExport(cwd, resolve(cwd, filePath), imports, site.schema) : undefined
+    // A schema the controller file declares itself, as the documented controller pattern does.
+    const target = site.schema && !site.schema.includes('.') && local?.declared.has(site.schema)
+      ? { file: controllerFile, name: site.schema }
+      : site.schema ? importedExport(cwd, controllerFile, imports, site.schema) : undefined
     if (!target) {
       unseen = true
       validates.push({ member: site.member, schema: '' })
@@ -152,7 +263,8 @@ async function actionRecord(
     authenticates: AUTH_CALL_PATTERN.test(body),
     authorizes,
     validates,
-    ...(unseen ? { unseen: digest(rawBody) } : {}),
+    // The body with the top-level bindings it names: a module-level ability or schema it passes is part of it.
+    ...(unseen ? { unseen: await declarations.closure(controllerFile, rawBody) } : {}),
   }
 }
 

@@ -70,6 +70,8 @@ export interface RouteSecurityRecord {
 export interface SecurityRecords {
   recordVersion: number
   routes: RouteSecurityRecord[]
+  /** What introspection skipped that may register routes this list lacks (`skippedRegistrars()`). */
+  skipped?: string[]
 }
 
 /**
