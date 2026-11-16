@@ -28,9 +28,10 @@ git rev-parse HEAD          # the base for step 3
 ## 1. Reproduce it as a failing test
 
 Write a `TestApp` test under `tests/` that requests the route the defect is
-seen on and asserts what should happen. Name the test after the behaviour, and
-put no `[AC-…]` id in its title: an id an existing test carries makes the
-change read as an acceptance change.
+seen on and asserts what should happen. Name the test after the behaviour and
+end its title with a tag for the defect in brackets (`[fix-page-2-repeats]`),
+which step 4's lesson points at. Use no `[AC-…]` id: an id an existing test
+carries makes the change read as an acceptance change.
 
 ```bash
 bun test tests/<file>.test.ts
@@ -78,20 +79,24 @@ bunx guren change:evidence --base <the base from step 0> --head "$(git rev-parse
 It runs the gate again and writes `evidence.md` under `.guren/evidence/`, so
 run it once and read that file rather than running it again to see more of
 the output. Report the lane and every hold as it prints them, with the two
-commits. The
-lane is the change's, not yours to lower: a medium or high lane means a
-person reads the change, and a hold says what is missing.
+commits. The lane is the change's, not yours to lower: a medium or high lane
+means a person reads the change, and a hold says what is missing.
 
 ## 4. Propose a lesson
 
-When the defect escaped into a commit that is already merged, find that commit
-(`git log -S`, `git blame`) and draft a lesson from it:
+When the defect escaped into a commit that is already merged (`git log -S`,
+`git blame` find it), draft a lesson from the fix, with the test from step 1
+as the check that catches it:
 
 ```bash
-bunx guren make:lesson "<the rule that would have prevented it>" --from <commit> --entity <Model>
+bunx guren make:lesson "<the rule that would have prevented it>" --entity <Model> \
+  --from "$(git rev-parse HEAD)" --enforced-by tests/<file>.test.ts#<the tag>
 ```
 
-Use `--paths "<glob>,<glob>"` instead of `--entity` for a rule about files
-rather than one entity. The lesson is written as `draft` and reaches nobody until a
-person merges it as `stable`; say that you wrote it, and leave the decision
-to them. Skip this step for a defect the same change introduced.
+It runs that test at the fix commit and at its parent (the test commit) and
+records `reproduced`: `true` when it fails without the fix and passes with
+it. Report the value and its reason as written. Use `--paths "<glob>,<glob>"`
+instead of `--entity` for a rule about files rather than one entity. The
+lesson is written as `draft` and reaches nobody until a person merges it as
+`stable`; say that you wrote it, and leave the decision to them. Skip this
+step for a defect the same change introduced.

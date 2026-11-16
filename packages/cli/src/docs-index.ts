@@ -102,6 +102,8 @@ export interface DocLesson {
   paths: string[]
   /** `<file>#<name>`: the check that enforces the rule; `''` when present but not a scalar. */
   enforcedBy?: string
+  /** `true`, `false` or `not-run`: whether `make:lesson` saw the check fail at the parent of `--from` and pass at it. */
+  reproduced?: string
   /** YYYY-MM-DD after which nobody has confirmed the lesson still applies. */
   review?: string
   supersededBy?: string
@@ -194,6 +196,7 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
                 ...('rule' in data ? (/^[|>][+-]?\d*$/u.test(toScalar(data.rule) ?? '') ? { rule: '', ruleBlock: true as const } : { rule: toScalar(data.rule) ?? '' }) : {}),
                 paths: toStringList(data.paths),
                 ...('enforcedBy' in data ? { enforcedBy: toScalar(data.enforcedBy) ?? '' } : {}),
+                ...('reproduced' in data ? { reproduced: toScalar(data.reproduced) ?? '' } : {}),
                 ...('review' in data ? { review: toScalar(data.review) ?? '' } : {}),
                 ...(toScalar(data.supersededBy) ? { supersededBy: toScalar(data.supersededBy) } : {}),
                 ...(data.source && typeof data.source === 'object' && !Array.isArray(data.source) ? { source: data.source } : {}),

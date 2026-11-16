@@ -12,6 +12,8 @@ import { matchesGlob } from './glob-match'
 import { parseModelFile } from './model-parser'
 import { scanDocs, extractDocsTags, buildEntityDocIndex, LESSON_RULE_LIMIT, type DocRef } from './docs-index'
 import { ISSUE_REF_FORMS } from './issue-refs'
+import { enforcedByProblem } from './lesson-enforced'
+import { isAppRootRelative, normalizeTarget } from './app-relative'
 import type { ParseCache } from './parse-cache'
 import { advisory, check, type CheckResult } from './check-result'
 import { acceptanceIdEntity, acceptanceTestsLoader, type AcceptanceTestRef } from './docs-acceptance'
@@ -30,26 +32,6 @@ export interface DocsCheckOptions {
 
 function hasGlobChars(entry: string): boolean {
   return entry.includes('*')
-}
-
-/**
- * Backslashes count as separators and a drive letter is absolute, as Windows
- * `path.resolve` treats them — a `..\..\outside.md` judged by `/` rules alone
- * slips past containment. Both containment checks below start here so they
- * cannot disagree about what a separator is.
- */
-function normalizeTarget(target: string): { path: string; absolute: boolean } {
-  const path = target.replace(/\\/g, '/')
-  return { path, absolute: path.startsWith('/') || /^[A-Za-z]:/.test(path) }
-}
-
-/**
- * Doc links are app-root-relative by convention; absolute paths and `..`
- * segments would validate files outside the project.
- */
-function isAppRootRelative(entry: string): boolean {
-  const { path, absolute } = normalizeTarget(entry)
-  return !absolute && !path.split('/').includes('..')
 }
 
 /**
@@ -320,6 +302,9 @@ function changedScope(refs: DocRef[], changedFiles: Set<string> | null): Set<str
   return new Set(refs.filter(inScope).map((ref) => ref.path))
 }
 
+// What `make:lesson --enforced-by` writes; `check --docs` never runs the check again.
+const REPRODUCED_VALUES = new Set(['true', 'false', 'not-run'])
+
 /**
  * A lesson (RFC 0040 §11): one rule line, an `enforcedBy` that names a check which exists, a
  * `review` date nobody let pass, and a `supersededBy` on a retired one. A rule or a check that
@@ -338,20 +323,14 @@ async function checkLesson(cwd: string, ref: DocRef, probes: PathProbes): Promis
     results.push(check(`docs-lesson-rule:${ref.path}`, `${ref.path} rule`, 'fail', `The rule is ${rule.length} characters; a lesson's rule is one line of at most ${LESSON_RULE_LIMIT}.`, 'Keep the rule to what a reviewer acts on and move the rest into the body.', ref.path))
   }
   if (lesson.enforcedBy !== undefined) {
-    // At the first `#`: the rest is the name whole, so `#AC-auth-1#removed` is not read as `AC-auth-1`.
-    const separator = lesson.enforcedBy.indexOf('#')
-    const file = separator === -1 ? lesson.enforcedBy : lesson.enforcedBy.slice(0, separator)
-    const name = separator === -1 ? undefined : lesson.enforcedBy.slice(separator + 1)
-    const target = posix.normalize(file)
-    const text = isAppRootRelative(target) && (await probes.exists(target)) ? await readFile(`${cwd}/${target}`, 'utf8').catch(() => undefined) : undefined
-    const failEnforced = (message: string): void => {
-      results.push(check(`docs-lesson-enforced:${ref.path}`, `${ref.path} enforcedBy`, 'fail', message, 'Name the check as <file>#<name>: a file relative to the application root, and a rule or a test it holds, as it is written there.', ref.path))
+    const problem = await enforcedByProblem(lesson.enforcedBy, async (file) =>
+      (await probes.exists(file)) ? readFile(`${cwd}/${file}`, 'utf8').catch(() => undefined) : undefined)
+    if (problem) {
+      results.push(check(`docs-lesson-enforced:${ref.path}`, `${ref.path} enforcedBy`, 'fail', problem, 'Name the check as <file>#<name>: a file relative to the application root, and a rule or a test it holds, as it is written there.', ref.path))
     }
-    if (lesson.enforcedBy.trim() === '') failEnforced('`enforcedBy:` is present but names nothing (empty, or not a single value), so no check is followed.')
-    else if (!name) failEnforced(`\`enforcedBy: ${lesson.enforcedBy}\` names no check in ${file}: a file existing is not a check that catches the failure.`)
-    else if (text === undefined) failEnforced(`\`enforcedBy: ${lesson.enforcedBy}\` names ${file}, which is not a file in the application.`)
-    // As a whole token: `AC-posts-1` must not pass on `AC-posts-12`, nor `no-drizzle` on `controllers-no-drizzle`.
-    else if (!new RegExp(`(?<![\\w-])${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?![\\w-])`, 'u').test(text)) failEnforced(`\`enforcedBy: ${lesson.enforcedBy}\`: ${file} does not hold ${name}.`)
+  }
+  if (lesson.reproduced !== undefined && !REPRODUCED_VALUES.has(lesson.reproduced)) {
+    results.push(advisory(`docs-lesson-reproduced:${ref.path}`, `${ref.path} reproduced`, 'warn', `\`reproduced: ${lesson.reproduced}\` is not true, false or not-run.`, 'Leave it as `make:lesson --enforced-by` wrote it, or run that again.', ref.path))
   }
   if (lesson.review !== undefined) {
     if (parseCalendarDate(lesson.review) === null) {

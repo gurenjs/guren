@@ -3,9 +3,13 @@
  * its frontmatter. It starts `draft`, which reaches nobody; a person merging it as `stable` is
  * the acceptance, and only then does `guren context` print its rule.
  */
+import { readFile } from 'node:fs/promises'
+
 import { safeModuleName, assertCwdUnsupported, slugifyProse, writeScaffoldFile, type WriterOptions } from './utils'
 import { runGit } from './changed-files'
 import { LESSON_RULE_LIMIT } from './docs-index'
+import { enforcedByProblem } from './lesson-enforced'
+import { reproduceLesson, type Reproduced } from './lesson-reproduce'
 import { nextSequenceNumber, resolveActor, resolveAdrPrefill, type AdrPrefill } from './make-adr'
 
 const LESSON_DIR = 'docs/lessons'
@@ -26,6 +30,12 @@ export interface MakeLessonOptions extends WriterOptions {
   /** A commit SHA or a pull request number (`412`, `#412`). */
   from?: string
   kind?: LessonSourceKind
+  /** `<file>#<name>`: the check that catches the failure. */
+  enforcedBy?: string
+  /** `false` records `reproduced: not-run` without running the check. */
+  reproduce?: boolean
+  /** Told before the check runs, since it runs the application's tests twice. */
+  onReproduce?: (enforcedBy: string, commit: string) => void
   by?: string
 }
 
@@ -37,9 +47,11 @@ function quoted(value: string, what: string): string {
   return `"${value}"`
 }
 
-async function sourceOf(from: string, kind: LessonSourceKind | undefined): Promise<string> {
+type Source = { line: string; commit?: string }
+
+async function sourceOf(from: string, kind: LessonSourceKind | undefined): Promise<Source> {
   const value = from.trim()
-  const pr = (number: string): string => `{ pr: ${number}, kind: ${kind ?? 'review-finding'} }`
+  const pr = (number: string): Source => ({ line: `{ pr: ${number}, kind: ${kind ?? 'review-finding'} }` })
   if (/^#\d+$/u.test(value)) return pr(value.slice(1))
   const [sha] = (await runGit(process.cwd(), ['rev-parse', '--verify', '--quiet', `${value}^{commit}`])) ?? []
   // Bare digits can name a pull request or a commit abbreviation; git decides, and `#412` says which.
@@ -49,8 +61,11 @@ async function sourceOf(from: string, kind: LessonSourceKind | undefined): Promi
   }
   if (!sha) throw new Error(`--from ${from} is neither a pull request number nor a commit in this repository.`)
   const [subject] = (await runGit(process.cwd(), ['log', '-1', '--format=%s', sha])) ?? []
-  return `{ commit: ${sha.slice(0, 12)}, kind: ${kind ?? (subject?.startsWith('Revert ') ? 'revert' : 'escaped-defect')} }`
+  return { line: `{ commit: ${sha.slice(0, 12)}, kind: ${kind ?? (subject?.startsWith('Revert ') ? 'revert' : 'escaped-defect')} }`, commit: sha }
 }
+
+/** A reason goes into a quoted scalar, so what would break one is replaced rather than refused. */
+const scalar = (text: string): string => text.replace(/["\\]/gu, "'").replace(/[\r\n]+/gu, ' ')
 
 /** Six months on, clamped to the last day of that month: Aug 31 gives Feb 28, not Mar 3. */
 function reviewDate(now: Date): string {
@@ -59,7 +74,12 @@ function reviewDate(now: Date): string {
   return new Date(Date.UTC(now.getUTCFullYear(), month, Math.min(now.getUTCDate(), lastDay))).toISOString().slice(0, 10)
 }
 
-function lessonTemplate(title: string, rule: string, prefill: AdrPrefill, paths: string[], source: string | undefined, actor: string | null, now: Date): string {
+interface Enforcement {
+  enforcedBy: string
+  reproduced: Reproduced
+}
+
+function lessonTemplate(title: string, rule: string, prefill: AdrPrefill, paths: string[], source: string | undefined, enforcement: Enforcement | undefined, actor: string | null, now: Date): string {
   const lines = [
     '---',
     'type: lesson',
@@ -69,6 +89,11 @@ function lessonTemplate(title: string, rule: string, prefill: AdrPrefill, paths:
     `paths: [${paths.map((path) => quoted(path, 'path')).join(', ')}]`,
     ...(prefill.related.length > 0 ? [`related:`, ...prefill.related.map((path) => `  - ${path}`)] : []),
     ...(source ? [`source: ${source}`] : []),
+    ...(enforcement ? [
+      `enforcedBy: ${quoted(enforcement.enforcedBy, 'enforcedBy')}`,
+      `reproduced: ${enforcement.reproduced.value}`,
+      `reproducedBecause: "${scalar(enforcement.reproduced.because)}"`,
+    ] : []),
     `review: ${reviewDate(now)}`,
     ...(actor === null ? [] : [`generated: { by: "${actor}", at: ${now.toISOString()} }`]),
     '---',
@@ -77,8 +102,7 @@ function lessonTemplate(title: string, rule: string, prefill: AdrPrefill, paths:
     '',
     '<!-- What went wrong, where, and why the rule above keeps it from happening again. -->',
     '',
-    '<!-- If a check can catch it (a guren.arch.ts rule, a lint rule, a test), name it in enforcedBy: as <file>#<name>. -->',
-    '',
+    ...(enforcement ? [] : ['<!-- If a check can catch it (a guren.arch.ts rule, a lint rule, a test), name it in enforcedBy: as <file>#<name>. -->', '']),
   ]
   return lines.join('\n')
 }
@@ -94,11 +118,29 @@ export async function makeLesson(title: string, options: MakeLessonOptions = {})
   for (const path of paths) quoted(path, 'path')
   if (options.kind && !LESSON_SOURCE_KINDS.includes(options.kind)) throw new Error(`--kind is one of ${LESSON_SOURCE_KINDS.join(', ')}.`)
   if (options.kind && !options.from) throw new Error('--kind says what --from came from, and needs it.')
+  const enforcedBy = options.enforcedBy?.trim()
+  if (enforcedBy !== undefined) {
+    quoted(enforcedBy, 'enforcedBy')
+    const problem = await enforcedByProblem(enforcedBy, (file) => readFile(file, 'utf8').catch(() => undefined))
+    if (problem) throw new Error(problem)
+  }
   const [prefill, actor, source] = await Promise.all([
     options.entity ? resolveAdrPrefill(options.entity, moduleName, LESSON_DIR) : { entities: [], related: [] },
     resolveActor(options.by),
     options.from ? sourceOf(options.from, options.kind) : undefined,
   ])
+  let enforcement: Enforcement | undefined
+  if (enforcedBy !== undefined) {
+    const commit = source?.commit
+    let reproduced: Reproduced
+    if (options.reproduce === false) reproduced = { value: 'not-run', because: 'make:lesson ran with --no-reproduce' }
+    else if (!commit) reproduced = { value: 'not-run', because: options.from ? `--from ${options.from} names a pull request, whose commits this does not read` : 'no --from names the commit that removed the defect' }
+    else {
+      options.onReproduce?.(enforcedBy, commit)
+      reproduced = await reproduceLesson(process.cwd(), commit, enforcedBy)
+    }
+    enforcement = { enforcedBy, reproduced }
+  }
   const sequence = await nextSequenceNumber(dir)
-  return writeScaffoldFile(`${dir}/${sequence}-${slugifyProse(title, '-', 'lesson')}.md`, lessonTemplate(title.trim(), rule, prefill, paths, source, actor, new Date()), options)
+  return writeScaffoldFile(`${dir}/${sequence}-${slugifyProse(title, '-', 'lesson')}.md`, lessonTemplate(title.trim(), rule, prefill, paths, source?.line, enforcement, actor, new Date()), options)
 }
