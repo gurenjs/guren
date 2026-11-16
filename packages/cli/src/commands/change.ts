@@ -109,9 +109,9 @@ export const changeLaneCommand = defineCommand({
 })
 
 export const changePolicyCommand = defineCommand({
-  meta: { name: 'change:policy', description: "Regenerate the block of REVIEW.md, and of .cursor/BUGBOT.md for an app that reviews with Cursor, that lists what a reviewer must read (RFC 0040 §7), from the application as registered; --check writes nothing and exits 1 on a stale or missing block." },
+  meta: { name: 'change:policy', description: "Regenerate the block of REVIEW.md, and of .cursor/BUGBOT.md for an app that reviews with Cursor, that lists what a reviewer must read (RFC 0040 §7), and each installed agent's lessons rule, from the application as registered; --check writes nothing and exits 1 on a stale or missing file." },
   args: {
-    check: { type: 'boolean', description: 'Write nothing; exit 1 when REVIEW.md (or, for Cursor, .cursor/BUGBOT.md) is missing or its block is stale.' },
+    check: { type: 'boolean', description: 'Write nothing; exit 1 when REVIEW.md, .cursor/BUGBOT.md (for Cursor) or an agent\'s lessons rule is missing or stale.' },
     app: { type: 'string', description: 'Application root directory.' },
   },
   async run({ args }) {
@@ -129,6 +129,7 @@ export const changePolicyCommand = defineCommand({
     for (const file of result.files) {
       console.log({
         written: `Wrote ${file.file}.`,
+        removed: `Removed ${file.file}: no stable lesson names paths any more.`,
         unchanged: `${file.file} is current.`,
         stale: `${file.file} is stale: run \`guren change:policy\`.`,
         missing: `${file.file} does not exist: run \`guren change:policy\`${file.file === REVIEW_DOC_FILE ? ' (or `guren add review`)' : ''}.`,

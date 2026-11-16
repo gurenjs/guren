@@ -48,7 +48,7 @@ import {
   type ContextRoute,
 } from './context-route'
 import { extractInertiaPageRefs, describeInertiaPage } from './inertia-pages'
-import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './docs-index'
+import { scanDocs, extractDocsTags, buildEntityDocIndex, standingLessonRule, type DocRef } from './docs-index'
 import { describeIssue, isRepoSlug, type IssueLink } from './issue-refs'
 import { fetchLiveIssues, resolveOriginRepo, type LiveIssue } from './github'
 import type { CapturedExec } from './subprocess'
@@ -525,7 +525,7 @@ export async function generateEntityContext(
         description: ref.description,
         generatedAt: ref.generated?.at,
         verifiedAt,
-        ...(ref.type === 'lesson' && (ref.status ?? 'stable') === 'stable' && ref.lesson?.rule ? { rule: ref.lesson.rule } : {}),
+        ...(standingLessonRule(ref) ? { rule: standingLessonRule(ref) } : {}),
       }
     })
 

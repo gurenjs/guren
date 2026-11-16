@@ -4,8 +4,10 @@ import { dirname, join } from 'node:path'
 
 import { judgeChangeLane } from '../src/change/lane'
 import { openChange, resolveChange } from '../src/change/resolve'
-import { BUGBOT_LIMIT, buildReviewBlock, renderBugbotDoc, renderReviewDoc, syncReviewDoc, type ReviewFacts } from '../src/change/review-doc'
+import { BUGBOT_LIMIT, buildReviewBlock, crossCuttingLessons, renderBugbotDoc, renderReviewDoc, syncReviewDoc, type ReviewFacts } from '../src/change/review-doc'
 import { APPLICATION_GRAPH_RELATIONS_FIXTURE } from './application-graph-fixture'
+import { expandBraces, renderScopedRule } from '../src/agent-targets'
+import { scanDocs } from '../src/docs-index'
 import { envFileNames } from '../src/introspect'
 import { createTempRoot, createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 
@@ -32,6 +34,7 @@ const FACTS: ReviewFacts = {
   ],
   tools: [{ tool: 'posts_store', method: 'POST', path: '/posts', readOnly: false, destructive: false, ability: 'create', surfaces: ['MCP'] }],
   gaps: [],
+  lessons: [],
 }
 
 const USER_FILES: Record<string, string> = {
@@ -86,6 +89,67 @@ describe('renderReviewDoc', () => {
 
   test('should refuse markers it cannot rewrite safely', () => {
     expect(renderReviewDoc('# Review\n\n<!-- guren:review generated -->\nunclosed\n', ['x'])).toEqual({ problems: [expect.stringContaining('opens and never closes')] })
+  })
+})
+
+describe('lessons across the code', () => {
+  const LESSON = { rule: 'Read a webhook body as untrusted', paths: ['app/Http/Webhooks/**'], file: 'docs/lessons/0001-webhooks.md' }
+
+  test('lists a stable lesson with paths and no entity in the block, and nothing else', async () => {
+    expect(buildReviewBlock({ ...FACTS, lessons: [LESSON] }).join('\n')).toContain('- Read a webhook body as untrusted (`app/Http/Webhooks/**`; `docs/lessons/0001-webhooks.md`)')
+    expect(buildReviewBlock(FACTS).join('\n')).not.toContain('Lessons across the code')
+
+    const lessonDoc = (frontmatter: string): string => `---\ntype: lesson\n${frontmatter}\n---\n\n# A lesson\n`
+    const workspace = await createTempWorkspace('guren-review-doc-lessons-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'docs/lessons/0001-webhooks.md': lessonDoc('status: stable\nrule: "Read a webhook body as untrusted"\npaths: ["app/Http/Webhooks/**"]'),
+        'docs/lessons/0002-entity.md': lessonDoc('status: stable\nrule: "Load a comment through its post"\nentities: [Comment]\npaths: ["app/**"]'),
+        'docs/lessons/0003-draft.md': lessonDoc('status: draft\nrule: "Not yet"\npaths: ["app/**"]'),
+      })
+      expect(crossCuttingLessons(await scanDocs(workspace.dir))).toEqual([LESSON])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('expands a brace for the agents whose scope is a comma-joined list', () => {
+    expect(expandBraces('app/{Http,Jobs}/**/*.{ts,tsx}')).toEqual(['app/Http/**/*.ts', 'app/Http/**/*.tsx', 'app/Jobs/**/*.ts', 'app/Jobs/**/*.tsx'])
+    expect(expandBraces('app/**')).toEqual(['app/**'])
+    expect(expandBraces('app/{legacy}/**/*.{ts,tsx}')).toEqual(['app/{legacy}/**/*.ts', 'app/{legacy}/**/*.tsx'])
+    expect(expandBraces('{a,{b}}/x')).toEqual(['a/x', '{b}/x'])
+    const doc = { description: 'Lessons', paths: ['app/{Http,Jobs}/**'], body: '\n# Lessons\n' }
+    expect(renderScopedRule('cursor', 'lessons', doc)?.content).toContain('globs: "app/Http/**,app/Jobs/**"')
+    expect(renderScopedRule('claude', 'lessons', doc)?.content).toContain('  - "app/{Http,Jobs}/**"')
+  })
+
+  test('keeps one lessons rule per installed agent, removes it when no lesson stands, and refuses a file nobody generated', async () => {
+    const workspace = await createTempWorkspace('guren-review-doc-lesson-rules-')
+    try {
+      const facts = { ...FACTS, lessons: [LESSON] }
+      expect(await syncReviewDoc(workspace.dir, { facts, components: ['claude', 'cursor'] })).toMatchObject({
+        files: [{ file: 'REVIEW.md', state: 'written' }, { file: '.claude/rules/lessons.md', state: 'written' }, { file: '.cursor/rules/lessons.mdc', state: 'written' }],
+      })
+      const claude = await readFile(join(workspace.dir, '.claude/rules/lessons.md'), 'utf8')
+      expect(claude.startsWith('---\npaths:\n  - "app/Http/Webhooks/**"\n---\n')).toBe(true)
+      expect(claude).toContain('- Read a webhook body as untrusted (applies to `app/Http/Webhooks/**`; `docs/lessons/0001-webhooks.md`)')
+      expect(await readFile(join(workspace.dir, '.cursor/rules/lessons.mdc'), 'utf8')).toContain('globs: "app/Http/Webhooks/**"')
+      expect(await syncReviewDoc(workspace.dir, { facts, components: ['claude', 'cursor'], check: true })).toMatchObject({ files: [{ state: 'unchanged' }, { state: 'unchanged' }, { state: 'unchanged' }] })
+
+      expect(await syncReviewDoc(workspace.dir, { facts: FACTS, components: ['claude', 'cursor'], check: true })).toMatchObject({ files: [{ file: 'REVIEW.md', state: 'stale' }, { file: '.claude/rules/lessons.md', state: 'stale' }, { file: '.cursor/rules/lessons.mdc', state: 'stale' }] })
+      await syncReviewDoc(workspace.dir, { facts: FACTS, components: ['claude', 'cursor'] })
+      expect(await Bun.file(join(workspace.dir, '.claude/rules/lessons.md')).exists()).toBe(false)
+
+      await writeWorkspaceFiles(workspace.dir, { '.claude/rules/lessons.md': '# Our own lessons\n' })
+      expect(await syncReviewDoc(workspace.dir, { facts, components: ['claude'] })).toMatchObject({ files: [{ state: 'unchanged', held: true }, { file: '.claude/rules/lessons.md', state: 'refused' }] })
+      expect(await readFile(join(workspace.dir, '.claude/rules/lessons.md'), 'utf8')).toBe('# Our own lessons\n')
+
+      // With no lesson to write, the author's file is left alone and the review documents still regenerate.
+      expect(await syncReviewDoc(workspace.dir, { facts: FACTS, components: ['claude'] })).toEqual({ state: 'read', files: [{ file: 'REVIEW.md', state: 'unchanged' }], gaps: [] })
+      expect(await readFile(join(workspace.dir, '.claude/rules/lessons.md'), 'utf8')).toBe('# Our own lessons\n')
+    } finally {
+      await workspace.cleanup()
+    }
   })
 })
 

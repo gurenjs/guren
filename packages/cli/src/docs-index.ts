@@ -82,6 +82,13 @@ export interface DocRef {
   hasFrontmatter: boolean
 }
 
+/** A stable lesson's rule, trimmed, or `undefined`: a draft or deprecated lesson, or one with no rule, reaches nobody. */
+export function standingLessonRule(ref: Pick<DocRef, 'type' | 'status' | 'lesson'>): string | undefined {
+  if (ref.type !== 'lesson' || (ref.status ?? 'stable') !== 'stable') return undefined
+  const rule = ref.lesson?.rule?.trim()
+  return rule ? rule : undefined
+}
+
 /** One line a reviewer can act on: `check --docs` refuses a longer rule, and `make:lesson` writes none. */
 export const LESSON_RULE_LIMIT = 160
 

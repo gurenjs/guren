@@ -189,6 +189,16 @@ async function componentInstalled(cwd: string, component: HarnessComponent, temp
   return false
 }
 
+/** The components the app has installed, with no fallback: an app with no harness has none. */
+export async function installedHarnessComponents(cwd: string): Promise<HarnessComponent[]> {
+  const templates = await loadAgentTemplates()
+  const found: HarnessComponent[] = []
+  for (const component of DETECTABLE_COMPONENTS) {
+    if (await componentInstalled(cwd, component, templates)) found.push(component)
+  }
+  return normalizeComponents(found)
+}
+
 /** Whether the app has a harness component, by the same evidence `agent:sync` detects it from. */
 export async function hasHarnessComponent(cwd: string, component: HarnessComponent): Promise<boolean> {
   return componentInstalled(cwd, component, await loadAgentTemplates())

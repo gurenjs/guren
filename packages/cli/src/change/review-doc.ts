@@ -4,12 +4,13 @@
  * by a person, the models with sensitive columns, the routes that change data with what authorizes
  * them, and the routes agents can call, read from the Application Graph and the introspected app.
  */
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname, join, sep } from 'node:path'
 
 import { controllerActionSource, type GurenApplicationGraph } from '../application-graph'
 import { escapeMarkdownTableCell } from '../docs-links'
 import { describeMethod } from '../http-methods'
+import { standingLessonRule, type DocRef } from '../docs-index'
 import { readMarkedLines, spliceMarkedBlock, type MarkerSyntax } from '../marker-blocks'
 import { writeFileAtomic } from '../plan/beside'
 import { FACT_CLASSES, type FactCode, type Lane } from './fact-classes'
@@ -71,6 +72,22 @@ export interface ReviewFacts {
   tools: Array<{ tool: string; method: string; path: string; readOnly: boolean; destructive: boolean; ability?: string; surfaces: string[] }>
   /** Graph sections that did not read whole, each with its reason codes. */
   gaps: string[]
+  /** Stable lessons with `paths` and no entity (RFC 0040 §11): `guren context` reaches none of them. */
+  lessons: CrossCuttingLesson[]
+}
+
+export interface CrossCuttingLesson {
+  rule: string
+  paths: string[]
+  file: string
+}
+
+/** The lessons a reviewer and an agent are told about by path, from the documents as read. */
+export function crossCuttingLessons(refs: readonly DocRef[]): CrossCuttingLesson[] {
+  return refs
+    .filter((ref) => standingLessonRule(ref) !== undefined && ref.entities.length === 0 && (ref.lesson?.paths.length ?? 0) > 0)
+    .map((ref) => ({ rule: standingLessonRule(ref)!, paths: [...ref.lesson!.paths].sort(), file: ref.path }))
+    .sort((a, b) => a.file.localeCompare(b.file))
 }
 
 const code = (value: string): string => `\`${value.replace(/`/gu, "'")}\``
@@ -186,6 +203,9 @@ export function buildReviewBlock(facts: ReviewFacts): string[] {
     for (const tool of facts.tools) lines.push(`| ${cell(tool.tool)} | ${cell(`${tool.method} ${tool.path}`)} | ${tool.surfaces.join(', ')} | ${tool.readOnly ? 'yes' : 'no'} | ${tool.destructive ? 'yes' : 'no'} | ${cell(tool.ability ?? 'not derivable')} |`)
   }
 
+  if (facts.lessons.length > 0) {
+    lines.push('', '**Lessons across the code**: each is a rule for a change to the files it names (`docs/lessons/`, stable).', '', ...facts.lessons.map((lesson) => `- ${lesson.rule} (${lesson.paths.map(code).join(', ')}; ${code(lesson.file)})`))
+  }
   if (facts.gaps.length > 0) lines.push('', '**What the tables may be missing**, since the graph did not read these whole:', '', ...facts.gaps.map((gap) => `- ${gap}`))
   return lines
 }
@@ -276,12 +296,13 @@ export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts
   ])
   const skippedModels: string[] = []
   const why = (error: unknown): string => (error instanceof Error ? error.message : String(error)).split('\n')[0]!.replaceAll(`${cwd}${sep}`, '')
-  const [graph, models, introspection, policy] = await Promise.all([
+  const [graph, models, introspection, policy, docs] = await Promise.all([
     // Without the env files: a machine's git-ignored `.env` must not change the block `--check` compares in CI.
     loadApplicationGraph({ cwd, introspect: true, withoutEnvFiles: true }).catch((error: unknown) => ({ unreadable: why(error) })),
     readModels(cwd, skippedModels).catch((error: unknown) => ({ unreadable: why(error) })),
     introspectApp(cwd, { withoutEnvFiles: true }),
     readPolicySummary(cwd),
+    import('../docs-index').then(({ scanDocs }) => scanDocs(cwd)).catch((error: unknown) => ({ unreadable: why(error) })),
   ])
   const unreadable: string[] = []
   if ('unreadable' in graph) unreadable.push(`the application graph: ${graph.unreadable}`)
@@ -289,8 +310,9 @@ export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts
     unreadable.push(`the routes: ${[...new Set(graph.coverage.route?.reasons.map((reason) => reason.code) ?? [])].join(', ') || 'not registered'}`)
   }
   if ('unreadable' in models) unreadable.push(`the models: ${models.unreadable}`)
+  if ('unreadable' in docs) unreadable.push(`the lessons under docs/: ${docs.unreadable}`)
   if (introspection.status !== 'ok') unreadable.push(`the agent routes, since the application did not introspect (${introspection.reason}): ${introspection.message.split('\n')[0]!.replaceAll(`${cwd}${sep}`, '')}`)
-  if (unreadable.length > 0 || 'unreadable' in graph || 'unreadable' in models || introspection.status !== 'ok') return { unreadable }
+  if (unreadable.length > 0 || 'unreadable' in graph || 'unreadable' in models || 'unreadable' in docs || introspection.status !== 'ok') return { unreadable }
 
   const unreadModels: ReviewFacts['models']['unread'] = skippedModels.sort().map((file) => ({ model: file.split('/').pop()!.replace(/\.[cm]?[jt]sx?$/u, ''), file, reason: 'the file did not parse, or holds no class' }))
   // The model reader reads one class per file; every other model the graph found there is unread.
@@ -331,6 +353,7 @@ export async function loadReviewFacts(cwd: string): Promise<{ facts: ReviewFacts
         surfaces: [...(tool.expose.mcp ? ['MCP'] : []), ...(tool.expose.webMcp ? ['WebMCP'] : [])],
       })),
       gaps: reviewGraphGaps(graph),
+      lessons: crossCuttingLessons(docs),
     },
   }
 }
@@ -339,7 +362,7 @@ export const BUGBOT_FILE = '.cursor/BUGBOT.md'
 
 export interface ReviewDocFile {
   file: string
-  state: 'written' | 'unchanged' | 'stale' | 'missing' | 'refused'
+  state: 'written' | 'removed' | 'unchanged' | 'stale' | 'missing' | 'refused'
   problems?: string[]
   /** Not written, though it would have been, because another file refused. */
   held?: true
@@ -353,7 +376,45 @@ export async function reviewsWithCursor(cwd: string): Promise<boolean> {
   return hasHarnessComponent(cwd, 'cursor')
 }
 
-type Planned = { file: ReviewDocFile; path: string; content?: string }
+type Planned = { file: ReviewDocFile; path: string; content?: string; remove?: true }
+
+const LESSONS_RULE = 'lessons'
+const LESSONS_MARKER = '<!-- Generated by `guren change:policy` from the stable lessons under docs/lessons/ that name paths and no entity. Edit the lessons, not this file. -->'
+
+/** The body every agent's lessons rule carries; its `paths` scope is the lessons' globs together. */
+export function lessonsRuleBody(lessons: readonly CrossCuttingLesson[]): string {
+  return ['', '# Lessons across the code', '', LESSONS_MARKER, '', ...lessons.map((lesson) => `- ${lesson.rule} (applies to ${lesson.paths.map(code).join(', ')}; ${code(lesson.file)})`), ''].join('\n')
+}
+
+/** Each installed agent's lessons rule: written while a lesson stands, removed once none does; a file of that name nobody generated is refused. */
+async function planLessonRules(cwd: string, lessons: readonly CrossCuttingLesson[], components: readonly string[], check: boolean): Promise<Planned[]> {
+  const { renderScopedRule } = await import('../agent-targets')
+  const paths = [...new Set(lessons.flatMap((lesson) => lesson.paths))].sort()
+  const planned: Planned[] = []
+  for (const component of components) {
+    const rendered = renderScopedRule(component as never, LESSONS_RULE, { description: 'Lessons across the code', paths: paths.length > 0 ? paths : ['**'], body: lessonsRuleBody(lessons) })
+    if (!rendered) continue
+    const path = join(cwd, rendered.path)
+    const existing = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    const ours = existing === undefined || existing.includes(LESSONS_MARKER)
+    if (lessons.length === 0) {
+      // A file of that name nobody generated is the author's, and with nothing to write it is left alone.
+      if (existing !== undefined && ours) planned.push(check ? { path, file: { file: rendered.path, state: 'stale' } } : { path, file: { file: rendered.path, state: 'removed' }, remove: true })
+      continue
+    }
+    if (!ours) {
+      planned.push({ path, file: { file: rendered.path, state: 'refused', problems: [`${rendered.path} exists and is not the lessons rule \`guren change:policy\` writes; rename it`] } })
+      continue
+    }
+    if (existing === rendered.content) planned.push({ path, file: { file: rendered.path, state: 'unchanged' } })
+    else if (check) planned.push({ path, file: { file: rendered.path, state: existing === undefined ? 'missing' : 'stale' } })
+    else planned.push({ path, file: { file: rendered.path, state: 'written' }, content: rendered.content })
+  }
+  return planned
+}
 
 async function planFile(path: string, relative: string, render: (existing: string | undefined) => { content: string } | { problems: string[] }, check: boolean): Promise<Planned> {
   const existing = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => {
@@ -371,18 +432,24 @@ async function planFile(path: string, relative: string, render: (existing: strin
  * `REVIEW.md` at the application root and, for an app that reviews with Cursor, `.cursor/BUGBOT.md`,
  * each with its block regenerated; under `check` nothing is written.
  */
-export async function syncReviewDoc(cwd: string, options: { check?: boolean; facts?: ReviewFacts; cursor?: boolean } = {}): Promise<ReviewDocResult> {
+export async function syncReviewDoc(cwd: string, options: { check?: boolean; facts?: ReviewFacts; cursor?: boolean; components?: readonly string[] } = {}): Promise<ReviewDocResult> {
   const loaded = options.facts ? { facts: options.facts } : await loadReviewFacts(cwd)
   if ('unreadable' in loaded) return { state: 'unreadable', reasons: loaded.unreadable }
   const block = buildReviewBlock(loaded.facts)
   const check = options.check === true
   const planned = [await planFile(join(cwd, REVIEW_DOC_FILE), REVIEW_DOC_FILE, (existing) => renderReviewDoc(existing, block), check)]
   if (options.cursor ?? await reviewsWithCursor(cwd)) planned.push(await planFile(join(cwd, BUGBOT_FILE), BUGBOT_FILE, (existing) => renderBugbotDoc(existing, block), check))
+  const components: readonly string[] = options.components ?? (await (await import('../agent-harness')).installedHarnessComponents(cwd))
+  planned.push(...await planLessonRules(cwd, loaded.facts.lessons, components, check))
   // Every file is judged before the first write, so one that refuses leaves the other as it was.
   if (planned.some((entry) => entry.file.state === 'refused')) {
-    return { state: 'read', files: planned.map((entry) => (entry.file.state === 'written' ? { file: entry.file.file, state: 'unchanged' as const, held: true } : entry.file)), gaps: loaded.facts.gaps }
+    return { state: 'read', files: planned.map((entry) => (entry.file.state === 'written' || entry.file.state === 'removed' ? { file: entry.file.file, state: 'unchanged' as const, held: true } : entry.file)), gaps: loaded.facts.gaps }
   }
   for (const entry of planned) {
+    if (entry.remove) {
+      await rm(entry.path, { force: true })
+      continue
+    }
     if (entry.content === undefined) continue
     await mkdir(dirname(entry.path), { recursive: true })
     await writeFileAtomic(entry.path, entry.content)
