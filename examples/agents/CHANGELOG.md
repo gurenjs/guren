@@ -1,5 +1,35 @@
 # @guren/example-agents
 
+## 0.1.35
+
+### Patch Changes
+
+- Updated dependencies [7aa4279]
+- Updated dependencies [3a4c362]
+- Updated dependencies [d595caa]
+- Updated dependencies [1c96476]
+- Updated dependencies [76f381a]
+- Updated dependencies [74cdee4]
+- Updated dependencies [8354701]
+- Updated dependencies [f2465bf]
+- Updated dependencies [c2146ec]
+- Updated dependencies [8313498]
+- Updated dependencies [8afb1c7]
+- Updated dependencies [da1c8eb]
+- Updated dependencies [d142ee3]
+- Updated dependencies [131d9c9]
+- Updated dependencies [721600b]
+- Updated dependencies [c44ad80]
+- Updated dependencies [d38f0c3]
+- Updated dependencies [ca48f22]
+- Updated dependencies [cf18fad]
+- Updated dependencies [70370c0]
+- Updated dependencies [421bd21]
+- Updated dependencies [94514f8]
+- Updated dependencies [b561cf3]
+  - @guren/cli@2.37.0
+  - @guren/orm@2.16.2
+
 ## 0.1.34
 
 ### Patch Changes
