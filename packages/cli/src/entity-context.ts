@@ -116,6 +116,8 @@ export interface EntityDoc {
   generatedAt?: string
   /** Latest OKF `verified[].at`, when the doc records verification events. */
   verifiedAt?: string
+  /** A stable lesson's rule (RFC 0040 §11); a draft or deprecated lesson reaches nobody. */
+  rule?: string
 }
 
 /**
@@ -523,6 +525,7 @@ export async function generateEntityContext(
         description: ref.description,
         generatedAt: ref.generated?.at,
         verifiedAt,
+        ...(ref.type === 'lesson' && (ref.status ?? 'stable') === 'stable' && ref.lesson?.rule ? { rule: ref.lesson.rule } : {}),
       }
     })
 
@@ -792,6 +795,13 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
   pushList('Factories', ctx.factories)
   pushList('Seeders', ctx.seeders)
   pushList('Tests', ctx.tests)
+
+  const lessons = ctx.docs.filter((doc) => doc.rule !== undefined)
+  if (lessons.length > 0) {
+    lines.push(`## Lessons (${lessons.length})`)
+    for (const doc of lessons) lines.push(`- ${doc.rule} (${doc.path})`)
+    lines.push('')
+  }
 
   if (ctx.docs.length > 0) {
     lines.push(`## Linked docs (${ctx.docs.length})`)

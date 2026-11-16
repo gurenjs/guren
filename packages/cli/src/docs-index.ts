@@ -77,7 +77,28 @@ export interface DocRef {
   citations: string[]
   /** Items under a `## Rules` heading that cite no acceptance id. */
   uncitedRules: string[]
+  /** A `type: lesson` document's own fields (RFC 0040 §11); absent on any other type. */
+  lesson?: DocLesson
   hasFrontmatter: boolean
+}
+
+/** One line a reviewer can act on: `check --docs` refuses a longer rule, and `make:lesson` writes none. */
+export const LESSON_RULE_LIMIT = 160
+
+/** A lesson: one rule line, what it governs and how it is kept (RFC 0040 §11). */
+export interface DocLesson {
+  /** `''` when present but not a scalar, so the checker can report it. */
+  rule?: string
+  /** The rule was written as a YAML block scalar (`|`, `>`), which the frontmatter reader does not follow. */
+  ruleBlock?: true
+  /** Globs a cross-cutting lesson governs. */
+  paths: string[]
+  /** `<file>#<name>`: the check that enforces the rule; `''` when present but not a scalar. */
+  enforcedBy?: string
+  /** YYYY-MM-DD after which nobody has confirmed the lesson still applies. */
+  review?: string
+  supersededBy?: string
+  source?: Record<string, string>
 }
 
 /** OKF reserved filenames (§3.1) — navigation, never concept documents. */
@@ -161,6 +182,15 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
               links: parsed ? extractMarkdownLinks(body) : [],
               citations: parsed ? extractAcceptanceCitations(body) : [],
               uncitedRules: parsed ? extractUncitedRules(body) : [],
+              ...(toScalar(data.type) === 'lesson' ? { lesson: {
+                // A block scalar reads back as its indicator alone, so the rule it holds is unread rather than `|`.
+                ...('rule' in data ? (/^[|>][+-]?\d*$/u.test(toScalar(data.rule) ?? '') ? { rule: '', ruleBlock: true as const } : { rule: toScalar(data.rule) ?? '' }) : {}),
+                paths: toStringList(data.paths),
+                ...('enforcedBy' in data ? { enforcedBy: toScalar(data.enforcedBy) ?? '' } : {}),
+                ...('review' in data ? { review: toScalar(data.review) ?? '' } : {}),
+                ...(toScalar(data.supersededBy) ? { supersededBy: toScalar(data.supersededBy) } : {}),
+                ...(data.source && typeof data.source === 'object' && !Array.isArray(data.source) ? { source: data.source } : {}),
+              } } : {}),
               hasFrontmatter: parsed !== null,
             }
           }),

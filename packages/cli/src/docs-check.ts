@@ -10,7 +10,7 @@ import {
 } from './discovery'
 import { matchesGlob } from './glob-match'
 import { parseModelFile } from './model-parser'
-import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './docs-index'
+import { scanDocs, extractDocsTags, buildEntityDocIndex, LESSON_RULE_LIMIT, type DocRef } from './docs-index'
 import { ISSUE_REF_FORMS } from './issue-refs'
 import type { ParseCache } from './parse-cache'
 import { advisory, check, type CheckResult } from './check-result'
@@ -150,6 +150,7 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     results.push(...(await checkDocRelations(ref, modelNames, probes)))
     results.push(...checkProvenanceFields(ref))
     results.push(...checkIssueRefs(ref))
+    results.push(...(await checkLesson(cwd, ref, probes)))
   }
 
   results.push(...checkConformance(refs, docsWithFrontmatter.length > 0, changedFiles ?? null))
@@ -295,6 +296,11 @@ function changedScope(refs: DocRef[], changedFiles: Set<string> | null): Set<str
 
   const inScope = (ref: DocRef): boolean => {
     if (changedFiles.has(ref.path)) return true
+    // The check a lesson points at goes stale by an edit to that file, not to the lesson.
+    const enforced = ref.lesson?.enforcedBy?.split('#', 1)[0]
+    if (enforced && targetChanged(posix.normalize(enforced))) return true
+    // A cross-cutting lesson governs its `paths`, as `related` does.
+    if (ref.lesson?.paths.some((entry) => (hasGlobChars(entry) ? changedList.some((file) => matchesGlob(file, entry)) : targetChanged(entry)))) return true
     if (ref.entities.some((entity) => changedModelNames.has(entity.toLowerCase()))) return true
     if (
       ref.related.some((entry) =>
@@ -312,6 +318,52 @@ function changedScope(refs: DocRef[], changedFiles: Set<string> | null): Set<str
   }
 
   return new Set(refs.filter(inScope).map((ref) => ref.path))
+}
+
+/**
+ * A lesson (RFC 0040 §11): one rule line, an `enforcedBy` that names a check which exists, a
+ * `review` date nobody let pass, and a `supersededBy` on a retired one. A rule or a check that
+ * does not hold fails; the dates and the retirement are advisory, since time alone breaks them.
+ */
+async function checkLesson(cwd: string, ref: DocRef, probes: PathProbes): Promise<CheckResult[]> {
+  const lesson = ref.lesson
+  if (!lesson) return []
+  const results: CheckResult[] = []
+  const rule = lesson.rule?.trim() ?? ''
+  if (lesson.ruleBlock) {
+    results.push(check(`docs-lesson-rule:${ref.path}`, `${ref.path} rule`, 'fail', 'The rule is a YAML block scalar (`|` or `>`), which the frontmatter reader does not follow, so nothing would be delivered.', `Write it on one line: \`rule: "<one line>"\` in ${ref.path}.`, ref.path))
+  } else if (rule === '') {
+    results.push(check(`docs-lesson-rule:${ref.path}`, `${ref.path} rule`, 'fail', 'A lesson has no `rule:`, the one line `guren context` delivers.', `Add \`rule: "<one line>"\` to ${ref.path}.`, ref.path))
+  } else if (rule.length > LESSON_RULE_LIMIT) {
+    results.push(check(`docs-lesson-rule:${ref.path}`, `${ref.path} rule`, 'fail', `The rule is ${rule.length} characters; a lesson's rule is one line of at most ${LESSON_RULE_LIMIT}.`, 'Keep the rule to what a reviewer acts on and move the rest into the body.', ref.path))
+  }
+  if (lesson.enforcedBy !== undefined) {
+    // At the first `#`: the rest is the name whole, so `#AC-auth-1#removed` is not read as `AC-auth-1`.
+    const separator = lesson.enforcedBy.indexOf('#')
+    const file = separator === -1 ? lesson.enforcedBy : lesson.enforcedBy.slice(0, separator)
+    const name = separator === -1 ? undefined : lesson.enforcedBy.slice(separator + 1)
+    const target = posix.normalize(file)
+    const text = isAppRootRelative(target) && (await probes.exists(target)) ? await readFile(`${cwd}/${target}`, 'utf8').catch(() => undefined) : undefined
+    const failEnforced = (message: string): void => {
+      results.push(check(`docs-lesson-enforced:${ref.path}`, `${ref.path} enforcedBy`, 'fail', message, 'Name the check as <file>#<name>: a file relative to the application root, and a rule or a test it holds, as it is written there.', ref.path))
+    }
+    if (lesson.enforcedBy.trim() === '') failEnforced('`enforcedBy:` is present but names nothing (empty, or not a single value), so no check is followed.')
+    else if (!name) failEnforced(`\`enforcedBy: ${lesson.enforcedBy}\` names no check in ${file}: a file existing is not a check that catches the failure.`)
+    else if (text === undefined) failEnforced(`\`enforcedBy: ${lesson.enforcedBy}\` names ${file}, which is not a file in the application.`)
+    // As a whole token: `AC-posts-1` must not pass on `AC-posts-12`, nor `no-drizzle` on `controllers-no-drizzle`.
+    else if (!new RegExp(`(?<![\\w-])${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?![\\w-])`, 'u').test(text)) failEnforced(`\`enforcedBy: ${lesson.enforcedBy}\`: ${file} does not hold ${name}.`)
+  }
+  if (lesson.review !== undefined) {
+    if (parseCalendarDate(lesson.review) === null) {
+      results.push(advisory(`docs-lesson-review:${ref.path}`, `${ref.path} review`, 'warn', `\`review: ${lesson.review}\` is not a YYYY-MM-DD date.`, 'Write the date after which the lesson should be confirmed again.', ref.path))
+    } else if ((ref.status ?? 'stable') === 'stable' && lesson.review < new Date().toISOString().slice(0, 10)) {
+      results.push(advisory(`docs-lesson-review:${ref.path}`, `${ref.path} review`, 'warn', `Nobody has confirmed since ${lesson.review} that this lesson still applies.`, 'Confirm it and move `review:` forward, or deprecate it with `supersededBy:`.', ref.path))
+    }
+  }
+  if (ref.status === 'deprecated' && !lesson.supersededBy) {
+    results.push(advisory(`docs-lesson-superseded:${ref.path}`, `${ref.path} supersededBy`, 'warn', 'A deprecated lesson names no `supersededBy:`, so a reader cannot tell what replaced it.', 'Name the lesson, the check or the ADR that replaced it.', ref.path))
+  }
+  return results
 }
 
 /** `type` is the one field OKF requires on a concept document. */
