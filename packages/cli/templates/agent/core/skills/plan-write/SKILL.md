@@ -9,6 +9,10 @@ You write the plan in this session, the person reviews and approves it, and
 `plan-implement` builds it. Never run `plan:approve`: approving is the
 person's decision, made after reading the page.
 
+A change that adds or alters a model, a route, a policy or a page is the
+kind a plan is for. Repairing the code behind them without changing what
+they are is a fix: the `fix` skill.
+
 ## 0. Check that someone will approve it
 
 A plan is built only after a person approves it, so decide this before you
