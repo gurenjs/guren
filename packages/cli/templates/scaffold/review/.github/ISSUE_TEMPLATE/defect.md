@@ -5,7 +5,7 @@ about: Something the application does wrong
 
 ## What happens
 
-<!-- The steps, what you saw, and the page or route. -->
+<!-- The steps, what you saw, and the page or route. The fix starts from a test that reproduces these steps. -->
 
 ## What should happen
 

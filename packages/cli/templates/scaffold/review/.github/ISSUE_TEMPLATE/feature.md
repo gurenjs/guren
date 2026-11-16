@@ -3,6 +3,8 @@ name: Feature
 about: Something the application should do that it does not
 ---
 
+<!-- A change that adds or alters a model, a route, a policy or a page gets a plan before any code. Repairing one without changing what it is goes in a defect. -->
+
 ## What a user should be able to do
 
 <!-- Who, what, and why it matters to them. -->

@@ -74,8 +74,10 @@ bunx guren gate                    # every CI stage (codegen, typecheck, lint, c
 Implementation plans: the `plan-write` and `plan-implement` skills. A plan is
 built only after a person approves it, so before writing one read step 0 of
 `plan-write`, which says what to do in a session nobody approves from (a
-non-interactive run, a request that says nobody will review). Browser
-verification: the `verify-in-browser` skill. Each lists its own commands.
+non-interactive run, a request that says nobody will review). A defect: the
+`fix` skill, which reproduces it as a failing test before changing anything.
+Browser verification: the `verify-in-browser` skill. Each lists its own
+commands.
 
 ## MCP Server (AI Agent Integration)
 
