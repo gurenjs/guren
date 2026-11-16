@@ -295,6 +295,7 @@ export const BULK_TEMPLATE_PREFIXES = [
   'targets/claude/agents/',
   'targets/claude/hooks/',
   'targets/cursor/hooks/',
+  'targets/agents/skills/',
 ] as const
 
 /**
@@ -356,6 +357,8 @@ export function componentsForTargets(targets: AgentTarget[]): HarnessComponent[]
 const RULES_DIR_TOKEN = '__RULES_DIR__'
 const SKILLS_DIR_TOKEN = '__SKILLS_DIR__'
 const APP_TITLE_TOKEN = '__APP_TITLE__'
+// The review contract (RFC 0040 §7): one body the Claude agent and the `.agents` skill both carry.
+const REVIEW_CONTRACT_TOKEN = '__REVIEW_CONTRACT__'
 const TOKEN_RE = /__[A-Z][A-Z_]*__/u
 
 export interface RuleDoc {
@@ -471,7 +474,10 @@ export function planComponents(
       .map(([path, content]) => [path.slice(prefix.length), content])
 
   const render = (content: string, dirs?: CanonicalDirs): string => {
-    const withTitle = content.replaceAll(APP_TITLE_TOKEN, appTitle)
+    const withContract = content.includes(REVIEW_CONTRACT_TOKEN)
+      ? content.replaceAll(REVIEW_CONTRACT_TOKEN, get('core/review-contract.md').trimEnd())
+      : content
+    const withTitle = withContract.replaceAll(APP_TITLE_TOKEN, appTitle)
     return dirs === undefined
       ? withTitle
       : withTitle.replaceAll(RULES_DIR_TOKEN, dirs.rules).replaceAll(SKILLS_DIR_TOKEN, dirs.skills)
@@ -509,9 +515,9 @@ export function planComponents(
   const addStopHookConfig = (path: string, templatePath: string): void =>
     addUserConfig(path, templatePath, STOP_HOOK_MARKER, 'the `guren gate` stop hook')
   /** A template subtree copied as managed files under `dir`. */
-  const addTree = (prefix: string, dir: string): void => {
+  const addTree = (prefix: string, dir: string, dirs?: CanonicalDirs): void => {
     for (const [rel, content] of under(prefix)) {
-      add({ path: `${dir}/${rel}`, content: render(content), managed: true })
+      add({ path: `${dir}/${rel}`, content: render(content, dirs), managed: true })
     }
   }
 
@@ -553,7 +559,7 @@ export function planComponents(
       'the Guren hooks (the edit check and the `guren gate` stop hook)',
       LEGACY_CLAUDE_HOOK_COMMANDS,
     )
-    addTree('targets/claude/agents/', '.claude/agents')
+    addTree('targets/claude/agents/', '.claude/agents', canonicalDirs('.claude'))
     addTree('targets/claude/hooks/', '.claude/hooks')
     // The Claude Code / Codex stop hook: one script, one stdin/exit-code contract.
     addTree('core/hooks/', '.claude/hooks')
@@ -567,6 +573,8 @@ export function planComponents(
       managed: false,
     })
     addCanonical('.agents')
+    // Claude Code reads the contract through its `code-review` agent; every other target through this skill.
+    addTree('targets/agents/skills/', canonicalDirs('.agents').skills, canonicalDirs('.agents'))
   }
 
   // Cursor and Copilot load path-scoped rules natively; re-render the

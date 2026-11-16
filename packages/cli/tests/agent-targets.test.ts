@@ -120,6 +120,23 @@ describe('planComponents', () => {
     expect(byPath.has('.agents/rules/testing.md')).toBe(false)
   })
 
+  it('renders one review contract into the Claude agent and the .agents skill, each with its own rules path', () => {
+    const templates = fakeTemplates()
+    templates.set('core/review-contract.md', 'contract reading __RULES_DIR__/testing.md\n')
+    templates.set('targets/claude/agents/code-review.md', '---\nname: code-review\n---\n\n__REVIEW_CONTRACT__\n')
+    templates.set('targets/agents/skills/review-change/SKILL.md', '---\nname: review-change\n---\n\n__REVIEW_CONTRACT__\n')
+
+    const claudeOnly = planByPath(['claude'], templates)
+    expect(claudeOnly.get('.claude/agents/code-review.md')?.content).toBe('---\nname: code-review\n---\n\ncontract reading .claude/rules/testing.md\n')
+    expect(claudeOnly.has('.agents/skills/review-change/SKILL.md')).toBe(false)
+    expect(claudeOnly.has('.claude/skills/review-change/SKILL.md')).toBe(false)
+
+    const both = planByPath(['claude', 'agents'], templates)
+    const skill = both.get('.agents/skills/review-change/SKILL.md')
+    expect(skill?.content).toBe('---\nname: review-change\n---\n\ncontract reading .agents/rules/testing.md\n')
+    expect(skill?.managed).toBe(true)
+  })
+
   it('assembles AGENTS.md from the same intro and body with the agents workflow', () => {
     const byPath = planByPath(['claude', 'agents'])
 
