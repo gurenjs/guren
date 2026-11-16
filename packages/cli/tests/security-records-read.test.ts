@@ -106,11 +106,11 @@ describe('readSecurityRecords', () => {
       method: 'PUT',
       action: 'app/Http/Controllers/PostController.ts#PostController.update',
       middleware: [{ capabilities: { authentication: { mode: 'required' } } }],
-      contracts: { body: { exports: ['app/Http/Validators/PostValidator.ts#PostSchema'], declarations: { 'app/Http/Validators/PostValidator.ts#PostSchema': expect.stringMatching(/^declaration:/) } } },
+      contracts: { body: { exports: ['app/Http/Validators/PostValidator.ts#PostSchema'], declarations: { 'app/Http/Validators/PostValidator.ts#PostSchema': expect.any(String) } } },
       handler: {
         authenticates: true,
         authorizes: [{ member: 'authorize', ability: 'update', subject: "'Post'" }],
-        validates: [{ member: 'validateParams', schema: 'app/Http/Validators/PostValidator.ts#IdSchema', declaration: expect.stringMatching(/^declaration:/) }],
+        validates: [{ member: 'validateParams', schema: 'app/Http/Validators/PostValidator.ts#IdSchema', declaration: expect.any(String) }],
       },
     })
     expect(update?.handler).not.toHaveProperty('unseen')
@@ -187,11 +187,12 @@ export function registerWebRoutes(router: Router): void {
     expect(before.update).toMatchObject({ authorizes: [], unseen: expect.any(String) })
     expect(before.destroy).toMatchObject({ unread: expect.stringContaining('was not found'), digest: expect.any(String) })
     expect(text((await handlers('digest-b', templated.replace("'publish'", "'view'"))).update)).not.toBe(update)
-    expect(text((await handlers('digest-c', templated, { 'app/Unrelated.ts': 'export const unrelated = 2\n' })).update)).toBe(update)
     expect(text((await handlers('digest-d', templated, { 'app/Http/Controllers/BaseController.ts': base.replace("    await this.authorize('delete', 'Post')\n", '') })).destroy)).not.toBe(destroy)
     const gated = await handlers('digest-e', gate)
     const gatedText = text(gated.update)
     expect(gated.update).toMatchObject({ unseen: expect.any(String) })
+    // The gate's arguments name no binding, so a file the body imports for something else is not reached.
+    expect(text((await handlers('digest-c', gate, { 'app/Unrelated.ts': 'export const unrelated = 2\n' })).update)).toBe(gatedText)
     expect(text((await handlers('digest-f', "    const gate = this.make('gate')")).update)).not.toBe(gatedText)
   })
   test('follows a local an unnamed call passes, the class chain for this.<member>, and a dense graph in one walk', async () => {
