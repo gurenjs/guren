@@ -16,13 +16,31 @@ type ContractKey = (typeof CONTRACT_KEYS)[number]
 
 type MiddlewareCapabilities = MiddlewareEntry['capabilities']
 
-export type MiddlewareRecord = Pick<MiddlewareEntry, 'kind' | 'name' | 'capabilities' | 'ability' | 'unresolved'>
+export type MiddlewareRecord = Pick<MiddlewareEntry, 'kind' | 'name' | 'capabilities' | 'ability' | 'unresolved' | 'members' | 'unresolvedMembers'>
 
 export interface ContractRecord {
   /** The JSON Schema the manifest renders, or why it could not. */
   schema: unknown
   /** `file#export` of each validator export the schema object is; empty when none is. */
   exports: string[]
+  /** A digest of each export's declaration, what an unreadable schema is compared by. */
+  declarations: Record<string, string>
+}
+
+export interface AuthorizationCall {
+  member: 'authorize' | 'can'
+  ability: string
+  /** The arguments after the ability, as written: the record or class the policy is asked about. */
+  subject: string
+}
+
+export interface ValidateCall {
+  /** `validateBody`, `validateBodySafe`, `validateQuery`, …: a Safe call returns rather than throws. */
+  member: string
+  /** `file#export` of the schema, or `''` when the argument is no imported validator export. */
+  schema: string
+  /** A digest of that export's declaration, since its schema is not rendered. */
+  declaration?: string
 }
 
 /** What the action body shows, or why it was not read. */
@@ -30,13 +48,10 @@ export type ActionRecord =
   | {
     /** The action calls `auth.userOrFail()` or `apiToken()`, which refuse a guest. */
     authenticates: boolean
-    authorizes: Array<{ member: 'authorize' | 'can'; ability: string }>
-    /** An `authorize()`/`can()` call whose ability is not a literal: resolved at request time. */
-    dynamicAuthorization?: true
-    /** The schema each validate call passes, as written. */
-    validates: string[]
-    /** A validate call whose argument the reader cannot follow. */
-    dynamicValidation?: true
+    authorizes: AuthorizationCall[]
+    validates: ValidateCall[]
+    /** A digest of the body as written, set when a call's ability or schema the reader cannot follow. */
+    unseen?: string
   }
   | { unread: string }
 
@@ -57,8 +72,11 @@ export interface SecurityRecords {
   routes: RouteSecurityRecord[]
 }
 
-/** The two sides' records, or why they could not both be read. */
-export type SecurityRecordPair = { base: SecurityRecords; head: SecurityRecords } | { unavailable: string }
+/**
+ * The two sides' records, or why they could not both be read. `side` names the one the reader
+ * could not read, when only one: a head the change made unreadable is not a missing base.
+ */
+export type SecurityRecordPair = { base: SecurityRecords; head: SecurityRecords } | { unavailable: string; side?: 'base' | 'head' }
 
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, entry: unknown) =>
   entry && typeof entry === 'object' && !Array.isArray(entry)
@@ -110,10 +128,74 @@ export type RecordVerdict =
   | { verdict: 'weaker'; authorization: string[]; validation: string[] }
   | { verdict: 'incomparable'; reasons: string[] }
 
-const capabilityKey = (entry: MiddlewareRecord): string => canonical(entry.capabilities)
-const entryKey = (entry: MiddlewareRecord): string => canonical([entry.kind, entry.name, entry.capabilities, entry.ability ?? null])
+const entryKey = (entry: MiddlewareRecord): string => canonical([entry.kind, entry.name, entry.capabilities, entry.ability ?? null, entry.members ?? null])
 const hasCapability = (entry: MiddlewareRecord): boolean => entry.capabilities.authentication !== undefined || entry.capabilities.authorization !== undefined
 const entryName = (entry: MiddlewareRecord): string => entry.name ?? (entry.kind === 'inline' ? 'an inline middleware' : `an unnamed ${entry.kind}`)
+const requiresAuthentication = (chain: MiddlewareRecord[]): boolean => chain.some((entry) => entry.capabilities.authentication?.mode === 'required')
+
+/** Removes and returns the items of `from` matched one to one in `other`, in `from`'s order. */
+function matchedInOrder<T>(from: T[], other: T[], key: (item: T) => string): string[] {
+  const left = other.map(key)
+  return from.map(key).filter((entry) => {
+    const at = left.indexOf(entry)
+    if (at === -1) return false
+    left.splice(at, 1)
+    return true
+  })
+}
+
+/** One to one: each item of `base` is matched to an equal item of `head` at most once. */
+function unmatched<T>(base: T[], head: T[], key: (item: T) => string): { gone: T[]; added: T[] } {
+  const added = [...head]
+  const gone: T[] = []
+  for (const item of base) {
+    const at = added.findIndex((other) => key(other) === key(item))
+    if (at === -1) gone.push(item)
+    else added.splice(at, 1)
+  }
+  return { gone, added }
+}
+
+function compareChain(base: RouteSecurityRecord, head: RouteSecurityRecord, out: { incomparable: string[]; authorization: string[] }): boolean {
+  let stronger = false
+  for (const entry of [...base.middleware, ...head.middleware]) {
+    if (entry.unresolved) out.incomparable.push(`the middleware ${entryName(entry)} is not registered, so what it enforces is unread`)
+    if (entry.unresolvedMembers?.length) out.incomparable.push(`the group ${entryName(entry)} names ${entry.unresolvedMembers.join(', ')}, which nothing registers`)
+    const authz = entry.capabilities.authorization
+    if (authz?.mode === 'mixed') out.incomparable.push(`${entryName(entry)} combines authorization checks whose ability is not derivable`)
+    if (authz?.resource && !authz.resource.fromMethodMap) out.incomparable.push(`${entryName(entry)} resolves its ability at request time`)
+  }
+  if (!same(matchedInOrder(base.middleware, head.middleware, entryKey), matchedInOrder(head.middleware, base.middleware, entryKey))) {
+    out.incomparable.push('the chain runs the same middleware in another order')
+  }
+  const { gone, added } = unmatched(base.middleware, head.middleware, entryKey)
+  const authenticationKept = requiresAuthentication(head.middleware)
+  for (const entry of gone) {
+    const sameGroup = entry.kind === 'group' ? added.findIndex((other) => other.kind === 'group' && other.name === entry.name) : -1
+    if (sameGroup !== -1) {
+      const group = added[sameGroup]!
+      const lost = (entry.members ?? []).filter((member) => !(group.members ?? []).includes(member))
+      if (lost.length > 0) { out.incomparable.push(`the group ${entryName(entry)} no longer runs ${lost.join(', ')}`); continue }
+      if (same(entry.capabilities, group.capabilities) && same(entry.ability ?? null, group.ability ?? null)) { added.splice(sameGroup, 1); stronger = true; continue }
+    }
+    if (!hasCapability(entry)) { out.incomparable.push(`${entryName(entry)}, a middleware that declares no capability, was removed or changed`); continue }
+    const authn = entry.capabilities.authentication
+    const authnKept = authn?.mode !== 'required' || authenticationKept
+    const authz = entry.capabilities.authorization
+    if (!authz) {
+      if (!authnKept) out.authorization.push(`${entryName(entry)} (${describeCapabilities(entry.capabilities)}) is no longer on the chain`)
+      continue
+    }
+    const kept = added.findIndex((other) => {
+      const theirs = other.capabilities.authorization
+      if (!theirs || theirs.mode !== authz.mode || (other.ability ?? null) !== (entry.ability ?? null)) return false
+      return authz.mode === 'all' ? authz.abilities.every((ability) => theirs.abilities.includes(ability)) : theirs.abilities.every((ability) => authz.abilities.includes(ability))
+    })
+    if (kept !== -1 && authnKept) { added.splice(kept, 1); stronger = true; continue }
+    out.authorization.push(`${entryName(entry)} (${describeCapabilities(entry.capabilities)}) is no longer on the chain`)
+  }
+  return stronger || added.length > 0
+}
 
 /** Compares one route's two records by RFC 0040 §3's table. */
 export function compareRecords(base: RouteSecurityRecord, head: RouteSecurityRecord): RecordVerdict {
@@ -121,96 +203,52 @@ export function compareRecords(base: RouteSecurityRecord, head: RouteSecurityRec
   const incomparable: string[] = []
   const authorization: string[] = []
   const validation: string[] = []
-  let stronger = false
+  let stronger = compareChain(base, head, { incomparable, authorization })
 
-  // The chain.
-  for (const entry of [...base.middleware, ...head.middleware]) {
-    if (entry.unresolved) incomparable.push(`the middleware ${entryName(entry)} is not registered, so what it enforces is unread`)
-    const authz = entry.capabilities.authorization
-    if (authz?.mode === 'mixed') incomparable.push(`${entryName(entry)} combines authorization checks whose ability is not derivable`)
-    if (authz?.resource && !authz.resource.fromMethodMap) incomparable.push(`${entryName(entry)} resolves its ability at request time`)
-  }
-  const [baseCapable, headCapable] = [base.middleware.filter(hasCapability), head.middleware.filter(hasCapability)]
-  const headKeys = headCapable.map(capabilityKey)
-  for (const entry of baseCapable) {
-    if (headKeys.includes(capabilityKey(entry))) continue
-    const authn = entry.capabilities.authentication
-    if (authn?.mode === 'guest-only' && !entry.capabilities.authorization) continue
-    if (authn?.mode === 'required' && head.middleware.some((other) => other.capabilities.authentication?.mode === 'required') && !entry.capabilities.authorization) continue
-    const authz = entry.capabilities.authorization
-    if (authz) {
-      const kept = headCapable.find((other) => other.capabilities.authorization?.mode === authz.mode && other.ability === entry.ability)
-      const abilities = kept?.capabilities.authorization?.abilities
-      if (abilities && authz.mode === 'all' && authz.abilities.every((ability) => abilities.includes(ability))) { stronger = true; continue }
-      if (abilities && authz.mode === 'any' && abilities.every((ability) => authz.abilities.includes(ability))) { stronger = true; continue }
-    }
-    authorization.push(`${entryName(entry)} (${describeCapabilities(entry.capabilities)}) is no longer on the chain`)
-  }
-  // The whole chain, as a multiset of entries: an inline middleware has no name to tell it by.
-  const [baseEntries, headEntries] = [base.middleware.map(entryKey), head.middleware.map(entryKey)]
-  const common = (from: string[], other: string[]): string[] => {
-    const left = [...other]
-    return from.filter((key) => {
-      const at = left.indexOf(key)
-      if (at === -1) return false
-      left.splice(at, 1)
-      return true
-    })
-  }
-  if (!same(common(baseEntries, headEntries), common(headEntries, baseEntries))) incomparable.push('the chain runs the same middleware in another order')
-  const remainingHead = [...headEntries]
-  for (const [index, key] of baseEntries.entries()) {
-    const at = remainingHead.indexOf(key)
-    if (at !== -1) { remainingHead.splice(at, 1); continue }
-    const entry = base.middleware[index]!
-    if (!hasCapability(entry)) incomparable.push(`${entryName(entry)}, a middleware that declares no capability, was removed or changed`)
-  }
-  if (remainingHead.length > 0) stronger = true
-
-  // The contracts.
   for (const key of CONTRACT_KEYS) {
     const [a, b] = [base.contracts[key], head.contracts[key]]
     if (!a) { if (b) stronger = true; continue }
     if (!b) { validation.push(`the ${key} contract is gone`); continue }
     if (!same(a.exports, b.exports)) { incomparable.push(`the ${key} contract is another validator export (${a.exports.join(', ') || 'none'} → ${b.exports.join(', ') || 'none'})`); continue }
+    const unreadable = (schema: unknown): boolean => !!schema && typeof schema === 'object' && 'unreadable' in schema
+    if (unreadable(a.schema) || unreadable(b.schema)) {
+      // Not rendered: the export's declaration is what can be compared.
+      if (!same(a.schema, b.schema) || !same(a.declarations, b.declarations) || a.exports.length === 0) incomparable.push(`the ${key} schema is not rendered and its declaration changed or is not known`)
+      continue
+    }
     if (same(a.schema, b.schema)) continue
     if (schemaOnlyTightens(a.schema, b.schema)) stronger = true
     else incomparable.push(`the ${key} schema lost a property, a required key or a bound, or changed otherwise`)
   }
 
-  // The action body.
   if ('unread' in base.handler || 'unread' in head.handler) {
     if (!same(base.handler, head.handler)) incomparable.push(`the action ${'unread' in head.handler ? `at the head was not read: ${head.handler.unread}` : 'at the base was not read'}`)
   } else {
     const [a, b] = [base.handler, head.handler]
-    // Moved onto the chain is not lost.
-    if (a.authenticates && !b.authenticates && !head.middleware.some((entry) => entry.capabilities.authentication?.mode === 'required')) authorization.push('the action no longer refuses a guest (auth.userOrFail() or apiToken())')
+    if (a.authenticates && !b.authenticates && !requiresAuthentication(head.middleware)) authorization.push('the action no longer refuses a guest (auth.userOrFail() or apiToken())')
     if (!a.authenticates && b.authenticates) stronger = true
-    if (a.dynamicAuthorization || b.dynamicAuthorization) {
-      if (!same([a.authorizes, a.dynamicAuthorization], [b.authorizes, b.dynamicAuthorization])) incomparable.push('an authorization call resolves its ability at request time')
-    } else {
-      const remaining = [...b.authorizes]
-      const missing: typeof a.authorizes = []
-      for (const call of a.authorizes) {
-        const at = remaining.findIndex((other) => other.member === call.member && other.ability === call.ability)
-        if (at === -1) missing.push(call)
-        else remaining.splice(at, 1)
-      }
-      const replaced = missing.filter((call) => remaining.some((other) => other.member === call.member))
-      if (replaced.length > 0) incomparable.push(`this.${replaced[0]!.member}('${replaced[0]!.ability}') became a call for another ability`)
-      for (const call of missing.filter((entry) => !replaced.includes(entry))) authorization.push(`this.${call.member}('${call.ability}') is no longer called`)
-      if (remaining.length > 0 && replaced.length === 0) stronger = true
-      if (missing.length === 0 && !same(a.authorizes, b.authorizes) && remaining.length === 0) incomparable.push('the authorization calls run in another order')
+    if ((a.unseen || b.unseen) && a.unseen !== b.unseen) incomparable.push('the action makes a call whose ability or schema the reader cannot follow, and its body changed')
+
+    const callKey = (call: AuthorizationCall): string => canonical(call)
+    const calls = unmatched(a.authorizes, b.authorizes, callKey)
+    if (!same(matchedInOrder(a.authorizes, b.authorizes, callKey), matchedInOrder(b.authorizes, a.authorizes, callKey))) incomparable.push('the authorization calls run in another order')
+    for (const call of calls.gone) {
+      const other = calls.added.find((entry) => entry.member === call.member)
+      if (other) incomparable.push(`this.${call.member}('${call.ability}'${call.subject ? `, ${call.subject}` : ''}) became this.${other.member}('${other.ability}'${other.subject ? `, ${other.subject}` : ''})`)
+      else authorization.push(`this.${call.member}('${call.ability}') is no longer called`)
     }
-    if (a.dynamicValidation || b.dynamicValidation) {
-      if (!same([a.validates, a.dynamicValidation], [b.validates, b.dynamicValidation])) incomparable.push('a validate call passes a schema the reader cannot follow')
-    } else {
-      const gone = a.validates.filter((schema) => !b.validates.includes(schema))
-      const added = b.validates.filter((schema) => !a.validates.includes(schema))
-      if (gone.length > 0 && added.length > 0) incomparable.push(`the action validates with ${added.join(', ')} in place of ${gone.join(', ')}`)
-      else if (gone.length > 0) validation.push(`the action no longer validates with ${gone.join(', ')}`)
-      else if (added.length > 0) stronger = true
+    if (calls.gone.length === 0 && calls.added.length > 0) stronger = true
+
+    const validateKey = (call: ValidateCall): string => `${call.member}\0${call.schema}`
+    const validates = unmatched(a.validates, b.validates, validateKey)
+    for (const call of a.validates) {
+      const other = b.validates.find((entry) => validateKey(entry) === validateKey(call))
+      if (other && other.declaration !== call.declaration) incomparable.push(`${call.schema || 'a schema'} changed, and a schema an action validates with is not rendered`)
     }
+    const label = (call: ValidateCall): string => `${call.member}(${call.schema || 'a schema written in place'})`
+    if (validates.gone.length > 0 && validates.added.length > 0) incomparable.push(`the action calls ${validates.added.map(label).join(', ')} in place of ${validates.gone.map(label).join(', ')}`)
+    else if (validates.gone.length > 0) validation.push(`the action no longer calls ${validates.gone.map(label).join(', ')}`)
+    else if (validates.added.length > 0) stronger = true
   }
 
   if (incomparable.length > 0) return { verdict: 'incomparable', reasons: [...new Set(incomparable)] }
@@ -227,6 +265,7 @@ function describeCapabilities(capabilities: MiddlewareCapabilities): string {
 
 const routeLabel = (route: RouteSecurityRecord): string => `${route.method} ${route.path}`
 const moduleOf = (route: RouteSecurityRecord): string => route.module ?? ''
+const actionMethod = (route: RouteSecurityRecord): string | undefined => route.action?.slice(route.action.lastIndexOf('.') + 1)
 
 export interface SecurityComparison {
   facts: ChangeFact[]
@@ -234,29 +273,41 @@ export interface SecurityComparison {
   incomparable: string[]
 }
 
+/** The base routes a head route is compared with: by action, then by method and path in its module, then across modules. */
+function counterpartsOf(route: RouteSecurityRecord, base: RouteSecurityRecord[]): RouteSecurityRecord[] | { ambiguous: string } {
+  const inModule = base.filter((entry) => moduleOf(entry) === moduleOf(route))
+  const byAction = route.action ? inModule.filter((entry) => entry.action === route.action) : []
+  const sameEndpoint = (entry: RouteSecurityRecord): boolean => entry.method === route.method && entry.path === route.path
+  if (byAction.length === 1) return byAction
+  if (byAction.length > 1) {
+    const exact = byAction.filter(sameEndpoint)
+    return exact.length === 1 ? exact : byAction
+  }
+  const byEndpoint = inModule.filter(sameEndpoint)
+  if (byEndpoint.length === 1) return byEndpoint
+  if (byEndpoint.length > 1) return { ambiguous: `${byEndpoint.length} base routes share its method and path` }
+  const anywhere = base.filter(sameEndpoint)
+  if (anywhere.length > 1) return { ambiguous: `${anywhere.length} base routes in other modules share its method and path` }
+  return anywhere
+}
+
 /**
- * Matches each head route to its base counterpart (by action, then by method and path, within a
- * module) and turns the verdicts into facts. An added route to an action that has routes at the
- * base is compared with each of them, so a second path with fewer guards is Weaker.
+ * Matches each head route to its base counterpart and turns the verdicts into facts. An added
+ * route to an action that has routes at the base is compared with each of them, so a second path
+ * with fewer guards is Weaker. A head route with no counterpart, while a base route of its method
+ * and its action's method name or path left, is a rename and a move the reader cannot pair.
  */
 export function compareSecurityRecords(base: SecurityRecords, head: SecurityRecords): SecurityComparison {
   const facts: ChangeFact[] = []
   const incomparable: string[] = []
+  const matched = new Set<RouteSecurityRecord>()
+  const orphans: RouteSecurityRecord[] = []
   for (const route of head.routes) {
-    const inModule = base.routes.filter((entry) => moduleOf(entry) === moduleOf(route))
-    const byAction = route.action ? inModule.filter((entry) => entry.action === route.action) : []
-    const byEndpoint = inModule.filter((entry) => entry.method === route.method && entry.path === route.path)
-    let counterparts: RouteSecurityRecord[]
-    if (byAction.length === 1) counterparts = byAction
-    else if (byAction.length > 1) {
-      const exact = byAction.filter((entry) => byEndpoint.includes(entry))
-      counterparts = exact.length === 1 ? exact : byAction
-    } else counterparts = byEndpoint
-    if (byAction.length === 0 && byEndpoint.length > 1) {
-      incomparable.push(`${routeLabel(route)}: ${byEndpoint.length} base routes share its method and path`)
-      continue
-    }
+    const counterparts = counterpartsOf(route, base.routes)
+    if (!Array.isArray(counterparts)) { incomparable.push(`${routeLabel(route)}: ${counterparts.ambiguous}`); continue }
+    if (counterparts.length === 0) { orphans.push(route); continue }
     for (const counterpart of counterparts) {
+      matched.add(counterpart)
       const result = compareRecords(counterpart, route)
       const label = counterpart.path === route.path && counterpart.method === route.method ? routeLabel(route) : `${routeLabel(route)} (against ${routeLabel(counterpart)})`
       if (result.verdict === 'incomparable') incomparable.push(`${label}: ${result.reasons.join('; ')}`)
@@ -265,6 +316,11 @@ export function compareSecurityRecords(base: SecurityRecords, head: SecurityReco
         if (result.validation.length > 0) facts.push({ code: 'validation-removed', lane: 'high', evidence: 'static', files: [], message: `${label}: ${result.validation.join('; ')}` })
       }
     }
+  }
+  const left = base.routes.filter((entry) => !matched.has(entry))
+  for (const route of orphans) {
+    const gone = left.find((entry) => entry.method === route.method && (entry.path === route.path || (actionMethod(entry) !== undefined && actionMethod(entry) === actionMethod(route))))
+    if (gone) incomparable.push(`${routeLabel(route)} has no counterpart at the base, while ${routeLabel(gone)}${gone.action ? ` (${gone.action})` : ''} left it: a rename and a move the reader cannot pair`)
   }
   return { facts, incomparable }
 }

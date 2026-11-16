@@ -512,28 +512,33 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   // One run serves the audit and the security records: both read the same two exports.
   let auditPromise: Promise<ChangeAudits | undefined> | undefined
   const auditRun = (): Promise<ChangeAudits | undefined> => (auditPromise ??= options.audit ? options.audit() : Promise.resolve(undefined))
+  // The audit scans `app`, `src`, `routes`, `config` and each whole module, loads what the routes import and reads the install.
+  const auditedPaths = change.paths.filter((entry) => entry.outsideApp || touches(entry, (path) => !isAmbient(path) && !path.startsWith('tests/')))
   const surface = inApp.filter((entry) => touches(entry, (path) => SECURITY_SURFACE.test(path)))
   const records = { compared: false }
-  if (surface.length > 0) {
-    const files = surface.map((entry) => entry.path)
-    // A base that cannot be rebuilt says nothing against the change (medium); records it cannot order do (high).
-    const pair = (await auditRun())?.records
-    if (!pair) unjudged.push({ reader: 'security-records', reason: 'the two sides were not exported and introspected, so authorization-removed and validation-removed were not judged', lane: 'medium', files })
-    else if ('unavailable' in pair) unjudged.push({ reader: 'security-records', reason: `${pair.unavailable}, so authorization-removed and validation-removed were not judged`, lane: 'medium', files })
-    else if (pair.base.recordVersion !== pair.head.recordVersion) unjudged.push({ reader: 'security-records', reason: `the two sides' records are of versions ${pair.base.recordVersion} and ${pair.head.recordVersion}`, lane: 'medium', files })
-    else {
-      records.compared = true
-      const comparison = compareSecurityRecords(pair.base, pair.head)
-      facts.push(...comparison.facts.map((fact) => ({ ...fact, files })))
-      if (comparison.incomparable.length > 0) unjudged.push({ reader: 'security-records', reason: `routes whose records cannot be ordered against the base: ${comparison.incomparable.join('; ')}`, lane: 'high', files })
-    }
+  // Read whenever both exports ran: a validator, a provider or the entry can weaken a route too.
+  const pair = auditedPaths.length > 0 ? (await auditRun())?.records : undefined
+  const files = surface.map((entry) => entry.path)
+  if (pair && !('unavailable' in pair) && pair.base.recordVersion === pair.head.recordVersion) {
+    records.compared = true
+    const comparison = compareSecurityRecords(pair.base, pair.head)
+    const touched = change.paths.filter((entry) => !entry.outsideApp).map((entry) => entry.path)
+    facts.push(...comparison.facts.map((fact) => ({ ...fact, files: files.length > 0 ? files : touched })))
+    if (comparison.incomparable.length > 0) unjudged.push({ reader: 'security-records', reason: `routes whose records cannot be ordered against the base: ${comparison.incomparable.join('; ')}`, lane: 'high', files: files.length > 0 ? files : touched })
+  } else if (pair && 'unavailable' in pair && pair.side === 'head') {
+    // The change made its own head unreadable: what it did to its routes cannot be ordered.
+    unjudged.push({ reader: 'security-records', reason: `${pair.unavailable}, while the base's were, so authorization-removed and validation-removed were not judged`, lane: 'high', files })
+  } else if (surface.length > 0) {
+    // A base that cannot be rebuilt says nothing against the change.
+    const why = !pair ? 'the two sides were not exported and introspected'
+      : 'unavailable' in pair ? pair.unavailable
+        : `the two sides' records are of versions ${pair.base.recordVersion} and ${pair.head.recordVersion}`
+    unjudged.push({ reader: 'security-records', reason: `${why}, so authorization-removed and validation-removed were not judged`, lane: 'medium', files })
   }
-  // The audit scans `app`, `src`, `routes`, `config` and each whole module, loads what the routes import and reads the install.
-  const audited = change.paths.filter((entry) => entry.outsideApp || touches(entry, (path) => !isAmbient(path) && !path.startsWith('tests/')))
   const audit = { compared: false, loadedCode: false }
-  if (audited.length > 0) {
+  if (auditedPaths.length > 0) {
     const notJudged = (why: string): void => {
-      unjudged.push({ reader: 'audit', reason: `${why}, so audit-fail, audit-warn-changed, csrf-exemption and sensitive-exposure were not judged`, lane: 'medium', files: audited.map((entry) => entry.path) })
+      unjudged.push({ reader: 'audit', reason: `${why}, so audit-fail, audit-warn-changed, csrf-exemption and sensitive-exposure were not judged`, lane: 'medium', files: auditedPaths.map((entry) => entry.path) })
     }
     const audits = await auditRun()
     if (!audits) notJudged('the audit was not run on the two sides')

@@ -1,12 +1,31 @@
 import { describe, expect, test } from 'bun:test'
 
-import { compareRecords, compareSecurityRecords, schemaOnlyTightens, SECURITY_RECORD_VERSION, type MiddlewareRecord, type RouteSecurityRecord } from '../src/change/security-records'
+import {
+  compareRecords,
+  compareSecurityRecords,
+  schemaOnlyTightens,
+  SECURITY_RECORD_VERSION,
+  type ActionRecord,
+  type AuthorizationCall,
+  type MiddlewareRecord,
+  type RouteSecurityRecord,
+  type ValidateCall,
+} from '../src/change/security-records'
 
 const auth: MiddlewareRecord = { kind: 'alias', name: 'auth', capabilities: { authentication: { mode: 'required' } } }
 const guest: MiddlewareRecord = { kind: 'inline', name: null, capabilities: { authentication: { mode: 'guest-only' } } }
 const throttle: MiddlewareRecord = { kind: 'inline', name: null, capabilities: {} }
 const can = (abilities: string[], mode: 'all' | 'any' | 'mixed' = 'all'): MiddlewareRecord => ({ kind: 'inline', name: null, capabilities: { authorization: { abilities, mode } } })
 const schema = { type: 'object', properties: { title: { type: 'string', minLength: 1 } }, required: ['title'] }
+const POST_SCHEMA = 'app/Http/Validators/PostValidator.ts#PostSchema'
+const body = (value: unknown = schema, exports = [POST_SCHEMA], declarations: Record<string, string> = { [POST_SCHEMA]: 'declaration:a' }) => ({ body: { schema: value, exports, declarations } })
+
+const authorize = (ability: string, subject = '[Post, post]', member: AuthorizationCall['member'] = 'authorize'): AuthorizationCall => ({ member, ability, subject })
+const validate = (name: string, member = 'validateParams', declaration = 'declaration:id'): ValidateCall => ({ member, schema: `app/Http/Validators/PostValidator.ts#${name}`, declaration })
+
+const handler = (overrides: Partial<Extract<ActionRecord, { authorizes: unknown }>> = {}): ActionRecord => ({
+  authenticates: false, authorizes: [authorize('update')], validates: [validate('PostIdSchema')], ...overrides,
+})
 
 function route(overrides: Partial<RouteSecurityRecord> = {}): RouteSecurityRecord {
   return {
@@ -16,19 +35,17 @@ function route(overrides: Partial<RouteSecurityRecord> = {}): RouteSecurityRecor
     module: null,
     action: 'PostController.update',
     middleware: [auth],
-    contracts: { body: { schema, exports: ['app/Http/Validators/PostValidator.ts#PostSchema'] } },
-    handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'update' }], validates: ['PostIdSchema'] },
+    contracts: body(),
+    handler: handler(),
     ...overrides,
   }
 }
 
-const handler = (overrides: Partial<Extract<RouteSecurityRecord['handler'], { authorizes: unknown }>>): RouteSecurityRecord['handler'] => ({
-  authenticates: false, authorizes: [{ member: 'authorize', ability: 'update' }], validates: ['PostIdSchema'], ...overrides,
-})
+const verdict = (base: RouteSecurityRecord, head: RouteSecurityRecord) => compareRecords(base, head).verdict
 
 describe('compareRecords', () => {
   test('is same for equal records, whatever the path or name', () => {
-    expect(compareRecords(route(), route({ path: '/articles/:id', name: 'articles.update' })).verdict).toBe('same')
+    expect(verdict(route(), route({ path: '/articles/:id', name: 'articles.update' }))).toBe('same')
   })
 
   test('is weaker for an authentication or authorization guard, an authorize() call, a contract or a validator gone', () => {
@@ -36,42 +53,66 @@ describe('compareRecords', () => {
     expect(compareRecords(route({ middleware: [auth, can(['update'])] }), route())).toMatchObject({ verdict: 'weaker', authorization: [expect.stringContaining('authorization all update')] })
     expect(compareRecords(route(), route({ handler: handler({ authorizes: [] }) }))).toMatchObject({ verdict: 'weaker', authorization: ["this.authorize('update') is no longer called"] })
     expect(compareRecords(route(), route({ contracts: {} }))).toMatchObject({ verdict: 'weaker', validation: ['the body contract is gone'] })
-    expect(compareRecords(route(), route({ handler: handler({ validates: [] }) }))).toMatchObject({ verdict: 'weaker', validation: ['the action no longer validates with PostIdSchema'] })
+    expect(compareRecords(route(), route({ handler: handler({ validates: [] }) }))).toMatchObject({ verdict: 'weaker', validation: [expect.stringContaining('validateParams(app/Http/Validators/PostValidator.ts#PostIdSchema)')] })
     expect(compareRecords(route({ middleware: [], handler: handler({ authenticates: true }) }), route({ middleware: [] }))).toMatchObject({ verdict: 'weaker', authorization: [expect.stringContaining('no longer refuses a guest')] })
   })
 
   test('is weaker for an ability dropped from an all list or added to an any list', () => {
-    expect(compareRecords(route({ middleware: [can(['update', 'publish'])] }), route({ middleware: [can(['update'])] })).verdict).toBe('weaker')
-    expect(compareRecords(route({ middleware: [can(['update', 'publish'], 'any')] }), route({ middleware: [can(['update', 'publish', 'view'], 'any')] })).verdict).toBe('weaker')
+    expect(verdict(route({ middleware: [can(['update', 'publish'])] }), route({ middleware: [can(['update'])] }))).toBe('weaker')
+    expect(verdict(route({ middleware: [can(['update', 'publish'], 'any')] }), route({ middleware: [can(['update', 'publish', 'view'], 'any')] }))).toBe('weaker')
   })
 
-  test('is incomparable for a mixed chain, a request-time ability, an unregistered middleware, a reorder, another ability, a replaced validator or a narrowed schema', () => {
-    const incomparable = (base: RouteSecurityRecord, head: RouteSecurityRecord) => expect(compareRecords(base, head).verdict).toBe('incomparable')
+  test('matches the chain one to one, so a duplicate guard dropped, or authentication lost beside a kept ability, is weaker', () => {
+    const grouped = (capabilities: MiddlewareRecord['capabilities']): MiddlewareRecord => ({ kind: 'inline', name: null, capabilities })
+    expect(verdict(route({ middleware: [can(['update']), can(['update'])] }), route({ middleware: [can(['update'])] }))).toBe('weaker')
+    const both = grouped({ authentication: { mode: 'required' }, authorization: { abilities: ['admin'], mode: 'all' } })
+    expect(verdict(route({ middleware: [both] }), route({ middleware: [grouped({ authorization: { abilities: ['admin'], mode: 'all' } })] }))).toBe('weaker')
+  })
+
+  test('is incomparable for a group that lost a member or names one nothing registers', () => {
+    const group = (members: string[], extra: Partial<MiddlewareRecord> = {}): MiddlewareRecord => ({ kind: 'group', name: 'admin', capabilities: { authentication: { mode: 'required' } }, members, ...extra })
+    expect(verdict(route({ middleware: [group(['auth', 'role'])] }), route({ middleware: [group(['auth'])] }))).toBe('incomparable')
+    expect(verdict(route({ middleware: [group(['auth'])] }), route({ middleware: [group(['auth', 'role'])] }))).toBe('stronger')
+    expect(verdict(route({ middleware: [group(['auth'])] }), route({ middleware: [group(['auth', 'role'], { unresolvedMembers: ['role'] })] }))).toBe('incomparable')
+  })
+
+  test('is incomparable for a mixed chain, a request-time ability, an unregistered middleware, a reorder, another ability or subject, a replaced validator or a narrowed schema', () => {
+    const incomparable = (base: RouteSecurityRecord, head: RouteSecurityRecord) => expect(verdict(base, head)).toBe('incomparable')
     incomparable(route({ middleware: [auth, can(['update', 'publish'], 'mixed')] }), route({ middleware: [auth] }))
     incomparable(route({ middleware: [auth, { kind: 'inline', name: null, capabilities: { authorization: { abilities: [], mode: 'all', resource: { fromMethodMap: false } } } }] }), route())
     incomparable(route({ middleware: [auth, { kind: 'alias', name: 'admin', capabilities: {}, unresolved: true }] }), route({ middleware: [auth] }))
     incomparable(route({ middleware: [auth, throttle] }), route({ middleware: [throttle, auth] }))
-    incomparable(route(), route({ handler: handler({ authorizes: [{ member: 'authorize', ability: 'view' }] }) }))
-    incomparable(route(), route({ handler: handler({ validates: ['OtherSchema'] }) }))
-    incomparable(route(), route({ contracts: { body: { schema, exports: ['app/Http/Validators/PostValidator.ts#OtherSchema'] } } }))
-    incomparable(route(), route({ contracts: { body: { schema: { ...schema, required: [] }, exports: ['app/Http/Validators/PostValidator.ts#PostSchema'] } } }))
+    incomparable(route(), route({ handler: handler({ authorizes: [authorize('view')] }) }))
+    incomparable(route(), route({ handler: handler({ authorizes: [authorize('update', '[Comment, comment]')] }) }))
+    incomparable(route(), route({ handler: handler({ validates: [validate('OtherSchema')] }) }))
+    incomparable(route(), route({ handler: handler({ validates: [validate('PostIdSchema', 'validateParamsSafe')] }) }))
+    incomparable(route(), route({ handler: handler({ validates: [validate('PostIdSchema', 'validateParams', 'declaration:looser')] }) }))
+    incomparable(route(), route({ contracts: body(schema, ['app/Http/Validators/PostValidator.ts#OtherSchema']) }))
+    incomparable(route(), route({ contracts: body({ ...schema, required: [] }) }))
     incomparable(route({ middleware: [auth, throttle] }), route({ middleware: [auth] }))
-    incomparable(route(), route({ handler: handler({ dynamicAuthorization: true }) }))
+    incomparable(route(), route({ handler: handler({ unseen: 'digest' }) }))
+    incomparable(route({ handler: handler({ unseen: 'one' }) }), route({ handler: handler({ unseen: 'two' }) }))
     incomparable(route(), route({ handler: { unread: 'an inline handler' } }))
   })
 
+  test('compares an unrendered schema by its declaration', () => {
+    const unread = { unreadable: 'z.custom()' }
+    expect(verdict(route({ contracts: body(unread) }), route({ contracts: body(unread) }))).toBe('same')
+    expect(verdict(route({ contracts: body(unread) }), route({ contracts: body(unread, [POST_SCHEMA], { [POST_SCHEMA]: 'declaration:b' }) }))).toBe('incomparable')
+  })
+
   test('is stronger for a guard, an ability in an all list, an authorize() call, a validator or a tightened schema added', () => {
-    expect(compareRecords(route({ middleware: [] }), route()).verdict).toBe('stronger')
-    expect(compareRecords(route({ middleware: [can(['update'])] }), route({ middleware: [can(['update', 'publish'])] })).verdict).toBe('stronger')
-    expect(compareRecords(route(), route({ handler: handler({ authorizes: [{ member: 'authorize', ability: 'update' }, { member: 'can', ability: 'publish' }] }) })).verdict).toBe('stronger')
-    expect(compareRecords(route(), route({ handler: handler({ validates: ['PostIdSchema', 'QuerySchema'] }) })).verdict).toBe('stronger')
+    expect(verdict(route({ middleware: [] }), route())).toBe('stronger')
+    expect(verdict(route({ middleware: [can(['update'])] }), route({ middleware: [can(['update', 'publish'])] }))).toBe('stronger')
+    expect(verdict(route(), route({ handler: handler({ authorizes: [authorize('update'), authorize('publish', '', 'can')] }) }))).toBe('stronger')
+    expect(verdict(route(), route({ handler: handler({ validates: [validate('PostIdSchema'), validate('QuerySchema', 'validateQuery')] }) }))).toBe('stronger')
     const tighter = { ...schema, properties: { title: { type: 'string', minLength: 3, maxLength: 80 }, body: { type: 'string' } }, required: ['title', 'body'] }
-    expect(compareRecords(route(), route({ contracts: { body: { schema: tighter, exports: ['app/Http/Validators/PostValidator.ts#PostSchema'] } } })).verdict).toBe('stronger')
+    expect(verdict(route(), route({ contracts: body(tighter) }))).toBe('stronger')
   })
 
   test('gives no fact for a requireGuest removed, nor for userOrFail() moved onto the chain', () => {
-    expect(compareRecords(route({ middleware: [guest] }), route({ middleware: [] })).verdict).toBe('same')
-    expect(compareRecords(route({ middleware: [], handler: handler({ authenticates: true }) }), route({ middleware: [auth] })).verdict).toBe('stronger')
+    expect(verdict(route({ middleware: [guest] }), route({ middleware: [] }))).toBe('same')
+    expect(verdict(route({ middleware: [], handler: handler({ authenticates: true }) }), route({ middleware: [auth] }))).toBe('stronger')
   })
 })
 
@@ -100,13 +141,19 @@ describe('compareSecurityRecords', () => {
     expect(facts).toEqual([expect.objectContaining({ code: 'authorization-removed', lane: 'high', message: expect.stringContaining('PATCH /posts/:id (against PUT /posts/:id)') })])
   })
 
-  test('falls back to the method and path, and holds a match it cannot make one to one', () => {
+  test('falls back to the method and path, then across modules, and holds a match it cannot make one to one', () => {
     expect(compareSecurityRecords(records(route({ action: 'Old.update' })), records(route({ action: 'New.update', middleware: [] }))).facts).toHaveLength(1)
+    expect(compareSecurityRecords(records(route({ module: 'billing' })), records(route({ middleware: [] }))).facts).toHaveLength(1)
     const twice = records(route({ action: 'A.update' }), route({ action: 'B.update' }))
     expect(compareSecurityRecords(twice, records(route({ action: 'C.update' }))).incomparable).toEqual([expect.stringContaining('2 base routes share its method and path')])
   })
 
-  test('matches within a module, and says nothing of an added route with no counterpart', () => {
-    expect(compareSecurityRecords(records(route({ module: 'billing' })), records(route({ middleware: [] })))).toEqual({ facts: [], incomparable: [] })
+  test('holds a head route with no counterpart while a base route of its method and action name left', () => {
+    const renamed = route({ action: 'ArticleController.update', path: '/articles/:id', middleware: [] })
+    expect(compareSecurityRecords(records(route()), records(renamed)).incomparable).toEqual([expect.stringContaining('a rename and a move the reader cannot pair')])
+  })
+
+  test('says nothing of an added route that pairs with nothing that left', () => {
+    expect(compareSecurityRecords(records(route()), records(route(), route({ method: 'GET', path: '/health', action: undefined, middleware: [] })))).toEqual({ facts: [], incomparable: [] })
   })
 })

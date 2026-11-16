@@ -226,12 +226,14 @@ export async function exportRevisions<Side extends string>(cwd: string, appPrefi
 /** Audits both sides of `change`, or neither, and reads both sides' security records in the same exports. */
 export async function auditChangeRevisions(cwd: string, change: ResolvedChange): Promise<ChangeAudits> {
   const exported = await exportRevisions<ChangeSide>(cwd, change.appPrefix, { head: change.head, base: change.mergeBase }, 'audited')
-  if ('unavailable' in exported) return { unavailable: exported.unavailable, records: { unavailable: exported.unavailable.replace(' was not audited: ', ' was not read: ') } }
+  if ('unavailable' in exported) return { unavailable: exported.unavailable, records: { unavailable: exported.unavailable } }
   try {
     const [base, head] = [await auditExport(exported.trees.base), await auditExport(exported.trees.head)]
     const [baseRecords, headRecords] = [await recordsExport(exported.trees.base), await recordsExport(exported.trees.head)]
-    const records: SecurityRecordPair = 'unavailable' in headRecords ? { unavailable: `the head's records were not read: ${headRecords.unavailable}` }
-      : 'unavailable' in baseRecords ? { unavailable: `the base's records were not read: ${baseRecords.unavailable}` }
+    // Only the head unreadable is the change's doing; a base that will not read says nothing against it.
+    const records: SecurityRecordPair = 'unavailable' in baseRecords
+      ? { unavailable: `the base's records were not read: ${baseRecords.unavailable}`, side: 'base' }
+      : 'unavailable' in headRecords ? { unavailable: `the head's records were not read: ${headRecords.unavailable}`, side: 'head' }
         : { base: baseRecords, head: headRecords }
     if ('unavailable' in head) return { unavailable: `the head was not audited: ${head.unavailable}`, loadedCode: true, records }
     if ('unavailable' in base) return { unavailable: `the base was not audited: ${base.unavailable}`, loadedCode: true, records }

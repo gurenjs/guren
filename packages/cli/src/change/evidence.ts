@@ -93,8 +93,8 @@ export interface ChangeEvidenceOptions {
   gate?: (cwd: string, options: { deps: boolean; routesFile?: string }) => Promise<GateReport>
   /** Defaults to `change:policy --check`; asked only where `REVIEW.md` exists. */
   reviewDoc?: (cwd: string) => Promise<ReviewDocResult>
-  /** Defaults to `change:lane`'s own judgement. */
-  lane?: (cwd: string, base: string, head: string, audit: boolean, deps: boolean) => Promise<ChangeLaneReport>
+  /** Defaults to `change:lane`'s own judgement; `records` takes the two sides' security records when they were read. */
+  lane?: (cwd: string, base: string, head: string, audit: boolean, deps: boolean, records?: (pair: SecurityRecordPair | undefined) => void) => Promise<ChangeLaneReport>
 }
 
 async function judgeLane(cwd: string, base: string, head: string, audit: boolean, deps: boolean, records?: (pair: SecurityRecordPair | undefined) => void): Promise<ChangeLaneReport> {
@@ -241,7 +241,7 @@ export async function collectChangeEvidence(options: ChangeEvidenceOptions): Pro
     if (pair) securityRecords = 'unavailable' in pair ? { unavailable: pair.unavailable } : pair.head
   }
   try {
-    lane = await (options.lane ?? ((...args) => judgeLane(...args, keepRecords)))(cwd, options.base, options.head, options.audit, options.deps)
+    lane = await (options.lane ?? judgeLane)(cwd, options.base, options.head, options.audit, options.deps, keepRecords)
   } catch (error) {
     hold('lane-unavailable', `the change could not be read: ${firstLine(error)}`)
   }

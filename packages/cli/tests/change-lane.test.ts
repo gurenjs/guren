@@ -7,6 +7,8 @@ import { runCommand } from 'citty'
 import { judgeChangeLane, type ChangeLaneReport, type JudgeChangeLaneOptions } from '../src/change/lane'
 import { changeAdvisories } from '../src/change/revision-advisories'
 import { openChange, resolveChange } from '../src/change/resolve'
+import type { ChangeAudits } from '../src/change/revision-audit'
+import { SECURITY_RECORD_VERSION, type RouteSecurityRecord, type SecurityRecordPair } from '../src/change/security-records'
 import { builtinSubCommands } from '../src/commands'
 import { renderChangeLane } from '../src/commands/change'
 import { createTempRoot, PG_SCHEMA_FIXTURE } from './helpers'
@@ -717,6 +719,59 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey() })
       { file: 'docs/plans/comments/plan.json', hash, standing: 'open' },
       expect.objectContaining({ file: 'draft.plan.json', standing: 'draft' }),
     ])
+  })
+})
+
+describe('judgeChangeLane with per-route security records', () => {
+  const route = (middleware: RouteSecurityRecord['middleware']): RouteSecurityRecord => ({
+    method: 'PUT', path: '/posts/:id', module: null, action: 'PostController.update', middleware, contracts: {},
+    handler: { authenticates: false, authorizes: [], validates: [] },
+  })
+  const auth = { kind: 'alias' as const, name: 'auth', capabilities: { authentication: { mode: 'required' as const } } }
+  const throttle = { kind: 'inline' as const, name: null, capabilities: {} }
+  const records = (...routes: RouteSecurityRecord[]) => ({ recordVersion: SECURITY_RECORD_VERSION, routes })
+
+  async function laneWith(files: Record<string, string | null>, pair: SecurityRecordPair): Promise<ChangeLaneReport> {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, files)
+    const change = await resolveChange(repo, base, head)
+    const { reader, dispose } = openChange(repo, change)
+    const audits: ChangeAudits = { unavailable: 'not audited in this test', records: pair }
+    try {
+      return await judgeChangeLane(change, reader, { audit: async () => audits })
+    } finally {
+      await dispose()
+    }
+  }
+  const controller = { 'app/Http/Controllers/PostController.ts': 'export class PostController {\n  update() {}\n}\n' }
+  const security = (report: ChangeLaneReport) => report.unjudged.filter((entry) => entry.reader === 'security-records').map((entry) => entry.lane)
+
+  test('should turn a guard gone into authorization-removed, carrying the files the change touched', async () => {
+    const report = await laneWith(controller, { base: records(route([auth])), head: records(route([])) })
+
+    expect(report.facts).toContainEqual(expect.objectContaining({ code: 'authorization-removed', lane: 'high', files: ['app/Http/Controllers/PostController.ts'] }))
+    expect(report.records).toEqual({ compared: true })
+    expect(security(report)).toEqual([])
+  })
+
+  test('should hold a record it cannot order at high, and say nothing of an unchanged one', async () => {
+    expect(security(await laneWith(controller, { base: records(route([auth, throttle])), head: records(route([throttle, auth])) }))).toEqual(['high'])
+    const same = await laneWith(controller, { base: records(route([auth])), head: records(route([auth])) })
+    expect(security(same)).toEqual([])
+    expect(same.facts.map((fact) => fact.code)).not.toContain('authorization-removed')
+  })
+
+  test('should compare a change that touches no route file, controller or policy', async () => {
+    const report = await laneWith({ 'config/app.ts': 'export default {}\n' }, { base: records(route([auth])), head: records(route([])) })
+
+    expect(report.facts).toContainEqual(expect.objectContaining({ code: 'authorization-removed', files: ['config/app.ts'] }))
+  })
+
+  test('should keep a base it cannot read at medium, and a head the change made unreadable at high', async () => {
+    expect(security(await laneWith(controller, { unavailable: "the base's records were not read: x", side: 'base' }))).toEqual(['medium'])
+    expect(security(await laneWith(controller, { unavailable: 'the base was not audited: bun.lock differs' }))).toEqual(['medium'])
+    expect(security(await laneWith(controller, { unavailable: "the head's records were not read: a provider threw", side: 'head' }))).toEqual(['high'])
+    expect(security(await laneWith({ 'config/app.ts': 'export default {}\n' }, { unavailable: 'x', side: 'base' }))).toEqual([])
   })
 })
 

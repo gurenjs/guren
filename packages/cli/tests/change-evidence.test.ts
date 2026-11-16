@@ -8,6 +8,7 @@ import { changeRecord, collectChangeEvidence, redactSecrets, renderEvidenceMarkd
 import { runWithCommandStatus } from '../src/command-status'
 import { builtinSubCommands } from '../src/commands'
 import type { GateReport } from '../src/gate'
+import { SECURITY_RECORD_VERSION } from '../src/change/security-records'
 import { createTempRoot, DEFAULT_ROUTES_FIXTURE, linkWorkspaceCore } from './helpers'
 
 // Each case makes a repository and runs git a dozen times, past Bun's 5 s default under a loaded suite.
@@ -224,6 +225,18 @@ describe('the record and the summary', () => {
     expect(record.securityRecords).toEqual({ unavailable: expect.any(String) })
     expect(typeof record.cli).toBe('string')
     expect(JSON.stringify(record)).not.toContain('1 test failed')
+  })
+
+  test('should carry the head\'s security records into the record, and why there are none', async () => {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n' })
+    const lane = (await evidenceOf(repo, base, head, { audit: false })).lane!
+    const routes = { recordVersion: SECURITY_RECORD_VERSION, routes: [] }
+    const read = await evidenceOf(repo, base, head, { lane: async (...args) => { args[5]?.({ base: { ...routes, routes: [] }, head: routes }); return lane } })
+    const unread = await evidenceOf(repo, base, head, { lane: async (...args) => { args[5]?.({ unavailable: 'the base was not audited: bun.lock differs' }); return lane } })
+
+    expect((await changeRecord(repo, base, head, read, false)).securityRecords).toEqual(routes)
+    expect((await changeRecord(repo, base, head, unread, false)).securityRecords).toEqual({ unavailable: 'the base was not audited: bun.lock differs' })
   })
 
   test('should read the server version through the application\'s @guren/core when none sits beside it', async () => {

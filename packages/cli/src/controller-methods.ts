@@ -238,6 +238,18 @@ const ABILITY_LITERAL_PATTERN = /\bthis\s*\.\s*(authorize|can)\s*\(\s*(['"`])([^
 export interface LiteralAuthorizationCall {
   member: 'authorize' | 'can'
   ability: string
+  /** The arguments after the ability, as written and with whitespace collapsed: what the policy is asked about. */
+  subject: string
+}
+
+/** Where the call opened at `open` closes, judged on the blanked body so a parenthesis in a string is not counted. */
+function closingParen(body: string, open: number): number {
+  let depth = 0
+  for (let index = open; index < body.length; index++) {
+    if (body[index] === '(') depth++
+    else if (body[index] === ')' && --depth === 0) return index
+  }
+  return -1
 }
 
 /**
@@ -246,8 +258,13 @@ export interface LiteralAuthorizationCall {
  * that spells one is not a check.
  */
 export function literalAuthorizationCalls(body: string, rawBody: string): LiteralAuthorizationCall[] {
-  return [...rawBody.matchAll(ABILITY_LITERAL_PATTERN)].filter((match) => body.startsWith('this', match.index))
-    .map((match) => ({ member: match[1] as LiteralAuthorizationCall['member'], ability: match[3]! }))
+  return [...rawBody.matchAll(ABILITY_LITERAL_PATTERN)].filter((match) => body.startsWith('this', match.index)).map((match) => {
+    const open = rawBody.indexOf('(', match.index)
+    const close = closingParen(body, open)
+    const after = match.index + match[0].length
+    const subject = close === -1 ? '' : rawBody.slice(after, close).replace(/^\s*,/u, '').replace(/\s+/gu, ' ').trim()
+    return { member: match[1] as LiteralAuthorizationCall['member'], ability: match[3]!, subject }
+  })
 }
 
 /** The abilities an action names as string literals in `this.authorize()` / `this.can()`. */
@@ -278,6 +295,26 @@ export const VALIDATE_CALL_PATTERN = new RegExp(
   `\\bthis\\s*\\.\\s*${accessorCallPattern(VALIDATE_MEMBERS)}\\s*([A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)`,
   'g',
 )
+
+const VALIDATE_SITE_PATTERN = new RegExp(
+  `\\bthis\\s*\\.\\s*(${[...VALIDATE_MEMBERS].sort((x, y) => y.length - x.length).join('|')})\\s*(?:<[^()]*>)?\\s*\\(\\s*([A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)?\\s*([),]?)`,
+  'g',
+)
+
+/** One validate call: its member, and the schema when the argument is an identifier (or `a.b`) passed alone. */
+export interface ValidateCallSite {
+  member: (typeof VALIDATE_MEMBERS)[number]
+  /** Absent when the argument is anything else: a call, an object written in place. */
+  schema?: string
+}
+
+/** Every validate call an action makes, in source order. */
+export function validateCallSites(body: string): ValidateCallSite[] {
+  return [...body.matchAll(VALIDATE_SITE_PATTERN)].map((match) => ({
+    member: match[1] as ValidateCallSite['member'],
+    ...(match[2] && match[3] ? { schema: match[2].replace(/\s+/g, '') } : {}),
+  }))
+}
 
 /** An Inertia page response, which carries no JSON schema an agent could read. */
 export const INERTIA_CALL_PATTERN = controllerMemberCall('inertia')
