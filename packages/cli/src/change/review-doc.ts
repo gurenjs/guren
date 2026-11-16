@@ -50,6 +50,8 @@ const ALWAYS_HIGH: Record<AlwaysHighCode, string> = {
   'csrf-exemption': 'a new CSRF exemption',
   'audit-warn-changed': 'a security default switched off, or a policy or forced-write warning on a file the change touches',
   'dependency-advisory': 'a dependency change that brings in an advisory the base did not have',
+  'authorization-removed': 'a route that authenticates or authorizes less than it did at the base: a guard off its middleware chain, or an `authorize()`/`can()` call gone from its action',
+  'validation-removed': 'a route that validates less than it did at the base: a contract schema gone, or a validate call gone from its action',
 }
 
 export interface ReviewRoute {

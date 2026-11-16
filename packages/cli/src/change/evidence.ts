@@ -17,6 +17,7 @@ import { policyNote, REVIEW_POLICY_FILE } from './review-policy'
 import { openChange, resolveChange } from './resolve'
 import { changeAdvisories } from './revision-advisories'
 import { auditChangeRevisions } from './revision-audit'
+import type { SecurityRecordPair, SecurityRecords } from './security-records'
 
 export const EVIDENCE_DIR = '.guren/evidence'
 export const RECORD_VERSION = 1
@@ -49,7 +50,12 @@ export interface ChangeEvidence {
   holds: ChangeHold[]
   /** Low floor and no hold. */
   eligible: boolean
+  /** The head's per-route security records, which a later change's base record is read from; why there are none otherwise. */
+  securityRecords: SecurityRecords | { unavailable: string; code: SecurityRecordsUnavailable }
 }
+
+/** Why a record holds no security records: a code, since the reason may carry an application's error text. */
+export type SecurityRecordsUnavailable = 'no-source' | 'no-audit' | 'not-exported' | 'base' | 'head'
 
 /** What outlives the run: the base record of later changes (RFC 0040 §4). Never finding text. */
 export interface ChangeRecord {
@@ -72,8 +78,8 @@ export interface ChangeRecord {
   holds: Array<Omit<ChangeHold, 'message'>>
   eligible: boolean
   gate: { ok: boolean; deps: boolean; stages: Array<{ name: string; status: string }> }
-  /** Per-route security records are not computed by this version: `unavailable`, never an empty list. */
-  securityRecords: { unavailable: string }
+  /** The head's per-route security records, or why there are none as a code: never an empty list, never an error's text. */
+  securityRecords: SecurityRecords | { unavailable: SecurityRecordsUnavailable }
 }
 
 export interface ChangeEvidenceOptions {
@@ -90,16 +96,16 @@ export interface ChangeEvidenceOptions {
   gate?: (cwd: string, options: { deps: boolean; routesFile?: string }) => Promise<GateReport>
   /** Defaults to `change:policy --check`; asked only where `REVIEW.md` exists. */
   reviewDoc?: (cwd: string) => Promise<ReviewDocResult>
-  /** Defaults to `change:lane`'s own judgement. */
-  lane?: (cwd: string, base: string, head: string, audit: boolean, deps: boolean) => Promise<ChangeLaneReport>
+  /** Defaults to `change:lane`'s own judgement; `records` takes the two sides' security records when they were read. */
+  lane?: (cwd: string, base: string, head: string, audit: boolean, deps: boolean, records?: (pair: SecurityRecordPair | undefined) => void) => Promise<ChangeLaneReport>
 }
 
-async function judgeLane(cwd: string, base: string, head: string, audit: boolean, deps: boolean): Promise<ChangeLaneReport> {
+async function judgeLane(cwd: string, base: string, head: string, audit: boolean, deps: boolean, records?: (pair: SecurityRecordPair | undefined) => void): Promise<ChangeLaneReport> {
   const change = await resolveChange(cwd, base, head)
   const { reader, dispose } = openChange(cwd, change)
   try {
     return await judgeChangeLane(change, reader, {
-      ...(audit ? { audit: () => auditChangeRevisions(cwd, change) } : {}),
+      ...(audit ? { audit: () => auditChangeRevisions(cwd, change).then((result) => { records?.(result.records); return result }) } : {}),
       ...(deps ? { advisories: (files) => changeAdvisories(cwd, change, files) } : {}),
     })
   } finally {
@@ -233,8 +239,14 @@ export async function collectChangeEvidence(options: ChangeEvidenceOptions): Pro
   }
 
   let lane: ChangeLaneReport | undefined
+  let securityRecords: ChangeEvidence['securityRecords'] = options.audit
+    ? { unavailable: 'the two sides were not exported, since the change touched no application source', code: 'no-source' }
+    : { unavailable: 'change:evidence ran with --no-audit, which reads no application code', code: 'no-audit' }
+  const keepRecords = (pair: SecurityRecordPair | undefined): void => {
+    if (pair) securityRecords = 'unavailable' in pair ? { unavailable: pair.unavailable, code: pair.side ?? 'not-exported' } : pair.head
+  }
   try {
-    lane = await (options.lane ?? judgeLane)(cwd, options.base, options.head, options.audit, options.deps)
+    lane = await (options.lane ?? judgeLane)(cwd, options.base, options.head, options.audit, options.deps, keepRecords)
   } catch (error) {
     hold('lane-unavailable', `the change could not be read: ${firstLine(error)}`)
   }
@@ -294,6 +306,7 @@ export async function collectChangeEvidence(options: ChangeEvidenceOptions): Pro
     migrationImpact,
     holds,
     eligible: lane !== undefined && lane.floor === 'low' && holds.length === 0 && gate.ok,
+    securityRecords,
   }
 }
 
@@ -314,7 +327,7 @@ export async function changeRecord(cwd: string, base: string, head: string, evid
     holds: evidence.holds.map(({ code, lane }) => ({ code, lane })),
     eligible: evidence.eligible,
     gate: { ok: evidence.gate.ok, deps, stages: evidence.gate.stages.map(({ name, status }) => ({ name, status })) },
-    securityRecords: { unavailable: 'per-route security records are not computed by this version' },
+    securityRecords: 'routes' in evidence.securityRecords ? evidence.securityRecords : { unavailable: evidence.securityRecords.code },
   }
 }
 

@@ -232,15 +232,48 @@ export const AUTHORIZATION_CALL_PATTERN = controllerMemberCall('authorize', 'can
  */
 const GATE_CALL_PATTERN = /\b[gG]ate\s*\.\s*(?:allows|denies|any|all|none|authorize|inspect|check|forUser)\s*\(/
 
-const ABILITY_LITERAL_PATTERN = /\bthis\s*\.\s*(?:authorize|can)\s*\(\s*(['"`])([^'"`]+)\1/g
+const ABILITY_LITERAL_PATTERN = /\bthis\s*\.\s*(authorize|can)\s*\(\s*(['"`])([^'"`]+)\2/g
+
+/** One `this.authorize()` / `this.can()` call whose ability is a string literal, in source order. */
+export interface LiteralAuthorizationCall {
+  member: 'authorize' | 'can'
+  ability: string
+  /** The arguments after the ability, as written and with whitespace collapsed: what the policy is asked about. */
+  subject: string
+  /** A template literal with a placeholder (`posts.${action}`), or a literal concatenated with more: the ability is built at request time. */
+  templated?: true
+}
+
+/** Where the call opened at `open` closes, judged on the blanked body so a parenthesis in a string is not counted. */
+function closingParen(body: string, open: number): number {
+  let depth = 0
+  for (let index = open; index < body.length; index++) {
+    if (body[index] === '(') depth++
+    else if (body[index] === ')' && --depth === 0) return index
+  }
+  return -1
+}
 
 /**
- * The abilities an action names as string literals in `this.authorize()` / `this.can()`, read
- * from `rawBody` where the blanked `body` (same offsets) still holds code, so a comment or a
- * string that spells one is not a check.
+ * The `this.authorize()` / `this.can()` calls an action makes with a literal ability, read from
+ * `rawBody` where the blanked `body` (same offsets) still holds code, so a comment or a string
+ * that spells one is not a check.
  */
+export function literalAuthorizationCalls(body: string, rawBody: string): LiteralAuthorizationCall[] {
+  return [...rawBody.matchAll(ABILITY_LITERAL_PATTERN)].filter((match) => body.startsWith('this', match.index)).map((match) => {
+    const open = rawBody.indexOf('(', match.index)
+    const close = closingParen(body, open)
+    const after = match.index + match[0].length
+    const subject = close === -1 ? '' : rawBody.slice(after, close).replace(/^\s*,/u, '').replace(/\s+/gu, ' ').trim()
+    // A literal that is only part of the ability (`'posts.' + action`) names no ability either.
+    const partial = !/^\s*[,)]/u.test(rawBody.slice(after))
+    return { member: match[1] as LiteralAuthorizationCall['member'], ability: match[3]!, subject, ...((match[2] === '`' && match[3]!.includes('${')) || partial ? { templated: true as const } : {}) }
+  })
+}
+
+/** The abilities an action names as string literals in `this.authorize()` / `this.can()`. */
 export function literalAbilities(body: string, rawBody: string): string[] {
-  return [...rawBody.matchAll(ABILITY_LITERAL_PATTERN)].filter((match) => body.startsWith('this', match.index)).map((match) => match[2]!)
+  return literalAuthorizationCalls(body, rawBody).map((call) => call.ability)
 }
 
 /** Whether an action body shows an authorization decision: {@link AUTHORIZATION_CALL_PATTERN} or a gate asked by hand. */
@@ -266,6 +299,53 @@ export const VALIDATE_CALL_PATTERN = new RegExp(
   `\\bthis\\s*\\.\\s*${accessorCallPattern(VALIDATE_MEMBERS)}\\s*([A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)`,
   'g',
 )
+
+const VALIDATE_SITE_PATTERN = new RegExp(
+  `\\bthis\\s*\\.\\s*(${[...VALIDATE_MEMBERS].sort((x, y) => y.length - x.length).join('|')})\\s*(?:<[^()]*>)?\\s*\\(\\s*([A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)?\\s*([),]?)`,
+  'g',
+)
+
+/** One validate call: its member, and the schema when the argument is an identifier (or `a.b`) passed alone. */
+export interface ValidateCallSite {
+  member: (typeof VALIDATE_MEMBERS)[number]
+  /** Absent when the argument is anything else: a call, an object written in place. */
+  schema?: string
+}
+
+/** Every validate call an action makes, in source order. */
+export function validateCallSites(body: string): ValidateCallSite[] {
+  return [...body.matchAll(VALIDATE_SITE_PATTERN)].map((match) => ({
+    member: match[1] as ValidateCallSite['member'],
+    ...(match[2] && match[3] ? { schema: match[2].replace(/\s+/g, '') } : {}),
+  }))
+}
+
+const UNFOLLOWED_CANDIDATES = new RegExp(
+  `${AUTHORIZATION_CALL_PATTERN.source}|${GATE_CALL_PATTERN.source}|${controllerMemberCall(...VALIDATE_MEMBERS).source}`,
+  'g',
+)
+
+/**
+ * The argument text, as written, of each call in an action whose ability or schema a record cannot
+ * name: `this.authorize()`/`this.can()` with no plain literal ability, a gate asked by hand, and a
+ * validate call whose argument is not one identifier (or `a.b`) passed alone.
+ */
+export function unfollowedCallArguments(body: string, rawBody: string): string[] {
+  const found: string[] = []
+  for (const match of body.matchAll(UNFOLLOWED_CANDIDATES)) {
+    const open = match.index + match[0].length - 1
+    const close = closingParen(body, open)
+    const args = rawBody.slice(open + 1, close === -1 ? rawBody.length : close)
+    const call = match[0]
+    if (/\b(?:authorize|can)\s*(?:<[^()]*>)?\s*\($/u.test(call) && /^\s*this\b/u.test(call)) {
+      if (/^\s*(?:(['"])[^'"`]+\1|`[^`$]*`)\s*(?:,|$)/u.test(args)) continue
+    } else if (/^\s*this\b/u.test(call)) {
+      if (/^\s*[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*(?:[),]|$)/u.test(args)) continue
+    }
+    found.push(args.replace(/\s+/gu, ' ').trim())
+  }
+  return found
+}
 
 /** An Inertia page response, which carries no JSON schema an agent could read. */
 export const INERTIA_CALL_PATTERN = controllerMemberCall('inertia')

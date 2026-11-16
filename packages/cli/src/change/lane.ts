@@ -24,6 +24,7 @@ import { applyReviewPolicy, loadBaseReviewPolicy, REVIEW_POLICY_FILE, type Loade
 import type { ChangedPath, ChangeReader, ChangeSide, ResolvedChange } from './resolve'
 import type { ChangedDependencyFile, LockfileAdvisories } from './revision-advisories'
 import type { ChangeAudits } from './revision-audit'
+import { compareSecurityRecords } from './security-records'
 
 export type { FactCode, Lane } from './fact-classes'
 
@@ -67,6 +68,8 @@ export interface ChangeLaneReport {
   unjudged: ChangeUnjudged[]
   /** `compared`: both sides were audited and compared. `loadedCode`: the run executed the application's code, compared or not. */
   audit: { compared: boolean; loadedCode: boolean }
+  /** `compared`: both sides' per-route security records were read and compared. */
+  records: { compared: boolean }
   plans: ChangePlan[]
   /** `guren.review.ts` at the merge base. */
   policy: LoadedReviewPolicy
@@ -506,18 +509,43 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     fact([entry], { code: fallbackCode(entry), lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}${entry.oldPath ? ` from ${entry.oldPath}` : ''}` })
   }
 
-  const surface = inApp.filter((entry) => touches(entry, (path) => SECURITY_SURFACE.test(path)))
-  if (surface.length > 0) {
-    unjudged.push({ reader: 'security-records', reason: 'per-route security records are not computed by this version, so authorization-removed and validation-removed were not judged', lane: 'medium', files: surface.map((entry) => entry.path) })
-  }
+  // One run serves the audit and the security records: both read the same two exports.
+  let auditPromise: Promise<ChangeAudits | undefined> | undefined
+  const auditRun = (): Promise<ChangeAudits | undefined> => (auditPromise ??= options.audit ? options.audit() : Promise.resolve(undefined))
   // The audit scans `app`, `src`, `routes`, `config` and each whole module, loads what the routes import and reads the install.
-  const audited = change.paths.filter((entry) => entry.outsideApp || touches(entry, (path) => !isAmbient(path) && !path.startsWith('tests/')))
+  const auditedPaths = change.paths.filter((entry) => entry.outsideApp || touches(entry, (path) => !isAmbient(path) && !path.startsWith('tests/')))
+  const surface = inApp.filter((entry) => touches(entry, (path) => SECURITY_SURFACE.test(path)))
+  const records = { compared: false }
+  // Read whenever both exports ran: a validator, a provider or the entry can weaken a route too.
+  const pair = auditedPaths.length > 0 ? (await auditRun())?.records : undefined
+  const files = surface.map((entry) => entry.path)
+  if (pair && !('unavailable' in pair) && pair.base.recordVersion === pair.head.recordVersion) {
+    records.compared = true
+    const comparison = compareSecurityRecords(pair.base, pair.head)
+    const touched = change.paths.filter((entry) => !entry.outsideApp).map((entry) => entry.path)
+    facts.push(...comparison.facts.map((fact) => ({ ...fact, files: files.length > 0 ? files : touched })))
+    if (comparison.incomparable.length > 0) unjudged.push({ reader: 'security-records', reason: `routes whose records cannot be ordered against the base: ${comparison.incomparable.join('; ')}`, lane: 'high', files: files.length > 0 ? files : touched })
+    // A skip the change brought in is the change's doing: a route it registers there is not on the list at all.
+    const added = (pair.head.skipped ?? []).filter((entry) => !(pair.base.skipped ?? []).includes(entry))
+    const shared = (pair.head.skipped ?? []).filter((entry) => (pair.base.skipped ?? []).includes(entry))
+    if (added.length > 0) unjudged.push({ reader: 'security-records', reason: `the head's introspection skipped ${added.join(', ')}, which the base's did not, so a route registered there was not compared`, lane: 'high', files: files.length > 0 ? files : touched })
+    else if (shared.length > 0 && files.length > 0) unjudged.push({ reader: 'security-records', reason: `introspection skipped ${shared.join(', ')} on both sides, so a route registered there was not compared`, lane: 'medium', files })
+  } else if (pair && 'unavailable' in pair && pair.side === 'head') {
+    // The change made its own head unreadable: what it did to its routes cannot be ordered.
+    unjudged.push({ reader: 'security-records', reason: `${pair.unavailable}, while the base's were, so authorization-removed and validation-removed were not judged`, lane: 'high', files })
+  } else if (surface.length > 0) {
+    // A base that cannot be rebuilt says nothing against the change.
+    const why = !pair ? 'the two sides were not exported and introspected'
+      : 'unavailable' in pair ? pair.unavailable
+        : `the two sides' records are of versions ${pair.base.recordVersion} and ${pair.head.recordVersion}`
+    unjudged.push({ reader: 'security-records', reason: `${why}, so authorization-removed and validation-removed were not judged`, lane: 'medium', files })
+  }
   const audit = { compared: false, loadedCode: false }
-  if (audited.length > 0) {
+  if (auditedPaths.length > 0) {
     const notJudged = (why: string): void => {
-      unjudged.push({ reader: 'audit', reason: `${why}, so audit-fail, audit-warn-changed, csrf-exemption and sensitive-exposure were not judged`, lane: 'medium', files: audited.map((entry) => entry.path) })
+      unjudged.push({ reader: 'audit', reason: `${why}, so audit-fail, audit-warn-changed, csrf-exemption and sensitive-exposure were not judged`, lane: 'medium', files: auditedPaths.map((entry) => entry.path) })
     }
-    const audits = await options.audit?.()
+    const audits = await auditRun()
     if (!audits) notJudged('the audit was not run on the two sides')
     else if ('unavailable' in audits) {
       audit.loadedCode = audits.loadedCode === true
@@ -574,6 +602,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     facts: judged,
     unjudged,
     audit,
+    records,
     plans: await readChangePlans(reader, trees.head),
     policy,
   }
