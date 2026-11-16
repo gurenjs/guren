@@ -104,7 +104,7 @@ describe('readSecurityRecords', () => {
     const update = records.routes.find((route) => route.path === '/posts/:id')
     expect(update).toMatchObject({
       method: 'PUT',
-      action: 'PostController.update',
+      action: 'app/Http/Controllers/PostController.ts#PostController.update',
       middleware: [{ capabilities: { authentication: { mode: 'required' } } }],
       contracts: { body: { exports: ['app/Http/Validators/PostValidator.ts#PostSchema'], declarations: { 'app/Http/Validators/PostValidator.ts#PostSchema': expect.stringMatching(/^declaration:/) } } },
       handler: {
@@ -180,14 +180,18 @@ export function registerWebRoutes(router: Router): void {
     const templated = "    const action = 'publish'\n    await this.authorize(`posts.${action}`, 'Post')"
     const gate = "    const gate = this.make('gate')\n    await gate.authorize('manage-posts')"
 
+    // Compared as text: Bun's toMatchObject writes the asymmetric matchers into the object it reads.
+    const text = (value: unknown): string => JSON.stringify(value)
     const before = await handlers('digest-a', templated)
+    const [update, destroy] = [text(before.update), text(before.destroy)]
     expect(before.update).toMatchObject({ authorizes: [], unseen: expect.any(String) })
     expect(before.destroy).toMatchObject({ unread: expect.stringContaining('was not found'), digest: expect.any(String) })
-    expect((await handlers('digest-b', templated.replace("'publish'", "'view'"))).update).not.toEqual(before.update)
-    expect((await handlers('digest-c', templated, { 'app/Unrelated.ts': 'export const unrelated = 2\n' })).update).toEqual(before.update)
-    expect((await handlers('digest-d', templated, { 'app/Http/Controllers/BaseController.ts': base.replace("    await this.authorize('delete', 'Post')\n", '') })).destroy).not.toEqual(before.destroy)
+    expect(text((await handlers('digest-b', templated.replace("'publish'", "'view'"))).update)).not.toBe(update)
+    expect(text((await handlers('digest-c', templated, { 'app/Unrelated.ts': 'export const unrelated = 2\n' })).update)).toBe(update)
+    expect(text((await handlers('digest-d', templated, { 'app/Http/Controllers/BaseController.ts': base.replace("    await this.authorize('delete', 'Post')\n", '') })).destroy)).not.toBe(destroy)
     const gated = await handlers('digest-e', gate)
+    const gatedText = text(gated.update)
     expect(gated.update).toMatchObject({ unseen: expect.any(String) })
-    expect((await handlers('digest-f', "    const gate = this.make('gate')")).update).not.toEqual(gated.update)
+    expect(text((await handlers('digest-f', "    const gate = this.make('gate')")).update)).not.toBe(gatedText)
   })
 })
