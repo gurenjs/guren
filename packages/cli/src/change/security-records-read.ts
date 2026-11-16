@@ -47,7 +47,7 @@ interface ModuleBindings {
   /** The statement node of each declared name, what its references are read from. */
   statements: Map<string, BabelNode>
   /** A declared class's parent as written: `extends Base`, or `extends ns.Base`. */
-  parents: Map<string, { local: string; member?: string }>
+  parents: Map<string, { local: string; member?: string } | { expression: BabelNode }>
   imports: Map<string, ImportEntry>
   /** `export { name } from` and `export { local as name } from`: the source and its name there. */
   reexported: Map<string, { source: string; name: string }>
@@ -107,10 +107,23 @@ function readsThisMember(node: unknown): boolean {
  * The identifiers source text reads, parsed through `parseSourceFile()`; `undefined` when it does
  * not parse, so a caller can widen rather than read nothing. `wrap` makes a fragment a program.
  */
-function sourceIdentifiers(text: string, file: string, wrap: (text: string) => string): { names: string[]; thisMember: boolean } | undefined {
+function sourceIdentifiers(text: string, file: string, wrap: (text: string) => string): { names: string[]; thisMember: boolean; program: BabelNode } | undefined {
   const ast = parseSourceFile(wrap(text), file)
   if (!ast) return undefined
-  return { names: referencedIdentifiers(ast.program), thisMember: readsThisMember(ast.program) }
+  const program = ast.program as unknown as BabelNode
+  return { names: referencedIdentifiers(program), thisMember: readsThisMember(program), program }
+}
+
+/** Whether a body assigns any of `names` from an expression that reads a member of `this`. */
+function assignsFromThis(program: BabelNode, names: ReadonlySet<string>): boolean {
+  let found = false
+  walk(program, (current) => {
+    if (found) return false
+    const node = current as BabelNode & { id?: PatternNode; init?: BabelNode | null; left?: PatternNode; right?: BabelNode }
+    if (current.type === 'VariableDeclarator' && node.init && patternNames(node.id).some((name) => names.has(name)) && readsThisMember(node.init)) found = true
+    if (current.type === 'AssignmentExpression' && node.right && patternNames(node.left).some((name) => names.has(name)) && readsThisMember(node.right)) found = true
+  })
+  return found
 }
 
 /**
@@ -163,6 +176,10 @@ class Declarations {
       units.push(found.module.declared.get(found.name)!)
       const parent = found.module.parents.get(found.name)
       if (!parent) break
+      if ('expression' in parent) {
+        units.push(`expression:${await this.reach(referencedIdentifiers(parent.expression).flatMap((other) => this.target(found.module, other) ?? []))}`)
+        break
+      }
       const target = this.target(found.module, parent.local)
       if (!target) { units.push(`unbound:${parent.local}`); break }
       if ('leaf' in target) { units.push(target.leaf); break }
@@ -297,7 +314,7 @@ class Declarations {
     const body = outcome.ast.program.body as Statement[]
     const declared = new Map<string, string>()
     const statements = new Map<string, BabelNode>()
-    const parents = new Map<string, { local: string; member?: string }>()
+    const parents = new Map<string, { local: string; member?: string } | { expression: BabelNode }>()
     const reexported = new Map<string, { source: string; name: string }>()
     const starred: string[] = []
     for (const statement of body) {
@@ -311,21 +328,26 @@ class Declarations {
         }
         continue
       }
-      const node = (statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportDefaultDeclaration' ? statement.declaration : statement) as { type: string; id?: { name?: string } | null; declarations?: Array<{ id: PatternNode }>; superClass?: BabelNode | null } | null
-      const bind = (name: string): void => {
+      type ParentNode = BabelNode & { name?: string; object?: BabelNode & { name?: string }; property?: BabelNode & { name?: string }; computed?: boolean }
+      const node = (statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportDefaultDeclaration' ? statement.declaration : statement) as { type: string; id?: { name?: string } | null; declarations?: Array<{ id: PatternNode; init?: { type: string; superClass?: BabelNode | null } | null }>; superClass?: BabelNode | null } | null
+      const bind = (name: string, superClass?: BabelNode | null): void => {
         declared.set(name, slice)
         statements.set(name, statement as unknown as BabelNode)
-        const parent = node?.superClass as (BabelNode & { name?: string; object?: BabelNode & { name?: string }; property?: BabelNode & { name?: string }; computed?: boolean }) | null | undefined
-        if (parent?.type === 'Identifier' && parent.name) parents.set(name, { local: parent.name })
-        else if (parent?.type === 'MemberExpression' && !parent.computed && parent.object?.type === 'Identifier' && parent.property?.type === 'Identifier') parents.set(name, { local: parent.object.name!, member: parent.property.name! })
+        const parent = superClass as ParentNode | null | undefined
+        if (!parent) return
+        if (parent.type === 'Identifier' && parent.name) parents.set(name, { local: parent.name })
+        else if (parent.type === 'MemberExpression' && !parent.computed && parent.object?.type === 'Identifier' && parent.property?.type === 'Identifier') parents.set(name, { local: parent.object.name!, member: parent.property.name! })
+        // A mixin call or any other expression: what it reads is the parent.
+        else parents.set(name, { expression: parent })
       }
-      if (statement.type === 'ExportDefaultDeclaration') bind('default')
+      if (statement.type === 'ExportDefaultDeclaration') bind('default', node?.superClass)
       if (!node) continue
       if (node.type === 'VariableDeclaration') {
-        for (const entry of node.declarations ?? []) for (const name of patternNames(entry.id)) bind(name)
+        // `const X = class extends Base {}` declares a class too.
+        for (const entry of node.declarations ?? []) for (const name of patternNames(entry.id)) bind(name, entry.init?.type === 'ClassExpression' ? entry.init.superClass : undefined)
       } else if (node.id?.name) {
         // A function, a class, an enum, a namespace: whatever binds a top-level name.
-        bind(node.id.name)
+        bind(node.id.name, node.superClass)
       }
     }
     return { path, text, declared, statements, parents, imports: importsByLocal(body), reexported, starred }
@@ -336,9 +358,9 @@ class Declarations {
   }
 }
 
-/** A digest of every routes file: where a contract schema no validator export is would be written. */
-async function routesDigest(cwd: string): Promise<string> {
-  const files: string[] = []
+/** A digest of every routes file and the entry: where a contract schema no validator export is, or a class no controller file declares, would be written. */
+async function routesDigest(cwd: string, entry: string | undefined): Promise<string> {
+  const files: string[] = entry ? [resolve(cwd, entry)] : []
   const walk = async (dir: string): Promise<void> => {
     for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
       const path = join(dir, entry.name)
@@ -385,7 +407,7 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
       const exports = (sources?.[key] ?? []).map((source) => `${source.file}#${source.exportName}`).sort()
       const digests: Record<string, string> = {}
       for (const source of sources?.[key] ?? []) digests[`${source.file}#${source.exportName}`] = await declarations.of(resolve(cwd, source.file), source.exportName)
-      if (exports.length === 0) digests[''] = await (routesFiles ??= routesDigest(cwd))
+      if (exports.length === 0) digests[''] = await (routesFiles ??= routesDigest(cwd, manifest.entry.file ?? undefined))
       contracts[key] = { schema, exports, declarations: digests }
     }
     const ref = route.controller
@@ -406,21 +428,25 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
         ...(entry.unresolvedMembers?.length ? { unresolvedMembers: entry.unresolvedMembers } : {}),
       })),
       contracts,
-      handler: ref ? await actionRecord(cwd, scan, ref, reachedByName, declarations) : { unread: 'an inline handler, whose body the reader does not follow' },
+      handler: ref ? await actionRecord(cwd, scan, ref, reachedByName, declarations, manifest.entry.file ?? undefined) : { unread: 'an inline handler, whose body the reader does not follow' },
     })
   }
   return { recordVersion: SECURITY_RECORD_VERSION, routes, ...(skipped.length > 0 ? { skipped } : {}) }
 }
 
 async function actionRecord(
-  cwd: string, scan: ControllerMethodScan, controller: ControllerTarget, reachedByName: ReadonlySet<string>, declarations: Declarations,
+  cwd: string, scan: ControllerMethodScan, controller: ControllerTarget, reachedByName: ReadonlySet<string>, declarations: Declarations, entry: string | undefined,
 ): Promise<ActionRecord> {
   const lookup = controllerMethodFor(scan, controller)
   // Unread, but the class is known: the digest of what declares it says whether it changed.
   const unread = async (why: string): Promise<ActionRecord> => {
     const declared = scan.declarations.filter((entry) => entry.className === lookup.className)
-    // Declared in no controller file (the routes file, the entry): the routes files are where it would be.
-    if (declared.length === 0) return { unread: why, digest: await routesDigest(cwd) }
+    if (declared.length === 0) {
+      // Placed by introspection though the controller scan holds no declaration (a class expression): its own chain.
+      if (controller.resolved === 'identity' && controller.file && controller.exportName) return { unread: why, digest: await declarations.classChain(resolve(cwd, controller.file), controller.exportName) }
+      // Declared in no controller file (the routes file, the entry): the routes files and the entry are where it would be.
+      return { unread: why, digest: await routesDigest(cwd, entry) }
+    }
     // The class statements along `extends`: what declares the action, and nothing else the class reads.
     const parts = await Promise.all(declared.map(async (entry) => `${entry.file}:${await declarations.classChain(resolve(cwd, entry.file), entry.className)}`))
     return { unread: why, digest: digest(parts.sort().join('\n')) }
@@ -457,11 +483,13 @@ async function actionRecord(
     const whole = sourceIdentifiers(rawBody, filePath, (text) => (text.trimStart().startsWith('{') ? `async function __action__() ${text}` : `async function __action__() { return (${text}) }`))
     const binds = (name: string): boolean => !!local && (local.declared.has(name) || local.imports.has(name))
     // An argument naming a local of the action reaches whatever the action assigns it: the whole body is the scope.
-    const widened = !args || args.names.some((name) => name !== '__args__' && !NOT_BINDINGS.has(name) && !binds(name))
+    const locals = new Set(args?.names.filter((name) => name !== '__args__' && !NOT_BINDINGS.has(name) && !binds(name)) ?? [])
+    const widened = !args || locals.size > 0
     const names = widened ? (whole?.names ?? rawBody.match(IDENTIFIER) ?? []) : args.names
     const parts = [await declarations.closure(controllerFile, rawBody, names)]
-    // `this.<member>` names the class's own field or method, which only the class statements hold.
-    if (!args || args.thisMember || (widened && (whole?.thisMember ?? true))) parts.push(await declarations.classChain(controllerFile, lookup.className))
+    // `this.<member>` names the class's own field or method, which only the class statements hold:
+    // read by an argument itself, or by what the body assigns a local an argument names.
+    if (!args || !whole || args.thisMember || (locals.size > 0 && assignsFromThis(whole.program, locals))) parts.push(await declarations.classChain(controllerFile, lookup.className))
     unseen = digest(parts.join('\n'))
   }
   return {

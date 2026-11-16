@@ -317,4 +317,63 @@ export class PostController extends BaseController {
     expect((await read('tree-d', { 'app/Http/Validators/Fallback.ts': "import { z } from 'zod'\n\nexport default z.string()\n" })).update).not.toBe(before.update)
     expect((await read('tree-e', { 'app/Http/Controllers/BaseController.ts': base.replace("    await this.authorize('delete', 'Post')\n", '') })).destroy).not.toBe(before.destroy)
   })
+  test('follows a mixin parent and a same-file enum, and adds no class chain for a local that reads nothing of this', async () => {
+    const mixin = (guard: string) => `import { Controller } from '@guren/core'
+
+export function WithCrud<T extends new (...args: any[]) => Controller>(Root: T) {
+  return class extends Root {
+    async destroy(): Promise<Response> {
+${guard}      return this.json({})
+    }
+  }
+}
+`
+    const controller = (other: string) => `import { z } from 'zod'
+import { Controller } from '@guren/core'
+import { WithCrud } from './Mixin.js'
+
+enum Role { Admin = 'admin' }
+const RoleSchema = z.object({ role: z.enum(Role) })
+
+export class PostController extends WithCrud(Controller) {
+  async other(): Promise<Response> {
+    ${other}
+  }
+
+  async update(): Promise<Response> {
+    await this.validateBody(RoleSchema)
+    const post = { id: 1 }
+    await this.authorize(String(post.id), post)
+    return this.json({})
+  }
+}
+`
+    const guard = "      await this.authorize('delete', 'Post')\n"
+    const files = (extra: Record<string, string> = {}): Record<string, string> => ({
+      ...FILES,
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.put('/posts/:id', { name: 'posts.update' }, [PostController, 'update'])
+  router.delete('/posts/:id', { name: 'posts.destroy' }, [PostController, 'destroy'])
+}
+`,
+      'app/Http/Controllers/Mixin.ts': mixin(guard),
+      'app/Http/Controllers/PostController.ts': controller('return this.json({})'),
+      ...extra,
+    })
+    const read = async (name: string, extra?: Record<string, string>) => {
+      const records = await readSecurityRecords(await app(name, files(extra)))
+      if ('unreadable' in records) throw new Error(records.unreadable)
+      const of = (method: string) => JSON.stringify(records.routes.find((route) => route.method === method)!.handler)
+      return { update: of('PUT'), destroy: of('DELETE') }
+    }
+    const before = await read('mixin-a')
+
+    expect((await read('mixin-b', { 'app/Http/Controllers/Mixin.ts': mixin('') })).destroy).not.toBe(before.destroy)
+    expect((await read('mixin-c', { 'app/Http/Controllers/PostController.ts': controller('return this.json({})').replace("Admin = 'admin'", "Admin = 'admin', Guest = 'guest'") })).update).not.toBe(before.update)
+    // `post` is a local, so the body is the scope, but it reads nothing of `this`: another action's edit does not reach it.
+    expect((await read('mixin-d', { 'app/Http/Controllers/PostController.ts': controller('return this.json({ edited: true })') })).update).toBe(before.update)
+  })
 })
