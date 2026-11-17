@@ -32,7 +32,7 @@ export const FACT_CLASSES = {
   'dependency-advisory': { kind: 'always-high', lowest: 'high' },
   'authorization-removed': { kind: 'always-high', lowest: 'high' },
   'validation-removed': { kind: 'always-high', lowest: 'high' },
-  // Not emitted until the route graph and the declaration matcher ship; named so a policy can raise them now.
+  // Not emitted until the route graph ships; named so a policy can raise them now.
   'route-added': { kind: 'declarable', lowest: 'low' },
   'route-changed': { kind: 'declarable', lowest: 'low' },
   'route-removed': { kind: 'declarable', lowest: 'low' },
