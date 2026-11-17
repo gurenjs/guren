@@ -576,6 +576,32 @@ describe('guren add browser-tests', () => {
     }
   })
 
+  test('reads the password from the env files the Playwright config loads, the first that assigns it winning', async () => {
+    const workspace = await createTempWorkspace('guren-add-browser-tests-password-files-')
+    const exported = process.env.BROWSER_TEST_PASSWORD
+    delete process.env.BROWSER_TEST_PASSWORD
+    const modeFile = `.env.${process.env.NODE_ENV || 'development'}`
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST, 'db/schema.ts': USERS_SCHEMA })
+      const run = () => addBrowserTests({ install: false, loadMap: async () => mapOf([POSTS, AUTH]) })
+      const cases: Array<[Record<string, string>, boolean]> = [
+        [{ '.env.local': 'BROWSER_TEST_PASSWORD=secret\n' }, true],
+        [{ [modeFile]: 'BROWSER_TEST_PASSWORD=secret\n' }, true],
+        [{ '.env.local': 'BROWSER_TEST_PASSWORD=\n', '.env': 'BROWSER_TEST_PASSWORD=secret\n' }, false],
+        [{ '.env.local': 'APP_KEY=x\n', [modeFile]: 'BROWSER_TEST_PASSWORD=\n', '.env': 'BROWSER_TEST_PASSWORD=secret\n' }, false],
+      ]
+      for (const [files, set] of cases) {
+        await writeWorkspaceFiles(workspace.dir, { '.env': 'APP_KEY=x\n', '.env.local': '', [modeFile]: '', ...files })
+        expect({ files, set: (await run()).passwordSet }).toEqual({ files, set })
+      }
+    } finally {
+      if (exported === undefined) delete process.env.BROWSER_TEST_PASSWORD
+      else process.env.BROWSER_TEST_PASSWORD = exported
+      await workspace.cleanup()
+    }
+  })
+
   test('writes the app\'s default locale into the config', async () => {
     const workspace = await createTempWorkspace('guren-add-browser-tests-locale-')
     try {
@@ -726,6 +752,33 @@ describe('guren add browser-tests --behaviours', () => {
       const install = info.mock.calls.map((call) => String(call[0])).find((line) => line.startsWith('Run: bun add -d '))
       expect(install).toContain(' @agentclientprotocol/codex-acp@^2.6.0')
       expect(install).not.toContain('claude-agent-acp')
+    } finally {
+      info.mockRestore()
+      await workspace.cleanup()
+    }
+  })
+
+  test('switching to another agent under --force names the previous adapter to remove, and keeps it under a kept config', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-adapter-switch-')
+    const info = spyOn(consola, 'info').mockImplementation((() => {}) as never)
+    const removals = (): string[] => info.mock.calls.map((call) => String(call[0])).filter((line) => line.startsWith('Run: bun remove '))
+    try {
+      await seedInertiaApp(workspace.dir)
+      // The manifest as `--agent claude-code` leaves it once installed.
+      const manifest = '{ "name": "app", "dependencies": { "@guren/inertia-client": "*" }, "devDependencies": { "e2e": "0.23.1", "@e2e-dev/web": "0.16.0", "@e2e-dev/acp": "0.5.0", "@agentclientprotocol/claude-agent-acp": "^0.107.0" } }\n'
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': manifest })
+      const run = (agent: string, force = false) => addBrowserTests({ install: false, force, behaviours: true, agent, loadMap: async () => mapOf([POSTS]) })
+      await run('claude-code')
+      expect(removals()).toEqual([])
+
+      // The kept config still starts Claude Code, so its adapter stays.
+      info.mockClear()
+      await run('codex')
+      expect(removals()).toEqual([])
+
+      info.mockClear()
+      await run('codex', true)
+      expect(removals()).toEqual(['Run: bun remove @agentclientprotocol/claude-agent-acp'])
     } finally {
       info.mockRestore()
       await workspace.cleanup()
