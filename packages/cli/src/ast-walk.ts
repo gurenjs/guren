@@ -289,3 +289,8 @@ function blankRanges(source: string, ranges: [number, number][]): string {
   }
   return chars.join('')
 }
+
+const AST_POSITION_KEYS = new Set(['start', 'end', 'loc', 'range', 'extra', 'leadingComments', 'trailingComments', 'innerComments'])
+
+/** A node as its syntax, without positions or comments: a string literal keeps its exact value. */
+export const canonicalSyntax = (node: unknown): string => JSON.stringify(node, (key, value: unknown) => (AST_POSITION_KEYS.has(key) ? undefined : value))

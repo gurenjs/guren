@@ -11,7 +11,7 @@ import { formatDestructiveFinding, judgeMigrations, readMigrationSources } from 
 
 import { parseSourceFile } from '../parse-cache'
 import { bracketedTokens, isAcceptanceId } from '../plan/acceptance-status'
-import { objectLiteral, topLevelDeclaration, walk } from '../ast-walk'
+import { canonicalSyntax, objectLiteral, topLevelDeclaration, walk } from '../ast-walk'
 import { TEST_FILE_PATTERN, toPosixRelative } from '../discovery'
 import { extractClassDeclaration } from '../model-parser'
 import { isPlanRevisionsDirName, planSlug } from '../plan/beside'
@@ -396,7 +396,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     const afterTables = new Map(after.map((table) => [table.identifier, table]))
     for (const [identifier, table] of afterTables) {
       const previous = beforeTables.get(identifier)
-      if (!previous) fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)} added (${table.columns.length} columns)` }, { kind: 'table', table })
+      if (!previous) fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)} added (${table.columns.length} columns)` }, { kind: 'table', table, file: head!, tables: after })
       else if (JSON.stringify(previous) !== JSON.stringify(table)) {
         const differences = tableDifferences(previous, table)
         // What the reader did not follow is no table fact a policy may lower.
@@ -649,11 +649,6 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   }
 }
 
-const AST_POSITION_KEYS = new Set(['start', 'end', 'loc', 'range', 'extra', 'leadingComments', 'trailingComments', 'innerComments'])
-
-/** A node as its syntax, without positions or comments: a string literal keeps its exact value. */
-const canonical = (node: unknown): string => JSON.stringify(node, (key, value: unknown) => (AST_POSITION_KEYS.has(key) ? undefined : value))
-
 /**
  * A schema file without its tables, its drizzle imports and an object listing only tables: what
  * `schema-changed` does not account for, compared per statement as syntax. Inside a table what no
@@ -676,7 +671,7 @@ function schemaResidue(text: string | null, file: string | undefined, tables: re
     if (framework(statement)) continue
     const declaration = topLevelDeclaration(statement)
     if (!declaration?.declarations.every((declarator) => declarator.id.type === 'Identifier' && (names.has(declarator.id.name) || listsTables(declarator.init)))) {
-      kept.push(canonical(statement))
+      kept.push(canonicalSyntax(statement))
       continue
     }
     walk(declaration.declarations.map((declarator) => declarator.init), (node, parent) => {
@@ -684,13 +679,13 @@ function schemaResidue(text: string | null, file: string | undefined, tables: re
       const body = node.type === 'ArrowFunctionExpression' ? (node.body as { type?: string; object?: { type?: string; name?: string }; computed?: boolean }) : undefined
       if (body?.type === 'MemberExpression' && !body.computed && body.object?.type === 'Identifier' && names.has(String(body.object.name))) return false
       if (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression' || node.type === 'SpreadElement' || node.type === 'TaggedTemplateExpression') {
-        kept.push(canonical(node))
+        kept.push(canonicalSyntax(node))
         return false
       }
       if (node.type !== 'Identifier' || builders.has(String(node.name)) || names.has(String(node.name))) return
       const named = parent as { type?: string; key?: unknown; property?: unknown; computed?: boolean } | null
       if (!named?.computed && ((named?.type === 'MemberExpression' && named.property === node) || (named?.type === 'ObjectProperty' && named.key === node))) return
-      kept.push(canonical(node))
+      kept.push(canonicalSyntax(node))
     })
   }
   return kept.join('\n')

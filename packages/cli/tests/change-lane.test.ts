@@ -728,14 +728,31 @@ import { comments } from '@/db/schema'
 
 export class Comment extends defineModel(comments) {}
 `
-  const SCHEMA = `${PG_SCHEMA_FIXTURE.replace('import { pgTable,', 'import { integer, pgTable,')}
+  // The table `plan:scaffold` writes for the plan's comments model into a schema holding `posts`.
+  const SCHEMA = `${PG_SCHEMA_FIXTURE.replace('import { pgTable,', 'import { index, integer, pgTable,')}
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+})
+
 export const comments = pgTable('comments', {
   id: serial('id').primaryKey(),
   body: text('body').notNull(),
-  postId: integer('post_id').notNull().references(() => users.id),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
-})
+  postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('comments_post_id_index').on(table.postId),
+])
 `
+  const POLICY_FILE = `import { Policy, type AuthUser } from '@guren/core'
+
+export class CommentPolicy extends Policy {
+  delete(_user: AuthUser | null): boolean {
+    return false
+  }
+}
+`
+
+  const report0Hash = (report: ChangeLaneReport): string => report.plans.find((plan) => plan.file === 'docs/plans/comments/plan.json')!.hash
 
   /** A repository whose base holds the comments plan, approved unless `approve` is false. */
   async function planRepo(approve = true): Promise<{ repo: string; base: string }> {
@@ -756,6 +773,32 @@ export const comments = pgTable('comments', {
       expect.objectContaining({ code: 'file-added', lane: 'low', files: ['app/Models/Comment.ts'], declaredBy: 'docs/plans/comments/plan.json#model.comment' }),
     ])
     expect(renderChangeLane(report)).toContain('app/Models/Comment.ts added (declared by docs/plans/comments/plan.json#model.comment)')
+  })
+
+  test('should lower an added policy with exactly the planned abilities', async () => {
+    const { repo, base } = await planRepo()
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Policies/CommentPolicy.ts': POLICY_FILE }))
+
+    expect(factAt(report, 'policy-added')).toMatchObject({ lane: 'low', declaredBy: 'docs/plans/comments/plan.json#policy.comment' })
+  })
+
+  test('should declare nothing from a plan that is closed', async () => {
+    const { repo, base } = await planRepo()
+    const hash = report0Hash(await laneOf(repo, base, base))
+    const closed = await commit(repo, { 'docs/plans/comments.md': `---\ntype: plan\nclosed: true\nplan_hash: ${hash}\n---\n` })
+    const report = await laneOf(repo, closed, await commit(repo, { 'app/Models/Comment.ts': MODEL }))
+
+    expect(report.plans).toEqual([expect.objectContaining({ file: 'docs/plans/comments/plan.json', standing: 'closed' })])
+    expect(factAt(report, 'file-added')).toMatchObject({ lane: 'medium' })
+    expect(factAt(report, 'file-added')?.declaredBy).toBeUndefined()
+  })
+
+  test('should let guren.review.ts raise a declared fact, which keeps its declaration', async () => {
+    const { repo } = await planRepo()
+    const base = await commit(repo, { 'guren.review.ts': "export default { facts: { 'file-added': 'medium' } }\n" })
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL }))
+
+    expect(factAt(report, 'file-added')).toMatchObject({ lane: 'medium', policyFrom: 'low', declaredBy: 'docs/plans/comments/plan.json#model.comment' })
   })
 
   test('should keep a file a plan names at another path, or exporting another name, at medium', async () => {
