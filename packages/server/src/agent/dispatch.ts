@@ -201,7 +201,14 @@ export function buildToolRequest(
 
   const qs = query.toString()
   const url = `${origin}${path}${qs ? `?${qs}` : ''}`
-  return { request: markDispatchedToolRequest(new Request(url, { method, headers, body })) }
+  // `routeName`, not `toolName`: the router answers by the route's own name.
+  return {
+    request: markDispatchedToolRequest(new Request(url, { method, headers, body }), {
+      method,
+      path: tool.path,
+      name: tool.routeName,
+    }),
+  }
 }
 
 /**

@@ -169,14 +169,14 @@ Apps that configure mail in a service provider keep working; see [Apps with serv
 | `host` | required | SMTP server hostname |
 | `port` | `587` | SMTP server port |
 | `secure` | `false` | Use TLS (usually for port 465) |
-| `requireTLS` | `false` | Fail the send when the server does not upgrade with STARTTLS |
+| `requireTLS` | see below | Fail the send when the server does not upgrade with STARTTLS |
 | `tls` | - | Node TLS options for the connection, such as `ca` for a relay on a private CA |
 | `auth.user` | - | SMTP username |
 | `auth.pass` | - | SMTP password |
 | `pool` | `true` | Use connection pooling |
 | `maxConnections` | `5` | Max pool connections |
 
-Without `secure`, the connection is encrypted only when the server's EHLO reply offers STARTTLS, and an attacker on the network path can remove that line to read the credentials and the mail. Set `requireTLS: true` for any relay reached over a network you do not control: the send then fails instead of falling back to cleartext. Leave it off for a local mail catcher that speaks no TLS.
+Without `secure`, the connection is encrypted only when the server's EHLO reply offers STARTTLS, and an attacker on the network path can remove that line to read the credentials and the mail. So `requireTLS` defaults to `true` when `auth` has a user or password and `host` is not `localhost`, a `127.x` address or `::1`: the send then fails instead of falling back to cleartext. A mail catcher on the same machine that speaks no TLS keeps working. Set `requireTLS: false` for a relay on a network you control that takes credentials without offering STARTTLS (a catcher in another container, for example), and `requireTLS: true` for a relay without `auth` reached over a network you do not control.
 
 **Resend Transport:**
 | Option | Default | Description |

@@ -633,6 +633,39 @@ describe('BroadcastManager', () => {
       expect(result).toBe(true)
     })
 
+    it('should match ** across dots and require at least one character for it', async () => {
+      manager.privateChannel('admin.**', () => true)
+
+      expect(await manager.authorize('private-admin.users', null)).toBe(true)
+      expect(await manager.authorize('private-admin.settings.email', null)).toBe(true)
+      expect(await manager.authorize('private-admin', null)).toBe(false)
+      expect(await manager.authorize('private-admin.', null)).toBe(false)
+    })
+
+    // A backtracking regex tries every split point of these names before failing: quadratic in their length.
+    it.each([
+      ['chat.{room}.{user}', `private-chat.${'a'.repeat(200_000)}.`],
+      ['chat.{a}-{b}', `private-chat.${'x-'.repeat(100_000)}.`],
+      ['chat\\.{room}.{user}', `private-chat.${'a'.repeat(200_000)}.`],
+    ])('should reject a long name against %s in linear time', async (pattern, name) => {
+      manager.privateChannel(pattern, () => true)
+
+      const started = performance.now()
+      const result = await manager.authorize(name, null)
+      const elapsed = performance.now() - started
+
+      expect(result).toBe(false)
+      expect(elapsed).toBeLessThan(1000)
+    })
+
+    it('should read an escaped dot as a dot and an unescaped one as any character', async () => {
+      manager.privateChannel('chat\\.{room}.end', () => true)
+
+      expect(await manager.authorize('private-chat.lobby.end', null)).toBe(true)
+      expect(await manager.authorize('private-chat.lobby-end', null)).toBe(true)
+      expect(await manager.authorize('private-chatxlobby.end', null)).toBe(false)
+    })
+
     it('should return true for unregistered channels', async () => {
       const result = await manager.authorize('unregistered', null)
       expect(result).toBe(true)

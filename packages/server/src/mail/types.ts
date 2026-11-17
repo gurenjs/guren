@@ -104,7 +104,8 @@ export interface SmtpTransportOptions {
   /**
    * Fail the send when the server does not upgrade with STARTTLS, rather than continue in cleartext.
    * Without it, an on-path attacker can strip STARTTLS from the EHLO reply and read `auth`.
-   * @default false
+   * Set `false` for a relay you reach over a network you control that takes `auth` without STARTTLS.
+   * @default true when `auth` has a user or password, `secure` is off and `host` is not localhost, 127.x or ::1
    */
   requireTLS?: boolean
 

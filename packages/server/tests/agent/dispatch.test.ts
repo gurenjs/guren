@@ -1,9 +1,12 @@
 import { describe, test, expect } from 'bun:test'
+import { Hono, type MiddlewareHandler } from 'hono'
 import { z } from 'zod'
 import { Router } from '../../src/mvc/Router'
 import { deriveAgentTools, type DerivedAgentTool } from '../../src/agent/derive'
 import { advertisesStructuredOutput, buildToolRequest, mapToolResponse } from '../../src/agent/dispatch'
+import { createAgentInvocationPipeline } from '../../src/agent/pipeline'
 import { createApp } from '../../src/http/Application'
+import { markDispatchedToolRequest, readDispatchedToolRoute } from '../../src/internal/dispatched-request'
 import { attachAuthContext, requireAuthenticated, requireGuest } from '../../src/http/middleware/auth'
 import { requireVerifiedEmail } from '../../src/auth/email-verification'
 import { createMockAuthContext } from '@guren/testing'
@@ -216,6 +219,17 @@ describe('buildToolRequest security and collision fixes', () => {
     expect('request' in ok).toBe(true)
   })
 
+  test('should stamp the request with the route the tool was derived from, by route name', () => {
+    const tool = toolFor((router) => {
+      router.get('/posts/:id', handler).name('posts.show').agent({ toolName: 'posts_show' })
+    }, 'posts_show')
+
+    const built = buildToolRequest(tool, { id: 7 })
+    const request = ('request' in built ? built : undefined)!.request
+    expect(readDispatchedToolRoute(request)).toEqual({ method: 'GET', path: '/posts/:id', name: 'posts.show' })
+    expect(readDispatchedToolRoute(new Request(request))).toBeUndefined()
+  })
+
   test('should forward the inbound origin into the synthesized URL', () => {
     const tool = toolFor((router) => {
       router.get('/posts', handler).name('posts.index').agent({})
@@ -407,6 +421,235 @@ describe('auth refusals on a tool call', () => {
     expect(outcome.status).toBe(303)
     expect(outcome.isError).toBeUndefined()
     expect(outcome.content[0]!.text).toBe('HTTP 303 (Location: /posts/1)')
+  })
+})
+
+/**
+ * A path value equal to an earlier route's literal segment (`new` on
+ * `/posts/:id`, behind `/posts/new`) must not run that route: the scope and
+ * approval gates judged the tool, not it. `reached` records every part of the
+ * other route that ran, its own middleware included.
+ */
+describe('a tool call whose path resolves to another route', () => {
+  async function boot(extra?: (router: Router, reached: string[]) => void) {
+    const reached: string[] = []
+    const createMiddleware: MiddlewareHandler = async (_c, next) => {
+      reached.push('create middleware')
+      await next()
+    }
+    const app = createApp({
+      routes: (router) => {
+        extra?.(router, reached)
+        router
+          .get('/posts/new', () => {
+            reached.push('create')
+            return Response.json({ page: 'create' })
+          }, createMiddleware)
+          .name('posts.create')
+        router
+          .get('/posts/:id', (c) => Response.json({ id: c.req.param('id') }))
+          .name('posts.show')
+          .agent({ toolName: 'posts_show' })
+      },
+    })
+    await app.boot()
+    const tool = deriveAgentTools(app.router.definitions()).tools.find((candidate) => candidate.toolName === 'posts_show')!
+    return { app, tool, reached }
+  }
+
+  async function call(args: Record<string, unknown>, options: { preflight?: boolean } = {}) {
+    const { app, tool, reached } = await boot()
+    const built = buildToolRequest(tool, args, options)
+    if (!('request' in built)) throw new Error('request not built')
+    return { outcome: await mapToolResponse(tool, await app.fetch(built.request)), reached }
+  }
+
+  test('should refuse a value that lands on an earlier literal route without running any of it', async () => {
+    const { outcome, reached } = await call({ id: 'new' })
+
+    expect(outcome.status).toBe(400)
+    expect(outcome.isError).toBe(true)
+    expect(JSON.parse(outcome.content[0]!.text).message).toContain(
+      'reached a different route than the tool\'s own (GET /posts/:id)',
+    )
+    expect(reached).toEqual([])
+  })
+
+  test('should refuse the same value on a preflight rather than run the other route', async () => {
+    const { outcome, reached } = await call({ id: 'new' }, { preflight: true })
+
+    expect(outcome.status).toBe(400)
+    expect(outcome.preflightVerdict).toBeUndefined()
+    expect(reached).toEqual([])
+  })
+
+  test('should still answer a value the tool\'s own route matches', async () => {
+    const { outcome, reached } = await call({ id: '7' })
+
+    expect(outcome.status).toBe(200)
+    expect(JSON.parse(outcome.content[0]!.text)).toEqual({ id: '7' })
+    expect(reached).toEqual([])
+  })
+
+  test('should leave a request a client sent to the literal route alone', async () => {
+    const { app, reached } = await boot()
+
+    const response = await app.fetch(new Request('http://localhost/posts/new', { headers: { Accept: 'application/json' } }))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ page: 'create' })
+    expect(reached).toEqual(['create middleware', 'create'])
+  })
+
+  test('should refuse a same-path route registered ahead of the tool\'s under another name', async () => {
+    const { app, tool, reached } = await boot((router, seen) => {
+      router.get('/posts/:id', () => {
+        seen.push('legacy')
+        return Response.json({ legacy: true })
+      }).name('posts.legacy')
+    })
+
+    const built = buildToolRequest(tool, { id: '7' })
+    if (!('request' in built)) throw new Error('request not built')
+    const outcome = await mapToolResponse(tool, await app.fetch(built.request))
+
+    expect(outcome.status).toBe(400)
+    expect(reached).toEqual([])
+  })
+
+  test('should refuse it on a call the invocation pipeline scope-gated and handed a principal', async () => {
+    const { app, tool, reached } = await boot()
+    const pipeline = createAgentInvocationPipeline({
+      app,
+      principal: { kind: 'user', id: 7 },
+      abilities: ['tool:posts_show'],
+      surface: 'mcp',
+      handoff: 'seam',
+    })
+
+    const result = await pipeline.invoke({ tool, args: { id: 'new' } })
+
+    if (result.status !== 'executed') throw new Error(`expected an executed call, got ${result.status}`)
+    expect(result.outcome.status).toBe(400)
+    expect(result.outcome.isError).toBe(true)
+    expect(reached).toEqual([])
+  })
+
+  async function bootWithHono(register: (hono: Hono, reached: string[]) => void) {
+    const reached: string[] = []
+    const app = createApp({
+      boot: (hono) => register(hono, reached),
+      routes: (router) => {
+        router
+          .get('/posts/:id', (c) => Response.json({ id: c.req.param('id') }))
+          .name('posts.show')
+          .agent({ toolName: 'posts_show' })
+      },
+    })
+    await app.boot()
+    const tool = deriveAgentTools(app.router.definitions()).tools.find((candidate) => candidate.toolName === 'posts_show')!
+    return { app, tool, reached }
+  }
+
+  // `boot` runs before the routes mount, so a route it adds to Hono matches ahead of the tool's.
+  test('should refuse a value that lands on a route the boot callback added straight to Hono', async () => {
+    const { app, tool, reached } = await bootWithHono((hono, seen) => {
+      hono.get('/posts/new', (c) => {
+        seen.push('boot route')
+        return c.json({ page: 'create' })
+      })
+    })
+
+    const built = buildToolRequest(tool, { id: 'new' })
+    if (!('request' in built)) throw new Error('request not built')
+    const outcome = await mapToolResponse(tool, await app.fetch(built.request))
+
+    expect(outcome.status).toBe(400)
+    expect(reached).toEqual([])
+    const direct = await app.fetch(new Request('http://localhost/posts/new'))
+    expect(direct.status).toBe(200)
+    expect(reached).toEqual(['boot route'])
+  })
+
+  test('should let a tool call through middleware the boot callback added with hono.use()', async () => {
+    const { app, tool, reached } = await bootWithHono((hono, seen) => {
+      hono.use('/posts/*', async (_c, next) => {
+        seen.push('boot middleware')
+        await next()
+      })
+    })
+
+    const built = buildToolRequest(tool, { id: '7' })
+    if (!('request' in built)) throw new Error('request not built')
+    const outcome = await mapToolResponse(tool, await app.fetch(built.request))
+
+    expect(outcome.status).toBe(200)
+    expect(JSON.parse(outcome.content[0]!.text)).toEqual({ id: '7' })
+    expect(reached).toEqual(['boot middleware'])
+  })
+})
+
+/**
+ * The guard rides on each route's first handler: a handler of its own would add
+ * a Hono route entry per route and take a single-handler route off Hono's
+ * one-handler path, which is the path a bare Hono app takes here.
+ */
+describe('the dispatched-route guard on a bare Hono app', () => {
+  const showRoute = { method: 'GET', path: '/posts/:id', name: 'posts.show' }
+
+  function mount(register: (router: Router) => void): Hono {
+    const router = new Router()
+    register(router)
+    const app = new Hono()
+    router.mount(app)
+    return app
+  }
+
+  test('should keep one Hono route entry per handler, with the first handler\'s name and arity', () => {
+    const answer: MiddlewareHandler = async function answer(c) {
+      return c.text('answered')
+    }
+    const app = mount((router) => {
+      router.get('/single', handler).name('single')
+      router.get('/answered', handler, answer).name('answered')
+    })
+
+    const single = app.routes.filter((route) => route.path === '/single')
+    expect(single).toHaveLength(1)
+    expect(single[0]!.handler.name).toBe('')
+    const answered = app.routes.filter((route) => route.path === '/answered')
+    expect(answered).toHaveLength(2)
+    expect(answered[0]!.handler.name).toBe('answer')
+    expect(answered[0]!.handler.length).toBe(1)
+  })
+
+  test('should refuse a request built for another route on a single-handler route', async () => {
+    const reached: string[] = []
+    const app = mount((router) => {
+      router.get('/posts/new', () => {
+        reached.push('create')
+        return new Response('create')
+      }).name('posts.create')
+    })
+
+    const refused = await app.fetch(markDispatchedToolRequest(new Request('http://localhost/posts/new'), showRoute))
+    expect(refused.status).toBe(400)
+    expect(reached).toEqual([])
+
+    const plain = await app.fetch(new Request('http://localhost/posts/new'))
+    expect(plain.status).toBe(200)
+    expect(reached).toEqual(['create'])
+  })
+
+  test('should run a single-handler route for a request built for it', async () => {
+    const app = mount((router) => {
+      router.get('/posts/:id', (c) => new Response(c.req.param('id'))).name('posts.show')
+    })
+
+    const response = await app.fetch(markDispatchedToolRequest(new Request('http://localhost/posts/7'), showRoute))
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('7')
   })
 })
 

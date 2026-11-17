@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { readdir } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -50,6 +50,17 @@ describe('scaffolding templates', () => {
 
     for (const template of ['default', 'api-only']) {
       expect(files).toContain(`create-app/templates/${template}/_gitignore`)
+    }
+  })
+
+  // Bun loads `.env.local` and `.env.<NODE_ENV>` too, and the deploy guides put production secrets in `.env.production`.
+  it('ignore every .env variant but the committed .env.example', async () => {
+    for (const template of ['default', 'api-only']) {
+      const lines = (await readFile(join(packagesDir, 'create-app/templates', template, '_gitignore'), 'utf8')).split(/\r?\n/u)
+
+      expect(lines).toContain('.env')
+      expect(lines).toContain('.env.*')
+      expect(lines.indexOf('!.env.example')).toBeGreaterThan(lines.indexOf('.env.*'))
     }
   })
 })

@@ -125,14 +125,16 @@ export function createFreshContextApi(): {
   return {
     generateContext: ({ cwd }) => runCliJson<ProjectContext>(['context'], cwd),
 
+    // A caller's value starting with `-` would be parsed as a flag of its own
+    // (`--routes=<file>` imports that file); `--name=value` keeps it one value.
     generateEntityContext: (entity, { cwd, module, live, repo }) =>
       runCliJson<EntityContext>(
         [
           'context',
-          entity,
-          ...(module ? ['--module', module] : []),
+          `--entity=${entity}`,
+          ...(module ? [`--module=${module}`] : []),
           ...(live ? ['--live'] : []),
-          ...(repo ? ['--repo', repo] : []),
+          ...(repo ? [`--repo=${repo}`] : []),
         ],
         cwd,
       ),

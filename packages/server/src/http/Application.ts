@@ -41,6 +41,7 @@ import { ConfigServiceProvider } from '../providers/ConfigServiceProvider'
 import { IntrospectionListenError, isIntrospecting, runIntrospecting } from '../introspection/flag'
 import type { AppManifest } from '../introspection/types'
 import { buildAppManifest } from '../introspection/manifest'
+import { guardDispatchedToolRoutes } from '../agent/dispatched-route-guard'
 
 import {
   adoptViteDevServer,
@@ -716,6 +717,8 @@ export class Application {
       ctx.set(CONTAINER_CONTEXT_KEY, container)
       return next()
     })
+    // Ahead of any route an app adds straight to Hono, which `Router.mount()` cannot guard.
+    this.hono.use('*', guardDispatchedToolRoutes())
 
     const { securityHeaders } = this.options
     if (securityHeaders !== false) {

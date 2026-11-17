@@ -141,8 +141,36 @@ describe('SmtpTransport TLS options', () => {
     }
   }
 
-  it('leaves requireTLS off by default, in production too', () => {
-    expect(nodemailerOptions(relay).requireTLS).toBe(false)
+  it('requires TLS by default when credentials go to a relay off this machine, in development too', () => {
+    expect(nodemailerOptions(relay).requireTLS).toBe(true)
+    expect(nodemailerOptions(relay, 'development').requireTLS).toBe(true)
+    expect(nodemailerOptions({ ...relay, auth: { user: '', pass: 'relay-pass' } }).requireTLS).toBe(true)
+    expect(nodemailerOptions({ ...relay, host: '10.0.0.5' }).requireTLS).toBe(true)
+    expect(nodemailerOptions({ ...relay, host: 'mailpit' }).requireTLS).toBe(true)
+    expect(nodemailerOptions({ ...relay, host: '::ffff:8.8.8.8' }).requireTLS).toBe(true)
+    expect(nodemailerOptions({ ...relay, host: '127.0.0.1.example.test' }).requireTLS).toBe(true)
+  })
+
+  for (const host of [
+    'localhost', 'LOCALHOST', '127.0.0.1', '127.1.2.3', '127.1', '::1', '[::1]', '',
+    '0:0:0:0:0:0:0:1', '[0:0:0:0:0:0:0:1]', '::ffff:127.0.0.1', '::ffff:7f00:1',
+  ]) {
+    it(`leaves requireTLS off by default for a mail catcher on this machine (host=${JSON.stringify(host)})`, () => {
+      expect(nodemailerOptions({ ...relay, host }).requireTLS).toBe(false)
+    })
+  }
+
+  it('leaves requireTLS off by default when no credentials are sent', () => {
+    expect(nodemailerOptions({ host: 'smtp.example.test' }).requireTLS).toBe(false)
+    expect(nodemailerOptions({ host: 'smtp.example.test', auth: { user: '', pass: '' } }).requireTLS).toBe(false)
+  })
+
+  it('leaves requireTLS off by default on an implicit TLS connection', () => {
+    expect(nodemailerOptions({ ...relay, port: 465, secure: true }).requireTLS).toBe(false)
+  })
+
+  it('forwards requireTLS: false for a relay that takes credentials without STARTTLS', () => {
+    expect(nodemailerOptions({ ...relay, requireTLS: false }).requireTLS).toBe(false)
   })
 
   it('forwards requireTLS: true to nodemailer', () => {
