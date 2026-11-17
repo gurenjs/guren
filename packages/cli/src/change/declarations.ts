@@ -7,7 +7,7 @@
 
 import type { ClassDeclaration, File, Statement } from '@babel/types'
 
-import { canonicalSyntax, memberKeyName } from '../ast-walk'
+import { canonicalSyntax, memberKeyName, referencedIdentifiers, walk } from '../ast-walk'
 import { extractClassDeclaration } from '../model-parser'
 import { parseSourceFile } from '../parse-cache'
 import { readPolicyAbilities } from '../plan/policy-abilities'
@@ -110,8 +110,10 @@ export function planDeclaredFiles(plan: PlanDraft): Map<string, DeclaredFile> {
   return new Map([...files].filter((entry): entry is [string, DeclaredFile] => entry[1] !== null))
 }
 
-function classNamed(ast: File, name: string): ClassDeclaration | undefined {
+/** The class exported as itself under `name`: a local class an alias exports is not the one a reader of the export gets. */
+function exportedClass(ast: File, name: string): ClassDeclaration | undefined {
   for (const node of ast.program.body) {
+    if (node.type !== 'ExportNamedDeclaration' && node.type !== 'ExportDefaultDeclaration') continue
     const declaration = extractClassDeclaration(node)
     if (declaration?.id?.name === name) return declaration
   }
@@ -126,13 +128,15 @@ function passesCheck(declared: DeclaredFile, ast: File, path: string): boolean {
   if (!planned) return false
   if (check.kind === 'whole') return canonicalSyntax(ast.program.body) === canonicalSyntax(planned.program.body)
   if (check.kind === 'policy') {
+    // The scaffold writes a class; a `definePolicy()` object keeps keys its `exposes` leaves out, `before` among them.
+    if (!exportedClass(ast, check.policy.name)) return false
     const read = readPolicyAbilities(ast, check.policy.name)
-    if ('unreadable' in read || read.open || read.fields.length > 0) return false
-    const abilities = read.exposes ? read.declared.filter((name) => read.exposes!.includes(name)) : read.declared
+    if ('unreadable' in read || read.open || read.fields.length > 0 || read.exposes) return false
+    const abilities = read.declared
     const wanted = check.policy.abilities.map((ability) => ability.name)
     return abilities.length === new Set(abilities).size && abilities.length === wanted.length && wanted.every((name) => abilities.includes(name))
   }
-  const [head, scaffold] = [classNamed(ast, check.controller.className), classNamed(planned, check.controller.className)]
+  const [head, scaffold] = [exportedClass(ast, check.controller.className), exportedClass(planned, check.controller.className)]
   if (!head || !scaffold || canonicalSyntax(head.superClass) !== canonicalSyntax(scaffold.superClass)) return false
   const actions = new Set(check.controller.actions.map((action) => action.name))
   // An action is what `Router` dispatches to; a constructor, a static member or an accessor is not one the plan names.
@@ -146,6 +150,29 @@ function passesCheck(declared: DeclaredFile, ast: File, path: string): boolean {
 function exportedStatement(ast: File, identifier: string): Statement | undefined {
   return ast.program.body.find((node) => node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'VariableDeclaration' && node.declaration.declarations.length === 1
     && node.declaration.declarations[0]!.id.type === 'Identifier' && node.declaration.declarations[0]!.id.name === identifier)
+}
+
+const FRAMEWORK_MODULE = /^(?:drizzle-orm|@guren\/orm)(?:\/|$)/
+
+/**
+ * Whether every name the statement reads is a framework builder imported under its own name, another table
+ * of the file, or a parameter it binds: `import { text as integer }` keeps the syntax and swaps the types.
+ */
+function importsBuildersAsThemselves(ast: File, statement: Statement, tables: readonly SchemaTable[]): boolean {
+  const builders = new Set<string>()
+  for (const node of ast.program.body) {
+    if (node.type !== 'ImportDeclaration' || !FRAMEWORK_MODULE.test(node.source.value)) continue
+    for (const specifier of node.specifiers) {
+      if (specifier.type === 'ImportSpecifier' && specifier.imported.type === 'Identifier' && specifier.imported.name === specifier.local.name) builders.add(specifier.local.name)
+    }
+  }
+  const bound = new Set<string>()
+  walk(statement, (node) => {
+    if (node.type !== 'ArrowFunctionExpression' && node.type !== 'FunctionExpression') return
+    for (const param of (node as { params?: Array<{ type: string; name?: string }> }).params ?? []) if (param.type === 'Identifier' && param.name) bound.add(param.name)
+  })
+  const own = new Set(tables.map((entry) => entry.identifier))
+  return referencedIdentifiers(statement).every((name) => builders.has(name) || own.has(name) || bound.has(name))
 }
 
 /** The added model the plan claims this table for, by SQL name and module, before anything else is compared. */
@@ -163,14 +190,16 @@ export function declaredTable(plan: PlanDraft, subject: Extract<DeclarationSubje
   const ast = model && headText !== null ? parseSourceFile(headText, subject.file) : null
   const statement = ast ? exportedStatement(ast, table.identifier) : undefined
   if (!model || !statement) return undefined
-  const added = new Set(plan.models.filter((candidate) => candidate.change.kind === 'add').map((candidate) => candidate.table))
-  // The schema as the scaffold found it: the tables this plan adds are what it writes, not what it reads.
+  if (!importsBuildersAsThemselves(ast!, statement, subject.tables)) return undefined
+  // The schema as the scaffold found it: its own table is what it writes; a parent an earlier step added is there.
   const app: Partial<PlanScaffoldApp> = {
     dialect: table.dialect,
-    tables: subject.tables.filter((entry) => !added.has(entry.tableName ?? '')).map((entry) => ({ identifier: entry.identifier, tableName: entry.tableName, module: entry.module, columns: entry.columns.map((column) => column.name), ...(entry.opaqueColumns ? { opaqueColumns: true } : {}) })),
+    tables: subject.tables.filter((entry) => entry.identifier !== table.identifier).map((entry) => ({ identifier: entry.identifier, tableName: entry.tableName, module: entry.module, columns: entry.columns.map((column) => column.name), ...(entry.opaqueColumns ? { opaqueColumns: true } : {}) })),
   }
   for (const step of scaffoldSteps(plan)) {
-    const block = planScaffoldOutput(plan, step, app).tables.find((entry) => entry.model === model.id && entry.identifier === table.identifier)?.block
+    const output = planScaffoldOutput(plan, step, app)
+    // A run that refuses writes nothing, and its block can lack what it refused over (a foreign key).
+    const block = output.refusals.length > 0 ? undefined : output.tables.find((entry) => entry.model === model.id && entry.identifier === table.identifier)?.block
     const written = block === undefined ? null : parseSourceFile(block, subject.file)
     if (written && written.program.body.length === 1 && canonicalSyntax(written.program.body[0]) === canonicalSyntax(statement)) return model.id
   }

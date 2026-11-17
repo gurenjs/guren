@@ -29,7 +29,7 @@ import {
 import { resolveImportPath } from '../import-resolution'
 import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, type GraphRouteEntry } from '../introspect'
 import { introspectedRoutes, skippedRegistrars } from '../manifest-section'
-import { walk, type BabelNode } from '../ast-walk'
+import { referencedIdentifiers, walk, type BabelNode } from '../ast-walk'
 import { ParseCache, parseSourceFile } from '../parse-cache'
 import { routesEntryOrDefault } from '../route-registrar'
 import { importsByLocal, specifierBase, type ImportEntry } from '../schema-binding'
@@ -72,27 +72,6 @@ type Target = { file: string; name: string } | { leaf: string }
 interface DeclarationNode { key: string; unit: string; next: Target[] }
 
 const NOT_BINDINGS = new Set(['this', 'super', 'true', 'false', 'null', 'undefined', 'new', 'typeof', 'instanceof', 'void', 'await', 'async', 'function', 'return', 'const', 'let', 'var', 'if', 'else', 'in', 'of', 'as', 'Number', 'String', 'Boolean', 'Object', 'Array', 'JSON', 'Math', 'Date', 'Promise', 'Error', 'Symbol', 'BigInt', 'RegExp', 'Map', 'Set'])
-
-// Subtrees that only type the code: a name read there reaches nothing at run time.
-const TYPE_ONLY = new Set(['TSTypeAnnotation', 'TSTypeParameterInstantiation', 'TSTypeParameterDeclaration', 'TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSDeclareFunction'])
-// A member of an object or a class literal, whose non-computed key is a name and no reference.
-const KEYED = /^(?:Object|Class)(?:Property|Method|PrivateProperty|AccessorProperty)$|^TSPropertySignature$/u
-const LABELLED = new Set(['LabeledStatement', 'BreakStatement', 'ContinueStatement'])
-
-/** The identifiers a syntax tree reads as values, from the tree itself: not a member name, a key, a label or a type. */
-export function referencedIdentifiers(node: unknown): string[] {
-  const found = new Set<string>()
-  walk(node, (current, parent) => {
-    if (TYPE_ONLY.has(current.type)) return false
-    if (current.type !== 'Identifier') return
-    const holder = parent as (BabelNode & { property?: unknown; key?: unknown; computed?: boolean }) | null
-    if (holder && (holder.type === 'MemberExpression' || holder.type === 'OptionalMemberExpression') && holder.property === current && !holder.computed) return
-    if (holder && KEYED.test(holder.type) && holder.key === current && !holder.computed) return
-    if (holder && LABELLED.has(holder.type)) return
-    found.add((current as BabelNode & { name: string }).name)
-  })
-  return [...found]
-}
 
 /** Whether a syntax tree reads a member of `this`. */
 function readsThisMember(node: unknown): boolean {

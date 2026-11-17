@@ -294,3 +294,24 @@ const AST_POSITION_KEYS = new Set(['start', 'end', 'loc', 'range', 'extra', 'lea
 
 /** A node as its syntax, without positions or comments: a string literal keeps its exact value. */
 export const canonicalSyntax = (node: unknown): string => JSON.stringify(node, (key, value: unknown) => (AST_POSITION_KEYS.has(key) ? undefined : value))
+
+// Subtrees that only type the code: a name read there reaches nothing at run time.
+const TYPE_ONLY = new Set(['TSTypeAnnotation', 'TSTypeParameterInstantiation', 'TSTypeParameterDeclaration', 'TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSDeclareFunction'])
+// A member of an object or a class literal, whose non-computed key is a name and no reference.
+const KEYED = /^(?:Object|Class)(?:Property|Method|PrivateProperty|AccessorProperty)$|^TSPropertySignature$/u
+const LABELLED = new Set(['LabeledStatement', 'BreakStatement', 'ContinueStatement'])
+
+/** The identifiers a syntax tree reads as values, from the tree itself: not a member name, a key, a label or a type. */
+export function referencedIdentifiers(node: unknown): string[] {
+  const found = new Set<string>()
+  walk(node, (current, parent) => {
+    if (TYPE_ONLY.has(current.type)) return false
+    if (current.type !== 'Identifier') return
+    const holder = parent as (BabelNode & { property?: unknown; key?: unknown; computed?: boolean }) | null
+    if (holder && (holder.type === 'MemberExpression' || holder.type === 'OptionalMemberExpression') && holder.property === current && !holder.computed) return
+    if (holder && KEYED.test(holder.type) && holder.key === current && !holder.computed) return
+    if (holder && LABELLED.has(holder.type)) return
+    found.add((current as BabelNode & { name: string }).name)
+  })
+  return [...found]
+}

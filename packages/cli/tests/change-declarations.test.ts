@@ -138,6 +138,30 @@ describe('declaredTable', () => {
     expect(tableOf(COMMENTS.replace(from, to))).toBeUndefined()
   })
 
+  test('should not match a table the scaffold would refuse to write, which lacks what it refused over', () => {
+    const text = `import { index, integer, pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'
+
+${COMMENTS.replace(".references(() => posts.id, { onDelete: 'cascade' })", '')}`
+
+    expect(declaredTable(commentsPlan(), tableSubject(text), text)).toBeUndefined()
+  })
+
+  test('should resolve a parent the plan also adds, as the step after it finds that table', () => {
+    const plan = commentsPlan((document) => {
+      document.models[0].change = { kind: 'add' }
+      document.models[0].columns[0].change = { kind: 'add' }
+    })
+
+    expect(tableOf(COMMENTS, plan)).toBe('model.comment')
+    expect(tableOf(COMMENTS.replace(".references(() => posts.id, { onDelete: 'cascade' })", ''), plan)).toBeUndefined()
+  })
+
+  test('should not match a statement whose builders are imported under other names', () => {
+    const text = schemaWith(COMMENTS).replace('integer, pgTable, serial, text,', 'text as integer, pgTable, serial, integer as text,')
+
+    expect(declaredTable(commentsPlan(), tableSubject(text), text)).toBeUndefined()
+  })
+
   test('should not match a table of another module', () => {
     const text = schemaWith(COMMENTS)
     const subject = tableSubject(text)
@@ -205,6 +229,22 @@ export class Comment extends defineModel(comments) {}
     expect(before).not.toBe(policy)
     expect((await judge(only(), path, policy, 'policy-added')).lane).toBe('low')
     expect((await judge(only(), path, before, 'policy-added')).lane).toBe('medium')
+  })
+
+  test('should keep a definePolicy() policy, which holds keys its abilities leave out, and a class exported under an alias', async () => {
+    const path = 'app/Policies/CommentPolicy.ts'
+    const defined = "import { definePolicy } from '@guren/core'\n\nexport const CommentPolicy = definePolicy({ before: () => true, delete: () => false })\n"
+    const aliased = `${scaffolded(path).replace('export class CommentPolicy', 'export default class Foo')}\nconst x = {}\nexport { x as CommentPolicy }\n`
+
+    expect((await judge(only(), path, defined, 'policy-added')).lane).toBe('medium')
+    expect((await judge(only(), path, aliased, 'policy-added')).lane).toBe('medium')
+  })
+
+  test('should keep a controller whose exported name is another class', async () => {
+    const path = 'app/Http/Controllers/CommentController.ts'
+    const aliased = `${scaffolded(path).replace('export default class CommentController', 'class CommentController')}\nclass Other extends Controller {\n  purgeAll() {}\n}\nexport { Other as CommentController, Other as default }\n`
+
+    expect((await judge(only(), path, aliased)).lane).toBe('medium')
   })
 
   test('should lower a controller holding only planned actions, and keep one with another member', async () => {
