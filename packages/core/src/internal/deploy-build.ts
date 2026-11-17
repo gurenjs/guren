@@ -526,11 +526,43 @@ export interface SqlClientModule extends DevOnlyModule {
  * Apart from `DEV_ONLY_MODULES`: unreachable on Workers (D1 only), load-bearing on
  * Lambda/Vercel, which stub only undeclared dialects (`unusedSqlClients`). Stub the
  * client *and* drizzle's entry importing it, or a D1 app fails to resolve `postgres`.
- * `mysql2/promise` lists its whole public API, not just drizzle's `createPool` (#507).
+ * Both mysql2 entries list their whole public API, not just drizzle's `createPool` (#507).
  */
 export const SQL_CLIENT_MODULES = [
   { specifier: 'postgres', kind: 'sql-driver', dialect: 'postgres', exportNames: [], importedBy: 'packages/orm/src' },
-  { specifier: 'mysql2', kind: 'sql-driver', dialect: 'mysql', exportNames: [], importedBy: 'packages/orm/src' },
+  {
+    specifier: 'mysql2',
+    kind: 'sql-driver',
+    dialect: 'mysql',
+    exportNames: [
+      'createConnection',
+      'createPool',
+      'createPoolCluster',
+      'createQuery',
+      'createServer',
+      'connect',
+      'createConnectionPromise',
+      'createPoolPromise',
+      'createPoolClusterPromise',
+      'escape',
+      'escapeId',
+      'format',
+      'raw',
+      'authPlugins',
+      'Connection',
+      'ConnectionConfig',
+      'Pool',
+      'PoolCluster',
+      'PoolConnection',
+      'Types',
+      'Charsets',
+      'CharsetToEncoding',
+      'setMaxParserCache',
+      'clearParserCache',
+      'TypedParameter',
+    ],
+    importedBy: 'packages/orm/src',
+  },
   {
     specifier: 'mysql2/promise',
     kind: 'sql-driver',
@@ -669,6 +701,8 @@ export function parseDatabaseDialects(value: string, label: string): readonly Da
 export interface UnusedSqlClient {
   readonly module: SqlClientModule
   readonly message: string
+  /** The dialects the app declares, which is why this client is not among them. */
+  readonly declared: readonly DatabaseDialect[]
 }
 
 /**
@@ -704,12 +738,62 @@ export function unusedSqlClients(input: {
   const declaredList = declared.join(', ')
   return SQL_CLIENT_MODULES.filter((module) => !declared.includes(module.dialect)).map((module) => ({
     module,
+    declared,
     message:
       `${label}: the "${module.specifier}" client is stubbed — this app declares ${declaredList}, not ${module.dialect}.`
       + ` @guren/orm names every dialect's client in a dynamic import that bundlers follow even when the branch cannot be taken,`
       + ` so an uninstalled client would otherwise fail the build.`
-      + ` If this app really does connect with ${module.dialect}, pass databaseDialects: ['${module.dialect}'] to the build.`,
+      + ` If this app really does connect with ${module.dialect}, pass databaseDialects: ${dialectListLiteral([...declared, module.dialect])} to the build.`,
   }))
+}
+
+function dialectListLiteral(dialects: readonly DatabaseDialect[]): string {
+  return `[${dialects.map((dialect) => `'${dialect}'`).join(', ')}]`
+}
+
+/** Whether `log` names `token` as a whole specifier: `mysql2` is not named by `mysql2/promise`. */
+function namesSpecifier(log: string, token: string): boolean {
+  for (let at = log.indexOf(token); at !== -1; at = log.indexOf(token, at + 1)) {
+    const next = log[at + token.length]
+    if (next === undefined || !/[\w/.-]/.test(next)) return true
+  }
+  return false
+}
+
+/**
+ * Lines for a failed bundle's report when an error names a stubbed database client.
+ * A stub exports only the names listed for it, so any other named import fails with
+ * "No matching export" in the stub namespace, which says nothing of the option (#507).
+ * @param namespace The plugin namespace the build loads its stubs under.
+ * @param flag The command-line spelling of `databaseDialects`, where the build has one.
+ */
+export function stubbedSqlClientHints(input: {
+  logs: readonly string[]
+  namespace: string
+  unused: readonly UnusedSqlClient[]
+  label: string
+  flag?: string
+}): string[] {
+  const { logs, namespace, unused, label, flag } = input
+  const byDialect = new Map<DatabaseDialect, { specifiers: string[]; declared: readonly DatabaseDialect[] }>()
+
+  for (const { module, declared } of unused) {
+    if (!logs.some((log) => namesSpecifier(log, `${namespace}:${module.specifier}`))) continue
+    const entry = byDialect.get(module.dialect) ?? { specifiers: [], declared }
+    entry.specifiers.push(`"${module.specifier}"`)
+    byDialect.set(module.dialect, entry)
+  }
+
+  return [...byDialect].map(([dialect, { specifiers, declared }]) => {
+    const keep = [...declared, dialect]
+    return (
+      `${label}: ${specifiers.join(' and ')} ${specifiers.length > 1 ? 'are stubs' : 'is a stub'} in this bundle`
+      + ` — this app declares ${declared.join(', ')}, not ${dialect}.`
+      + ` A stub exports only the names the framework lists for it, so importing any other name fails the build.`
+      + ` To bundle the real client, declare ${dialect} as well: databaseDialects: ${dialectListLiteral(keep)}`
+      + `${flag ? ` (${flag} ${keep.join(',')} on the command line)` : ''}.`
+    )
+  })
 }
 
 export type DevOnlySpecifier = (typeof DEV_ONLY_MODULES)[number]['specifier']

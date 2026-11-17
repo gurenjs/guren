@@ -28,6 +28,7 @@ import {
   resolvePathLike,
   ssrRuntimePaths,
   stageStaticAssets,
+  stubbedSqlClientHints,
   translationCatalogJson,
 } from './deploy-build'
 import gurenVitePlugin from '../vite'
@@ -813,7 +814,98 @@ describe('unusedSqlClients', () => {
 
     expect(first?.message).toContain('"mysql2" client is stubbed')
     expect(first?.message).toContain('declares postgres, not mysql')
-    expect(first?.message).toContain("databaseDialects: ['mysql']")
+    // The declared dialect stays in the list: naming mysql alone would stub postgres.
+    expect(first?.message).toContain("databaseDialects: ['postgres', 'mysql']")
+  })
+
+  test('should stub every name app code may import from either mysql2 entry', () => {
+    // #507: a stub naming none of them failed `bun build` on `import { createConnection } from 'mysql2'`.
+    const names = (specifier: string): readonly string[] =>
+      SQL_CLIENT_MODULES.find((module) => module.specifier === specifier)?.exportNames ?? []
+
+    for (const name of ['createConnection', 'createPool', 'createPoolCluster', 'escape', 'format', 'Types', 'TypedParameter']) {
+      expect(names('mysql2')).toContain(name)
+      expect(names('mysql2/promise')).toContain(name)
+    }
+    expect(names('mysql2')).toContain('createPoolPromise')
+  })
+
+  test.each(SQL_CLIENT_MODULES.filter((module) => module.exportNames.length > 0))(
+    'should render a stub for $specifier that declares each name once',
+    async (module) => {
+      // A duplicated or reserved name is a syntax error only the bundler would report.
+      // Loaded from a file: Bun 1.4.4 gives a `data:` module no named exports.
+      const file = join(root, 'stub.mjs')
+      writeFileSync(file, renderDevOnlyStub(module, 'stubbed'))
+      const loaded = (await import(file)) as Record<string, unknown>
+
+      expect(Object.keys(loaded).filter((key) => key !== 'default').sort()).toEqual([...module.exportNames].sort())
+    },
+  )
+})
+
+describe('stubbedSqlClientHints', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-stub-hints-'))
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(join(root, 'config/database.ts'), 'export const db = createPostgresDatabase({})\n')
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  const missing = (specifier: string, name: string) =>
+    `BuildMessage: No matching export in "guren-lambda-stub:${specifier}" for import "${name}"`
+
+  function hints(logs: string[], flag?: string): string[] {
+    return stubbedSqlClientHints({
+      logs,
+      namespace: 'guren-lambda-stub',
+      unused: unusedSqlClients({ root, label: 'Lambda build' }),
+      label: 'Lambda build',
+      flag,
+    })
+  }
+
+  test('should name the detected dialects and the value that keeps the client', () => {
+    const [hint, ...rest] = hints([missing('mysql2/promise', 'nope')], '--database')
+
+    expect(rest).toEqual([])
+    expect(hint).toContain('Lambda build: "mysql2/promise" is a stub in this bundle')
+    expect(hint).toContain('this app declares postgres, not mysql')
+    expect(hint).toContain("databaseDialects: ['postgres', 'mysql']")
+    expect(hint).toContain('(--database postgres,mysql on the command line)')
+  })
+
+  test('should not read an error about mysql2/promise as one about mysql2', () => {
+    const [hint] = hints([missing('mysql2/promise', 'nope')])
+
+    expect(hint).not.toContain('"mysql2" ')
+  })
+
+  test('should give one line per dialect when both of its clients are named', () => {
+    const result = hints([missing('mysql2', 'a'), missing('mysql2/promise', 'b'), missing('@aws-sdk/client-rds-data', 'c')])
+
+    expect(result).toHaveLength(2)
+    expect(result[0]).toContain('"mysql2" and "mysql2/promise" are stubs in this bundle')
+    expect(result[1]).toContain("databaseDialects: ['postgres', 'aws-data-api']")
+  })
+
+  test('should leave the command line out for a build that has no flag', () => {
+    const [hint] = hints([missing('mysql2', 'nope')])
+
+    expect(hint).toContain("databaseDialects: ['postgres', 'mysql'].")
+    expect(hint).not.toContain('command line')
+  })
+
+  test('should add nothing when no error names a stubbed client', () => {
+    expect(hints(['BuildMessage: Could not resolve: "left-pad"'])).toEqual([])
+    // Another build's namespace, and a dev-only stub: neither has a dialect to declare.
+    expect(hints(['No matching export in "guren-vercel-stub:mysql2" for import "x"'])).toEqual([])
+    expect(hints(['No matching export in "guren-lambda-stub:vite" for import "x"'])).toEqual([])
   })
 })
 

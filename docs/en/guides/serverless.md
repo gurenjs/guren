@@ -198,6 +198,14 @@ to tell, and stubs nothing:
 bunx guren lambda:build --database postgres,sqlite
 ```
 
+A stub exports the names the framework lists for its client. The stubs for
+`mysql2` and `mysql2/promise` carry the whole public API of those modules, so
+application code that imports `createConnection` from either one builds, and
+throws only if that code runs. Importing a name a stub does not list fails the
+build with `No matching export in "guren-lambda-stub:…"`. The build then adds
+a line naming the dialects it detected and the `--database` value that keeps
+the real client in the bundle.
+
 ## Runtime Detection
 
 Conditionally configure services based on the runtime:
