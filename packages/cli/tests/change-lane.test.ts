@@ -722,6 +722,70 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey() })
   })
 })
 
+describe('judgeChangeLane with an open plan', () => {
+  const MODEL = `import { defineModel } from '@guren/core'
+import { comments } from '@/db/schema'
+
+export class Comment extends defineModel(comments) {}
+`
+  const SCHEMA = `${PG_SCHEMA_FIXTURE.replace('import { pgTable,', 'import { integer, pgTable,')}
+export const comments = pgTable('comments', {
+  id: serial('id').primaryKey(),
+  body: text('body').notNull(),
+  postId: integer('post_id').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+})
+`
+
+  /** A repository whose base holds the comments plan, approved unless `approve` is false. */
+  async function planRepo(approve = true): Promise<{ repo: string; base: string }> {
+    const { repo } = await createRepo()
+    const path = join(repo, 'docs/plans/comments/plan.json')
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, JSON.stringify(loadApprovedCommentsPlan()), 'utf8')
+    if (approve) await approvePlanFile(path)
+    return { repo, base: await commit(repo, {}) }
+  }
+
+  test('should lower an added file and an added table the plan declares, naming the element', async () => {
+    const { repo, base } = await planRepo()
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL, 'db/schema.ts': SCHEMA }))
+
+    expect(report.facts.filter((fact) => fact.declaredBy)).toEqual([
+      expect.objectContaining({ code: 'schema-changed', lane: 'low', target: 'comments', declaredBy: 'docs/plans/comments/plan.json#model.comment' }),
+      expect.objectContaining({ code: 'file-added', lane: 'low', files: ['app/Models/Comment.ts'], declaredBy: 'docs/plans/comments/plan.json#model.comment' }),
+    ])
+    expect(renderChangeLane(report)).toContain('app/Models/Comment.ts added (declared by docs/plans/comments/plan.json#model.comment)')
+  })
+
+  test('should keep a file a plan names at another path, or exporting another name, at medium', async () => {
+    const { repo, base } = await planRepo()
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Note.ts': MODEL, 'app/Models/Comment.ts': MODEL.replace('class Comment', 'class Note') }))
+
+    expect(report.facts.filter((fact) => fact.code === 'file-added').map((fact) => [fact.files[0], fact.lane, fact.declaredBy])).toEqual([
+      ['app/Models/Comment.ts', 'medium', undefined],
+      ['app/Models/Note.ts', 'medium', undefined],
+    ])
+  })
+
+  test('should declare nothing from a plan nobody approved', async () => {
+    const { repo, base } = await planRepo(false)
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL, 'db/schema.ts': SCHEMA }))
+
+    expect(report.plans).toEqual([expect.objectContaining({ file: 'docs/plans/comments/plan.json', standing: 'unapproved' })])
+    expect(report.facts.filter((fact) => fact.declaredBy)).toEqual([])
+    expect(factAt(report, 'file-added')?.lane).toBe('medium')
+  })
+
+  test('should declare nothing in a change that writes a plan record', async () => {
+    const { repo, base } = await planRepo()
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL, 'docs/plans/comments/decisions.json': '{"waivers":[]}' }))
+
+    expect(factAt(report, 'plan-record')?.lane).toBe('high')
+    expect(report.facts.filter((fact) => fact.declaredBy)).toEqual([])
+  })
+})
+
 describe('judgeChangeLane with per-route security records', () => {
   const route = (middleware: RouteSecurityRecord['middleware']): RouteSecurityRecord => ({
     method: 'PUT', path: '/posts/:id', module: null, action: 'PostController.update', middleware, contracts: {},

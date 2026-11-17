@@ -306,6 +306,17 @@ describe('the record and the summary', () => {
     expect(renderEvidenceMarkdown(evidence).split('\n')[0]).toBe('## Change evidence: floor `low`, eligible for low')
   })
 
+  test('should name the declaration that lowered a fact in the summary and the record', async () => {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n' })
+    const lane = (await evidenceOf(repo, base, head, { audit: false })).lane!
+    const fact = { code: 'file-added' as const, lane: 'low' as const, files: ['app/Models/Comment.ts'], evidence: 'path' as const, declaredBy: 'docs/plans/comments/plan.json#model.comment', message: 'app/Models/Comment.ts added' }
+    const evidence = await evidenceOf(repo, base, head, { lane: async () => ({ ...lane, facts: [fact] }) })
+
+    expect(renderEvidenceMarkdown(evidence)).toContain('app/Models/Comment.ts added (declared by docs/plans/comments/plan.json#model.comment)')
+    expect((await changeRecord(repo, base, head, evidence, false)).facts).toEqual([{ code: 'file-added', lane: 'low', declaredBy: 'docs/plans/comments/plan.json#model.comment', files: ['app/Models/Comment.ts'] }])
+  })
+
   test('should hand --base-record to the lane and name the stored base the records were compared with', async () => {
     const { repo, base } = await createRepo()
     const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n' })

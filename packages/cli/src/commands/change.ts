@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 
 import { defineCommand } from '../define-command'
-import { judgeChangeLane, type ChangeFact, type ChangeLaneReport, type Lane } from '../change/lane'
+import { declarationNote, judgeChangeLane, type ChangeFact, type ChangeLaneReport, type Lane } from '../change/lane'
 import { openChange, resolveChange } from '../change/resolve'
 import { REVIEW_DOC_FILE, syncReviewDoc } from '../change/review-doc'
 import { policyNote, REVIEW_POLICY_FILE } from '../change/review-policy'
@@ -15,7 +15,7 @@ import { markCommandFailed } from '../command-status'
 const short = (sha: string): string => sha.slice(0, 12)
 
 function factLine(fact: ChangeFact): string {
-  return `  ${fact.code}${fact.target ? ` (${fact.target})` : ''}: ${fact.message}${policyNote(fact)}`
+  return `  ${fact.code}${fact.target ? ` (${fact.target})` : ''}: ${fact.message}${declarationNote(fact)}${policyNote(fact)}`
 }
 
 export function renderChangeLane(report: ChangeLaneReport): string {

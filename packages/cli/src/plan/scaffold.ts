@@ -631,7 +631,12 @@ const NO_APP: PlanScaffoldApp = { dialect: 'pg', tables: [], models: [], validat
 
 /** The files `plan:scaffold` writes for `step`. The plan alone names them: the application changes their contents and the refusals, never which files. */
 export function planScaffoldFilePaths(plan: PlanDraft, step: PlanDerivedStep): string[] {
-  return emitPlanScaffold(plan, step, NO_APP).files.map((file) => file.path)
+  return planScaffoldFiles(plan, step).map((file) => file.path)
+}
+
+/** {@link planScaffoldFilePaths} with the elements each file writes and its contents against no application. */
+export function planScaffoldFiles(plan: PlanDraft, step: PlanDerivedStep): PlanScaffoldFile[] {
+  return emitPlanScaffold(plan, step, NO_APP).files
 }
 
 /** What `plan:scaffold` writes for `step`. Pure: the caller reads the application and writes the result. */
