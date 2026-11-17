@@ -189,7 +189,7 @@ rules: [
 
 `includeTypeImports` は、`guren.arch.ts` に宣言したルールにだけ効きます。`modules/` ディレクトリがあると自動で有効になる、設定不要のモジュール境界ルールにはこのオプションがなく、常に実行時の import だけを解析します。
 
-新しく作ったアプリには、2 つの約束を書いた `guren.arch.ts` が最初から入っています。ページはブラウザで動き、データは props で受け取るので、`resources/js/` の下のファイルは `drizzle-orm`、`postgres`、`mysql2`、`@guren/orm`、`@guren/core` を import できません。コントローラーが `drizzle-orm` を import すると警告になります。`guren check` は警告があっても通りますが、`guren check --ci` と `guren gate` は警告も数えます。生の SQL が必要なら、コントローラーの外に移すか、このファイルのルールを書き換えてください。どちらのルールもファイル自身の import だけを見ます。ページがローカルのモジュールを経由してデータベースのコードに届く場合や、動的な `import()` を使う場合は検出できません。API だけのスターターにはページが無いので、コントローラーのルールだけが入っています。
+新しく作ったアプリには、3 つの約束を書いた `guren.arch.ts` が最初から入っています。ページはブラウザで動き、データは props で受け取るので、`resources/js/` の下のファイルは `drizzle-orm`、`postgres`、`mysql2`、`@guren/orm`、`@guren/core` を import できません。`app/`、`config/`、`db/`、`routes/`、`src/` の下のファイルを値として import することもできません。Vite はページが import したものをバンドルに含めるので、静的なヘルパーを呼ぶために Resource クラスを import すると、そのクラスと、クラスが import しているものがすべての訪問者に配られます。型だけの import はコンパイルで消えるので、`import type { PostResourceData } from '@/app/Http/Resources/PostResource'` は通り、`import { PostResource, type PostResourceData }` は失敗になります。サーバーとページの両方で使うコードは `resources/js/` の下に置くか、置き場所のディレクトリをルールから外してください。コントローラーが `drizzle-orm` を import すると警告になります。`guren check` は警告があっても通りますが、`guren check --ci` と `guren gate` は警告も数えます。生の SQL が必要なら、コントローラーの外に移すか、このファイルのルールを書き換えてください。3 つのルールはどれもファイル自身の import だけを見ます。ページがこれらのディレクトリの外にあるモジュールを経由してサーバーのコードに届く場合や、動的な `import()` を使う場合は検出できません。API だけのスターターにはページが無いので、コントローラーのルールだけが入っています。
 
 AI コーディングエージェントや大きなアプリで使いやすくするためのフラグが 2 つあります。
 

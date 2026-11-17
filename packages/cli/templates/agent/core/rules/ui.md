@@ -96,5 +96,8 @@ them `outline-none`.
 Pages run in the browser. A file under `resources/js/` never imports a value
 from `drizzle-orm`, a database driver, `@guren/orm` or `@guren/core` (an
 `import type` is fine): load the data in the controller and pass it as props.
-That is a `guren check` failure in an app whose `guren.arch.ts` has the
-default rules.
+The same holds for the app's own server code: a page takes a Resource's payload
+with `import type { PostResourceData } from '@/app/Http/Resources/PostResource'`
+and never imports a value from `app/`, `config/`, `db/`, `routes/` or `src/`,
+since Vite would bundle that file for the browser. Both are a `guren check`
+failure in an app whose `guren.arch.ts` has the default rules.

@@ -10,6 +10,12 @@ export default defineArchRules({
       message: 'Pages run in the browser; load data in the controller and pass it as props.',
     },
     {
+      from: 'resources/js/**',
+      disallow: ['app/**', 'config/**', 'db/**', 'routes/**', 'src/**'],
+      message:
+        'Server code a page imports ships to the browser; use `import type` for a type, and pass data as props.',
+    },
+    {
       from: 'app/Http/Controllers/**',
       disallowPackages: ['drizzle-orm'],
       severity: 'warn',

@@ -291,6 +291,8 @@ export default function Show({ post }: Props) {
 }
 ```
 
+   この import には `type` を付けたままにしてください。Resource を値として import すると、そのクラスと、クラスが import しているものがクライアントのバンドルに入ります。新しく作ったアプリの `guren.arch.ts` では、`guren check` がこの import を失敗として報告します（[アーキテクチャ境界](./cli-checks.md#アーキテクチャ境界)を参照）。
+
 2. **codegen が Props を抽出する**。`bun run codegen`（`bun run dev` の実行中にも自動で走ります）がすべてのページコンポーネントを読み、`interface Props` を取り出して `.guren/pages.gen.ts` に書き出します。
 
 ```ts

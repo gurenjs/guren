@@ -1,4 +1,4 @@
-import { mkdir, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { runArchCheck } from '../src/arch-check'
@@ -986,5 +986,61 @@ export default {
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  describe('the rules a new app ships with', () => {
+    // The template imports defineArchRules, which a temp workspace cannot resolve; the
+    // rules object is what the scaffolded file exports either way.
+    async function scaffoldedRules(): Promise<string> {
+      const source = await readFile(
+        join(import.meta.dir, '../../create-app/templates/default/guren.arch.ts'),
+        'utf8',
+      )
+      const importLine = "import { defineArchRules } from '@guren/cli/arch'\n"
+      expect(source).toContain(importLine)
+      expect(source).toContain('defineArchRules(')
+      return source.replace(importLine, '').replace('defineArchRules(', '(')
+    }
+
+    const RESOURCE = `export interface PostResourceData { id: number }\nexport class PostResource {}\n`
+
+    async function checkPage(page: string): Promise<CheckResult[]> {
+      const workspace = await createTempWorkspace('guren-cli-arch-scaffold-')
+      try {
+        await writeWorkspaceFiles(workspace.dir, {
+          'guren.arch.ts': await scaffoldedRules(),
+          'app/Http/Resources/PostResource.ts': RESOURCE,
+          'config/env.ts': 'export const env = {}\n',
+          'resources/js/lib/cn.ts': `export const cn = (): string => ''\n`,
+          'resources/js/pages/posts/Show.tsx': page,
+        })
+        return await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      } finally {
+        await workspace.cleanup()
+      }
+    }
+
+    it('should pass a page that imports a Resource as a type only', async () => {
+      const results = await checkPage(
+        `import type { PostResourceData } from '@/app/Http/Resources/PostResource'\n` +
+          `import { cn } from '../../lib/cn'\n` +
+          `export const title = (post: PostResourceData): string => cn() + post.id\n`,
+      )
+
+      expect(results.map((r) => [r.key, r.status])).toEqual([['arch:summary', 'pass']])
+    })
+
+    it('should fail a page that imports server code as a value', async () => {
+      const results = await checkPage(
+        `import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'\n` +
+          `import { env } from '../../../../config/env'\n` +
+          `export const title = (post: PostResourceData): unknown => [PostResource, env, post]\n`,
+      )
+
+      expect(results.map((r) => [r.key, r.status])).toEqual([
+        ['arch:resources/js/pages/posts/Show.tsx:@/app/Http/Resources/PostResource:app/**', 'fail'],
+        ['arch:resources/js/pages/posts/Show.tsx:../../../../config/env:config/**', 'fail'],
+      ])
+    })
   })
 })
