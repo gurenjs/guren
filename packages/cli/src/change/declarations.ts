@@ -7,7 +7,8 @@
 
 import type { ClassDeclaration, File, Statement } from '@babel/types'
 
-import { canonicalSyntax, memberKeyName, referencedIdentifiers, walk } from '../ast-walk'
+import { canonicalSyntax, referencedIdentifiers, walk } from '../ast-walk'
+import { classActionMembers } from '../controller-methods'
 import { extractClassDeclaration } from '../model-parser'
 import { parseSourceFile } from '../parse-cache'
 import { readPolicyAbilities } from '../plan/policy-abilities'
@@ -156,12 +157,9 @@ function classFileAllowed(ast: File, planned: File, className: string, members: 
   })
   if (!allowed || (head.decorators?.length ?? 0) > 0) return undefined
   // A member is what `Router` dispatches to or the Gate asks: a constructor, a static member or an accessor is not one the plan names.
-  const onlyPlanned = head.body.body.every((member) => {
-    if ((member as { decorators?: unknown[] }).decorators?.length) return false
-    if (member.type === 'ClassMethod') return member.kind === 'method' && !member.static && members.has(memberKeyName(member) ?? '')
-    if (member.type === 'ClassProperty') return !member.static && (member.value?.type === 'ArrowFunctionExpression' || member.value?.type === 'FunctionExpression') && members.has(memberKeyName(member) ?? '')
-    return false
-  })
+  const actions = [...classActionMembers(head)]
+  const onlyPlanned = actions.length === head.body.body.length && actions.every(({ member, name }) =>
+    !member.static && !member.decorators?.length && (!('kind' in member) || member.kind === 'method') && members.has(name))
   return onlyPlanned ? head : undefined
 }
 
