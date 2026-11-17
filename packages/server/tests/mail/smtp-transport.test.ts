@@ -147,9 +147,14 @@ describe('SmtpTransport TLS options', () => {
     expect(nodemailerOptions({ ...relay, auth: { user: '', pass: 'relay-pass' } }).requireTLS).toBe(true)
     expect(nodemailerOptions({ ...relay, host: '10.0.0.5' }).requireTLS).toBe(true)
     expect(nodemailerOptions({ ...relay, host: 'mailpit' }).requireTLS).toBe(true)
+    expect(nodemailerOptions({ ...relay, host: '::ffff:8.8.8.8' }).requireTLS).toBe(true)
+    expect(nodemailerOptions({ ...relay, host: '127.0.0.1.example.test' }).requireTLS).toBe(true)
   })
 
-  for (const host of ['localhost', 'LOCALHOST', '127.0.0.1', '127.1.2.3', '::1', '[::1]', '']) {
+  for (const host of [
+    'localhost', 'LOCALHOST', '127.0.0.1', '127.1.2.3', '127.1', '::1', '[::1]', '',
+    '0:0:0:0:0:0:0:1', '[0:0:0:0:0:0:0:1]', '::ffff:127.0.0.1', '::ffff:7f00:1',
+  ]) {
     it(`leaves requireTLS off by default for a mail catcher on this machine (host=${JSON.stringify(host)})`, () => {
       expect(nodemailerOptions({ ...relay, host }).requireTLS).toBe(false)
     })
