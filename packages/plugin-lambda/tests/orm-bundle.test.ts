@@ -80,18 +80,25 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
     // The dev-only imports stand in for the ones Guren's own graph makes (the
     // disabled MCP endpoint, Vite when serving locally). Naming them directly
     // keeps the probe to two installed packages, and a bundler follows a literal
-    // dynamic import either way. `createConnection` stands in for app code
-    // reaching past drizzle's own `createPool` import into the client (#507).
+    // dynamic import either way. `createConnection` stands in for app code reaching
+    // past drizzle's own `createPool` import, through either mysql2 entry (#507).
     writeFileSync(
       join(root, 'src/lambda.ts'),
       "import { getDatabase } from '../config/database'\n"
-        + "import { createConnection } from 'mysql2/promise'\n\n"
+        + "import { createConnection } from 'mysql2/promise'\n"
+        + "import { createConnection as createCallbackConnection } from 'mysql2'\n\n"
         + 'export const http = async () => new Response(String(typeof (await getDatabase())))\n\n'
         + 'export const devOnly = async () => [\n'
         + "  await import('vite'),\n"
         + "  await import('@guren/cli'),\n"
         + ']\n\n'
-        + 'export const mysqlRaw = () => typeof createConnection\n',
+        + 'export const mysqlRaw = () => [typeof createConnection, typeof createCallbackConnection]\n',
+    )
+
+    writeFileSync(
+      join(root, 'src/lambda-unlisted.ts'),
+      "import { notExportedByTheStub } from 'mysql2/promise'\n\n"
+        + 'export const http = async () => new Response(String(notExportedByTheStub))\n',
     )
   })
 
@@ -132,6 +139,23 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
       const bundled = await bundle(['postgres'])
 
       expect(bundled).toContain('function createConnection')
+    },
+    120_000,
+  )
+
+  test(
+    'names the dialects and the --database value when an import misses the stub',
+    async () => {
+      // #507: the bundler's error names the stub namespace alone, which says nothing
+      // of the option that keeps the real client.
+      const attempt = buildLambdaOutput({
+        rootDir: root,
+        outputDir: join(root, '.lambda'),
+        skipAppBuild: true,
+        entrypoint: join(root, 'src/lambda-unlisted.ts'),
+      })
+
+      await expect(attempt).rejects.toThrow(/"mysql2\/promise" is a stub in this bundle.*--database postgres,mysql/s)
     },
     120_000,
   )

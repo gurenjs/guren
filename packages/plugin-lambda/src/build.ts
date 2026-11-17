@@ -14,10 +14,12 @@ import {
   resolveSsrEntryFile,
   ssrRuntimePaths,
   stageStaticAssets,
+  stubbedSqlClientHints,
   unusedSqlClients,
   type ClientAssetEnv,
   type DatabaseDialect,
   type PathLike,
+  type UnusedSqlClient,
 } from '@guren/core/internal/deploy-build'
 import { reportDeployRuntimeHazards } from '@guren/core/internal/deploy-check'
 import { LAMBDA_HANDLER_EXPORTS, LAMBDA_HANDLER_MODULE } from './handlers'
@@ -86,12 +88,7 @@ function devOnlyStubs(): Record<string, string> {
  * `@aws-sdk/client-rds-data` for a Postgres app really does replace drizzle's
  * hoisted top-level import of it.
  */
-function stubsFor(
-  root: string,
-  dialects: readonly DatabaseDialect[] | undefined,
-): Record<string, string> {
-  const unused = unusedSqlClients({ root, label: 'Lambda build', dialects })
-
+function stubsFor(unused: readonly UnusedSqlClient[]): Record<string, string> {
   return {
     ...devOnlyStubs(),
     ...Object.fromEntries(
@@ -99,6 +96,8 @@ function stubsFor(
     ),
   }
 }
+
+const STUB_NAMESPACE = 'guren-lambda-stub'
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -162,7 +161,8 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const wrapperPath = resolve(out, `${LAMBDA_HANDLER_MODULE}.ts`)
   writeFileSync(wrapperPath, renderHandlerModule({ out, entrypoint, env: bakedEnv }))
 
-  await bundleHandler(wrapperPath, funcDir, stubsFor(root, options.databaseDialects), root)
+  const unused = unusedSqlClients({ root, label: 'Lambda build', dialects: options.databaseDialects })
+  await bundleHandler(wrapperPath, funcDir, unused, root)
 
   // Lambda's Node.js runtime treats `.js` as CommonJS unless the package is
   // marked as a module; the bundle and the SSR chunks are both ESM.
@@ -255,9 +255,10 @@ function renderHandlerModule(input: {
 async function bundleHandler(
   handlerEntry: string,
   funcDir: string,
-  stubs: Record<string, string>,
+  unused: readonly UnusedSqlClient[],
   root: string,
 ): Promise<void> {
+  const stubs = stubsFor(unused)
   const filter = stubFilter(stubs)
 
   const result = await Bun.build({
@@ -288,9 +289,9 @@ async function bundleHandler(
         setup(build) {
           build.onResolve({ filter }, (args) => ({
             path: args.path,
-            namespace: 'guren-lambda-stub',
+            namespace: STUB_NAMESPACE,
           }))
-          build.onLoad({ filter: /.*/, namespace: 'guren-lambda-stub' }, (args) => ({
+          build.onLoad({ filter: /.*/, namespace: STUB_NAMESPACE }, (args) => ({
             contents: stubs[args.path],
             loader: 'js',
           }))
@@ -300,8 +301,15 @@ async function bundleHandler(
   })
 
   if (!result.success) {
-    const details = result.logs.map((log) => String(log)).join('\n')
-    throw new Error(`Lambda build: bun build failed.\n${details}`)
+    const logs = result.logs.map((log) => String(log))
+    const hints = stubbedSqlClientHints({
+      logs,
+      namespace: STUB_NAMESPACE,
+      unused,
+      label: 'Lambda build',
+      flag: '--database',
+    })
+    throw new Error(`Lambda build: bun build failed.\n${[...logs, ...hints].join('\n')}`)
   }
 
   await reportRenamedNameKeyedClasses(result, { root, label: 'Lambda build' })

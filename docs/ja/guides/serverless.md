@@ -202,6 +202,8 @@ ORM は各ダイアレクトのクライアントを動的 import で読み込�
 bunx guren lambda:build --database postgres,sqlite
 ```
 
+スタブが export するのは、フレームワークがそのクライアントについて列挙している名前です。`mysql2` と `mysql2/promise` のスタブは元のモジュールの公開 API をすべて持っているので、アプリのコードがどちらかから `createConnection` を import してもビルドは通り、そのコードが実行されたときにだけ例外が出ます。スタブに無い名前を import すると、ビルドは `No matching export in "guren-lambda-stub:…"` で失敗します。このときビルドは、検出したダイアレクトと、実物のクライアントをバンドルに残すための `--database` の値を 1 行追加して知らせます。
+
 ## ランタイム検出
 
 実行中のランタイムに応じて、サービスの設定を切り替えられます。

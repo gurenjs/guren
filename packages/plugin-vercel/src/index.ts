@@ -16,9 +16,11 @@ import {
   resolvePathLike,
   resolveSsrEntryFile,
   ssrRuntimePaths,
+  stubbedSqlClientHints,
   unusedSqlClients,
   type DatabaseDialect,
   type PathLike,
+  type UnusedSqlClient,
 } from '@guren/core/internal/deploy-build'
 import { reportDeployRuntimeHazards } from '@guren/core/internal/deploy-check'
 
@@ -230,22 +232,18 @@ const UNAVAILABLE_ON_VERCEL: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], s
  * bundler regardless of branch: dev-only modules, and SQL clients of unused
  * dialects.
  */
-function stubbedModules(
-  root: string,
-  dialects: readonly DatabaseDialect[] | undefined,
-): Record<string, string> {
+function stubbedModules(unusedClients: readonly UnusedSqlClient[]): Record<string, string> {
   const devOnly = DEV_ONLY_MODULES.flatMap((module) => {
     const message = UNAVAILABLE_ON_VERCEL[module.kind]
     return message === null ? [] : [[module.specifier, renderDevOnlyStub(module, message)]]
   })
 
-  const unused = unusedSqlClients({ root, label: LABEL, dialects }).map(({ module, message }) => [
-    module.specifier,
-    renderDevOnlyStub(module, message),
-  ])
+  const unused = unusedClients.map(({ module, message }) => [module.specifier, renderDevOnlyStub(module, message)])
 
   return Object.fromEntries([...devOnly, ...unused])
 }
+
+const STUB_NAMESPACE = 'guren-vercel-stub'
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -271,7 +269,8 @@ async function bundleFunction(input: {
   dialects: readonly DatabaseDialect[] | undefined
   bundledEnv: Record<string, string>
 }): Promise<void> {
-  const stubs = stubbedModules(input.root, input.dialects)
+  const unused = unusedSqlClients({ root: input.root, label: LABEL, dialects: input.dialects })
+  const stubs = stubbedModules(unused)
   const filter = stubFilter(stubs)
 
   const result = await Bun.build({
@@ -299,8 +298,8 @@ async function bundleFunction(input: {
       {
         name: 'guren-vercel-stubs',
         setup(build) {
-          build.onResolve({ filter }, (args) => ({ path: args.path, namespace: 'guren-vercel-stub' }))
-          build.onLoad({ filter: /.*/, namespace: 'guren-vercel-stub' }, (args) => ({
+          build.onResolve({ filter }, (args) => ({ path: args.path, namespace: STUB_NAMESPACE }))
+          build.onLoad({ filter: /.*/, namespace: STUB_NAMESPACE }, (args) => ({
             contents: stubs[args.path],
             loader: 'js',
           }))
@@ -310,7 +309,9 @@ async function bundleFunction(input: {
   })
 
   if (!result.success) {
-    throw new Error(`${LABEL}: bun build failed.\n${result.logs.map((log) => String(log)).join('\n')}`)
+    const logs = result.logs.map((log) => String(log))
+    const hints = stubbedSqlClientHints({ logs, namespace: STUB_NAMESPACE, unused, label: LABEL })
+    throw new Error(`${LABEL}: bun build failed.\n${[...logs, ...hints].join('\n')}`)
   }
 
   await reportRenamedNameKeyedClasses(result, { root: input.root, label: LABEL })
