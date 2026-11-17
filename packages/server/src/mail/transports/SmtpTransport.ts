@@ -1,5 +1,17 @@
 import nodemailer from 'nodemailer'
+import { isLoopbackAddress } from '../../http/middleware/loopback-guard'
 import type { MailTransport, MailMessage, SendResult, SmtpTransportOptions } from '../types'
+
+/**
+ * Whether a stripped STARTTLS would put credentials on the network in cleartext. A host on this
+ * machine is left out, since a local mail catcher speaks no TLS; `'localhost'` is nodemailer's
+ * own fallback for an empty host.
+ */
+function sendsCredentialsOffHost(options: SmtpTransportOptions): boolean {
+  if (options.secure || !(options.auth?.user || options.auth?.pass)) return false
+  const host = (options.host || 'localhost').toLowerCase()
+  return host !== 'localhost' && host !== '[::1]' && !isLoopbackAddress(host)
+}
 
 /** Format an email address for nodemailer. */
 function formatAddress(addr: { email: string; name?: string }): string {
@@ -26,7 +38,7 @@ export class SmtpTransport implements MailTransport {
       host: options.host,
       port: options.port ?? 587,
       secure: options.secure ?? false,
-      requireTLS: options.requireTLS ?? false,
+      requireTLS: options.requireTLS ?? sendsCredentialsOffHost(options),
       tls: options.tls,
       auth: options.auth,
       pool: options.pool ?? true,
