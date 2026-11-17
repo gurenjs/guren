@@ -7,25 +7,33 @@
 
 import type { ClassDeclaration, File, Statement } from '@babel/types'
 
+import { readCreationStatements, snapshotRecordsCreation, type CreationForeignKey, type CreationStatement, type MigrationDialect } from '@guren/orm/internal/migration-guard'
+
 import { canonicalSyntax, referencedIdentifiers, walk } from '../ast-walk'
 import { classActionMembers } from '../controller-methods'
 import { extractClassDeclaration } from '../model-parser'
 import { parseSourceFile } from '../parse-cache'
 import { readPolicyAbilities } from '../plan/policy-abilities'
 import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
-import { planScaffoldOutput, type PlanScaffoldApp } from '../plan/scaffold'
+import { planScaffoldOutput, sqlNameOf, type PlanScaffoldApp } from '../plan/scaffold'
 import { MODELS_DIR } from '../discovery'
 import { policyFilePath, providerFilePath, resourceFilePath, validatorFilePath } from '../plan/scaffold-http'
 import { controllerFilePath, sideEffectFilePath } from '../plan/scaffold-controller'
 import { derivePlanTasks, type PlanDerivedStep } from '../plan/tasks'
-import type { SchemaTable } from '../schema-parser'
+import { parseSchemaSource, type SchemaDialect, type SchemaTable } from '../schema-parser'
 import { FACT_CLASSES } from './fact-classes'
 import type { ChangeFact } from './lane'
 
-/** What a fact is about, kept beside it by the reader that emitted it. `tables` are the head's tables of the same file. */
+/**
+ * What a fact is about, kept beside it by the reader that emitted it. `tables` are the head's tables of the same
+ * file; a migration's `files` are its changed paths, and `previous` the migration folder before it at the head.
+ * A table's residue is the code inside an added table the column reader does not state.
+ */
 export type DeclarationSubject =
   | { kind: 'file'; path: string }
   | { kind: 'table'; table: SchemaTable; file: string; tables: readonly SchemaTable[] }
+  | { kind: 'migration'; dir: string; files: string[]; previous?: string }
+  | { kind: 'table-residue'; file: string; identifier: string }
 
 /** An approved plan that is not closed, as the head has it; `file` is app-relative. */
 export interface OpenPlan {
@@ -279,16 +287,24 @@ export async function applyPlanDeclarations(
 ): Promise<ChangeFact[]> {
   const owned = plans.map((open) => ({ open, files: planDeclaredFiles(open.plan), paths: planClaimedPaths(open.plan) }))
   const result: ChangeFact[] = []
+  const declaredTables = new Set<string>()
   for (const fact of facts) {
     const subject = subjects.get(fact)
-    const declaredBy = subject ? await declarationOf(subject, owned, readHead) : undefined
+    const declaredBy = subject?.kind === 'table-residue' ? undefined
+      : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
+      : subject ? await declarationOf(subject, owned, readHead) : undefined
+    if (declaredBy && subject?.kind === 'table') declaredTables.add(`${subject.file}\u0000${subject.table.identifier}`)
     result.push(declaredBy ? { ...fact, lane: FACT_CLASSES[fact.code].lowest, declaredBy } : fact)
   }
-  return result
+  // The statement a declared table matched is the scaffold's whole, its `sql` defaults and index callback included.
+  return result.filter((fact) => {
+    const subject = subjects.get(fact)
+    return subject?.kind !== 'table-residue' || !declaredTables.has(`${subject.file}\u0000${subject.identifier}`)
+  })
 }
 
 async function declarationOf(
-  subject: DeclarationSubject,
+  subject: Extract<DeclarationSubject, { kind: 'file' | 'table' }>,
   owned: ReadonlyArray<{ open: OpenPlan; files: Map<string, DeclaredFile>; paths: Set<string> }>,
   readHead: (path: string) => Promise<string | null>,
 ): Promise<string | undefined> {
@@ -307,4 +323,112 @@ async function declarationOf(
   const exports = ast ? declaredExports(ast) : undefined
   if (!ast || !exports || !declared.exports.every((name) => exports.includes(name)) || !passesCheck(declared, ast, subject.path)) return undefined
   return `${open.file}#${declared.elements.join(',')}`
+}
+
+const MIGRATION_DIALECTS: Record<SchemaDialect, MigrationDialect> = { pg: 'postgres', mysql: 'mysql', sqlite: 'sqlite' }
+const ROOT_SCHEMA = 'db/schema.ts'
+
+function readJson(text: string | null): unknown {
+  if (text === null) return undefined
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The added models a migration creates, when it does nothing else (`readCreationStatements()`): every table it
+ * touches is one model one open plan adds in the project root, with exactly the planned columns, each foreign key
+ * one the plan states and each index one it plans; and its `snapshot.json`, which later migrations are judged
+ * against, records what the SQL creates over the migration before it and nothing else.
+ */
+export async function declaredMigration(
+  subject: Extract<DeclarationSubject, { kind: 'migration' }>,
+  plans: readonly OpenPlan[],
+  readHead: (path: string) => Promise<string | null>,
+): Promise<string | undefined> {
+  const [sqlFile, snapshotFile] = [`${subject.dir}/migration.sql`, `${subject.dir}/snapshot.json`]
+  if (!subject.files.every((file) => file === sqlFile || file === snapshotFile)) return undefined
+  const schemaText = await readHead(ROOT_SCHEMA)
+  const tables = schemaText === null ? undefined : parseSchemaSource(schemaText, ROOT_SCHEMA, null)
+  const dialects = new Set(tables?.map((table) => table.dialect))
+  const sql = await readHead(sqlFile)
+  if (!tables || dialects.size !== 1 || sql === null) return undefined
+  const statements = readCreationStatements(sql, MIGRATION_DIALECTS[[...dialects][0]!])
+  if (!statements || statements.length === 0) return undefined
+
+  const snapshot = readJson(await readHead(snapshotFile))
+  if (snapshot !== undefined) {
+    const previous = subject.previous === undefined ? undefined : readJson(await readHead(`${subject.previous}/snapshot.json`))
+    if (snapshot === null || previous === null || (subject.previous !== undefined && previous === undefined) || !snapshotRecordsCreation(previous, snapshot, statements)) return undefined
+  }
+
+  // Claimed by SQL name in any module: two plans about one table of one database are a question for a person.
+  const touched = new Set(statements.map((statement) => statement.table))
+  const claims = plans.filter(({ plan }) => plan.models.some((model) => touched.has(model.table) || (model.tableRenamedFrom !== undefined && touched.has(model.tableRenamedFrom))))
+  if (claims.length !== 1 || ![...touched].every((table) => claims[0]!.plan.models.some((model) => model.table === table || model.tableRenamedFrom === table))) return undefined
+  const { file, plan } = claims[0]!
+  const created = new Map<string, PlanDraft['models'][number]>()
+  for (const statement of statements) {
+    if (statement.kind !== 'create-table') {
+      if (!created.has(statement.table)) return undefined
+      continue
+    }
+    const model = plan.models.find((candidate) => candidate.change.kind === 'add' && candidate.module === undefined && candidate.table === statement.table)
+    if (!model || created.has(statement.table) || !createsPlannedTable(statement, model)) return undefined
+    created.set(statement.table, model)
+  }
+  const keys = new Map([...created].map(([table, model]) => [table, plannedForeignKeys(plan, model, tables)]))
+  for (const statement of statements) {
+    const model = created.get(statement.table)!
+    const stated = statement.kind === 'create-table' ? statement.foreignKeys : statement.kind === 'add-foreign-key' ? [statement.foreignKey] : []
+    for (const key of stated) if (!takeForeignKey(keys.get(statement.table)!, key)) return undefined
+    if (statement.kind === 'create-index' && !plannedIndexes(model, statement.unique).some((columns) => sameList(columns, statement.columns))) return undefined
+  }
+  return `${file}#${[...created.values()].map((model) => model.id).join(',')}`
+}
+
+const sameList = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((value, at) => value === b[at])
+
+/** Exactly the planned columns by SQL name, the planned composite key, and each inline unique one the plan states. */
+function createsPlannedTable(statement: Extract<CreationStatement, { kind: 'create-table' }>, model: PlanDraft['models'][number]): boolean {
+  const planned = model.columns.map(sqlNameOf)
+  const names = statement.columns.map((column) => column.name)
+  if (new Set(names).size !== names.length || !sameList([...names].sort(), [...planned].sort())) return false
+  const primary = model.columns.filter((column) => column.primaryKey).map(sqlNameOf)
+  if (primary.length > 1 ? !statement.primaryKey || !sameList([...statement.primaryKey].sort(), [...primary].sort()) : statement.primaryKey !== undefined) return false
+  return statement.uniques.every((columns) => plannedIndexes(model, true).some((entry) => sameList(entry, columns)))
+}
+
+/** The column lists the model plans an index over (`unique`: a unique one), by SQL name. */
+function plannedIndexes(model: PlanDraft['models'][number], unique: boolean): string[][] {
+  const byName = new Map(model.columns.map((column) => [column.name, sqlNameOf(column)]))
+  return [
+    ...model.columns.filter((column) => (unique ? column.unique : column.index)).map((column) => [sqlNameOf(column)]),
+    ...(model.indexes ?? []).filter((index) => index.unique === unique).map((index) => index.columns.map((name) => byName.get(name) ?? '')),
+  ]
+}
+
+/** Each planned reference as the SQL states it, the target column by SQL name from the plan or else the head's schema. */
+function plannedForeignKeys(plan: PlanDraft, model: PlanDraft['models'][number], tables: readonly SchemaTable[]): CreationForeignKey[] {
+  return model.columns.flatMap((column) => {
+    const reference = column.references
+    const target = reference && plan.models.find((candidate) => candidate.id === reference.model)
+    if (!reference || !target) return []
+    const planned = target.columns.find((candidate) => candidate.name === reference.column)
+    const existing = tables.find((table) => table.module === null && table.tableName === target.table)?.columns.find((candidate) => candidate.name === reference.column)
+    const to = planned ? sqlNameOf(planned) : existing ? existing.columnName ?? existing.name : undefined
+    return to === undefined ? [] : [{ columns: [sqlNameOf(column)], table: target.table, columnsTo: [to], ...(reference.onDelete ? { onDelete: reference.onDelete.toUpperCase() } : {}) }]
+  })
+}
+
+/** Removes and confirms the planned key `key` states; `NO ACTION` is what an absent action means. */
+function takeForeignKey(planned: CreationForeignKey[], key: CreationForeignKey): boolean {
+  const action = (value: string | undefined) => value ?? 'NO ACTION'
+  if (action(key.onUpdate) !== 'NO ACTION') return false
+  const at = planned.findIndex((entry) => entry.table === key.table && sameList(entry.columns, key.columns) && sameList(entry.columnsTo, key.columnsTo) && action(entry.onDelete) === action(key.onDelete))
+  if (at === -1) return false
+  planned.splice(at, 1)
+  return true
 }

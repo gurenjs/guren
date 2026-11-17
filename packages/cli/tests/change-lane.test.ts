@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { readdirSync, readFileSync } from 'node:fs'
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
@@ -773,6 +774,20 @@ export class CommentPolicy extends Policy {
       expect.objectContaining({ code: 'file-added', lane: 'low', files: ['app/Models/Comment.ts'], declaredBy: 'docs/plans/comments/plan.json#model.comment' }),
     ])
     expect(renderChangeLane(report)).toContain('app/Models/Comment.ts added (declared by docs/plans/comments/plan.json#model.comment)')
+    // The index callback inside the declared table is the scaffold's own.
+    expect(report.facts.filter((fact) => fact.code === 'source-edited')).toEqual([])
+  })
+
+  test('should lower the migration drizzle-kit writes for the tables the plan adds', async () => {
+    const { repo } = await planRepo()
+    const folder = join(import.meta.dir, 'fixtures/change-migrations')
+    const [first, second] = readdirSync(folder, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
+    const files = (name: string) => Object.fromEntries(['migration.sql', 'snapshot.json'].map((file) => [`drizzle/${name}/${file}`, readFileSync(join(folder, name, file), 'utf8')]))
+    const base = await commit(repo, files(first!))
+    const report = await laneOf(repo, base, await commit(repo, { 'db/schema.ts': SCHEMA, ...files(second!) }))
+
+    expect(factAt(report, 'migration')).toMatchObject({ lane: 'low', target: `drizzle/${second}`, declaredBy: 'docs/plans/comments/plan.json#model.comment' })
+    expect(factAt(report, 'migration')?.files.sort()).toEqual([`drizzle/${second}/migration.sql`, `drizzle/${second}/snapshot.json`])
   })
 
   test('should lower an added policy with exactly the planned abilities', async () => {
@@ -818,6 +833,7 @@ export class CommentPolicy extends Policy {
     expect(report.plans).toEqual([expect.objectContaining({ file: 'docs/plans/comments/plan.json', standing: 'unapproved' })])
     expect(report.facts.filter((fact) => fact.declaredBy)).toEqual([])
     expect(factAt(report, 'file-added')?.lane).toBe('medium')
+    expect(report.facts.filter((fact) => fact.code === 'source-edited')).toEqual([expect.objectContaining({ lane: 'medium', target: 'comments', files: ['db/schema.ts'] })])
   })
 
   test('should declare nothing in a change that writes a plan record', async () => {

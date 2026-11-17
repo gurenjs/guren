@@ -1,0 +1,30 @@
+import { sql } from 'drizzle-orm'
+import { index, integer, numeric, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+export const users = sqliteTable('users', { id: integer('id').primaryKey({ autoIncrement: true }) })
+export const posts = sqliteTable('posts', { id: integer('id').primaryKey({ autoIncrement: true }) })
+
+export const comments = sqliteTable('comments', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  body: text('body').notNull(),
+  postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  index('comments_post_id_index').on(table.postId),
+])
+
+export const tags = sqliteTable('tags', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  slug: text('slug').notNull().unique(),
+  label: text('label').notNull().default('untitled'),
+  weight: numeric('weight'),
+  active: integer('active', { mode: 'boolean' }).notNull().default(false),
+  meta: text('meta', { mode: 'json' }),
+  ref: text('ref'),
+  seenOn: text('seen_on'),
+  postId: integer('postId').references(() => posts.id, { onDelete: 'set null' }),
+  createdAt: integer('createdAt', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  index('tags_ref_index').on(table.ref),
+  index('tags_label_weight_index').on(table.label, table.weight),
+])

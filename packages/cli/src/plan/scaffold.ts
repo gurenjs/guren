@@ -123,7 +123,8 @@ function hasColumn(table: TableRef, name: string): boolean {
   return table.opaqueColumns === true || table.columns.includes(name)
 }
 
-function sqlNameOf(column: PlanColumn): string {
+/** A planned column's SQL name, as the scaffold writes it into the builder. */
+export function sqlNameOf(column: PlanColumn): string {
   return column.columnName ?? column.name
 }
 

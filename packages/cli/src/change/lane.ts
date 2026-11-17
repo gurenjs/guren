@@ -370,13 +370,16 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
       continue
     }
     const findings = [...judged.unacknowledged, ...judged.acknowledged.flatMap((entry) => entry.findings)]
+    const folders = [...trees.head].flatMap((path) => (path.startsWith(`${folder}/`) && posix.basename(path) === 'migration.sql' && posix.dirname(posix.dirname(path)) === folder ? [posix.basename(posix.dirname(path))] : [])).sort()
     for (const name of names) {
       const destructive = findings.filter((finding) => finding.migration === name)
       if (destructive.length > 0) {
         const marker = judged.acknowledged.some((entry) => entry.migration === name) ? ' (acknowledged by its marker, which a person reads)' : ''
         fact(entriesOf(name), { code: 'migration-destructive', lane: 'high', target: `${folder}/${name}`, evidence: 'static', message: `${destructive.map(formatDestructiveFinding).join('; ')}${marker}` })
       } else {
-        fact(entriesOf(name), { code: 'migration', lane: 'medium', target: `${folder}/${name}`, evidence: 'static', message: `${folder}/${name}: added, nothing destructive` })
+        const previous = folders.filter((other) => other < name).at(-1)
+        const subject: DeclarationSubject = { kind: 'migration', dir: `${folder}/${name}`, files: entriesOf(name).map((entry) => entry.path), ...(previous ? { previous: `${folder}/${previous}` } : {}) }
+        fact(entriesOf(name), { code: 'migration', lane: 'medium', target: `${folder}/${name}`, evidence: 'static', message: `${folder}/${name}: added, nothing destructive` }, subject)
       }
     }
   }
@@ -409,10 +412,19 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     }
     if (!claimed.has(entry)) fact([entry], { code: 'source-edited', lane: 'medium', evidence: 'static', message: `${entry.path}: no table the reader sees changed` })
     else {
-      // A table fact is lowerable, and code beside the tables must not ride it.
+      // A table fact is lowerable, and code beside the tables must not ride it. An added table's own is kept apart:
+      // the declaration matcher accounts for it only where it matched that table's whole statement.
       const [residueBefore, residueAfter] = [schemaResidue(beforeText, base, before), schemaResidue(afterText, head, after)]
-      if (residueBefore === undefined || residueAfter === undefined || residueBefore !== residueAfter) {
+      const added = new Set([...afterTables.keys()].filter((identifier) => !beforeTables.has(identifier)))
+      const kept = (residue: SchemaResidue) => residue.filter((item) => item.table === undefined || !added.has(item.table)).map((item) => item.text).join('\n')
+      if (residueBefore === undefined || residueAfter === undefined || kept(residueBefore) !== kept(residueAfter)) {
         fact([entry], { code: 'source-edited', lane: 'medium', evidence: 'static', message: `${entry.path}: a function inside its tables, or code beside them, changed` })
+      } else {
+        for (const identifier of added) {
+          const own = residueAfter.filter((item) => item.table === identifier)
+          if (own.length === 0) continue
+          fact([entry], { code: 'source-edited', lane: 'medium', target: identifier, evidence: 'static', message: `${entry.path}: table ${identifier} holds code the column reader does not state (${own.length === 1 ? 'a function or a name' : `${own.length} functions or names`})` }, { kind: 'table-residue', file: head!, identifier })
+        }
       }
     }
   }
@@ -655,8 +667,10 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
  * column property states is kept: a function (but a foreign key's), a spread, a tagged template and
  * any other name.
  */
-function schemaResidue(text: string | null, file: string | undefined, tables: readonly SchemaTable[]): string | undefined {
-  if (text === null || file === undefined) return ''
+type SchemaResidue = Array<{ table?: string; text: string }>
+
+function schemaResidue(text: string | null, file: string | undefined, tables: readonly SchemaTable[]): SchemaResidue | undefined {
+  if (text === null || file === undefined) return []
   const ast = parseSourceFile(text, file)
   if (!ast) return undefined
   const names = new Set(tables.map((table) => table.identifier))
@@ -666,29 +680,32 @@ function schemaResidue(text: string | null, file: string | undefined, tables: re
     const object = objectLiteral(init as never)
     return object !== null && object.properties.every((property) => property.type === 'ObjectProperty' && property.shorthand && property.value.type === 'Identifier' && names.has(property.value.name))
   }
-  const kept: string[] = []
+  const kept: SchemaResidue = []
   for (const statement of ast.program.body) {
     if (framework(statement)) continue
     const declaration = topLevelDeclaration(statement)
     if (!declaration?.declarations.every((declarator) => declarator.id.type === 'Identifier' && (names.has(declarator.id.name) || listsTables(declarator.init)))) {
-      kept.push(canonicalSyntax(statement))
+      kept.push({ text: canonicalSyntax(statement) })
       continue
     }
+    // One table's own residue is told apart only where the statement declares that table alone.
+    const only = declaration.declarations.length === 1 && declaration.declarations[0]!.id.type === 'Identifier' && names.has(declaration.declarations[0]!.id.name) ? declaration.declarations[0]!.id.name : undefined
+    const keep = (node: Parameters<typeof canonicalSyntax>[0]): void => void kept.push({ ...(only ? { table: only } : {}), text: canonicalSyntax(node) })
     walk(declaration.declarations.map((declarator) => declarator.init), (node, parent) => {
       // `.references(() => users.id)`: the foreign key the column reader states.
       const body = node.type === 'ArrowFunctionExpression' ? (node.body as { type?: string; object?: { type?: string; name?: string }; computed?: boolean }) : undefined
       if (body?.type === 'MemberExpression' && !body.computed && body.object?.type === 'Identifier' && names.has(String(body.object.name))) return false
       if (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression' || node.type === 'SpreadElement' || node.type === 'TaggedTemplateExpression') {
-        kept.push(canonicalSyntax(node))
+        keep(node)
         return false
       }
       if (node.type !== 'Identifier' || builders.has(String(node.name)) || names.has(String(node.name))) return
       const named = parent as { type?: string; key?: unknown; property?: unknown; computed?: boolean } | null
       if (!named?.computed && ((named?.type === 'MemberExpression' && named.property === node) || (named?.type === 'ObjectProperty' && named.key === node))) return
-      kept.push(canonicalSyntax(node))
+      keep(node)
     })
   }
-  return kept.join('\n')
+  return kept
 }
 
 /** The plans at the head with the standing each has there, read from the head's own records, and the open ones. */

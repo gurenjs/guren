@@ -1,0 +1,29 @@
+import { boolean, date, index, integer, jsonb, numeric, pgTable, serial, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+
+export const users = pgTable('users', { id: serial('id').primaryKey() })
+export const posts = pgTable('posts', { id: serial('id').primaryKey() })
+
+export const comments = pgTable('comments', {
+  id: serial('id').primaryKey(),
+  body: text('body').notNull(),
+  postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('comments_post_id_index').on(table.postId),
+])
+
+export const tags = pgTable('tags', {
+  id: serial('id').primaryKey(),
+  slug: text('slug').notNull().unique(),
+  label: text('label').notNull().default('untitled'),
+  weight: numeric('weight', { precision: 8, scale: 2 }),
+  active: boolean('active').notNull().default(false),
+  meta: jsonb('meta'),
+  ref: uuid('ref'),
+  seenOn: date('seen_on'),
+  postId: integer('postId').references(() => posts.id, { onDelete: 'set null' }),
+  createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('tags_ref_index').on(table.ref),
+  index('tags_label_weight_index').on(table.label, table.weight),
+])
