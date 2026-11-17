@@ -13,7 +13,7 @@ import { consola } from 'consola'
 
 import { readAppLocale } from './app-locale'
 import { assertNotApiOnly } from './app-surface'
-import { BEHAVIOUR_AGENT_PACKAGE, BEHAVIOUR_PACKAGES, BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP } from './browser-behaviour-specs'
+import { BEHAVIOUR_AGENT_PACKAGE, BEHAVIOUR_PACKAGES, BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP, configNamesAgent } from './browser-behaviour-specs'
 import { loadBrowserMap, runBrowserMap } from './browser-map-files'
 import type { ApprovedPlanInput, BrowserMap } from './browser-map'
 import {
@@ -89,6 +89,8 @@ export interface AddBrowserTestsResult {
   behaviours?: BehaviourAgentChoice
   /** A setup project signs in as the seeded browser account. */
   signIn: boolean
+  /** `.env` or this process's environment gives `BROWSER_TEST_PASSWORD` a value. */
+  passwordSet: boolean
   map: BrowserMap
   /** False when config/database.ts never seeds on boot, so `browser:serve` never writes the browser account. */
   seedsOnBoot: boolean
@@ -215,6 +217,26 @@ async function olderPlaywright(cwd: string): Promise<{ installed: string; pinned
   return Bun.semver.order(installed, pinned) < 0 ? { installed, pinned } : undefined
 }
 
+/** The agent's packages the manifest declares: `@e2e-dev/acp` and every adapter, which a config with no agent never loads. */
+const AGENT_ONLY_PACKAGES = [BEHAVIOUR_AGENT_PACKAGE, ...AGENT_NAMES.map((name) => BEHAVIOUR_AGENTS[name].adapter.name)]
+
+/** A value a `BROWSER_TEST_PASSWORD=` line of `.env` assigns (the last one), or one this process already has. */
+async function browserPasswordSet(cwd: string): Promise<boolean> {
+  if (process.env.BROWSER_TEST_PASSWORD) return true
+  const lines = [...((await readIfExists(cwd, '.env')) ?? '').matchAll(/^\s*(?:export\s+)?BROWSER_TEST_PASSWORD=(.*)$/gmu)]
+  const value = lines.at(-1)?.[1]?.replace(/\s+#.*$/u, '').trim().replace(/^(['"])(.*)\1$/u, '$2')
+  return value !== undefined && value !== ''
+}
+
+/** Takes the agent's packages out once the config on disk names no agent, so nothing keeps an adapter no test can start. */
+async function removeAgentPackages(cwd: string, install: boolean): Promise<void> {
+  const declared: string[] = []
+  for (const name of AGENT_ONLY_PACKAGES) if ((await appDependsOn(cwd, name)) === true) declared.push(name)
+  if (declared.length === 0) return
+  if (install) await runCommand('bun', ['remove', ...declared], { cwd })
+  else consola.info(`Run: bun remove ${declared.join(' ')}`)
+}
+
 /** Only what the manifest does not declare, so a rerun on an app that has Playwright adds axe alone. */
 async function installDevPackages(cwd: string, install: boolean, agent: BehaviourAgentChoice | undefined): Promise<void> {
   const range = (name: string) => ({ name, range: cliDependencyRange('devDependencies', name) })
@@ -276,7 +298,8 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
   const created = await writeScaffoldFiles(files, { force: options.force, overwritten: options.overwritten, skipExisting: true })
   // A config kept from an earlier run may name another agent, or one at all, than this run installs an adapter for.
   const kept = agent && !created.includes(resolve(cwd, BEHAVIOURS_CONFIG)) ? await readIfExists(cwd, BEHAVIOURS_CONFIG) : null
-  if (agent === 'none' && kept?.includes(`from '${BEHAVIOUR_AGENT_PACKAGE}'`)) {
+  const keptNamesAgent = kept !== null && configNamesAgent(kept)
+  if (agent === 'none' && keptNamesAgent) {
     consola.warn(`${BEHAVIOURS_CONFIG} was left as it is and still imports an executor from ${BEHAVIOUR_AGENT_PACKAGE}, which --agent none does not install. Pass --force to rewrite it with no agent, or install the agent's packages.`)
   } else if (agent && agent !== 'none' && kept !== null && !kept?.includes(CONFIG_AGENT_LINES(agent)[0]!.trim())) {
     consola.warn(`${BEHAVIOURS_CONFIG} was left as it is and does not import ${BEHAVIOUR_AGENTS[agent].executor} from ${BEHAVIOUR_AGENT_PACKAGE}, so its steps run on another agent than --agent ${agent}. Pass --force to rewrite it, or change its executor by hand.`)
@@ -309,6 +332,8 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
     )
   }
   await installDevPackages(cwd, options.install ?? true, agent)
+  // Only once the config names no agent: removing them under a kept config that imports one would stop it loading.
+  if (agent === 'none' && !keptNamesAgent) await removeAgentPackages(cwd, options.install ?? true)
   const older = agent ? await olderPlaywright(cwd) : undefined
   if (older) {
     consola.warn(`${PLAYWRIGHT_PACKAGE} ${older.installed} is older than the playwright-core ${older.pinned} the e2e runner pins. With both installed, the accessibility spec may stop typechecking, since ${AXE_PACKAGE}'s types can name the newer copy. Run: bun add -d ${PLAYWRIGHT_PACKAGE}@^${older.pinned}`)
@@ -326,6 +351,7 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
     },
     ...(agent ? { behaviours: agent } : {}),
     signIn: account !== undefined,
+    passwordSet: account !== undefined && await browserPasswordSet(cwd),
     map,
     seedsOnBoot: database?.includes('seedOnBoot') === true,
   }

@@ -1,11 +1,12 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { consola } from 'consola'
 import type { z } from 'zod'
 
 import { addBrowserTests, agentConfig } from '../src/add-browser-tests'
 import {
-  BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP, buildBehaviourSpecs, GENERATED_BEHAVIOURS_DIR,
+  BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP, buildBehaviourSpecs, configNamesAgent, GENERATED_BEHAVIOURS_DIR,
 } from '../src/browser-behaviour-specs'
 import { isParameterless, type ApprovedPlanInput, type BrowserFeature, type BrowserMap, type BrowserMapRoute, type BrowserMapView } from '../src/browser-map'
 import { runBrowserMap } from '../src/browser-map-files'
@@ -221,7 +222,7 @@ describe('the behaviour specs', () => {
     const update = behaviour('AC-posts-update-1', 'update', { input: input({ title: 'Again' }), expect: { redirect: '/posts/:id' } })
     const contents = contentsOf([STORE, update], { agent: false })
     expect(contents).toContain("await screen.getByRole('button', 'Create').or(screen.getByRole('link', 'Create')).tap()")
-    expect(contents).toContain("test.skip('AC-posts-update-1: does AC-posts-update-1: needs an agent step, since the plan does not name every control it touches, and the app declares no @e2e-dev/acp, so the config names no agent'")
+    expect(contents).toContain("test.skip('AC-posts-update-1: does AC-posts-update-1: needs an agent step, since the plan does not name every control it touches, and the config names no agent (e2e.browser.config.ts imports no executor from @e2e-dev/acp, or the app does not declare it)'")
     expect(contents).not.toContain('agent.act')
     expect(() => transpiler.transformSync(contents)).not.toThrow()
   })
@@ -482,6 +483,65 @@ describe('the spec files', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  test('switching an app set up for an agent to --agent none --force skips the agent steps and names the packages to remove', async () => {
+    const workspace = await createTempWorkspace('guren-add-behaviours-to-none-')
+    const info = spyOn(consola, 'info').mockImplementation((() => {}) as never)
+    try {
+      const update = behaviour('AC-posts-update-1', 'update', { input: input({ title: 'Again' }), expect: { redirect: '/posts/:id' } })
+      const plan = planOf([STORE, update])
+      const plans = [{ file: FILE, plan }]
+      await seedInertiaApp(workspace.dir)
+      // The manifest as `--agent claude-code` leaves it once installed.
+      const manifest = '{ "name": "app", "dependencies": { "@guren/inertia-client": "*" }, "devDependencies": { "e2e": "0.23.1", "@e2e-dev/web": "0.16.0", "@e2e-dev/acp": "0.5.0", "@agentclientprotocol/claude-agent-acp": "^0.107.0" } }\n'
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': manifest })
+      const run = (agent: string) => addBrowserTests({ install: false, force: true, behaviours: true, agent, loadMap: async () => mapOf(plan), plans })
+
+      await run('claude-code')
+      expect(await readFile(join(workspace.dir, SPEC), 'utf8')).toContain('await agent.act(')
+      await writeWorkspaceFiles(workspace.dir, { [BEHAVIOURS_GIVEN_FILE]: '// mine\n', '.e2e/cache/recorded.json': '{}\n' })
+
+      info.mockClear()
+      const none = await run('none')
+      const config = await readFile(join(workspace.dir, BEHAVIOURS_CONFIG), 'utf8')
+      expect(config).not.toContain('agents:')
+      expect(configNamesAgent(config)).toBe(false)
+      const lines = info.mock.calls.map((call) => String(call[0]))
+      expect(lines).toContain('Run: bun remove @e2e-dev/acp @agentclientprotocol/claude-agent-acp')
+      expect(lines.filter((line) => line.startsWith('Run: bun add') && line.includes('acp'))).toEqual([])
+      // --no-install left the packages declared; the config, which names no agent, is what the spec follows.
+      expect(none.mapped.changed).toContain(SPEC)
+      const spec = await readFile(join(workspace.dir, SPEC), 'utf8')
+      expect(spec).not.toContain('agent.act')
+      expect(spec).toContain(`test.skip('AC-posts-update-1: does AC-posts-update-1: needs an agent step, since the plan does not name every control it touches, and the config names no agent (${BEHAVIOURS_CONFIG} imports no executor from @e2e-dev/acp, or the app does not declare it)'`)
+      expect(spec).toContain("await screen.getByRole('button', 'Create').or(screen.getByRole('link', 'Create')).tap()")
+      expect(await readFile(join(workspace.dir, BEHAVIOURS_GIVEN_FILE), 'utf8')).toBe('// mine\n')
+      expect(await readFile(join(workspace.dir, '.e2e/cache/recorded.json'), 'utf8')).toBe('{}\n')
+
+      // A later browser:map reads the same config, so it agrees and has nothing to change.
+      const later = await runBrowserMap({ cwd: workspace.dir, write: false, map: mapOf(plan), plans })
+      expect(later.changed.filter((file) => file.startsWith('tests/'))).toEqual([])
+
+      // And back: the config names the agent again, so the agent step returns.
+      await run('claude-code')
+      expect(await readFile(join(workspace.dir, SPEC), 'utf8')).toContain('await agent.act(')
+    } finally {
+      info.mockRestore()
+      await workspace.cleanup()
+    }
+  })
+
+  test('a config names an agent only by importing a value from @e2e-dev/acp', async () => {
+    const shipped = await readFile(join(TEMPLATE_ROOT, BEHAVIOURS_CONFIG), 'utf8')
+    expect(configNamesAgent(shipped)).toBe(true)
+    expect(configNamesAgent(agentConfig({ path: BEHAVIOURS_CONFIG, contents: shipped }, 'codex').contents)).toBe(true)
+    const none = agentConfig({ path: BEHAVIOURS_CONFIG, contents: shipped }, 'none').contents
+    expect(configNamesAgent(none)).toBe(false)
+    expect(configNamesAgent(`// import { claudeCode } from '@e2e-dev/acp'\n${none}`)).toBe(false)
+    expect(configNamesAgent(`import type { Executor } from '@e2e-dev/acp'\n${none}`)).toBe(false)
+    expect(configNamesAgent(`import { type Executor } from '@e2e-dev/acp'\n${none}`)).toBe(false)
+    expect(configNamesAgent('import { claudeCode } from \'@e2e-dev/acp\'\nexport default {')).toBe(false)
   })
 
   test('a blueprint about to write the files and install the runner is answered as if the four conditions held', async () => {

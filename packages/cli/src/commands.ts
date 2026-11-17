@@ -1485,7 +1485,7 @@ const addBrowserTestsCommand = defineCommand({
     if (!result.map.complete) consola.warn(`The browser map is incomplete (${result.map.gaps.map((gap) => gap.section).join(', ')}), so the specs may miss features; run bunx guren browser:map --check for the reasons.`)
     if (result.signIn) {
       if (!result.seedsOnBoot) consola.warn(`config/database.ts does not set seedOnBoot, so browser:serve never seeds the browser account and the setup project cannot sign in. Pass ${SEED_ON_BOOT_OPTION} to defineDatabaseConfig().`)
-      consola.info('Set BROWSER_TEST_PASSWORD in .env: the browser account is seeded with it.')
+      if (!result.passwordSet) consola.info('Set BROWSER_TEST_PASSWORD in .env: the browser account is seeded with it.')
     }
     consola.info('Next: bunx playwright install chromium, then bun run test:browser. After approving a plan, run bunx guren browser:map to regenerate the specs.')
     if (result.behaviours === 'none') {
