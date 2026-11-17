@@ -11,7 +11,7 @@ import { formatDestructiveFinding, judgeMigrations, readMigrationSources } from 
 
 import { parseSourceFile } from '../parse-cache'
 import { bracketedTokens, isAcceptanceId } from '../plan/acceptance-status'
-import { objectLiteral, topLevelDeclaration, walk } from '../ast-walk'
+import { canonicalSyntax, objectLiteral, topLevelDeclaration, walk } from '../ast-walk'
 import { TEST_FILE_PATTERN, toPosixRelative } from '../discovery'
 import { extractClassDeclaration } from '../model-parser'
 import { isPlanRevisionsDirName, planSlug } from '../plan/beside'
@@ -24,6 +24,7 @@ import { applyReviewPolicy, loadBaseReviewPolicy, REVIEW_POLICY_FILE, type Loade
 import type { ChangedPath, ChangeReader, ChangeSide, ResolvedChange } from './resolve'
 import type { ChangedDependencyFile, LockfileAdvisories } from './revision-advisories'
 import type { BaseRecordReading } from './base-record'
+import type { DeclarationSubject, OpenPlan } from './declarations'
 import type { ChangeAudits, HeadRecords } from './revision-audit'
 import { compareSecurityRecords, type SecurityRecords } from './security-records'
 
@@ -39,7 +40,7 @@ export interface ChangeFact {
   target?: string
   files: string[]
   evidence: 'registered' | 'static' | 'path'
-  /** The plan element whose declaration matched. Never set until the declaration matcher ships. */
+  /** The plan and element ids whose declaration lowered it (`docs/plans/comments/plan.json#model.comment`). */
   declaredBy?: string
   message: string
 }
@@ -74,6 +75,11 @@ export interface ChangeLaneReport {
   plans: ChangePlan[]
   /** `guren.review.ts` at the merge base. */
   policy: LoadedReviewPolicy
+}
+
+/** ` (declared by docs/plans/comments/plan.json#model.comment)`, or nothing. */
+export function declarationNote(fact: Pick<ChangeFact, 'declaredBy'>): string {
+  return fact.declaredBy === undefined ? '' : ` (declared by ${fact.declaredBy})`
 }
 
 export function highestLane(lanes: Iterable<Lane>): Lane {
@@ -238,8 +244,12 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   const claimed = new Set<ChangedPath>()
   // The entries, not their names: an outside-app path is named from the root, as an app path of the same spelling is.
   const dependencyEntries = new Set<ChangedPath>()
-  const fact = (entries: readonly ChangedPath[], value: Omit<ChangeFact, 'files'>): void => {
-    facts.push({ ...value, files: entries.map((entry) => entry.path) })
+  // What a declarable fact is about, for the declaration matcher to read once every fact is in.
+  const subjects = new Map<ChangeFact, DeclarationSubject>()
+  const fact = (entries: readonly ChangedPath[], value: Omit<ChangeFact, 'files'>, subject?: DeclarationSubject): void => {
+    const created = { ...value, files: entries.map((entry) => entry.path) }
+    facts.push(created)
+    if (subject) subjects.set(created, subject)
     for (const entry of entries) {
       claimed.add(entry)
       if (value.code === 'dependencies-changed') dependencyEntries.add(entry)
@@ -386,7 +396,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     const afterTables = new Map(after.map((table) => [table.identifier, table]))
     for (const [identifier, table] of afterTables) {
       const previous = beforeTables.get(identifier)
-      if (!previous) fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)} added (${table.columns.length} columns)` })
+      if (!previous) fact([entry], { code: 'schema-changed', lane: 'medium', target: describeTable(table), evidence: 'static', message: `table ${describeTable(table)} added (${table.columns.length} columns)` }, { kind: 'table', table, file: head!, tables: after })
       else if (JSON.stringify(previous) !== JSON.stringify(table)) {
         const differences = tableDifferences(previous, table)
         // What the reader did not follow is no table fact a policy may lower.
@@ -447,7 +457,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     if (claimed.has(entry) || !touches(entry, isPolicyFile)) continue
     const { base, head } = sides(entry)
     if (base === undefined) {
-      fact([entry], { code: 'policy-added', lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}` })
+      fact([entry], { code: 'policy-added', lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}` }, { kind: 'file', path: entry.path })
       continue
     }
     if (!isPolicyFile(base)) {
@@ -511,7 +521,8 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
 
   for (const entry of inApp) {
     if (claimed.has(entry)) continue
-    fact([entry], { code: fallbackCode(entry), lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}${entry.oldPath ? ` from ${entry.oldPath}` : ''}` })
+    const code = fallbackCode(entry)
+    fact([entry], { code, lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}${entry.oldPath ? ` from ${entry.oldPath}` : ''}` }, code === 'file-added' ? { kind: 'file', path: entry.path } : undefined)
   }
 
   // One run serves the audit and the security records: both read the same two exports.
@@ -612,8 +623,13 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     }
   }
 
+  const plans = await readChangePlans(reader, trees.head)
+  // A change that writes a plan record is high already, and must not cite what it wrote.
+  const declared = plans.open.length > 0 && subjects.size > 0 && !facts.some((entry) => entry.code === 'plan-record')
+    ? await (await import('./declarations')).applyPlanDeclarations(facts, subjects, plans.open, (path) => reader.read('head', path))
+    : facts
   const policy = await loadBaseReviewPolicy(reader)
-  const judged = policy.state === 'read' ? applyReviewPolicy(facts, change.paths, policy.policy) : facts
+  const judged = policy.state === 'read' ? applyReviewPolicy(declared, change.paths, policy.policy) : declared
   if (policy.state === 'unreadable') {
     unjudged.push({ reader: 'review-policy', reason: `${REVIEW_POLICY_FILE} at the merge base was not applied, so a lane it raises would not show: ${policy.reason}`, lane: 'high', files: [REVIEW_POLICY_FILE] })
   }
@@ -628,15 +644,10 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     unjudged,
     audit,
     records,
-    plans: await readChangePlans(reader, trees.head),
+    plans: plans.listed,
     policy,
   }
 }
-
-const AST_POSITION_KEYS = new Set(['start', 'end', 'loc', 'range', 'extra', 'leadingComments', 'trailingComments', 'innerComments'])
-
-/** A node as its syntax, without positions or comments: a string literal keeps its exact value. */
-const canonical = (node: unknown): string => JSON.stringify(node, (key, value: unknown) => (AST_POSITION_KEYS.has(key) ? undefined : value))
 
 /**
  * A schema file without its tables, its drizzle imports and an object listing only tables: what
@@ -660,7 +671,7 @@ function schemaResidue(text: string | null, file: string | undefined, tables: re
     if (framework(statement)) continue
     const declaration = topLevelDeclaration(statement)
     if (!declaration?.declarations.every((declarator) => declarator.id.type === 'Identifier' && (names.has(declarator.id.name) || listsTables(declarator.init)))) {
-      kept.push(canonical(statement))
+      kept.push(canonicalSyntax(statement))
       continue
     }
     walk(declaration.declarations.map((declarator) => declarator.init), (node, parent) => {
@@ -668,27 +679,28 @@ function schemaResidue(text: string | null, file: string | undefined, tables: re
       const body = node.type === 'ArrowFunctionExpression' ? (node.body as { type?: string; object?: { type?: string; name?: string }; computed?: boolean }) : undefined
       if (body?.type === 'MemberExpression' && !body.computed && body.object?.type === 'Identifier' && names.has(String(body.object.name))) return false
       if (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression' || node.type === 'SpreadElement' || node.type === 'TaggedTemplateExpression') {
-        kept.push(canonical(node))
+        kept.push(canonicalSyntax(node))
         return false
       }
       if (node.type !== 'Identifier' || builders.has(String(node.name)) || names.has(String(node.name))) return
       const named = parent as { type?: string; key?: unknown; property?: unknown; computed?: boolean } | null
       if (!named?.computed && ((named?.type === 'MemberExpression' && named.property === node) || (named?.type === 'ObjectProperty' && named.key === node))) return
-      kept.push(canonical(node))
+      kept.push(canonicalSyntax(node))
     })
   }
   return kept.join('\n')
 }
 
-/** The plans at the head with the standing each has there, read from the head's own records. */
-async function readChangePlans(reader: ChangeReader, head: ReadonlySet<string>): Promise<ChangePlan[]> {
+/** The plans at the head with the standing each has there, read from the head's own records, and the open ones. */
+async function readChangePlans(reader: ChangeReader, head: ReadonlySet<string>): Promise<{ listed: ChangePlan[]; open: OpenPlan[] }> {
   const inputs = [...head].filter(isPlanInput)
-  if (!inputs.some((path) => isPlanFileName(posix.basename(path)))) return []
+  if (!inputs.some((path) => isPlanFileName(posix.basename(path)))) return { listed: [], open: [] }
   const root = await reader.materialize('head', inputs)
   const [{ readPlanFile }, { readPlanApprovalStanding }, { readPlanClosedHash }, { planDigest }] = await Promise.all([
     import('../plan-render'), import('../plan/approvals'), import('../plan/open-plan'), import('../plan/identity'),
   ])
   const plans: ChangePlan[] = []
+  const open: OpenPlan[] = []
   for (const path of (await discoverPlanFiles(root)).files) {
     const file = toPosixRelative(root, path)
     try {
@@ -699,11 +711,13 @@ async function readChangePlans(reader: ChangeReader, head: ReadonlySet<string>):
       else if (standing.state !== 'approved') plans.push({ file, hash, standing: standing.state })
       else {
         const closed = await readPlanClosedHash(root, planSlug(path))
-        plans.push({ file, hash, standing: 'unreadable' in closed ? 'unreadable' : closed.hash === hash ? 'closed' : 'open' })
+        const state = 'unreadable' in closed ? 'unreadable' : closed.hash === hash ? 'closed' : 'open'
+        plans.push({ file, hash, standing: state })
+        if (state === 'open') open.push({ file, plan })
       }
     } catch {
       plans.push({ file, hash: '', standing: 'unreadable' })
     }
   }
-  return plans
+  return { listed: plans, open }
 }
