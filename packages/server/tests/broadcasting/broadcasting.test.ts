@@ -646,6 +646,7 @@ describe('BroadcastManager', () => {
     it.each([
       ['chat.{room}.{user}', `private-chat.${'a'.repeat(200_000)}.`],
       ['chat.{a}-{b}', `private-chat.${'x-'.repeat(100_000)}.`],
+      ['chat\\.{room}.{user}', `private-chat.${'a'.repeat(200_000)}.`],
     ])('should reject a long name against %s in linear time', async (pattern, name) => {
       manager.privateChannel(pattern, () => true)
 
@@ -655,6 +656,14 @@ describe('BroadcastManager', () => {
 
       expect(result).toBe(false)
       expect(elapsed).toBeLessThan(1000)
+    })
+
+    it('should read an escaped dot as a dot and an unescaped one as any character', async () => {
+      manager.privateChannel('chat\\.{room}.end', () => true)
+
+      expect(await manager.authorize('private-chat.lobby.end', null)).toBe(true)
+      expect(await manager.authorize('private-chat.lobby-end', null)).toBe(true)
+      expect(await manager.authorize('private-chatxlobby.end', null)).toBe(false)
     })
 
     it('should return true for unregistered channels', async () => {
