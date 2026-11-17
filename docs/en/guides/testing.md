@@ -436,6 +436,14 @@ bunx guren make:test posts/PostController
 
 `make:test` writes a `bun:test` file, or a Vitest one when the app has a `vitest.config.*` or depends on `vitest`. Pass `--runner bun` or `--runner vitest` to choose.
 
+## Browser Tests
+
+`TestApp` never opens a browser, so it cannot tell you that a form label is missing or that a route renders the wrong page. For that, `bunx guren add browser-tests` sets up Playwright tests that start your app and open it in a real browser. `bunx guren browser:map` generates their specs: one per page, and one per approved plan's views. Run them with `bun run test:browser`. `guren gate` does not run them.
+
+To run a plan's behaviours in the browser too (fill the form, submit it, check where the page lands), add `--behaviours --agent claude-code`, or `codex`, or `none` for no agent. Run those tests with `bun run test:behaviours`. CI runs `bun run test:behaviours:ci`, which replays the recorded steps and needs no login.
+
+The CLI reference lists the files each command writes and what to commit: see [`add browser-tests`](./cli.md#add-browser-tests) and [Behaviour specs](./cli.md#behaviour-specs).
+
 ## Testing a Controller Without the App (Vitest)
 
 `TestApp` covers most controller tests. If you add Vitest to test a controller in isolation, with its models mocked, `@guren/testing` has helpers for that:

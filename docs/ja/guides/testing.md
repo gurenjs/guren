@@ -438,6 +438,14 @@ bunx guren make:test posts/PostController
 
 `make:test` は `bun:test` のファイルを書き出します。アプリに `vitest.config.*` があるか `vitest` に依存している場合は Vitest のファイルになります。`--runner bun` か `--runner vitest` で明示的に選べます。
 
+## ブラウザテスト
+
+`TestApp` はブラウザを開かないので、フォームのラベルが表示されていないことや、ルートが別のページを描画していることには気づけません。こうした問題は、`bunx guren add browser-tests` で導入する Playwright のブラウザテストで確かめます。テストはアプリを起動して、本物のブラウザで開きます。spec はページごとと、承認済みの計画のビューごとに `bunx guren browser:map` が生成します。実行は `bun run test:browser` で、`guren gate` では実行されません。
+
+計画の振る舞い（フォームに入力して送信し、遷移先のページを確かめる）もブラウザで実行するときは、`--behaviours --agent claude-code` を付けます。エージェントには `codex` も指定でき、エージェントを使わないなら `none` にします。このテストは `bun run test:behaviours` で実行します。CI で実行する `bun run test:behaviours:ci` は記録したステップを再生するだけなので、ログインは要りません。
+
+各コマンドが書き出すファイルとコミットするものは、CLI リファレンスの [`add browser-tests`](./cli.md#add-browser-tests) と[振る舞いの spec](./cli.md#振る舞いの-spec) にまとめてあります。
+
 ## アプリを使わずにコントローラーをテストする（Vitest）
 
 コントローラーのテストは、たいてい `TestApp` で足ります。Vitest を追加して、モデルをモックしたうえでコントローラー単体をテストしたい場合は、`@guren/testing` の次のヘルパーを使います。
