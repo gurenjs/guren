@@ -89,7 +89,7 @@ export interface AddBrowserTestsResult {
   behaviours?: BehaviourAgentChoice
   /** A setup project signs in as the seeded browser account. */
   signIn: boolean
-  /** `.env` or this process's environment gives `BROWSER_TEST_PASSWORD` a value. */
+  /** An env file the Playwright config loads, or this process's environment, gives `BROWSER_TEST_PASSWORD` a value. */
   passwordSet: boolean
   map: BrowserMap
   /** False when config/database.ts never seeds on boot, so `browser:serve` never writes the browser account. */
@@ -220,18 +220,29 @@ async function olderPlaywright(cwd: string): Promise<{ installed: string; pinned
 /** The agent's packages the manifest declares: `@e2e-dev/acp` and every adapter, which a config with no agent never loads. */
 const AGENT_ONLY_PACKAGES = [BEHAVIOUR_AGENT_PACKAGE, ...AGENT_NAMES.map((name) => BEHAVIOUR_AGENTS[name].adapter.name)]
 
-/** A value a `BROWSER_TEST_PASSWORD=` line of `.env` assigns (the last one), or one this process already has. */
+/**
+ * The value the Playwright config ends up with: this process's, else the first of its env files that
+ * assigns it (the last line there), since `process.loadEnvFile()` replaces no name already set.
+ * The file order is `playwright.browser.config.ts`'s; change both together.
+ */
 async function browserPasswordSet(cwd: string): Promise<boolean> {
   if (process.env.BROWSER_TEST_PASSWORD) return true
-  const lines = [...((await readIfExists(cwd, '.env')) ?? '').matchAll(/^\s*(?:export\s+)?BROWSER_TEST_PASSWORD=(.*)$/gmu)]
-  const value = lines.at(-1)?.[1]?.replace(/\s+#.*$/u, '').trim().replace(/^(['"])(.*)\1$/u, '$2')
-  return value !== undefined && value !== ''
+  const mode = process.env.NODE_ENV || 'development'
+  for (const file of ['.env.local', `.env.${mode}`, '.env']) {
+    const lines = [...((await readIfExists(cwd, file)) ?? '').matchAll(/^\s*(?:export\s+)?BROWSER_TEST_PASSWORD=(.*)$/gmu)]
+    const value = lines.at(-1)?.[1]?.replace(/\s+#.*$/u, '').trim().replace(/^(['"])(.*)\1$/u, '$2')
+    if (value !== undefined) return value !== ''
+  }
+  return false
 }
 
-/** Takes the agent's packages out once the config on disk names no agent, so nothing keeps an adapter no test can start. */
-async function removeAgentPackages(cwd: string, install: boolean): Promise<void> {
+/** Takes out the agent packages the manifest declares and the config on disk does not start, so no adapter stays behind. */
+async function removeAgentPackages(cwd: string, install: boolean, keep: BehaviourAgent | undefined): Promise<void> {
+  const unused = keep === undefined
+    ? AGENT_ONLY_PACKAGES
+    : AGENT_NAMES.filter((name) => name !== keep).map((name) => BEHAVIOUR_AGENTS[name].adapter.name)
   const declared: string[] = []
-  for (const name of AGENT_ONLY_PACKAGES) if ((await appDependsOn(cwd, name)) === true) declared.push(name)
+  for (const name of unused) if ((await appDependsOn(cwd, name)) === true) declared.push(name)
   if (declared.length === 0) return
   if (install) await runCommand('bun', ['remove', ...declared], { cwd })
   else consola.info(`Run: bun remove ${declared.join(' ')}`)
@@ -332,8 +343,11 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
     )
   }
   await installDevPackages(cwd, options.install ?? true, agent)
-  // Only once the config names no agent: removing them under a kept config that imports one would stop it loading.
-  if (agent === 'none' && !keptNamesAgent) await removeAgentPackages(cwd, options.install ?? true)
+  // Only once the config starts no other agent: removing an adapter a kept config imports would stop it loading.
+  if (agent === 'none' && !keptNamesAgent) await removeAgentPackages(cwd, options.install ?? true, undefined)
+  if (agent && agent !== 'none' && (kept === null || kept.includes(CONFIG_AGENT_LINES(agent)[0]!.trim()))) {
+    await removeAgentPackages(cwd, options.install ?? true, agent)
+  }
   const older = agent ? await olderPlaywright(cwd) : undefined
   if (older) {
     consola.warn(`${PLAYWRIGHT_PACKAGE} ${older.installed} is older than the playwright-core ${older.pinned} the e2e runner pins. With both installed, the accessibility spec may stop typechecking, since ${AXE_PACKAGE}'s types can name the newer copy. Run: bun add -d ${PLAYWRIGHT_PACKAGE}@^${older.pinned}`)
