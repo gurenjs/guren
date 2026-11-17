@@ -84,28 +84,34 @@ interface RateLimitOptions {
   /** Prefix for rate limit keys (default: 'rl:') */
   keyPrefix?: string
 
-  /** Trust proxy headers (CF-Connecting-IP, True-Client-IP, X-Real-IP, X-Forwarded-For) for client IPs (default: false) */
-  trustProxy?: boolean
+  /** Read the client IP from what your proxy adds: true, { hops }, or { header } (default: false) */
+  trustProxy?: boolean | { hops: number } | { header: string }
 }
 ```
 
 ### Deployments Behind a Proxy
 
-When your app always sits behind a reverse proxy or CDN (Cloudflare, ALB, Nginx), enable `trustProxy` for per-client limiting without writing a custom `keyGenerator`:
+When your app always sits behind a reverse proxy or CDN (Cloudflare, ALB, Nginx), enable `trustProxy` for per-client limiting without writing a custom `keyGenerator`. A proxy appends the address it received the request from to `X-Forwarded-For` and passes on whatever the client already put there, so only the entries at the right end are trustworthy:
 
 ```ts
-createRateLimitMiddleware({
-  limit: 100,
-  trustProxy: true, // resolves CF-Connecting-IP → True-Client-IP → X-Real-IP → X-Forwarded-For[0]
-})
+// One proxy (ALB, Nginx with proxy_add_x_forwarded_for): the last X-Forwarded-For entry
+createRateLimitMiddleware({ limit: 100, trustProxy: true })
+
+// Two proxies (Cloudflare in front of an ALB): the second entry from the right
+createRateLimitMiddleware({ limit: 100, trustProxy: { hops: 2 } })
+
+// A single-value header your proxy overwrites on every request
+createRateLimitMiddleware({ limit: 100, trustProxy: { header: 'cf-connecting-ip' } })
 ```
 
-> **Warning:** Enable `trustProxy` only when every request passes through your proxy. On direct deployments clients can spoof these headers to bypass per-client limits — that is why it defaults to `false`.
+`trustProxy: true` is `{ hops: 1 }`. It does not read `CF-Connecting-IP`, `True-Client-IP` or `X-Real-IP`, since an ALB or Nginx forwards those as the client sent them; name one with `{ header }` only when your proxy sets it on every request. When the header is missing or `X-Forwarded-For` has fewer entries than `hops`, the limiter keys on the socket address.
+
+> **Warning:** Enable `trustProxy` only when every request passes through your proxy. On direct deployments clients can send these headers themselves to bypass per-client limits, which is why it defaults to `false`. With `{ header }`, also make sure the app cannot be reached except through the proxy that sets it (for Cloudflare, accept only Cloudflare's addresses at the load balancer).
 
 ### Full Configuration Example
 
 ```ts
-import { AUTH_CONTEXT_KEY, createRateLimitMiddleware, MemoryRateLimitStore } from '@guren/core'
+import { AUTH_CONTEXT_KEY, createRateLimitMiddleware, MemoryRateLimitStore, resolveClientIp } from '@guren/core'
 import type { AuthContext } from '@guren/core'
 import type { Context } from 'hono'
 
@@ -136,7 +142,7 @@ const rateLimiter = createRateLimitMiddleware({
     if (user) {
       return `user:${user.id}`
     }
-    return ctx.req.header('x-forwarded-for')?.split(',')[0] ?? 'unknown'
+    return resolveClientIp(ctx, true) ?? 'unknown'
   },
 
   // Skip for admin users
@@ -354,7 +360,7 @@ const rateLimiter = createRateLimitMiddleware({
     return apiKey === process.env.INTERNAL_API_KEY
 
     // Or skip for certain IPs
-    const ip = ctx.req.header('x-forwarded-for')
+    const ip = resolveClientIp(ctx, true)
     return ['10.0.0.1', '10.0.0.2'].includes(ip ?? '')
   },
 })
