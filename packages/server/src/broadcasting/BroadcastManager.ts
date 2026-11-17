@@ -16,6 +16,7 @@ import type {
   PresenceMember,
 } from './types'
 import { broadcastChannelsOf, broadcastNameOf } from './event-target'
+import { isWalkableChannelPattern, walkChannelPattern } from './channel-pattern'
 import { isSenderUserId, isSocketId, markSender, readSender, stripSender } from './sender-envelope'
 import { Channel, PrivateChannel, PresenceChannel } from './channels'
 import { MemoryDriver } from './drivers'
@@ -308,6 +309,8 @@ export class BroadcastManager {
   }
 
   protected matchPattern(pattern: string, channelName: string): boolean {
+    if (isWalkableChannelPattern(pattern)) return walkChannelPattern(pattern, channelName)
+
     const regexPattern = pattern
       .replace(/\{[^}]+\}/g, '[^.]+')
       .replace(/\*\*/g, '.+')
