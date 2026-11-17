@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { buildApplicationGraph, graphId, packageControllerSource, type ApplicationGraphInputs, type GraphNode, type GurenApplicationGraph } from '../src/application-graph'
 import { BROWSER_MAP_SECTIONS, buildBrowserMap, renderFeatureDoc, renderIndexDoc, type BrowserMap } from '../src/browser-map'
 import { approvedPlans } from '../src/browser-map-files'
+import { extractAcceptanceCitations } from '../src/docs-acceptance'
 import { createTempWorkspace, writeWorkspaceFiles } from './helpers'
 import { approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan, loadParsedCommentsPlan } from './plan-fixture'
 
@@ -217,7 +218,9 @@ describe('feature documents', () => {
     expect(doc.content).toContain('**AC-comments-2** (validation)')
     expect(doc.content).toContain('(message text not planned)')
     expect(doc.content).toContain('(button or link: check the page)')
-    expect(doc.content).toContain('- validation (AC-comments-2): ')
+    expect(doc.content).toContain('- validation (`AC-comments-2`): ')
+    // A code span is no citation, so check --docs asks no test of an id the map only lists.
+    expect(extractAcceptanceCitations(doc.content)).toEqual([])
   })
 
   test('folds multiline plan prose so the document reads back and reruns unchanged', () => {

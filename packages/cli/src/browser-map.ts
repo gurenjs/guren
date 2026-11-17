@@ -378,7 +378,7 @@ function seededCharters(feature: BrowserFeature): string[] {
     kinds.set(acceptance.kind, ids)
   }
   if (kinds.size === 0) return ['One line per area to explore: one area, one posture, one sentence.']
-  return [...kinds].map(([kind, ids]) => `- ${kind} (${ids.join(', ')}): ${CHARTER_BY_KIND[kind]}`)
+  return [...kinds].map(([kind, ids]) => `- ${kind} (${ids.map(code).join(', ')}): ${CHARTER_BY_KIND[kind]}`)
 }
 
 function generatedBlocks(feature: BrowserFeature, map: BrowserMap): Array<[GeneratedSection, string[]]> {
