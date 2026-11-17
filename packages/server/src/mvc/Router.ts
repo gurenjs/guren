@@ -8,7 +8,8 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
-import { readDispatchedToolRoute } from '../internal/dispatched-request'
+import { markRouterRouteEntry, readDispatchedToolRoute } from '../internal/dispatched-request'
+import { refuseMisroutedToolCall } from '../agent/dispatched-route-guard'
 import { trimSlashes } from '../support/trim-slashes'
 import { extractPathParamNames, PATH_PARAM_PATTERN } from '../internal/route-path'
 import { createPrototypeRouteHandler, isPrototypeHandler, type PrototypeRouteHandler } from './prototype'
@@ -752,7 +753,7 @@ export class Router<in M extends string = never> {
       if (preflightMiddleware) chain.push(preflightMiddleware)
       chain.push(handler)
       // Wrapped, not prepended: each Hono handler is a route entry of its own.
-      chain[0] = guardDispatchedRoute(route, chain[0]!)
+      chain[0] = markRouterRouteEntry(guardDispatchedRoute(route, chain[0]!))
       return { route, chain }
     })
     for (const { route, chain } of prepared) {
@@ -1429,11 +1430,7 @@ function guardDispatchedRoute(route: RegisteredRoute, first: MiddlewareHandler):
     ) {
       return first.call(this, c, next)
     }
-    return Promise.resolve(c.json({
-      message:
-        `The tool call reached a different route than the tool's own (${target.method} ${target.path}), `
-        + 'so nothing was run. A path parameter equal to another route\'s literal segment selects that route.',
-    }, 400))
+    return Promise.resolve(refuseMisroutedToolCall(c, target))
   }
   Object.defineProperty(guarded, 'length', { value: first.length })
   Object.defineProperty(guarded, 'name', { value: first.name })

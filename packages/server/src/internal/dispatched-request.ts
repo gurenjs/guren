@@ -37,3 +37,16 @@ export function isDispatchedToolRequest(request: Request): boolean {
 export function readDispatchedToolRoute(request: Request): DispatchedToolRoute | undefined {
   return dispatched.get(request)
 }
+
+const routeEntries = new WeakSet<object>()
+
+/** Record `handler` as the first handler of a route `Router.mount()` registered, returning it. */
+export function markRouterRouteEntry<T extends object>(handler: T): T {
+  routeEntries.add(handler)
+  return handler
+}
+
+/** Whether `handler` opens a route `Router.mount()` registered, which checks the dispatched route itself. */
+export function isRouterRouteEntry(handler: unknown): boolean {
+  return typeof handler === 'function' && routeEntries.has(handler)
+}

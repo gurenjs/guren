@@ -534,6 +534,59 @@ describe('a tool call whose path resolves to another route', () => {
     expect(result.outcome.isError).toBe(true)
     expect(reached).toEqual([])
   })
+
+  async function bootWithHono(register: (hono: Hono, reached: string[]) => void) {
+    const reached: string[] = []
+    const app = createApp({
+      boot: (hono) => register(hono, reached),
+      routes: (router) => {
+        router
+          .get('/posts/:id', (c) => Response.json({ id: c.req.param('id') }))
+          .name('posts.show')
+          .agent({ toolName: 'posts_show' })
+      },
+    })
+    await app.boot()
+    const tool = deriveAgentTools(app.router.definitions()).tools.find((candidate) => candidate.toolName === 'posts_show')!
+    return { app, tool, reached }
+  }
+
+  // `boot` runs before the routes mount, so a route it adds to Hono matches ahead of the tool's.
+  test('should refuse a value that lands on a route the boot callback added straight to Hono', async () => {
+    const { app, tool, reached } = await bootWithHono((hono, seen) => {
+      hono.get('/posts/new', (c) => {
+        seen.push('boot route')
+        return c.json({ page: 'create' })
+      })
+    })
+
+    const built = buildToolRequest(tool, { id: 'new' })
+    if (!('request' in built)) throw new Error('request not built')
+    const outcome = await mapToolResponse(tool, await app.fetch(built.request))
+
+    expect(outcome.status).toBe(400)
+    expect(reached).toEqual([])
+    const direct = await app.fetch(new Request('http://localhost/posts/new'))
+    expect(direct.status).toBe(200)
+    expect(reached).toEqual(['boot route'])
+  })
+
+  test('should let a tool call through middleware the boot callback added with hono.use()', async () => {
+    const { app, tool, reached } = await bootWithHono((hono, seen) => {
+      hono.use('/posts/*', async (_c, next) => {
+        seen.push('boot middleware')
+        await next()
+      })
+    })
+
+    const built = buildToolRequest(tool, { id: '7' })
+    if (!('request' in built)) throw new Error('request not built')
+    const outcome = await mapToolResponse(tool, await app.fetch(built.request))
+
+    expect(outcome.status).toBe(200)
+    expect(JSON.parse(outcome.content[0]!.text)).toEqual({ id: '7' })
+    expect(reached).toEqual(['boot middleware'])
+  })
 })
 
 /**

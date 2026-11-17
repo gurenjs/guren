@@ -138,6 +138,17 @@ describe('deriveAgentTools (RFC 0016)', () => {
       expect(toolNamed(router, 'drafts.index').description).toBe('Agent description')
       expect(toolNamed(router, 'tags.index').description).toBeUndefined()
     })
+
+    test('leaves out a tool whose method, path and name another route also has', () => {
+      const router = new Router()
+      router.get('/posts/:id', [PostController, 'index']).name('posts.show')
+      router.get('/posts/:id', [PostController, 'index']).name('posts.show').agent({ toolName: 'posts_show' })
+      router.get('/posts/:id', [PostController, 'index']).name('posts.preview').agent({})
+
+      const { tools, warnings } = deriveAgentTools(router.definitions())
+      expect(tools.map((tool) => tool.toolName)).toEqual(['posts.preview'])
+      expect(warnings).toContainEqual(expect.stringContaining('posts_show: GET /posts/:id (route "posts.show") shares its method, path and name'))
+    })
   })
 
   describe('exposure', () => {
