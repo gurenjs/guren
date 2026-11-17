@@ -589,6 +589,25 @@ export default {
       expect(boundary(results)).toEqual([])
     })
 
+    it('should keep a file only a type-only import lands on out of the runtime surface', async () => {
+      const files = {
+        'modules/contracts/package.json': JSON.stringify({ main: 'index.ts', types: 'app/contracts.ts' }),
+        'modules/contracts/index.ts': 'export const contractsModule = {}\n',
+        'modules/contracts/app/contracts.ts': 'export interface Contract { id: number }\nexport const helper = 1\n',
+      }
+      const typed = await checkModules(OPT_IN, {
+        ...files,
+        'modules/billing/service.ts': `import type { Contract } from '../contracts'\nexport type X = Contract\n`,
+      })
+      const valued = await checkModules(OPT_IN, {
+        ...files,
+        'modules/billing/service.ts': `import { helper } from '../contracts/app/contracts'\nexport const h = helper\n`,
+      })
+
+      expect(boundary(typed)).toEqual([])
+      expect(boundary(valued).map(([file, status]) => [file, status])).toEqual([['modules/billing/service.ts', 'fail']])
+    })
+
     it('should report one runtime violation when a file reaches the same internals both ways', async () => {
       const results = await checkModules(OPT_IN, {
         'modules/billing/service.ts':

@@ -97,24 +97,26 @@ async function evaluateDerivedModuleRules(
 
   // A module's public surface is what an import of its directory, or of its `db/schema`,
   // lands on. Resolved only for a module some import reaches across into. A type-only
-  // import may land on a `.d.ts` instead, so that reading joins the surface with it.
+  // import may land elsewhere (a `.d.ts`, package.json `types`): that file is surface for
+  // a type-only import alone, or opting in would pass a value import of it.
   const surfaces = new Map<string, Promise<Set<string>>>()
-  const surfaceOf = (name: string): Promise<Set<string>> => {
-    let surface = surfaces.get(name)
+  const surfaceOf = (name: string, typeOnly: boolean): Promise<Set<string>> => {
+    const key = `${name}:${typeOnly}`
+    let surface = surfaces.get(key)
     if (!surface) {
       const moduleDir = resolve(cwd, 'modules', name)
       const schema = join(moduleDir, 'db', 'schema')
       surface = Promise.all([
         moduleEntryFile(moduleDir, probe),
         resolveImportPath(schema, { probe }),
-        ...(includeTypes
+        ...(typeOnly
           ? [
               resolveDirectoryImport(moduleDir, { declarations: true, probe }),
               resolveImportPath(schema, { declarations: true, probe }),
             ]
           : []),
       ]).then((files) => new Set(files.flatMap((file) => (file === null ? [] : [toPosixRelative(cwd, file)]))))
-      surfaces.set(name, surface)
+      surfaces.set(key, surface)
     }
     return surface
   }
@@ -146,7 +148,7 @@ async function evaluateDerivedModuleRules(
 
       const targetModule = moduleNameFromRelPath(imp.fileRelPath)
       if (!targetModule || targetModule === importerModule) continue
-      if ((await surfaceOf(targetModule)).has(imp.fileRelPath)) continue
+      if ((await surfaceOf(targetModule, imp.typeOnly)).has(imp.fileRelPath)) continue
 
       results.push(
         check(
