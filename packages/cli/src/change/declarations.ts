@@ -14,7 +14,9 @@ import { parseSourceFile } from '../parse-cache'
 import { readPolicyAbilities } from '../plan/policy-abilities'
 import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
 import { planScaffoldOutput, type PlanScaffoldApp } from '../plan/scaffold'
-import { providerFilePath } from '../plan/scaffold-http'
+import { MODELS_DIR } from '../discovery'
+import { policyFilePath, providerFilePath, resourceFilePath, validatorFilePath } from '../plan/scaffold-http'
+import { controllerFilePath, sideEffectFilePath } from '../plan/scaffold-controller'
 import { derivePlanTasks, type PlanDerivedStep } from '../plan/tasks'
 import type { SchemaTable } from '../schema-parser'
 import { FACT_CLASSES } from './fact-classes'
@@ -57,7 +59,8 @@ export function declaredExports(ast: File): string[] | undefined {
     if (node.type === 'ExportAllDeclaration') return undefined
     if (node.type === 'ExportDefaultDeclaration') {
       const declaration = node.declaration
-      if ((declaration.type === 'ClassDeclaration' || declaration.type === 'FunctionDeclaration') && declaration.id) names.push('default', declaration.id.name)
+      // `export default class X` exports `default` only: an importer of `{ X }` finds nothing.
+      if ((declaration.type === 'ClassDeclaration' || declaration.type === 'FunctionDeclaration') && declaration.id) names.push('default')
       continue
     }
     if (node.type !== 'ExportNamedDeclaration' || node.exportKind === 'type') continue
@@ -182,14 +185,25 @@ function exportedStatement(ast: File, identifier: string): Statement | undefined
 
 const FRAMEWORK_MODULE = /^(?:drizzle-orm|@guren\/orm)(?:\/|$)/
 
+/** `pgTable` in `export const posts = pgTable('posts', …)`. */
+function factoryName(statement: Statement): string | undefined {
+  if (statement.type !== 'ExportNamedDeclaration' || statement.declaration?.type !== 'VariableDeclaration') return undefined
+  const init = statement.declaration.declarations[0]?.init
+  return init?.type === 'CallExpression' && init.callee.type === 'Identifier' ? init.callee.name : undefined
+}
+
 /**
  * Whether every name the statement reads is a framework builder imported under its own name, another table
  * of the file, or a parameter it binds: `import { text as integer }` keeps the syntax and swaps the types.
  */
 function importsBuildersAsThemselves(ast: File, statement: Statement, tables: readonly SchemaTable[]): boolean {
+  // One dialect's barrel: pg's `text` under an sqlite table keeps the syntax and drops sqlite's modes.
+  const factory = factoryName(statement)
+  const source = factory === undefined ? undefined : importOf(ast, factory)?.split('#')[0]
+  if (source === undefined || !FRAMEWORK_MODULE.test(source)) return false
   const builders = new Set<string>()
   for (const node of ast.program.body) {
-    if (node.type !== 'ImportDeclaration' || !FRAMEWORK_MODULE.test(node.source.value)) continue
+    if (node.type !== 'ImportDeclaration' || node.source.value !== source) continue
     for (const specifier of node.specifiers) {
       if (specifier.type === 'ImportSpecifier' && specifier.imported.type === 'Identifier' && specifier.imported.name === specifier.local.name) builders.add(specifier.local.name)
     }
@@ -201,6 +215,25 @@ function importsBuildersAsThemselves(ast: File, statement: Statement, tables: re
   })
   const own = new Set(tables.map((entry) => entry.identifier))
   return referencedIdentifiers(statement).every((name) => builders.has(name) || own.has(name) || bound.has(name))
+}
+
+/**
+ * Every path a scaffold of any of the plan's elements would write, whatever its kind, module or task:
+ * a second plan naming the file is a claim even where its own scaffold writes nothing there.
+ */
+export function planClaimedPaths(plan: PlanDraft): Set<string> {
+  return new Set([
+    ...plan.models.flatMap((model) => [`${MODELS_DIR}/${model.name}.ts`, validatorFilePath(model)]),
+    ...plan.resources.map(resourceFilePath),
+    ...plan.policies.flatMap((policy) => [policyFilePath(policy), providerFilePath(policy)]),
+    ...plan.controllers.map(controllerFilePath),
+    ...plan.sideEffects.map(sideEffectFilePath),
+  ])
+}
+
+/** Whether any model of the plan, whatever its change, names this table by SQL name in its module. */
+function claimsTable(plan: PlanDraft, table: SchemaTable): boolean {
+  return plan.models.some((model) => (model.module ?? null) === table.module && (model.table === table.tableName || model.tableRenamedFrom === table.tableName))
 }
 
 /** The added model the plan claims this table for, by SQL name and module, before anything else is compared. */
@@ -244,7 +277,7 @@ export async function applyPlanDeclarations(
   plans: readonly OpenPlan[],
   readHead: (path: string) => Promise<string | null>,
 ): Promise<ChangeFact[]> {
-  const owned = plans.map((open) => ({ open, files: planDeclaredFiles(open.plan) }))
+  const owned = plans.map((open) => ({ open, files: planDeclaredFiles(open.plan), paths: planClaimedPaths(open.plan) }))
   const result: ChangeFact[] = []
   for (const fact of facts) {
     const subject = subjects.get(fact)
@@ -256,13 +289,14 @@ export async function applyPlanDeclarations(
 
 async function declarationOf(
   subject: DeclarationSubject,
-  owned: ReadonlyArray<{ open: OpenPlan; files: Map<string, DeclaredFile> }>,
+  owned: ReadonlyArray<{ open: OpenPlan; files: Map<string, DeclaredFile>; paths: Set<string> }>,
   readHead: (path: string) => Promise<string | null>,
 ): Promise<string | undefined> {
   // Claimed by identity first: two approved plans about one file or table are a question for a person.
-  const claims = owned.filter(({ open, files }) => (subject.kind === 'table' ? claimedModel(open.plan, subject.table) !== undefined : files.has(subject.path)))
+  const claims = owned.filter(({ open, files, paths }) => (subject.kind === 'table' ? claimsTable(open.plan, subject.table) : files.has(subject.path) || paths.has(subject.path)))
   if (claims.length !== 1) return undefined
   const { open, files } = claims[0]!
+  if (subject.kind === 'file' && !files.has(subject.path)) return undefined
   if (subject.kind === 'table') {
     const id = declaredTable(open.plan, subject, await readHead(subject.file))
     return id ? `${open.file}#${id}` : undefined

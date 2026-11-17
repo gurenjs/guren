@@ -55,8 +55,8 @@ describe('declaredExports', () => {
     expect(exportsOf('export class A {}\nexport function b() {}\nexport const c = 1\nconst d = 2\nexport { d as e }\nexport type F = 1\nexport interface G {}\n')).toEqual(['A', 'b', 'c', 'e'])
   })
 
-  test('should name a default export by its declaration as well', () => {
-    expect(exportsOf('export default class Provider {}\n')).toEqual(['default', 'Provider'])
+  test('should count a default export as `default` only, which an importer of the name does not find', () => {
+    expect(exportsOf('export default class Provider {}\n')).toEqual(['default'])
   })
 
   test('should not count a name re-exported from another file, whether through `from` or an import', () => {
@@ -85,7 +85,7 @@ describe('planDeclaredFiles', () => {
       'app/Providers/CommentPolicyProvider.ts',
     ])
     expect(files.get('app/Models/Comment.ts')).toMatchObject({ elements: ['model.comment'], exports: ['Comment'], check: { kind: 'exports' } })
-    expect(files.get('app/Providers/CommentPolicyProvider.ts')).toMatchObject({ exports: ['default', 'CommentPolicyProvider'], check: { kind: 'whole' } })
+    expect(files.get('app/Providers/CommentPolicyProvider.ts')).toMatchObject({ exports: ['default'], check: { kind: 'whole' } })
     expect(files.get('app/Policies/CommentPolicy.ts')?.check.kind).toBe('policy')
     expect(files.get('app/Http/Controllers/CommentController.ts')?.check.kind).toBe('controller')
   })
@@ -159,6 +159,13 @@ ${COMMENTS.replace(".references(() => posts.id, { onDelete: 'cascade' })", '')}`
   test('should not match a statement whose builders are imported under other names', () => {
     const text = schemaWith(COMMENTS).replace('integer, pgTable, serial, text,', 'text as integer, pgTable, serial, integer as text,')
 
+    expect(declaredTable(commentsPlan(), tableSubject(text), text)).toBeUndefined()
+  })
+
+  test("should not match a statement that takes a builder from another dialect's barrel", () => {
+    const text = schemaWith(COMMENTS).replace('pgTable, serial, text, timestamp }', "pgTable, serial, timestamp }\nimport { text } from '@guren/orm/drizzle/sqlite'")
+
+    expect(text).toContain("import { text } from '@guren/orm/drizzle/sqlite'")
     expect(declaredTable(commentsPlan(), tableSubject(text), text)).toBeUndefined()
   })
 
@@ -260,6 +267,12 @@ export class Comment extends defineModel(comments) {}
     expect((await judge(only(), path, local)).lane).toBe('medium')
   })
 
+  test('should keep a policy the file exports as default, which the provider imports by name', async () => {
+    const path = 'app/Policies/CommentPolicy.ts'
+
+    expect((await judge(only(), path, scaffolded(path).replace('export class CommentPolicy', 'export default class CommentPolicy'), 'policy-added')).lane).toBe('medium')
+  })
+
   test('should keep a controller whose exported name is another class', async () => {
     const path = 'app/Http/Controllers/CommentController.ts'
     const aliased = `${scaffolded(path).replace('export default class CommentController', 'class CommentController')}\nclass Other extends Controller {\n  purgeAll() {}\n}\nexport { Other as CommentController, Other as default }\n`
@@ -288,6 +301,17 @@ export class Comment extends defineModel(comments) {}
 
     expect((await judge(plans, 'app/Models/Comment.ts', MODEL)).lane).toBe('medium')
     expect((await judge(plans, 'app/Http/Validators/CommentValidator.ts', scaffolded('app/Http/Validators/CommentValidator.ts'))).lane).toBe('medium')
+  })
+
+  test('should keep a file a second open plan names, though its own scaffold writes nothing there', async () => {
+    const path = 'app/Http/Controllers/CommentController.ts'
+    const other = commentsPlan((plan) => {
+      plan.controllers[0].change = { kind: 'existing' }
+      for (const action of plan.controllers[0].actions) action.change = { kind: 'existing' }
+    })
+
+    expect(planDeclaredFiles(other).has(path)).toBe(false)
+    expect((await judge([...only(), { file: 'docs/plans/moderation/plan.json', plan: other }], path, scaffolded(path))).lane).toBe('medium')
   })
 
   test('should keep a table a second open plan claims with other columns', async () => {
