@@ -127,24 +127,54 @@ function passesCheck(declared: DeclaredFile, ast: File, path: string): boolean {
   const planned = parseSourceFile(declared.contents, path)
   if (!planned) return false
   if (check.kind === 'whole') return canonicalSyntax(ast.program.body) === canonicalSyntax(planned.program.body)
-  if (check.kind === 'policy') {
-    // The scaffold writes a class; a `definePolicy()` object keeps keys its `exposes` leaves out, `before` among them.
-    if (!exportedClass(ast, check.policy.name)) return false
-    const read = readPolicyAbilities(ast, check.policy.name)
-    if ('unreadable' in read || read.open || read.fields.length > 0 || read.exposes) return false
-    const abilities = read.declared
-    const wanted = check.policy.abilities.map((ability) => ability.name)
-    return abilities.length === new Set(abilities).size && abilities.length === wanted.length && wanted.every((name) => abilities.includes(name))
-  }
-  const [head, scaffold] = [exportedClass(ast, check.controller.className), exportedClass(planned, check.controller.className)]
-  if (!head || !scaffold || canonicalSyntax(head.superClass) !== canonicalSyntax(scaffold.superClass)) return false
-  const actions = new Set(check.controller.actions.map((action) => action.name))
-  // An action is what `Router` dispatches to; a constructor, a static member or an accessor is not one the plan names.
-  return head.body.body.every((member) => {
-    if (member.type === 'ClassMethod') return member.kind === 'method' && !member.static && actions.has(memberKeyName(member) ?? '')
-    if (member.type === 'ClassProperty') return !member.static && (member.value?.type === 'ArrowFunctionExpression' || member.value?.type === 'FunctionExpression') && actions.has(memberKeyName(member) ?? '')
+  const className = check.kind === 'policy' ? check.policy.name : check.controller.className
+  const members = new Set(check.kind === 'policy' ? check.policy.abilities.map((ability) => ability.name) : check.controller.actions.map((action) => action.name))
+  const head = classFileAllowed(ast, planned, className, members)
+  if (!head || check.kind === 'controller') return head !== undefined
+  // The scaffold writes a class; a `definePolicy()` object keeps keys its `exposes` leaves out, `before` among them.
+  const read = readPolicyAbilities(ast, className)
+  if ('unreadable' in read || read.open || read.fields.length > 0 || read.exposes) return false
+  return read.declared.length === members.size && read.declared.every((name) => members.has(name))
+}
+
+/**
+ * The class `className` when the file is nothing but it, imports with names and type declarations, and the
+ * class extends the scaffold's base, imported as the scaffold imports it, with no member but `members`.
+ * An allowlist: any other statement, a decorator, a static block or an inherited member goes unread otherwise.
+ */
+function classFileAllowed(ast: File, planned: File, className: string, members: ReadonlySet<string>): ClassDeclaration | undefined {
+  const head = exportedClass(ast, className)
+  const scaffold = exportedClass(planned, className)
+  if (!head || !scaffold || head.superClass?.type !== 'Identifier' || canonicalSyntax(head.superClass) !== canonicalSyntax(scaffold.superClass)) return undefined
+  const base = head.superClass.name
+  if (importOf(ast, base) === undefined || importOf(ast, base) !== importOf(planned, base)) return undefined
+  const allowed = ast.program.body.every((node) => {
+    if (node.type === 'ImportDeclaration') return node.specifiers.length > 0
+    if (node.type === 'TSTypeAliasDeclaration' || node.type === 'TSInterfaceDeclaration') return true
+    if ((node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration') && extractClassDeclaration(node) === head) return true
+    return node.type === 'ExportNamedDeclaration' && !node.source && (node.declaration?.type === 'TSTypeAliasDeclaration' || node.declaration?.type === 'TSInterfaceDeclaration')
+  })
+  if (!allowed || (head.decorators?.length ?? 0) > 0) return undefined
+  // A member is what `Router` dispatches to or the Gate asks: a constructor, a static member or an accessor is not one the plan names.
+  const onlyPlanned = head.body.body.every((member) => {
+    if ((member as { decorators?: unknown[] }).decorators?.length) return false
+    if (member.type === 'ClassMethod') return member.kind === 'method' && !member.static && members.has(memberKeyName(member) ?? '')
+    if (member.type === 'ClassProperty') return !member.static && (member.value?.type === 'ArrowFunctionExpression' || member.value?.type === 'FunctionExpression') && members.has(memberKeyName(member) ?? '')
     return false
   })
+  return onlyPlanned ? head : undefined
+}
+
+/** `module#imported` for the local name `local`, or `undefined` when no import binds it. */
+function importOf(ast: File, local: string): string | undefined {
+  for (const node of ast.program.body) {
+    if (node.type !== 'ImportDeclaration' || node.importKind === 'type') continue
+    for (const specifier of node.specifiers) {
+      if (specifier.local.name !== local || specifier.type !== 'ImportSpecifier') continue
+      return `${node.source.value}#${specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value}`
+    }
+  }
+  return undefined
 }
 
 function exportedStatement(ast: File, identifier: string): Statement | undefined {

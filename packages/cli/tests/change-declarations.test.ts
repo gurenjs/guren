@@ -240,6 +240,26 @@ export class Comment extends defineModel(comments) {}
     expect((await judge(only(), path, aliased, 'policy-added')).lane).toBe('medium')
   })
 
+  test.each<[string, (policy: string) => string]>([
+    ['a statement beside the class', (policy) => `${policy}\n;(CommentPolicy.prototype as any).before = () => true\n`],
+    ['a static block', (policy) => policy.replace('extends Policy {', 'extends Policy {\n  static {\n    Object.assign(CommentPolicy.prototype, {})\n  }\n')],
+    ['an import run for its effects', (policy) => `import './register'\n${policy}`],
+  ])('should keep a policy file holding %s', async (_why, edit) => {
+    const path = 'app/Policies/CommentPolicy.ts'
+    const changed = edit(scaffolded(path))
+
+    expect(changed).not.toBe(scaffolded(path))
+    expect((await judge(only(), path, changed, 'policy-added')).lane).toBe('medium')
+  })
+
+  test("should keep a controller extending the application's own base class, whose members are not read", async () => {
+    const path = 'app/Http/Controllers/CommentController.ts'
+    const local = scaffolded(path).replace("import { Controller, HttpException } from '@guren/core'", "import { HttpException } from '@guren/core'\nimport { Controller } from './Controller'")
+
+    expect(local).not.toBe(scaffolded(path))
+    expect((await judge(only(), path, local)).lane).toBe('medium')
+  })
+
   test('should keep a controller whose exported name is another class', async () => {
     const path = 'app/Http/Controllers/CommentController.ts'
     const aliased = `${scaffolded(path).replace('export default class CommentController', 'class CommentController')}\nclass Other extends Controller {\n  purgeAll() {}\n}\nexport { Other as CommentController, Other as default }\n`
