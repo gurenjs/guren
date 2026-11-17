@@ -166,7 +166,8 @@ ${COMMENTS.replace(".references(() => posts.id, { onDelete: 'cascade' })", '')}`
     const text = schemaWith(COMMENTS).replace('pgTable, serial, text, timestamp }', "pgTable, serial, timestamp }\nimport { text } from '@guren/orm/drizzle/sqlite'")
 
     expect(text).toContain("import { text } from '@guren/orm/drizzle/sqlite'")
-    expect(declaredTable(commentsPlan(), tableSubject(text), text)).toBeUndefined()
+    // The schema reader gives no tables for a file mixing barrels, and lane.ts then emits no table fact; the subject is the plain one.
+    expect(declaredTable(commentsPlan(), tableSubject(schemaWith(COMMENTS)), text)).toBeUndefined()
   })
 
   test('should not match a table of another module', () => {
