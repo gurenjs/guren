@@ -14,6 +14,7 @@ import {
   isBareSpecifier,
   moduleEntryFile,
   packageNameFromSpecifier,
+  resolveDirectoryImport,
   resolveImportPath,
   type FileProbe,
 } from './import-resolution'
@@ -61,7 +62,14 @@ export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckR
   // Both evaluators resolve the same imports; each path is stat'ed once per run.
   const probe = cachedFileProbe()
 
-  const derivedResults = await evaluateDerivedModuleRules(cwd, cache, changedFiles, importableFiles, probe)
+  const derivedResults = await evaluateDerivedModuleRules(
+    cwd,
+    cache,
+    changedFiles,
+    importableFiles,
+    probe,
+    loaded.config?.moduleBoundaries?.includeTypeImports ?? false,
+  )
   const explicitResults = loaded.config
     ? await evaluateArchRules(cwd, cache, loaded.config, changedFiles, importableFiles, probe)
     : []
@@ -73,8 +81,8 @@ export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckR
  * Zero-config module boundary rules (RFC 0002), active whenever a `modules/`
  * directory exists: nothing outside a module may reach past its public surface.
  * Amended from the RFC's literal "except index.ts" — `db/schema.ts` is exempt
- * too, since `make:module` wires the root schema to it. Runtime imports only: a
- * set-wide `includeTypeImports` deliberately does not reach these.
+ * too, since `make:module` wires the root schema to it. Type-only imports count
+ * only under `moduleBoundaries.includeTypeImports`, never the set-wide flag.
  */
 async function evaluateDerivedModuleRules(
   cwd: string,
@@ -82,22 +90,33 @@ async function evaluateDerivedModuleRules(
   changedFiles: Set<string> | null | undefined,
   importableFiles: () => Promise<readonly string[]>,
   probe: FileProbe,
+  includeTypes: boolean,
 ): Promise<CheckResult[]> {
   const moduleNames = await listModuleNames(cwd)
   if (moduleNames.length === 0) return []
 
   // A module's public surface is what an import of its directory, or of its `db/schema`,
-  // lands on. Resolved only for a module some import reaches across into.
+  // lands on. Resolved only for a module some import reaches across into. A type-only
+  // import may land elsewhere (a `.d.ts`, package.json `types`): that file is surface for
+  // a type-only import alone, or opting in would pass a value import of it.
   const surfaces = new Map<string, Promise<Set<string>>>()
-  const surfaceOf = (name: string): Promise<Set<string>> => {
-    let surface = surfaces.get(name)
+  const surfaceOf = (name: string, typeOnly: boolean): Promise<Set<string>> => {
+    const key = `${name}:${typeOnly}`
+    let surface = surfaces.get(key)
     if (!surface) {
       const moduleDir = resolve(cwd, 'modules', name)
+      const schema = join(moduleDir, 'db', 'schema')
       surface = Promise.all([
         moduleEntryFile(moduleDir, probe),
-        resolveImportPath(join(moduleDir, 'db', 'schema'), { probe }),
+        resolveImportPath(schema, { probe }),
+        ...(typeOnly
+          ? [
+              resolveDirectoryImport(moduleDir, { declarations: true, probe }),
+              resolveImportPath(schema, { declarations: true, probe }),
+            ]
+          : []),
       ]).then((files) => new Set(files.flatMap((file) => (file === null ? [] : [toPosixRelative(cwd, file)]))))
-      surfaces.set(name, surface)
+      surfaces.set(key, surface)
     }
     return surface
   }
@@ -113,12 +132,14 @@ async function evaluateDerivedModuleRules(
     const parsed = await cache.get(absPath)
     if (!parsed) continue
 
-    const specifiers = extractImportSpecifiers(parsed.ast.program.body)
+    const specifiers = extractImportSpecifiers(parsed.ast.program.body, includeTypes)
     if (specifiers.length === 0) continue
 
     filesChecked += 1
-    const resolvedImports = await Promise.all(
-      specifiers.map((entry) => resolveImportSpecifier(cwd, absPath, entry.specifier, probe)),
+    const resolvedImports = dedupeResolvedImports(
+      await Promise.all(
+        specifiers.map((entry) => resolveImportSpecifier(cwd, absPath, entry.specifier, probe, entry.typeOnly)),
+      ),
     )
     const importerModule = moduleNameFromRelPath(relPath)
 
@@ -127,14 +148,14 @@ async function evaluateDerivedModuleRules(
 
       const targetModule = moduleNameFromRelPath(imp.fileRelPath)
       if (!targetModule || targetModule === importerModule) continue
-      if ((await surfaceOf(targetModule)).has(imp.fileRelPath)) continue
+      if ((await surfaceOf(targetModule, imp.typeOnly)).has(imp.fileRelPath)) continue
 
       results.push(
         check(
           `arch:module-boundary:${relPath}:${imp.specifier}`,
           'Module boundary',
           'fail',
-          `${relPath} imports '${imp.specifier}', reaching into modules/${targetModule}'s internals.`,
+          `${relPath} ${importVerb(imp)} '${imp.specifier}', reaching into modules/${targetModule}'s internals.`,
           `Import from modules/${targetModule} (its entry file) or move the shared code into the module's public API.`,
           relPath,
         ),

@@ -222,7 +222,17 @@ rules: [
 ]
 ```
 
-`includeTypeImports` covers the rules you declare in `guren.arch.ts`. The zero-config module boundary rules that activate for a `modules/` directory take no options and always analyse runtime imports only.
+`includeTypeImports` covers the rules you declare in `guren.arch.ts`. The zero-config module boundary rules that activate for a `modules/` directory analyse runtime imports only, whatever that flag says. They have their own opt-in:
+
+```typescript
+export default defineArchRules({
+  rules: [],
+  // A type-only import past a module's index.ts or db/schema.ts fails too.
+  moduleBoundaries: { includeTypeImports: true },
+})
+```
+
+With it, `import type { Row } from '../orders/db/rows'` in `modules/billing/` fails as the value import does, and the finding reads `imports (type-only)`. A declared rule cannot stand in for this one: `from` and `disallow` are globs, and no pair of globs says "a different module", so `from: 'modules/*/**'` with `disallow: ['modules/*/app/**']` would also fail a module importing its own files. A type-only import of a module's entry or its `db/schema.ts` still passes, and so does a module with only an `index.d.ts`.
 
 A new app starts with a `guren.arch.ts` holding three conventions. Files under `resources/js/` may not import `drizzle-orm`, `postgres`, `mysql2`, `@guren/orm` or `@guren/core`, since pages run in the browser and get their data as props. They may not import a file under `app/`, `config/`, `db/`, `routes/` or `src/` as a value either: Vite bundles what a page imports, so a Resource class imported for a static helper ships to every visitor with whatever it imports. `import type { PostResourceData } from '@/app/Http/Resources/PostResource'` passes, since a type-only import compiles away, while `import { PostResource, type PostResourceData }` fails. Code that both sides need belongs under `resources/js/`, or in a directory you take out of the rule. Controllers get a warning for importing `drizzle-orm`. `guren check` passes with it, but `guren check --ci` and `guren gate` count warnings, so keep a raw query you need out of the controller, or change the rule in the file. All three look at a file's own imports only: a page that reaches server code through a module outside those directories, or a dynamic `import()`, is not caught. The API-only starter has no pages, so its file holds the controller rule alone.
 

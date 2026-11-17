@@ -515,6 +515,147 @@ export default {
     }
   })
 
+  describe('moduleBoundaries.includeTypeImports', () => {
+    const OPT_IN = `export default { rules: [], moduleBoundaries: { includeTypeImports: true } }`
+
+    async function checkModules(config: string, files: Record<string, string>): Promise<CheckResult[]> {
+      const workspace = await createTempWorkspace('guren-cli-arch-module-types-')
+      try {
+        await writeWorkspaceFiles(workspace.dir, {
+          'guren.arch.ts': config,
+          'modules/orders/index.ts': 'export const ordersModule = {}\nexport interface Order { id: number }\n',
+          'modules/orders/db/schema.ts': 'export const orders = {}\n',
+          'modules/orders/db/rows.ts': 'export interface Row { id: number }\nexport const rows = []\n',
+          'modules/billing/index.ts': 'export const billingModule = {}\n',
+          ...files,
+        })
+        return await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      } finally {
+        await workspace.cleanup()
+      }
+    }
+
+    const boundary = (results: CheckResult[]) =>
+      results.filter((r) => r.key.startsWith('arch:module-boundary:')).map((r) => [r.filePath, r.status, r.message])
+
+    it('should fail a type-only reach from one module into another, labelled as such', async () => {
+      const results = await checkModules(OPT_IN, {
+        'modules/billing/service.ts': `import type { Row } from '../orders/db/rows'\nexport const rows: Row[] = []\n`,
+      })
+
+      expect(boundary(results)).toEqual([
+        [
+          'modules/billing/service.ts',
+          'fail',
+          "modules/billing/service.ts imports (type-only) '../orders/db/rows', reaching into modules/orders's internals.",
+        ],
+      ])
+    })
+
+    it('should fail a type-only reach from outside any module, and an import() in a type position', async () => {
+      const results = await checkModules(OPT_IN, {
+        'tests/probe.ts': `import type { Row } from '../modules/orders/db/rows.js'\nexport type X = Row\n`,
+        'app/Report.ts': `export type Y = import('../modules/orders/db/rows').Row\n`,
+      })
+
+      expect(boundary(results).map(([file, status]) => `${file}: ${status}`).sort()).toEqual([
+        'app/Report.ts: fail',
+        'tests/probe.ts: fail',
+      ])
+    })
+
+    it('should pass a type-only import of the public surface and of the importing module itself', async () => {
+      const results = await checkModules(OPT_IN, {
+        'modules/billing/own.ts': 'export interface Own { id: number }\n',
+        'modules/billing/service.ts':
+          `import type { Order } from '../orders'\n` +
+          `import type { orders } from '../orders/db/schema'\n` +
+          `import type { Own } from './own'\n` +
+          `export type X = Order | typeof orders | Own\n`,
+      })
+
+      expect(results.map((r) => [r.key, r.status])).toEqual([
+        ['arch:module-summary', 'pass'],
+        ['arch:summary', 'pass'],
+      ])
+    })
+
+    it('should treat a module whose only entry is index.d.ts as its surface for a type-only import', async () => {
+      const results = await checkModules(OPT_IN, {
+        'modules/contracts/index.d.ts': 'export interface Contract { id: number }\n',
+        'modules/billing/service.ts': `import type { Contract } from '../contracts'\nexport type X = Contract\n`,
+      })
+
+      expect(boundary(results)).toEqual([])
+    })
+
+    it('should keep a file only a type-only import lands on out of the runtime surface', async () => {
+      const files = {
+        'modules/contracts/package.json': JSON.stringify({ main: 'index.ts', types: 'app/contracts.ts' }),
+        'modules/contracts/index.ts': 'export const contractsModule = {}\n',
+        'modules/contracts/app/contracts.ts': 'export interface Contract { id: number }\nexport const helper = 1\n',
+      }
+      const typed = await checkModules(OPT_IN, {
+        ...files,
+        'modules/billing/service.ts': `import type { Contract } from '../contracts'\nexport type X = Contract\n`,
+      })
+      const valued = await checkModules(OPT_IN, {
+        ...files,
+        'modules/billing/service.ts': `import { helper } from '../contracts/app/contracts'\nexport const h = helper\n`,
+      })
+
+      expect(boundary(typed)).toEqual([])
+      expect(boundary(valued).map(([file, status]) => [file, status])).toEqual([['modules/billing/service.ts', 'fail']])
+    })
+
+    it('should report one runtime violation when a file reaches the same internals both ways', async () => {
+      const results = await checkModules(OPT_IN, {
+        'modules/billing/service.ts':
+          `import { rows } from '../orders/db/rows.js'\n` +
+          `import type { Row } from '../orders/db/rows'\n` +
+          `export const all: Row[] = rows\n`,
+      })
+
+      expect(boundary(results)).toEqual([
+        [
+          'modules/billing/service.ts',
+          'fail',
+          "modules/billing/service.ts imports '../orders/db/rows.js', reaching into modules/orders's internals.",
+        ],
+      ])
+    })
+
+    it('should leave a type-only reach unreported without the opt-in', async () => {
+      const results = await checkModules(`export default { rules: [], moduleBoundaries: {} }`, {
+        'modules/billing/service.ts': `import type { Row } from '../orders/db/rows'\nexport const rows: Row[] = []\n`,
+      })
+
+      expect(boundary(results)).toEqual([])
+    })
+
+    it('should refuse an option the module boundary rules do not take', async () => {
+      const results = await checkModules(
+        `export default { rules: [], moduleBoundaries: { includeTypeImport: true } }`,
+        {
+          'modules/billing/service.ts': `import type { Row } from '../orders/db/rows'\nexport const rows: Row[] = []\n`,
+        },
+      )
+
+      expect(results.map((r) => [r.key, r.status])).toEqual([['arch:config', 'warn']])
+      expect(results[0]!.message).toContain('`moduleBoundaries` has no option `includeTypeImport`')
+    })
+
+    it('should refuse an includeTypeImports that is not a boolean', async () => {
+      const results = await checkModules(
+        `export default { rules: [], moduleBoundaries: { includeTypeImports: 'yes' } }`,
+        {},
+      )
+
+      expect(results.map((r) => [r.key, r.status])).toEqual([['arch:config', 'warn']])
+      expect(results[0]!.message).toContain('`moduleBoundaries.includeTypeImports` must be a boolean.')
+    })
+  })
+
   it('reports one runtime violation when the same module is imported both ways', async () => {
     const workspace = await createTempWorkspace('guren-cli-arch-type-dedupe-')
     try {

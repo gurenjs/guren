@@ -35,6 +35,16 @@ export interface ArchRule {
   includeTypeImports?: boolean
 }
 
+export interface ArchModuleBoundaries {
+  /**
+   * Also report a type-only import that reaches past a module's public surface.
+   * Only the derived rules know that importer and target are different modules,
+   * which no `from`/`disallow` glob pair can say.
+   * @default false
+   */
+  includeTypeImports?: boolean
+}
+
 export interface ArchRuleSet {
   /** Maps a layer name to one or more globs, matched against project-relative paths. */
   layers?: ArchLayers
@@ -42,10 +52,12 @@ export interface ArchRuleSet {
   /**
    * Default for {@link ArchRule.includeTypeImports} across every rule in this
    * set; a rule's own setting wins. Covers only the rules declared here — the
-   * zero-config `modules/` boundary rules always analyse runtime imports only.
+   * zero-config `modules/` boundary rules read {@link ArchRuleSet.moduleBoundaries}.
    * @default false
    */
   includeTypeImports?: boolean
+  /** Options for the zero-config `modules/` boundary rules, which run with or without this file. */
+  moduleBoundaries?: ArchModuleBoundaries
 }
 
 /**
