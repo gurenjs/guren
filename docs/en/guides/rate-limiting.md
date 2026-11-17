@@ -104,9 +104,9 @@ createRateLimitMiddleware({ limit: 100, trustProxy: { hops: 2 } })
 createRateLimitMiddleware({ limit: 100, trustProxy: { header: 'cf-connecting-ip' } })
 ```
 
-`trustProxy: true` is `{ hops: 1 }`. It does not read `CF-Connecting-IP`, `True-Client-IP` or `X-Real-IP`, since an ALB or Nginx forwards those as the client sent them; name one with `{ header }` only when your proxy sets it on every request. When the header is missing or `X-Forwarded-For` has fewer entries than `hops`, the limiter keys on the socket address.
+`trustProxy: true` is `{ hops: 1 }`. It does not read `CF-Connecting-IP`, `True-Client-IP` or `X-Real-IP`, since an ALB or Nginx forwards those as the client sent them; name one with `{ header }` only when your proxy sets it on every request. A port on the value is dropped, since an ALB that preserves the client port appends `ip:port`. When the header is missing or `X-Forwarded-For` has fewer entries than `hops`, the limiter keys on the socket address Bun reports, or on one bucket per route where there is none.
 
-> **Warning:** Enable `trustProxy` only when every request passes through your proxy. On direct deployments clients can send these headers themselves to bypass per-client limits, which is why it defaults to `false`. With `{ header }`, also make sure the app cannot be reached except through the proxy that sets it (for Cloudflare, accept only Cloudflare's addresses at the load balancer).
+> **Warning:** Enable `trustProxy` only when every request passes through all of your proxies. On direct deployments clients can send these headers themselves to bypass per-client limits, which is why it defaults to `false`. With `{ hops: 2 }` or `{ header }`, also make sure the load balancer accepts traffic only from the proxy in front of it (for Cloudflare, only Cloudflare's addresses): a request sent straight to the load balancer puts a value the client chose where the limiter reads.
 
 ### Full Configuration Example
 

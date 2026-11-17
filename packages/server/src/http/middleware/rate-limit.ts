@@ -168,7 +168,8 @@ export interface RateLimitOptions {
  * Which proxy-added value names the client. `{ hops: n }` is the `n`th `X-Forwarded-For` entry
  * from the right: proxies append, so only the entries your own `n` proxies wrote are theirs.
  * `{ header }` is one single-value header your proxy overwrites, such as `cf-connecting-ip`.
- * Absent, or with fewer entries than hops, the socket address is used.
+ * A port on the value (`203.0.113.7:50001`, `[2001:db8::7]:50001`) is dropped. Absent, or with
+ * fewer entries than hops, the socket address is used.
  */
 export type TrustProxy = boolean | { hops: number } | { header: string }
 
@@ -181,6 +182,9 @@ const UNREAD_PROXY_HEADERS = ['cf-connecting-ip', 'true-client-ip', 'x-real-ip']
 
 let unreadProxyHeaderWarned = false
 
+// RFC 9110 §5.6.2 `token`; `Headers.get()` throws on any other name, on every request.
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9a-z]+$/
+
 function proxySource(trustProxy: TrustProxy): ProxySource | undefined {
   if (trustProxy === false) return undefined
   if (trustProxy === true) return { hops: 1 }
@@ -192,13 +196,32 @@ function proxySource(trustProxy: TrustProxy): ProxySource | undefined {
   }
   const header = typeof trustProxy.header === 'string' ? trustProxy.header.trim().toLowerCase() : ''
   if (header === '') throw new TypeError('trustProxy.header must name a request header.')
+  if (!HEADER_NAME.test(header)) {
+    throw new TypeError(`trustProxy.header must be a valid header name, got ${JSON.stringify(trustProxy.header)}.`)
+  }
   if (header === 'x-forwarded-for') {
     throw new TypeError('trustProxy.header cannot be x-forwarded-for, a list clients add to; use trustProxy: { hops } for it.')
   }
   return { header }
 }
 
+// A load balancer that preserves the client port appends `ip:port`, and a port per connection
+// would give each connection its own bucket. Bare IPv6 has more than one colon and stays whole.
+function withoutPort(address: string): string {
+  if (address.startsWith('[')) {
+    const close = address.indexOf(']')
+    return close > 1 ? address.slice(1, close) : address
+  }
+  const colon = address.indexOf(':')
+  return colon > 0 && colon === address.lastIndexOf(':') ? address.slice(0, colon) : address
+}
+
 function proxyClientIp(ctx: Context, source: ProxySource): string | undefined {
+  const address = proxyValue(ctx, source)
+  return address ? withoutPort(address) || undefined : undefined
+}
+
+function proxyValue(ctx: Context, source: ProxySource): string | undefined {
   if ('header' in source) return ctx.req.header(source.header)?.trim() || undefined
 
   if (!unreadProxyHeaderWarned && UNREAD_PROXY_HEADERS.some((name) => ctx.req.header(name) !== undefined)) {

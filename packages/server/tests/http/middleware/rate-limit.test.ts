@@ -258,6 +258,7 @@ describe('createRateLimitMiddleware', () => {
     expect(() => createRateLimitMiddleware({ store, trustProxy: { hops: 1.5 } })).toThrow('trustProxy.hops must be a positive integer')
     expect(() => createRateLimitMiddleware({ store, trustProxy: { header: ' ' } })).toThrow('trustProxy.header must name a request header')
     expect(() => createRateLimitMiddleware({ store, trustProxy: { header: 'X-Forwarded-For' } })).toThrow('use trustProxy: { hops }')
+    expect(() => createRateLimitMiddleware({ store, trustProxy: { header: 'X Real IP' } })).toThrow('must be a valid header name')
   })
 
   it('ignores proxy headers by default (spoofing cannot bypass limits)', async () => {
@@ -586,5 +587,23 @@ describe('resolveClientIp', () => {
     expect(await resolved({ 'x-forwarded-for': '1.1.1.1, 3.3.3.3' }, { hops: 2 }, '10.0.0.9')).toBe('1.1.1.1')
     expect(await resolved({ 'x-forwarded-for': '3.3.3.3' }, { hops: 2 }, '10.0.0.9')).toBe('10.0.0.9')
     expect(await resolved({}, { header: 'x-real-ip' }, '10.0.0.9')).toBe('10.0.0.9')
+  })
+
+  it('drops a port the proxy appended, keeping bare IPv6 whole', async () => {
+    expect(await resolved({ 'x-forwarded-for': '1.1.1.1, 203.0.113.7:50001' }, true)).toBe('203.0.113.7')
+    expect(await resolved({ 'x-forwarded-for': '[2001:db8::7]:50001' }, true)).toBe('2001:db8::7')
+    expect(await resolved({ 'x-forwarded-for': '[2001:db8::7]' }, true)).toBe('2001:db8::7')
+    expect(await resolved({ 'x-forwarded-for': '2001:db8::7' }, true)).toBe('2001:db8::7')
+    expect(await resolved({ 'x-real-ip': '203.0.113.7:443' }, { header: 'x-real-ip' })).toBe('203.0.113.7')
+  })
+
+  it('gives one bucket to one address whatever port it arrives from', async () => {
+    const app = new Hono()
+    app.use('*', createRateLimitMiddleware({ store: new MemoryRateLimitStore(0), limit: 1, trustProxy: true }))
+    app.get('/', (c) => c.text('OK'))
+    const first = await app.request('/', { headers: { 'x-forwarded-for': '203.0.113.7:50001' } })
+    const second = await app.request('/', { headers: { 'x-forwarded-for': '203.0.113.7:50002' } })
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(429)
   })
 })
