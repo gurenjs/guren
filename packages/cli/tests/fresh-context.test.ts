@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -120,4 +121,49 @@ export class Invoice extends Model<typeof invoices> {
       api.generateEntityContext('Invoice', { cwd: tempDir, module: 'nope' }),
     ).rejects.toThrow(/module "nope"/u)
   }, 60_000)
+
+  // The Dev MCP hands `entity` and `module` over from a request; a value read as
+  // `--routes=<file>` would have the child CLI import that file.
+  describe('a value that starts with a dash', () => {
+    let outsideDir: string
+    let marker: string
+    let foreignRoutes: string
+
+    beforeEach(async () => {
+      outsideDir = await mkdtemp(join(tmpdir(), 'guren-cli-fresh-context-outside-'))
+      marker = join(outsideDir, 'imported')
+      foreignRoutes = join(outsideDir, 'routes.ts')
+      await writeFile(
+        foreignRoutes,
+        `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(marker)}, 'imported')\n`,
+      )
+      await writeFile(join(tempDir, 'routes/web.ts'), routesFile('posts.index', '/posts'))
+    })
+
+    afterEach(async () => {
+      await rm(outsideDir, { recursive: true, force: true })
+    })
+
+    it('is read as the entity name, never as a flag', async () => {
+      const promise = createFreshContextApi().generateEntityContext(`--routes=${foreignRoutes}`, { cwd: tempDir })
+
+      await expect(promise).rejects.toThrow(/Model "--routes=/u)
+      expect(existsSync(marker)).toBe(false)
+    }, 60_000)
+
+    // Post resolves with no module filter, so a module swallowed as empty would
+    // let the bundle go on to load the routes file the value names.
+    it('is read as the module name, never as a flag', async () => {
+      await mkdir(join(tempDir, 'app/Models'), { recursive: true })
+      await writeFile(join(tempDir, 'app/Models/Post.ts'), 'export class Post {}\n')
+
+      const promise = createFreshContextApi().generateEntityContext('Post', {
+        cwd: tempDir,
+        module: `--routes=${foreignRoutes}`,
+      })
+
+      await expect(promise).rejects.toThrow(/in module "--routes=/u)
+      expect(existsSync(marker)).toBe(false)
+    }, 60_000)
+  })
 })

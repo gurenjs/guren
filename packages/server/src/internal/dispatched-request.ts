@@ -7,15 +7,46 @@
  * client can send: that one only picks the shape of a refusal.
  * Not exported from the package index.
  */
-const dispatched = new WeakSet<Request>()
 
-/** Mark `request` as built by `buildToolRequest`, returning that same object. */
-export function markDispatchedToolRequest(request: Request): Request {
-  dispatched.add(request)
+/** The route a dispatched request was built for, as `Router.definitions()` names it. */
+export interface DispatchedToolRoute {
+  method: string
+  path: string
+  name: string
+}
+
+const dispatched = new WeakMap<Request, DispatchedToolRoute>()
+
+/** Mark `request` as built by `buildToolRequest` for `route`, returning that same object. */
+export function markDispatchedToolRequest(request: Request, route: DispatchedToolRoute): Request {
+  dispatched.set(request, { method: route.method, path: route.path, name: route.name })
   return request
 }
 
 /** Whether this exact object was built by the dispatcher in this process. */
 export function isDispatchedToolRequest(request: Request): boolean {
   return dispatched.has(request)
+}
+
+/**
+ * The route this exact object was built for, or `undefined` for any other
+ * request. `Router.mount()` refuses it on every other route: a path parameter
+ * equal to an earlier route's literal segment would otherwise run a route the
+ * scope and approval gates never judged.
+ */
+export function readDispatchedToolRoute(request: Request): DispatchedToolRoute | undefined {
+  return dispatched.get(request)
+}
+
+const routeEntries = new WeakSet<object>()
+
+/** Record `handler` as the first handler of a route `Router.mount()` registered, returning it. */
+export function markRouterRouteEntry<T extends object>(handler: T): T {
+  routeEntries.add(handler)
+  return handler
+}
+
+/** Whether `handler` opens a route `Router.mount()` registered, which checks the dispatched route itself. */
+export function isRouterRouteEntry(handler: unknown): boolean {
+  return typeof handler === 'function' && routeEntries.has(handler)
 }

@@ -167,6 +167,11 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
   const tools: DerivedAgentTool[] = []
   const warnings: string[] = []
   const claimed = new Map<string, DerivedAgentTool>()
+  const routeKeys = new Map<string, number>()
+  for (const definition of definitions) {
+    const key = dispatchKey(definition)
+    routeKeys.set(key, (routeKeys.get(key) ?? 0) + 1)
+  }
 
   for (const definition of definitions) {
     const agent = definition.agent
@@ -197,6 +202,16 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
 
     const routeName = definition.name
     const toolName = agent.toolName ?? routeName
+
+    // A dispatched call is bound to its route by method, path and name, so a second route
+    // sharing all three would answer it first if registered first, under gates it never declared.
+    if ((routeKeys.get(dispatchKey(definition)) ?? 0) > 1) {
+      warnings.push(
+        `${toolName}: ${where} (route "${routeName}") shares its method, path and name with another route, `
+          + 'so a tool call could not tell them apart and it is not exposed. Give one of them a distinct name.',
+      )
+      continue
+    }
 
     // Two routes claiming one tool name is a conflict, not a merge: the
     // manifest is keyed by name, and an adapter registering the second would
@@ -483,4 +498,8 @@ export function deriveAgentToolUi(declared: NonNullable<AgentRouteMetadata['ui']
     ...(page !== undefined ? { page } : {}),
     visibility: Array.from(new Set(visibility)) as Array<'model' | 'app'>,
   }
+}
+
+function dispatchKey(definition: RouteDefinition): string {
+  return `${definition.method.toUpperCase()} ${definition.path} ${definition.name ?? ''}`
 }

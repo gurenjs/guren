@@ -6,7 +6,7 @@ import { Hono } from 'hono'
 /**
  * The dispatcher's identity mark across the **built** entries: `./agent` builds
  * the request, the root's force-https reads the mark, two rolldown entries.
- * A copy of `internal/dispatched-request.ts` per entry would be two `WeakSet`s,
+ * A copy of `internal/dispatched-request.ts` per entry would be two `WeakMap`s,
  * and tool calls would meet the redirect with the source suite green.
  * Skipped when `dist/` is absent.
  */
@@ -16,7 +16,7 @@ const built = existsSync(`${distDir}/index.js`) && existsSync(`${distDir}/agent/
 describe.if(built)('the dispatched-request mark (built entries)', () => {
   test('should let a request built by the agent entry through the root entry\'s force-https', async () => {
     // By file path: in this repo the package name resolves to `src/` through the
-    // root tsconfig `paths`, where one module holds the set whatever rolldown emits.
+    // root tsconfig `paths`, where one module holds the map whatever rolldown emits.
     const { buildToolRequest } = (await import(`${distDir}/agent/public.js`)) as typeof import('../../src/agent/public')
     const { Router, createForceHttpsMiddleware, deriveAgentTools } = (await import(
       `${distDir}/index.js`

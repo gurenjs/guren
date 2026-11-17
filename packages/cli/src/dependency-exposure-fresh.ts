@@ -16,7 +16,9 @@ function isExposureResult(value: unknown): value is ExposureResult {
 
 /** `guren deps:exposure --json` in a child, under the graph tool's time and output bounds; exit 1 carries a partial document. */
 export async function freshDependencyExposure(cwd: string, packageName?: string): Promise<ExposureResult> {
-  const args = [cliEntry(), 'deps:exposure', '--json', '--app', cwd, ...(packageName === undefined ? [] : ['--package', packageName])]
+  // One `--package=<value>` element: a separate value starting with `-` (`--app=<dir>`) is parsed as a flag of its own.
+  // Kept last: citty hands an empty `--package=` the next argument not starting with `-`.
+  const args = [cliEntry(), 'deps:exposure', '--json', '--app', cwd, ...(packageName === undefined ? [] : [`--package=${packageName}`])]
   let stdout: string
   try {
     stdout = (await execute(process.execPath, args, { cwd, timeout: 60_000, maxBuffer: GRAPH_OUTPUT_LIMIT })).stdout

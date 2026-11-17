@@ -8,6 +8,8 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
+import { markRouterRouteEntry, readDispatchedToolRoute } from '../internal/dispatched-request'
+import { refuseMisroutedToolCall } from '../agent/dispatched-route-guard'
 import { trimSlashes } from '../support/trim-slashes'
 import { extractPathParamNames, PATH_PARAM_PATTERN } from '../internal/route-path'
 import { createPrototypeRouteHandler, isPrototypeHandler, type PrototypeRouteHandler } from './prototype'
@@ -750,6 +752,8 @@ export class Router<in M extends string = never> {
       if (contractMiddleware) chain.push(contractMiddleware)
       if (preflightMiddleware) chain.push(preflightMiddleware)
       chain.push(handler)
+      // Wrapped, not prepended: each Hono handler is a route entry of its own.
+      chain[0] = markRouterRouteEntry(guardDispatchedRoute(route, chain[0]!))
       return { route, chain }
     })
     for (const { route, chain } of prepared) {
@@ -1408,6 +1412,29 @@ function throwOnInvalid<T>(schema: ValidationSchema<T>, data: unknown): T {
     throw ValidationException.withMessages(formatValidationErrors(result.error))
   }
   return result.data
+}
+
+/**
+ * `first`, refusing a request `buildToolRequest` built for another route (RFC 0016 §3):
+ * a path value equal to an earlier route's literal segment (`new` on `/posts/:id`,
+ * behind `/posts/new`) would run a route the scope and approval gates never judged.
+ * The refusal calls neither `first` nor `next()`, which would run this route's rest. Any
+ * other request reaches `first` as Hono called it; `length` and `name` are kept for `hono/dev`.
+ */
+function guardDispatchedRoute(route: RegisteredRoute, first: MiddlewareHandler): MiddlewareHandler {
+  const guarded = function (this: unknown, c: Context, next: Next): Promise<Response | void> {
+    const target = readDispatchedToolRoute(c.req.raw)
+    if (
+      target === undefined
+      || (target.method === route.method.toUpperCase() && target.path === route.path && target.name === route.name)
+    ) {
+      return first.call(this, c, next)
+    }
+    return Promise.resolve(refuseMisroutedToolCall(c, target))
+  }
+  Object.defineProperty(guarded, 'length', { value: first.length })
+  Object.defineProperty(guarded, 'name', { value: first.name })
+  return guarded
 }
 
 /**
