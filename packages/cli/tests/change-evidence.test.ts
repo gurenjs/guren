@@ -222,7 +222,7 @@ describe('the record and the summary', () => {
     expect(JSON.parse(await readFile(join(dir, 'evidence.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(evidence)))
     expect(await readFile(join(dir, 'evidence.md'), 'utf8')).toBe(renderEvidenceMarkdown(evidence))
     expect(record).toMatchObject({ recordVersion: 1, base, head, mergeBase: base, floor: 'low', eligible: false, unjudged: [], audit: { compared: false, loadedCode: false }, holds: [{ code: 'gate-failed', lane: 'medium' }], gate: { ok: false, deps: false, stages: [{ name: 'test', status: 'fail' }] } })
-    expect(record.securityRecords).toEqual({ unavailable: 'no-source' })
+    expect(record.securityRecords).toEqual({ unavailable: 'not-exported' })
     expect(typeof record.cli).toBe('string')
     expect(JSON.stringify(record)).not.toContain('1 test failed')
   })
@@ -232,8 +232,8 @@ describe('the record and the summary', () => {
     const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n' })
     const lane = (await evidenceOf(repo, base, head, { audit: false })).lane!
     const routes = { recordVersion: SECURITY_RECORD_VERSION, routes: [] }
-    const read = await evidenceOf(repo, base, head, { lane: async (...args) => { args[5]?.({ base: { ...routes, routes: [] }, head: routes }); return lane } })
-    const unread = await evidenceOf(repo, base, head, { lane: async (...args) => { args[5]?.({ unavailable: 'the base was not audited: bun.lock differs' }); return lane } })
+    const read = await evidenceOf(repo, base, head, { lane: async (...args) => { args[5]?.(routes); return lane } })
+    const unread = await evidenceOf(repo, base, head, { lane: async (...args) => { args[5]?.({ unavailable: 'the base was not audited: bun.lock differs', code: 'not-exported' }); return lane } })
 
     expect((await changeRecord(repo, base, head, read, false)).securityRecords).toEqual(routes)
     expect((await changeRecord(repo, base, head, unread, false)).securityRecords).toEqual({ unavailable: 'not-exported' })
@@ -304,6 +304,18 @@ describe('the record and the summary', () => {
     const evidence = await evidenceOf(repo, base, await commit(repo, { 'docs/guide.md': 'A longer guide.\n' }))
 
     expect(renderEvidenceMarkdown(evidence).split('\n')[0]).toBe('## Change evidence: floor `low`, eligible for low')
+  })
+
+  test('should hand --base-record to the lane and name the stored base the records were compared with', async () => {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, { 'docs/guide.md': 'A longer guide.\n' })
+    const lane = (await evidenceOf(repo, base, head, { audit: false })).lane!
+    let given: string | undefined
+    const stored = { ...lane, records: { compared: true, stored: { head: 'b'.repeat(40), cli: '2.37.3', server: null } } }
+    const evidence = await evidenceOf(repo, base, head, { baseRecord: '/tmp/base/record.json', lane: async (...args) => { given = args[6]; return stored } })
+
+    expect(given).toBe('/tmp/base/record.json')
+    expect(renderEvidenceMarkdown(evidence)).toContain('Security records were compared with the base record stored for bbbbbbbbbbbb (@guren/cli 2.37.3, @guren/server unknown).')
   })
 
   test('should hold a change whose REVIEW.md block is stale or could not be checked, and leave an app without one alone', async () => {

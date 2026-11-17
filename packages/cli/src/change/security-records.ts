@@ -9,7 +9,10 @@ import type { MiddlewareEntry } from '@guren/server'
 import { CONTRACT_SEGMENTS, type ContractSegment } from '../contract-segments'
 import type { ChangeFact } from './lane'
 
-/** Bumped whenever a field's meaning changes: a stored record of another version is not compared. */
+/**
+ * Bumped whenever a field's meaning changes, a digest's inputs included: a stored record of another
+ * version is not compared, and a differing `@guren/cli` is only named, so this is the one guard.
+ */
 export const SECURITY_RECORD_VERSION = 1
 
 const CONTRACT_KEYS = CONTRACT_SEGMENTS
@@ -80,7 +83,7 @@ export interface SecurityRecords {
  * The two sides' records, or why they could not both be read. `side` names the one the reader
  * could not read, when only one: a head the change made unreadable is not a missing base.
  */
-export type SecurityRecordPair = { base: SecurityRecords; head: SecurityRecords } | { unavailable: string; side?: 'base' | 'head' }
+export type SecurityRecordPair = { base: SecurityRecords; head: SecurityRecords } | { unavailable: string; side?: 'base' | 'head'; head?: SecurityRecords }
 
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, entry: unknown) =>
   entry && typeof entry === 'object' && !Array.isArray(entry)
