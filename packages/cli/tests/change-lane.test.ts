@@ -7,6 +7,8 @@ import { runCommand } from 'citty'
 import { judgeChangeLane, type ChangeLaneReport, type JudgeChangeLaneOptions } from '../src/change/lane'
 import { changeAdvisories } from '../src/change/revision-advisories'
 import { openChange, resolveChange } from '../src/change/resolve'
+import type { ChangeAudits } from '../src/change/revision-audit'
+import { SECURITY_RECORD_VERSION, type RouteSecurityRecord, type SecurityRecordPair } from '../src/change/security-records'
 import { builtinSubCommands } from '../src/commands'
 import { renderChangeLane } from '../src/commands/change'
 import { createTempRoot, PG_SCHEMA_FIXTURE } from './helpers'
@@ -717,6 +719,109 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey() })
       { file: 'docs/plans/comments/plan.json', hash, standing: 'open' },
       expect.objectContaining({ file: 'draft.plan.json', standing: 'draft' }),
     ])
+  })
+})
+
+describe('judgeChangeLane with per-route security records', () => {
+  const route = (middleware: RouteSecurityRecord['middleware']): RouteSecurityRecord => ({
+    method: 'PUT', path: '/posts/:id', module: null, action: 'PostController.update', middleware, contracts: {},
+    handler: { authenticates: false, authorizes: [], validates: [] },
+  })
+  const auth = { kind: 'alias' as const, name: 'auth', capabilities: { authentication: { mode: 'required' as const } } }
+  const throttle = { kind: 'inline' as const, name: null, capabilities: {} }
+  const records = (...routes: RouteSecurityRecord[]) => ({ recordVersion: SECURITY_RECORD_VERSION, routes })
+
+  async function laneWith(files: Record<string, string | null>, pair: SecurityRecordPair, options: Pick<JudgeChangeLaneOptions, 'baseRecord' | 'headRecords'> = {}): Promise<ChangeLaneReport> {
+    const { repo, base } = await createRepo()
+    const head = await commit(repo, files)
+    const change = await resolveChange(repo, base, head)
+    const { reader, dispose } = openChange(repo, change)
+    const audits: ChangeAudits = { unavailable: 'not audited in this test', records: pair }
+    try {
+      return await judgeChangeLane(change, reader, { audit: async () => audits, ...options })
+    } finally {
+      await dispose()
+    }
+  }
+  const controller = { 'app/Http/Controllers/PostController.ts': 'export class PostController {\n  update() {}\n}\n' }
+  const security = (report: ChangeLaneReport) => report.unjudged.filter((entry) => entry.reader === 'security-records').map((entry) => entry.lane)
+
+  test('should turn a guard gone into authorization-removed, carrying the files the change touched', async () => {
+    const report = await laneWith(controller, { base: records(route([auth])), head: records(route([])) })
+
+    expect(report.facts).toContainEqual(expect.objectContaining({ code: 'authorization-removed', lane: 'high', files: ['app/Http/Controllers/PostController.ts'] }))
+    expect(report.records).toEqual({ compared: true })
+    expect(security(report)).toEqual([])
+  })
+
+  test('should hold a record it cannot order at high, and say nothing of an unchanged one', async () => {
+    expect(security(await laneWith(controller, { base: records(route([auth, throttle])), head: records(route([throttle, auth])) }))).toEqual(['high'])
+    const same = await laneWith(controller, { base: records(route([auth])), head: records(route([auth])) })
+    expect(security(same)).toEqual([])
+    expect(same.facts.map((fact) => fact.code)).not.toContain('authorization-removed')
+  })
+
+  test('should compare a change that touches no route file, controller or policy', async () => {
+    const report = await laneWith({ 'config/app.ts': 'export default {}\n' }, { base: records(route([auth])), head: records(route([])) })
+
+    expect(report.facts).toContainEqual(expect.objectContaining({ code: 'authorization-removed', files: ['config/app.ts'] }))
+  })
+
+  test('should hold a registrar only the head skipped at high, and one both sides skipped at medium', async () => {
+    const skipped = (...names: string[]) => ({ ...records(route([auth])), skipped: names })
+    expect(security(await laneWith({ 'src/app.ts': 'export default {}\n' }, { base: records(route([auth])), head: skipped('the createApp({ boot }) callback') }))).toEqual(['high'])
+    expect(security(await laneWith(controller, { base: skipped('the createApp({ boot }) callback'), head: skipped('the createApp({ boot }) callback') }))).toEqual(['medium'])
+  })
+
+  test('should keep a base it cannot read at medium, and a head the change made unreadable at high', async () => {
+    expect(security(await laneWith(controller, { unavailable: "the base's records were not read: x", side: 'base' }))).toEqual(['medium'])
+    expect(security(await laneWith(controller, { unavailable: 'the base was not audited: bun.lock differs' }))).toEqual(['medium'])
+    expect(security(await laneWith(controller, { unavailable: "the head's records were not read: a provider threw", side: 'head' }))).toEqual(['high'])
+    expect(security(await laneWith({ 'config/app.ts': 'export default {}\n' }, { unavailable: 'x', side: 'base' }))).toEqual([])
+  })
+
+  describe('with a stored base record', () => {
+    const stored = (...routes: RouteSecurityRecord[]) => ({ records: records(...routes), head: 'a'.repeat(40), cli: '2.37.3', server: '2.37.0' })
+    const notInstalled = { unavailable: 'the base was not audited: bun.lock is not the lockfile installed here' }
+
+    test('should compare the stored base against the head the audit read', async () => {
+      const report = await laneWith(controller, { ...notInstalled, side: 'base', head: records(route([])) }, { baseRecord: stored(route([auth])) })
+
+      expect(report.facts).toContainEqual(expect.objectContaining({ code: 'authorization-removed', lane: 'high' }))
+      expect(report.records).toEqual({ compared: true, stored: { head: 'a'.repeat(40), cli: '2.37.3', server: '2.37.0' } })
+      expect(security(report)).toEqual([])
+    })
+
+    test('should read the head alone when the audit exported neither side', async () => {
+      let asked = 0
+      const headRecords = async () => {
+        asked += 1
+        return records(route([]))
+      }
+      const report = await laneWith(controller, notInstalled, { baseRecord: stored(route([auth])), headRecords })
+
+      expect(asked).toBe(1)
+      expect(report.facts.map((fact) => fact.code)).toContain('authorization-removed')
+    })
+
+    test('should keep an unusable record at medium, naming why and what would fix it', async () => {
+      const report = await laneWith(controller, notInstalled, { baseRecord: { unusable: 'the base record is format 1, and this run writes 2', fix: 'run the Change workflow on aaaaaaaaaaaa again' } })
+      const entry = report.unjudged.find((item) => item.reader === 'security-records')
+
+      expect(entry?.lane).toBe('medium')
+      expect(entry?.reason).toContain('the base record is format 1, and this run writes 2 (run the Change workflow on aaaaaaaaaaaa again)')
+      expect(report.records).toEqual({ compared: false })
+    })
+
+    test('should hold a head that exported and did not read at high, and one never exported at medium', async () => {
+      const baseRecord = stored(route([auth]))
+      expect(security(await laneWith(controller, notInstalled, { baseRecord, headRecords: async () => ({ unavailable: "the head's records were not read: a provider threw", exported: true }) }))).toEqual(['high'])
+      expect(security(await laneWith(controller, notInstalled, { baseRecord, headRecords: async () => ({ unavailable: 'the head was not exported: a symlink', exported: false }) }))).toEqual(['medium'])
+    })
+
+    test('should leave a head the change made unreadable at high whatever the stored base holds', async () => {
+      expect(security(await laneWith(controller, { unavailable: "the head's records were not read: a provider threw", side: 'head' }, { baseRecord: stored(route([auth])) }))).toEqual(['high'])
+    })
   })
 })
 

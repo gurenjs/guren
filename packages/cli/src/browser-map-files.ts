@@ -16,7 +16,7 @@ import {
   type ApprovedPlanInput, type BrowserMap,
 } from './browser-map'
 import {
-  BEHAVIOUR_AGENT_PACKAGE, BEHAVIOUR_PACKAGES, BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP, buildBehaviourSpecs, GENERATED_BEHAVIOURS_DIR,
+  BEHAVIOUR_AGENT_PACKAGE, BEHAVIOUR_PACKAGES, BEHAVIOURS_CONFIG, BEHAVIOURS_GIVEN_FILE, BEHAVIOURS_SETUP, buildBehaviourSpecs, configNamesAgent, GENERATED_BEHAVIOURS_DIR,
   type BehaviourSpecOptions,
 } from './browser-behaviour-specs'
 import {
@@ -183,7 +183,8 @@ async function generatedSpecs(
     if (read.unreadable.length > 0 || files.join('\0') !== map.plans.join('\0')) return { outputs: new Map(), onDisk: new Map(), held: HELD }
     const written = buildBehaviourSpecs(map, read.plans, plannedBehaviours ?? {
       signIn: await pathExists(join(cwd, BEHAVIOURS_SETUP)),
-      agent: (await appDependsOn(cwd, BEHAVIOUR_AGENT_PACKAGE)) === true,
+      agent: (await appDependsOn(cwd, BEHAVIOUR_AGENT_PACKAGE)) === true
+        && configNamesAgent(await readFile(join(cwd, BEHAVIOURS_CONFIG), 'utf8').catch(() => '')),
     }, sharedSlugs)
     for (const entry of written.files) outputs.set(entry.path, entry.contents)
     unlabelled = written.unlabelled

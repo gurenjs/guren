@@ -36,7 +36,7 @@ import { migrateCommand, seedCommand, resetCommand, freshCommand, rollbackComman
 import { introspectCommand } from './commands/introspect'
 import { graphCommand } from './commands/graph'
 import { depsExposureCommand, depsWhyCommand } from './commands/deps'
-import { changeEvidenceCommand, changeLaneCommand, changePolicyCommand } from './commands/change'
+import { changeEvidenceCommand, changeLaneCommand, changePolicyCommand, changeRecordsCommand } from './commands/change'
 import { browserDoctorCommand, browserMapCommand, browserRecordCommand, browserServeCommand } from './commands/browser'
 import { runtimeErrorsCommand } from './commands/runtime-errors'
 import { planCommand, planRenderCommand, planStatusCommand, planVerifyCommand, planNextCommand, planScaffoldCommand, planApproveCommand, planWaiveCommand, planReviseCommand, planCloseCommand } from './commands/plan'
@@ -1485,7 +1485,7 @@ const addBrowserTestsCommand = defineCommand({
     if (!result.map.complete) consola.warn(`The browser map is incomplete (${result.map.gaps.map((gap) => gap.section).join(', ')}), so the specs may miss features; run bunx guren browser:map --check for the reasons.`)
     if (result.signIn) {
       if (!result.seedsOnBoot) consola.warn(`config/database.ts does not set seedOnBoot, so browser:serve never seeds the browser account and the setup project cannot sign in. Pass ${SEED_ON_BOOT_OPTION} to defineDatabaseConfig().`)
-      consola.info('Set BROWSER_TEST_PASSWORD in .env: the browser account is seeded with it.')
+      if (!result.passwordSet) consola.info('Set BROWSER_TEST_PASSWORD in .env: the browser account is seeded with it.')
     }
     consola.info('Next: bunx playwright install chromium, then bun run test:browser. After approving a plan, run bunx guren browser:map to regenerate the specs.')
     if (result.behaviours === 'none') {
@@ -1875,6 +1875,7 @@ export const builtinSubCommands = {
   'change:lane': changeLaneCommand,
   'change:evidence': changeEvidenceCommand,
   'change:policy': changePolicyCommand,
+  'change:records': changeRecordsCommand,
   'browser:map': browserMapCommand,
   'browser:serve': browserServeCommand,
   'browser:doctor': browserDoctorCommand,

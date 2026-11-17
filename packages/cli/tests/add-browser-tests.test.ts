@@ -550,6 +550,32 @@ describe('guren add browser-tests', () => {
     }
   })
 
+  test('tells whether .env already gives the browser account a password', async () => {
+    const workspace = await createTempWorkspace('guren-add-browser-tests-password-')
+    const exported = process.env.BROWSER_TEST_PASSWORD
+    delete process.env.BROWSER_TEST_PASSWORD
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST, 'db/schema.ts': USERS_SCHEMA })
+      const run = () => addBrowserTests({ install: false, loadMap: async () => mapOf([POSTS, AUTH]) })
+      for (const [env, set] of [
+        ['APP_KEY=x\n', false], ['BROWSER_TEST_PASSWORD=\n', false], ['BROWSER_TEST_PASSWORD=""\n', false],
+        ['BROWSER_TEST_PASSWORD=   # later\n', false],
+        ['BROWSER_TEST_PASSWORD=secret\n', true], ["BROWSER_TEST_PASSWORD='s3cret'\n", true],
+      ] as const) {
+        await writeWorkspaceFiles(workspace.dir, { '.env': env })
+        expect({ env, set: (await run()).passwordSet }).toEqual({ env, set })
+      }
+      await writeWorkspaceFiles(workspace.dir, { '.env': 'APP_KEY=x\n' })
+      process.env.BROWSER_TEST_PASSWORD = 'from-the-shell'
+      expect((await run()).passwordSet).toBe(true)
+    } finally {
+      if (exported === undefined) delete process.env.BROWSER_TEST_PASSWORD
+      else process.env.BROWSER_TEST_PASSWORD = exported
+      await workspace.cleanup()
+    }
+  })
+
   test('writes the app\'s default locale into the config', async () => {
     const workspace = await createTempWorkspace('guren-add-browser-tests-locale-')
     try {

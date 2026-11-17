@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto'
 import { isParameterless, type ApprovedPlanInput, type BrowserMap, type BrowserMapRoute, type BrowserMapView } from './browser-map'
 import { GENERATED_HEADER, LOCALE_COOKIE } from './browser-specs'
 import { CliError } from './cli-error'
+import { parseSourceFile } from './parse-cache'
 import { routeTarget } from './plan/app-targets'
 import { planSlug } from './plan/beside'
 import { BOUND_RULE, FORMAT_RULES } from './plan/field-status'
@@ -30,13 +31,26 @@ export const GENERATED_BEHAVIOURS_DIR = `${BEHAVIOURS_DIR}/generated`
 export const BEHAVIOUR_PACKAGES = ['e2e', '@e2e-dev/web'] as const
 /** The package the config imports its executor from: a behaviour that needs an agent step is written only for an app declaring it. */
 export const BEHAVIOUR_AGENT_PACKAGE = '@e2e-dev/acp'
+
+/**
+ * The config imports an executor from {@link BEHAVIOUR_AGENT_PACKAGE}, the one sign that it names an
+ * agent: the runner refuses an agent step under a config with none (`MODEL_UNAVAILABLE`). A type-only
+ * import, a mention in a comment and a config that does not parse are no sign.
+ */
+export function configNamesAgent(source: string): boolean {
+  const ast = parseSourceFile(source, BEHAVIOURS_CONFIG)
+  return ast?.program.body.some((statement) => statement.type === 'ImportDeclaration'
+    && statement.importKind !== 'type'
+    && statement.source.value === BEHAVIOUR_AGENT_PACKAGE
+    && statement.specifiers.some((specifier) => specifier.type !== 'ImportSpecifier' || specifier.importKind !== 'type')) === true
+}
 /** The session the auth setup saves and a signed-in test runs under. */
 export const BEHAVIOUR_SESSION = 'browser'
 
 export interface BehaviourSpecOptions {
   /** The setup test signs in, so a route requiring a user can be driven. */
   signIn: boolean
-  /** The config names an agent (the app declares `@e2e-dev/acp`), so a behaviour the plan does not fully name can be an agent step. */
+  /** The config names an agent ({@link configNamesAgent}, and the app declares `@e2e-dev/acp`), so a behaviour the plan does not fully name can be an agent step. */
   agent: boolean
 }
 
@@ -60,7 +74,7 @@ const REASONS = {
   query: 'its route is a QUERY, which no form or link sends',
   noView: 'no view of the plan sends its route, so nothing says which page to start on',
   signIn: 'needs a signed-in user, and the app has no password sign-in for the setup test',
-  agent: `needs an agent step, since the plan does not name every control it touches, and the app declares no ${BEHAVIOUR_AGENT_PACKAGE}, so the config names no agent`,
+  agent: `needs an agent step, since the plan does not name every control it touches, and the config names no agent (${BEHAVIOURS_CONFIG} imports no executor from ${BEHAVIOUR_AGENT_PACKAGE}, or the app does not declare it)`,
   outcome: 'no outcome a browser can check after the step: every expectation is a status or a database row, an errors key has no labelled field, or what it lands on already showed before the step',
   input: 'an input is not a string, a number or a boolean, and nothing says how a control takes it',
   control: 'its input is one a control of the form may stop or change before a request is sent (an empty, missing, out-of-range or malformed value), so no error would be rendered; TestApp pins it',
