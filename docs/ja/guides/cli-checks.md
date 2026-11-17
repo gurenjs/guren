@@ -187,7 +187,17 @@ rules: [
 ]
 ```
 
-`includeTypeImports` は、`guren.arch.ts` に宣言したルールにだけ効きます。`modules/` ディレクトリがあると自動で有効になる、設定不要のモジュール境界ルールにはこのオプションがなく、常に実行時の import だけを解析します。
+`includeTypeImports` は、`guren.arch.ts` に宣言したルールにだけ効きます。`modules/` ディレクトリがあると自動で有効になる、設定不要のモジュール境界ルールは、このフラグの値にかかわらず実行時の import だけを解析します。モジュール境界ルールには専用のオプションがあります。
+
+```typescript
+export default defineArchRules({
+  rules: [],
+  // モジュールの index.ts と db/schema.ts より奥への型だけの import も失敗にする
+  moduleBoundaries: { includeTypeImports: true },
+})
+```
+
+これを指定すると、`modules/billing/` の中の `import type { Row } from '../orders/db/rows'` は値の import と同じく失敗になり、指摘には `imports (type-only)` と表示されます。宣言したルールでは、この境界を代わりに表せません。`from` と `disallow` は glob なので「別のモジュール」という条件を書けず、`from: 'modules/*/**'` と `disallow: ['modules/*/app/**']` の組み合わせでは、モジュールが自分のファイルを import する場合も失敗になります。モジュールの入口と `db/schema.ts` への型だけの import は、オプションを指定しても通ります。`index.d.ts` だけを持つモジュールも同じ扱いです。
 
 新しく作ったアプリには、3 つの約束を書いた `guren.arch.ts` が最初から入っています。ページはブラウザで動き、データは props で受け取るので、`resources/js/` の下のファイルは `drizzle-orm`、`postgres`、`mysql2`、`@guren/orm`、`@guren/core` を import できません。`app/`、`config/`、`db/`、`routes/`、`src/` の下のファイルを値として import することもできません。Vite はページが import したものをバンドルに含めるので、静的なヘルパーを呼ぶために Resource クラスを import すると、そのクラスと、クラスが import しているものがすべての訪問者に配られます。型だけの import はコンパイルで消えるので、`import type { PostResourceData } from '@/app/Http/Resources/PostResource'` は通り、`import { PostResource, type PostResourceData }` は失敗になります。サーバーとページの両方で使うコードは `resources/js/` の下に置くか、置き場所のディレクトリをルールから外してください。コントローラーが `drizzle-orm` を import すると警告になります。`guren check` は警告があっても通りますが、`guren check --ci` と `guren gate` は警告も数えます。生の SQL が必要なら、コントローラーの外に移すか、このファイルのルールを書き換えてください。3 つのルールはどれもファイル自身の import だけを見ます。ページがこれらのディレクトリの外にあるモジュールを経由してサーバーのコードに届く場合や、動的な `import()` を使う場合は検出できません。API だけのスターターにはページが無いので、コントローラーのルールだけが入っています。
 

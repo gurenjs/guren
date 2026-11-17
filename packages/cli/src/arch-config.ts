@@ -40,7 +40,29 @@ export async function loadArchConfig(cwd: string): Promise<LoadedArchConfig> {
     }
   }
 
+  const optionsError = moduleBoundariesError(config.moduleBoundaries)
+  if (optionsError) {
+    return { config: null, loadError: `${resolvedFile}: ${optionsError}` }
+  }
+
   return { config: config as ArchRuleSet }
+}
+
+/** A misspelt opt-in would read as off, and the boundary it asked for would pass unchecked. */
+function moduleBoundariesError(value: unknown): string | null {
+  if (value === undefined) return null
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return '`moduleBoundaries` must be an object.'
+  }
+  const options = value as Record<string, unknown>
+  const unknownKey = Object.keys(options).find((key) => key !== 'includeTypeImports')
+  if (unknownKey !== undefined) {
+    return `\`moduleBoundaries\` has no option \`${unknownKey}\`; the one it takes is \`includeTypeImports\`.`
+  }
+  if (options.includeTypeImports !== undefined && typeof options.includeTypeImports !== 'boolean') {
+    return '`moduleBoundaries.includeTypeImports` must be a boolean.'
+  }
+  return null
 }
 
 async function resolveConfigFile(cwd: string): Promise<string | undefined> {
