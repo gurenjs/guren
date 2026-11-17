@@ -100,7 +100,7 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
 - \`createRateLimitMiddleware({ limit?, windowMs?, keyGenerator?, store?, keyPrefix?, skip?, trustProxy? })\` — defaults \`100\` per
   \`60000\` ms; past the limit responds 429 with \`Retry-After\`
 - Default key is \`server.requestIP()\`; without it (TestApp, Lambda) every client shares one per-route bucket — pass \`keyGenerator\`
-  (or \`trustProxy\`, only when every request passes through the proxy: \`true\` is the last \`X-Forwarded-For\` entry,
+  (or \`trustProxy: true\`, only when every request passes through the proxy: the last \`X-Forwarded-For\` entry,
   \`{ hops: n }\` the nth from the right, \`{ header: 'cf-connecting-ip' }\` one header the proxy overwrites);
   \`resolveClientIp(ctx, trustProxy?)\` reads the same address in a custom \`keyGenerator\`
 - Per token: mount after the bearer middleware, \`.middleware(bearer, limiter)\`, with
