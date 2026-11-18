@@ -2191,6 +2191,7 @@ describe('runAudit ignore config', () => {
   ignore: [
     { key: 'deps:picomatch:GHSA-FC5Q-39XC-VJPF', reason: 'patterns come from configuration only' },
     { key: 'deps:runtime:GHSA-AAAA-BBBB-CCCC', reason: 'not reachable here' },
+    { key: 'deps:runtime-unpinned:Dockerfile:1', reason: 'pinned elsewhere' },
     { key: 'authz:POST /nonexistent', reason: 'stale entry' },
   ],
 }`,

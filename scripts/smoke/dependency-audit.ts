@@ -35,11 +35,12 @@ const IGNORED_ADVISORIES: IgnoredAdvisory[] = [
     id: 'GHSA-fc5q-39xc-vjpf',
     reason:
       'picomatch <=4.0.7 ReDoS from a single-branch repeated extglob in the *pattern*; high. No ' +
-      'release is outside the range. Every holder takes its patterns from configuration, never a ' +
-      'request: vite and tinyglobby (4.0.7, 4.0.5), tsdown and @rolldown/plugin-babel (4.0.5), and ' +
-      'micromatch under @changesets (2.3.2); nothing in packages/*/src imports picomatch, and ' +
-      '@guren/server and @guren/cli reach vite only as a peer. Remove once a picomatch release ' +
-      'outside <=4.0.7 is locked through root overrides with --minimum-release-age.',
+      'release is outside the range. The holders build their patterns from configuration and ' +
+      'package manifests, never from a request: vite and vitest (4.0.7), tinyglobby, tsdown and ' +
+      '@rolldown/plugin-babel (4.0.5), and micromatch under @changesets (2.3.2); a request path ' +
+      'is only ever the string matched (vite server.fs.deny). Nothing in packages/*/src imports ' +
+      'picomatch, and @guren/server and @guren/cli reach vite only as a peer. Remove once a ' +
+      'picomatch release outside <=4.0.7 is locked through root overrides with --minimum-release-age.',
   },
 ]
 
