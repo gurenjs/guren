@@ -432,7 +432,10 @@ async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport
     entry.classifications ??= classifyFindingKey(entry.key)
   }
 
-  await applyIgnoreConfig(cwd, options.auditConfigFile, findings)
+  await applyIgnoreConfig(cwd, options.auditConfigFile, findings, {
+    dependencies: dependencyScan.status === 'complete',
+    runtime: runtimeCheck?.coverage.status === 'complete',
+  })
 
   const dependencyExposure = options.exposure && findings.some((entry) => entry.advisory && entry.status !== 'ignored')
     ? await import('./dependency-exposure-load')
@@ -513,6 +516,7 @@ async function applyIgnoreConfig(
   cwd: string,
   auditConfigFile: string | undefined,
   findings: AuditFinding[],
+  scanned: ScannedForIgnores,
 ): Promise<void> {
   const { entries, invalidEntries, loadError } = await loadAuditConfig(cwd, auditConfigFile)
 
@@ -550,6 +554,7 @@ async function applyIgnoreConfig(
   }
 
   for (const entry of unused) {
+    if (!couldHaveMatched(entry.key, scanned)) continue
     findings.push(
       configWarning(
         `audit-config:unused:${entry.key}`,
@@ -565,6 +570,20 @@ interface IgnoreApplicationResult {
   unused: AuditIgnoreEntry[]
   /** Entries that matched only line-level findings (rejected, not applied). */
   unsupported: AuditIgnoreEntry[]
+}
+
+/** Which scans finished, so a `deps:*` entry that matched nothing can be called stale. */
+interface ScannedForIgnores {
+  dependencies: boolean
+  runtime: boolean
+}
+
+// Under --no-deps, or with the registry unreachable, no `deps:*` finding exists to match,
+// which says nothing about whether the entry is stale.
+function couldHaveMatched(key: string, scanned: ScannedForIgnores): boolean {
+  if (key.startsWith('deps:runtime')) return scanned.runtime
+  if (key.startsWith('deps:')) return scanned.dependencies
+  return true
 }
 
 /**
