@@ -411,6 +411,19 @@ describe('declaredMigration', () => {
     ['an index the plan does not plan', (sql, q) => sql.replace(`(${q}post_id${q});`, `(${q}body${q});`)],
     ['a planned index missing', (sql) => sql.split('--> statement-breakpoint').filter((piece) => !piece.includes('CREATE INDEX')).join('--> statement-breakpoint')],
     ['a planned index stated twice', (sql, q) => `${sql};\nCREATE INDEX ${q}tags_ref_again${q} ON ${q}tags${q} (${q}ref${q});`],
+    ['another column type', (sql, q) => sql.replace(`${q}body${q} text NOT NULL`, `${q}body${q} integer NOT NULL`)],
+    ['a key the database does not number', (sql, _q, dialect) => (dialect === 'pg' ? sql.replaceAll('"id" serial PRIMARY KEY', '"id" integer PRIMARY KEY') : sql.replaceAll(' AUTO_INCREMENT', '').replaceAll(' AUTOINCREMENT', ''))],
+    ["a date where the plan's now() is a timestamp", (sql, _q, dialect) => ({
+      pg: () => sql.replace('"created_at" timestamp with time zone DEFAULT now()', '"created_at" timestamp with time zone DEFAULT CURRENT_DATE'),
+      mysql: () => sql.replace('`created_at` timestamp NOT NULL DEFAULT (CURRENT_TIMESTAMP)', '`created_at` timestamp NOT NULL DEFAULT (CURRENT_DATE)'),
+      sqlite: () => sql.replace('`created_at` integer DEFAULT (unixepoch())', '`created_at` integer DEFAULT CURRENT_DATE'),
+    })[dialect]!()],
+    ['an index ahead of its table', (sql) => {
+      const pieces = sql.split('--> statement-breakpoint')
+      const [index] = pieces.splice(pieces.findIndex((piece) => piece.includes('tags_ref_index')), 1)
+      pieces.splice(1, 0, index!)
+      return pieces.join('--> statement-breakpoint')
+    }],
   ])('should declare nothing for a migration with %s', async (_label, edit) => {
     for (const dialect of ['pg', 'mysql', 'sqlite']) {
       const quote = dialect === 'pg' ? '"' : '`'
@@ -420,9 +433,9 @@ describe('declaredMigration', () => {
       expect(edited).not.toBe(text)
       expect(await declaredMigration(subject, open(), migration(dialect, { [sql]: edited }).readHead)).toBeUndefined()
       // The plan rule alone, with no snapshot to disagree with the edit.
-      expect(planCreatesStatements(tagsPlan(), readCreationStatements(text, DIALECT[dialect]!)!, schema)).toEqual(['model.comment', 'model.tag'])
+      expect(planCreatesStatements(tagsPlan(), readCreationStatements(text, DIALECT[dialect]!)!, schema, schema[0]!.dialect)).toEqual(['model.comment', 'model.tag'])
       const statements = readCreationStatements(edited, DIALECT[dialect]!)
-      expect(statements && planCreatesStatements(tagsPlan(), statements, schema)).toBeUndefined()
+      expect(statements && planCreatesStatements(tagsPlan(), statements, schema, schema[0]!.dialect)).toBeUndefined()
     }
   })
 

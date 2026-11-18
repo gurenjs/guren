@@ -17,6 +17,7 @@ import { readPolicyAbilities } from '../plan/policy-abilities'
 import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
 import { plannedSqlDefault, planScaffoldOutput, sqlNameOf, type PlanScaffoldApp } from '../plan/scaffold'
 import { MODELS_DIR } from '../discovery'
+import { isAutoIncrementPrimaryKey, migrationSqlType } from '../schema-columns'
 import { policyFilePath, providerFilePath, resourceFilePath, validatorFilePath } from '../plan/scaffold-http'
 import { controllerFilePath, sideEffectFilePath } from '../plan/scaffold-controller'
 import { derivePlanTasks, type PlanDerivedStep } from '../plan/tasks'
@@ -367,26 +368,29 @@ export async function declaredMigration(
   const touched = new Set(statements.map((statement) => statement.table))
   const claims = plans.filter(({ plan }) => plan.models.some((model) => touched.has(model.table) || (model.tableRenamedFrom !== undefined && touched.has(model.tableRenamedFrom))))
   if (claims.length !== 1 || ![...touched].every((table) => claims[0]!.plan.models.some((model) => model.table === table || model.tableRenamedFrom === table))) return undefined
-  const ids = planCreatesStatements(claims[0]!.plan, statements, tables)
+  const ids = planCreatesStatements(claims[0]!.plan, statements, tables, [...dialects][0]!)
   return ids ? `${claims[0]!.file}#${ids.join(',')}` : undefined
 }
 
 /**
  * The models `statements` create when they create exactly what `plan` adds for each table and nothing else: the
- * planned columns with their nullability, primary key and default, and every planned unique, index and foreign
- * key once, each on a table the statements create. Types are the snapshot's to hold against the SQL.
+ * planned columns with the type, nullability, keys and default the scaffold's builders give them in `dialect`, and
+ * every planned unique, index and foreign key once, each after the `CREATE TABLE` of its table.
  */
-export function planCreatesStatements(plan: PlanDraft, statements: readonly CreationStatement[], tables: readonly SchemaTable[]): string[] | undefined {
+export function planCreatesStatements(plan: PlanDraft, statements: readonly CreationStatement[], tables: readonly SchemaTable[], dialect: SchemaDialect): string[] | undefined {
   const created = new Map<string, { model: PlanDraft['models'][number]; keys: CreationForeignKey[]; uniques: string[][]; indexes: string[][] }>()
   for (const statement of statements) {
     if (statement.kind !== 'create-table') continue
     const model = plan.models.find((candidate) => candidate.change.kind === 'add' && candidate.module === undefined && candidate.table === statement.table)
-    if (!model || created.has(statement.table) || !createsPlannedTable(statement, model)) return undefined
+    if (!model || created.has(statement.table) || !createsPlannedTable(statement, model, dialect)) return undefined
     created.set(statement.table, { model, keys: plannedForeignKeys(plan, model, tables), uniques: plannedIndexes(model, true), indexes: plannedIndexes(model, false) })
   }
+  const before = new Set<string>()
   for (const statement of statements) {
     const table = created.get(statement.table)
-    if (!table) return undefined
+    // An index or a key ahead of its table does not apply, and on MySQL meets any table of that name first.
+    if (statement.kind === 'create-table') before.add(statement.table)
+    if (!table || !before.has(statement.table)) return undefined
     const stated = statement.kind === 'create-table' ? statement.foreignKeys : statement.kind === 'add-foreign-key' ? [statement.foreignKey] : []
     if (!stated.every((key) => takeForeignKey(table.keys, key))) return undefined
     const uniques = statement.kind === 'create-table' ? [...statement.uniques, ...statement.columns.filter((column) => column.unique).map((column) => [column.name])] : statement.kind === 'create-index' && statement.unique ? [statement.columns] : []
@@ -407,8 +411,8 @@ function take(lists: string[][], columns: readonly string[]): boolean {
 
 const sameList = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((value, at) => value === b[at])
 
-/** Exactly the planned columns by SQL name, each with its nullability, primary key and default, and the planned composite key. */
-function createsPlannedTable(statement: Extract<CreationStatement, { kind: 'create-table' }>, model: PlanDraft['models'][number]): boolean {
+/** Exactly the planned columns by SQL name, each with its type, nullability, keys and default, and the planned composite key. */
+function createsPlannedTable(statement: Extract<CreationStatement, { kind: 'create-table' }>, model: PlanDraft['models'][number], dialect: SchemaDialect): boolean {
   const byName = new Map(statement.columns.map((column) => [column.name, column]))
   if (byName.size !== statement.columns.length || byName.size !== model.columns.length) return false
   const primary = model.columns.filter((column) => column.primaryKey)
@@ -416,18 +420,18 @@ function createsPlannedTable(statement: Extract<CreationStatement, { kind: 'crea
   return model.columns.every((planned) => {
     const column = byName.get(sqlNameOf(planned))
     const single = planned.primaryKey === true && primary.length === 1
-    // A primary key is not null whether or not the SQL says so.
-    return column !== undefined && column.primaryKey === single && (column.notNull || column.primaryKey) === (!planned.nullable || single) && sameDefault(planned, column.default)
+    const generated = isAutoIncrementPrimaryKey(planned, primary.length)
+    const type = migrationSqlType(dialect, planned, generated)
+    // A primary key is not null whether or not the SQL says so; pg numbers a key by its `serial` type.
+    return column !== undefined && type !== undefined && column.type === type && column.autoIncrement === (generated && dialect !== 'pg')
+      && column.primaryKey === single && (column.notNull || column.primaryKey) === (!planned.nullable || single) && sameDefault(planned, column.default, dialect)
   })
 }
 
-const TIMESTAMP_DEFAULTS = new Set(['now()', '(now())', 'current_timestamp', '(current_timestamp)', '(unixepoch())', 'current_date', '(current_date)'])
-
-/** Whether the SQL's default is the planned one: none, a timestamp function for `now()`, or the literal (in parentheses or not). */
-function sameDefault(column: PlanDraft['models'][number]['columns'][number], stated: string | undefined): boolean {
-  const planned = plannedSqlDefault(column)
+/** Whether the SQL's default is the planned one, written as drizzle-kit writes it or in parentheses. */
+function sameDefault(column: PlanDraft['models'][number]['columns'][number], stated: string | undefined, dialect: SchemaDialect): boolean {
+  const planned = plannedSqlDefault(column, dialect)
   if (planned === undefined || stated === undefined) return planned === stated
-  if (planned === 'now') return TIMESTAMP_DEFAULTS.has(stated)
   return planned !== null && (stated === planned || stated === `(${planned})`)
 }
 
