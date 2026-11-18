@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { applyPlanDeclarations, declaredExports, declaredMigration, declaredTable, planDeclaredFiles, type DeclarationSubject, type OpenPlan } from '../src/change/declarations'
+import { readCreationStatements, type MigrationDialect } from '@guren/orm/internal/migration-guard'
+
+import { applyPlanDeclarations, declaredExports, declaredMigration, declaredTable, planCreatesStatements, planDeclaredFiles, type DeclarationSubject, type OpenPlan } from '../src/change/declarations'
 import type { ChangeFact } from '../src/change/lane'
 import { parseSourceFile } from '../src/parse-cache'
 import { PlanSchema, type PlanDraft } from '../src/plan/schema'
@@ -385,8 +387,10 @@ describe('declaredMigration', () => {
         return null
       }
     }
-    return { subject, readHead, sql: `drizzle/${head}/migration.sql`, snapshot: `drizzle/${head}/snapshot.json`, text: readFileSync(join(root, head!, 'migration.sql'), 'utf8') }
+    const schema = parseSchemaSource(readFileSync(join(root, 'schema.ts.txt'), 'utf8'), 'db/schema.ts', null)!
+    return { subject, readHead, schema, sql: `drizzle/${head}/migration.sql`, snapshot: `drizzle/${head}/snapshot.json`, text: readFileSync(join(root, head!, 'migration.sql'), 'utf8') }
   }
+  const DIALECT: Record<string, MigrationDialect> = { pg: 'postgres', mysql: 'mysql', sqlite: 'sqlite' }
   const open = (plan = tagsPlan()): OpenPlan[] => [{ file: PLAN_FILE, plan }]
 
   test.each(['pg', 'mysql', 'sqlite'])('should declare the %s migration drizzle-kit writes for the tables the plan adds', async (dialect) => {
@@ -395,27 +399,42 @@ describe('declaredMigration', () => {
     expect(await declaredMigration(subject, open(), readHead)).toBe(`${PLAN_FILE}#model.comment,model.tag`)
   })
 
-  test.each<[string, (sql: string, quote: string) => string]>([
+  test.each<[string, (sql: string, quote: string, dialect: string) => string]>([
     ['a statement about another table', (sql, q) => `${sql};\nCREATE INDEX ${q}posts_id_index${q} ON ${q}posts${q} (${q}id${q});`],
     ['a column the plan does not add', (sql, q) => sql.replace(`${q}body${q} text NOT NULL,`, `${q}body${q} text NOT NULL,\n\t${q}secret${q} text,`)],
     ['a planned column missing', (sql) => sql.replace(/\n\t.body. text NOT NULL,/, '')],
+    ['a planned NOT NULL missing', (sql, q) => sql.replace(`${q}body${q} text NOT NULL`, `${q}body${q} text`)],
+    ['a unique the plan does not state', (sql, q) => sql.replace(`${q}body${q} text NOT NULL`, `${q}body${q} text NOT NULL UNIQUE`)],
+    ['a planned unique missing', (sql, q, dialect) => (dialect === 'mysql' ? sql.replace(/,\n\tCONSTRAINT `slug_unique` UNIQUE INDEX\(`slug`\)/, '') : sql.replace(`${q}slug${q} text NOT NULL UNIQUE`, `${q}slug${q} text NOT NULL`))],
+    ['another default', (sql) => sql.replace("'untitled'", "'other'")],
     ['a foreign key deleting otherwise', (sql) => sql.replace('ON DELETE CASCADE', 'ON DELETE RESTRICT')],
     ['an index the plan does not plan', (sql, q) => sql.replace(`(${q}post_id${q});`, `(${q}body${q});`)],
+    ['a planned index missing', (sql) => sql.split('--> statement-breakpoint').filter((piece) => !piece.includes('CREATE INDEX')).join('--> statement-breakpoint')],
+    ['a planned index stated twice', (sql, q) => `${sql};\nCREATE INDEX ${q}tags_ref_again${q} ON ${q}tags${q} (${q}ref${q});`],
   ])('should declare nothing for a migration with %s', async (_label, edit) => {
     for (const dialect of ['pg', 'mysql', 'sqlite']) {
       const quote = dialect === 'pg' ? '"' : '`'
-      const { subject, sql, snapshot, text } = migration(dialect)
-      const edited = edit(text, quote)
+      const { subject, sql, schema, text } = migration(dialect)
+      const edited = edit(text, quote, dialect)
 
       expect(edited).not.toBe(text)
       expect(await declaredMigration(subject, open(), migration(dialect, { [sql]: edited }).readHead)).toBeUndefined()
-      // The SQL rule alone, with no snapshot to disagree with the edit.
-      expect(await declaredMigration({ ...subject, files: [sql] }, open(), migration(dialect, { [sql]: edited, [snapshot]: null }).readHead)).toBeUndefined()
-      expect(await declaredMigration({ ...subject, files: [sql] }, open(), migration(dialect, { [snapshot]: null }).readHead)).toBe(`${PLAN_FILE}#model.comment,model.tag`)
+      // The plan rule alone, with no snapshot to disagree with the edit.
+      expect(planCreatesStatements(tagsPlan(), readCreationStatements(text, DIALECT[dialect]!)!, schema)).toEqual(['model.comment', 'model.tag'])
+      const statements = readCreationStatements(edited, DIALECT[dialect]!)
+      expect(statements && planCreatesStatements(tagsPlan(), statements, schema)).toBeUndefined()
     }
   })
 
-  test('should declare nothing when the folder holds another file, or its snapshot misstates the SQL', async () => {
+  test('should declare nothing behind a separator inside a comment, which the migrator runs as its own statement', async () => {
+    for (const dialect of ['pg', 'mysql', 'sqlite']) {
+      const { subject, sql, text } = migration(dialect)
+
+      expect(await declaredMigration(subject, open(), migration(dialect, { [sql]: `${text}\n-- x --> statement-breakpoint DROP TABLE users;\n` }).readHead)).toBeUndefined()
+    }
+  })
+
+  test('should declare nothing when the folder holds another file, or its snapshot is missing or misstates the SQL', async () => {
     const { subject, readHead, snapshot } = migration('pg')
     const forged = JSON.parse((await readHead(snapshot))!)
     forged.ddl.find((entry: Record<string, unknown>) => entry.entityType === 'columns' && entry.table === 'tags' && entry.name === 'slug').type = 'varchar(1)'
@@ -423,6 +442,7 @@ describe('declaredMigration', () => {
     expect(await declaredMigration({ ...subject, files: [...subject.files, `${subject.dir}/notes.sql`] }, open(), readHead)).toBeUndefined()
     expect(await declaredMigration(subject, open(), migration('pg', { [snapshot]: JSON.stringify(forged) }).readHead)).toBeUndefined()
     expect(await declaredMigration(subject, open(), migration('pg', { [`${subject.previous}/snapshot.json`]: null }).readHead)).toBeUndefined()
+    expect(await declaredMigration({ ...subject, files: [subject.files[0]!] }, open(), migration('pg', { [snapshot]: null }).readHead)).toBeUndefined()
   })
 
   test('should declare nothing for a table a second open plan claims, or one the plan adds in a module', async () => {

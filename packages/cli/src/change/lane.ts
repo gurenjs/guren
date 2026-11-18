@@ -661,14 +661,15 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   }
 }
 
+/** What `schemaResidue()` keeps, each item with the table whose statement alone holds it. */
+type SchemaResidue = Array<{ table?: string; text: string }>
+
 /**
  * A schema file without its tables, its drizzle imports and an object listing only tables: what
  * `schema-changed` does not account for, compared per statement as syntax. Inside a table what no
  * column property states is kept: a function (but a foreign key's), a spread, a tagged template and
  * any other name.
  */
-type SchemaResidue = Array<{ table?: string; text: string }>
-
 function schemaResidue(text: string | null, file: string | undefined, tables: readonly SchemaTable[]): SchemaResidue | undefined {
   if (text === null || file === undefined) return []
   const ast = parseSourceFile(text, file)

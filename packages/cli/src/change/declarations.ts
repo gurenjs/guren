@@ -1,8 +1,8 @@
 /**
- * The declaration matcher of RFC 0040 §3: a fact takes its declarable lane only when an approved,
- * open plan declares it. Two subjects are matched so far, both against what `plan:scaffold` writes for
- * the plan: an added file of added elements, and an added table of an added model. A subject two open
- * plans claim, or one that differs from the scaffold where the plan determines it, stays where it was.
+ * The declaration matcher of RFC 0040 §3: a fact takes its declarable lane only when an approved, open plan
+ * declares it. Matched so far: an added file of added elements and an added table of an added model, both
+ * against what `plan:scaffold` writes (a declared table taking its own residue with it), and an added migration
+ * that only creates such tables. A subject two open plans claim, or one the plan does not determine, stays.
  */
 
 import type { ClassDeclaration, File, Statement } from '@babel/types'
@@ -15,7 +15,7 @@ import { extractClassDeclaration } from '../model-parser'
 import { parseSourceFile } from '../parse-cache'
 import { readPolicyAbilities } from '../plan/policy-abilities'
 import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
-import { planScaffoldOutput, sqlNameOf, type PlanScaffoldApp } from '../plan/scaffold'
+import { plannedSqlDefault, planScaffoldOutput, sqlNameOf, type PlanScaffoldApp } from '../plan/scaffold'
 import { MODELS_DIR } from '../discovery'
 import { policyFilePath, providerFilePath, resourceFilePath, validatorFilePath } from '../plan/scaffold-http'
 import { controllerFilePath, sideEffectFilePath } from '../plan/scaffold-controller'
@@ -358,47 +358,77 @@ export async function declaredMigration(
   const statements = readCreationStatements(sql, MIGRATION_DIALECTS[[...dialects][0]!])
   if (!statements || statements.length === 0) return undefined
 
+  // drizzle-kit writes one beside every migration; without it the next `generate` diffs against an older one.
   const snapshot = readJson(await readHead(snapshotFile))
-  if (snapshot !== undefined) {
-    const previous = subject.previous === undefined ? undefined : readJson(await readHead(`${subject.previous}/snapshot.json`))
-    if (snapshot === null || previous === null || (subject.previous !== undefined && previous === undefined) || !snapshotRecordsCreation(previous, snapshot, statements)) return undefined
-  }
+  const previous = subject.previous === undefined ? undefined : readJson(await readHead(`${subject.previous}/snapshot.json`))
+  if (snapshot === undefined || snapshot === null || previous === null || (subject.previous !== undefined && previous === undefined) || !snapshotRecordsCreation(previous, snapshot, statements)) return undefined
 
   // Claimed by SQL name in any module: two plans about one table of one database are a question for a person.
   const touched = new Set(statements.map((statement) => statement.table))
   const claims = plans.filter(({ plan }) => plan.models.some((model) => touched.has(model.table) || (model.tableRenamedFrom !== undefined && touched.has(model.tableRenamedFrom))))
   if (claims.length !== 1 || ![...touched].every((table) => claims[0]!.plan.models.some((model) => model.table === table || model.tableRenamedFrom === table))) return undefined
-  const { file, plan } = claims[0]!
-  const created = new Map<string, PlanDraft['models'][number]>()
+  const ids = planCreatesStatements(claims[0]!.plan, statements, tables)
+  return ids ? `${claims[0]!.file}#${ids.join(',')}` : undefined
+}
+
+/**
+ * The models `statements` create when they create exactly what `plan` adds for each table and nothing else: the
+ * planned columns with their nullability, primary key and default, and every planned unique, index and foreign
+ * key once, each on a table the statements create. Types are the snapshot's to hold against the SQL.
+ */
+export function planCreatesStatements(plan: PlanDraft, statements: readonly CreationStatement[], tables: readonly SchemaTable[]): string[] | undefined {
+  const created = new Map<string, { model: PlanDraft['models'][number]; keys: CreationForeignKey[]; uniques: string[][]; indexes: string[][] }>()
   for (const statement of statements) {
-    if (statement.kind !== 'create-table') {
-      if (!created.has(statement.table)) return undefined
-      continue
-    }
+    if (statement.kind !== 'create-table') continue
     const model = plan.models.find((candidate) => candidate.change.kind === 'add' && candidate.module === undefined && candidate.table === statement.table)
     if (!model || created.has(statement.table) || !createsPlannedTable(statement, model)) return undefined
-    created.set(statement.table, model)
+    created.set(statement.table, { model, keys: plannedForeignKeys(plan, model, tables), uniques: plannedIndexes(model, true), indexes: plannedIndexes(model, false) })
   }
-  const keys = new Map([...created].map(([table, model]) => [table, plannedForeignKeys(plan, model, tables)]))
   for (const statement of statements) {
-    const model = created.get(statement.table)!
+    const table = created.get(statement.table)
+    if (!table) return undefined
     const stated = statement.kind === 'create-table' ? statement.foreignKeys : statement.kind === 'add-foreign-key' ? [statement.foreignKey] : []
-    for (const key of stated) if (!takeForeignKey(keys.get(statement.table)!, key)) return undefined
-    if (statement.kind === 'create-index' && !plannedIndexes(model, statement.unique).some((columns) => sameList(columns, statement.columns))) return undefined
+    if (!stated.every((key) => takeForeignKey(table.keys, key))) return undefined
+    const uniques = statement.kind === 'create-table' ? [...statement.uniques, ...statement.columns.filter((column) => column.unique).map((column) => [column.name])] : statement.kind === 'create-index' && statement.unique ? [statement.columns] : []
+    const indexes = statement.kind === 'create-index' && !statement.unique ? [statement.columns] : []
+    if (!uniques.every((columns) => take(table.uniques, columns)) || !indexes.every((columns) => take(table.indexes, columns))) return undefined
   }
-  return `${file}#${[...created.values()].map((model) => model.id).join(',')}`
+  // What the plan states and the SQL does not: a missing key, unique or index is a table the plan did not ask for.
+  if ([...created.values()].some((table) => table.keys.length + table.uniques.length + table.indexes.length > 0)) return undefined
+  return [...created.values()].map((table) => table.model.id)
+}
+
+/** Removes `columns` from `lists`, telling whether it was there. */
+function take(lists: string[][], columns: readonly string[]): boolean {
+  const at = lists.findIndex((entry) => sameList(entry, columns))
+  if (at !== -1) lists.splice(at, 1)
+  return at !== -1
 }
 
 const sameList = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((value, at) => value === b[at])
 
-/** Exactly the planned columns by SQL name, the planned composite key, and each inline unique one the plan states. */
+/** Exactly the planned columns by SQL name, each with its nullability, primary key and default, and the planned composite key. */
 function createsPlannedTable(statement: Extract<CreationStatement, { kind: 'create-table' }>, model: PlanDraft['models'][number]): boolean {
-  const planned = model.columns.map(sqlNameOf)
-  const names = statement.columns.map((column) => column.name)
-  if (new Set(names).size !== names.length || !sameList([...names].sort(), [...planned].sort())) return false
-  const primary = model.columns.filter((column) => column.primaryKey).map(sqlNameOf)
-  if (primary.length > 1 ? !statement.primaryKey || !sameList([...statement.primaryKey].sort(), [...primary].sort()) : statement.primaryKey !== undefined) return false
-  return statement.uniques.every((columns) => plannedIndexes(model, true).some((entry) => sameList(entry, columns)))
+  const byName = new Map(statement.columns.map((column) => [column.name, column]))
+  if (byName.size !== statement.columns.length || byName.size !== model.columns.length) return false
+  const primary = model.columns.filter((column) => column.primaryKey)
+  if (primary.length > 1 ? !statement.primaryKey || !sameList([...statement.primaryKey].sort(), primary.map(sqlNameOf).sort()) : statement.primaryKey !== undefined) return false
+  return model.columns.every((planned) => {
+    const column = byName.get(sqlNameOf(planned))
+    const single = planned.primaryKey === true && primary.length === 1
+    // A primary key is not null whether or not the SQL says so.
+    return column !== undefined && column.primaryKey === single && (column.notNull || column.primaryKey) === (!planned.nullable || single) && sameDefault(planned, column.default)
+  })
+}
+
+const TIMESTAMP_DEFAULTS = new Set(['now()', '(now())', 'current_timestamp', '(current_timestamp)', '(unixepoch())', 'current_date', '(current_date)'])
+
+/** Whether the SQL's default is the planned one: none, a timestamp function for `now()`, or the literal (in parentheses or not). */
+function sameDefault(column: PlanDraft['models'][number]['columns'][number], stated: string | undefined): boolean {
+  const planned = plannedSqlDefault(column)
+  if (planned === undefined || stated === undefined) return planned === stated
+  if (planned === 'now') return TIMESTAMP_DEFAULTS.has(stated)
+  return planned !== null && (stated === planned || stated === `(${planned})`)
 }
 
 /** The column lists the model plans an index over (`unique`: a unique one), by SQL name. */

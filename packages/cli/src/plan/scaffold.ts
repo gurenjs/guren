@@ -180,6 +180,20 @@ function isNullDefault(text: string): boolean {
   return /^null$/i.test(text.trim())
 }
 
+/**
+ * The planned default as drizzle-kit's migration writes it (`readCreationStatements()`'s spelling): `undefined` for
+ * none, `now` for a timestamp function, else the SQL literal. `null` for an expression the scaffold writes as SQL.
+ */
+export function plannedSqlDefault(column: PlanColumn): string | 'now' | null | undefined {
+  const text = column.default?.trim()
+  if (text === undefined || isNullDefault(text)) return undefined
+  if ((column.type === 'date' || column.type === 'datetime') && /^(now\(\)|current_timestamp(\(\))?)$/i.test(text)) return 'now'
+  const literal = parseLiteral(text)
+  const written = literal && column.type !== 'json' ? literalDefault(literal.value, column.type) : undefined
+  if (written === undefined) return null
+  return typeof literal!.value === 'string' || STRING_TYPES.has(column.type) ? `'${String(literal!.value).replaceAll("'", "''")}'` : written
+}
+
 function defaultModifier(column: PlanColumn, text: string, dialect: SchemaDialect): ColumnCode {
   const trimmed = text.trim()
   if ((column.type === 'date' || column.type === 'datetime') && /^(now\(\)|current_timestamp(\(\))?)$/i.test(trimmed)) {

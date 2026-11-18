@@ -871,10 +871,18 @@ export interface CreationForeignKey {
   onUpdate?: string
 }
 
-/** A column a `CREATE TABLE` defines; `type` is spelled as a drizzle-kit snapshot spells it (`numeric(8,2)`). */
+/**
+ * A column a `CREATE TABLE` defines. `type` is spelled as a drizzle-kit snapshot spells it (`numeric(8,2)`), and
+ * `default` as the SQL writes it, words lower-cased and strings single-quoted (`'draft'`, `now()`, `(unixepoch())`).
+ */
 export interface CreationColumn {
   name: string
   type: string
+  notNull: boolean
+  primaryKey: boolean
+  unique: boolean
+  autoIncrement: boolean
+  default?: string
 }
 
 /** One statement of a migration that only creates: a table, an index on one, or a foreign key added to one. */
@@ -883,24 +891,73 @@ export type CreationStatement =
   | { kind: 'create-index'; table: string; columns: string[]; unique: boolean }
   | { kind: 'add-foreign-key'; table: string; foreignKey: CreationForeignKey }
 
-// The words drizzle-kit writes in a column definition for the plan's column types, and nothing that names
-// another object or runs a statement: a function a default calls is one of the three timestamp functions.
-const COLUMN_DEFINITION_WORDS = new Set([
+// The type words drizzle-kit writes for the plan's column types, and the functions a default may call: the
+// timestamp ones, none of which names another object or has an effect.
+const COLUMN_TYPE_WORDS = new Set([
   'SERIAL', 'INTEGER', 'INT', 'TEXT', 'VARCHAR', 'NUMERIC', 'DECIMAL', 'DOUBLE', 'PRECISION', 'REAL', 'BOOLEAN', 'DATE', 'TIMESTAMP',
-  'WITH', 'WITHOUT', 'TIME', 'ZONE', 'JSONB', 'JSON', 'UUID', 'NOT', 'NULL', 'PRIMARY', 'KEY', 'UNIQUE', 'DEFAULT', 'AUTO_INCREMENT',
-  'AUTOINCREMENT', 'TRUE', 'FALSE', 'NOW', 'CURRENT_TIMESTAMP', 'UNIXEPOCH',
+  'WITH', 'WITHOUT', 'TIME', 'ZONE', 'JSONB', 'JSON', 'UUID',
 ])
-const COLUMN_DEFINITION_PUNCT = /^[0-9().,-]$/
-const COLUMN_CONSTRAINT_WORDS = new Set(['NOT', 'NULL', 'PRIMARY', 'UNIQUE', 'DEFAULT', 'AUTO_INCREMENT', 'AUTOINCREMENT'])
+const DEFAULT_FUNCTIONS = new Set(['NOW', 'UNIXEPOCH'])
+const DEFAULT_WORDS = new Set(['TRUE', 'FALSE', 'NULL', 'CURRENT_TIMESTAMP', 'CURRENT_DATE'])
+const COLUMN_TYPE_PUNCT = /^[0-9(),]$/
 
-/** `NUMERIC ( 8 , 2 )` as `numeric(8,2)`, and `TIMESTAMP WITH TIME ZONE` as `timestamp with time zone`. */
-function spellCreationType(tokens: Token[]): string {
-  let type = ''
+/** `NUMERIC ( 8 , 2 )` as `numeric(8,2)`, `TIMESTAMP WITH TIME ZONE` as `timestamp with time zone`, `'a''b'` as written. */
+function spellTokens(tokens: Token[]): string {
+  let text = ''
   for (const [at, token] of tokens.entries()) {
-    if (token.kind !== 'word' && token.kind !== 'punct') return ''
-    type += `${at > 0 && token.kind === 'word' && tokens[at - 1]!.kind === 'word' ? ' ' : ''}${token.kind === 'word' ? token.value.toLowerCase() : token.value}`
+    const spelled = token.kind === 'word' ? token.value.toLowerCase() : token.kind === 'string' ? `'${token.value.replaceAll("'", "''")}'` : token.value
+    text += `${at > 0 && token.kind === 'word' && tokens[at - 1]!.kind === 'word' ? ' ' : ''}${spelled}`
   }
-  return type
+  return text
+}
+
+/** The end of a default expression at `start`: a string, a number, a literal word, `now()`, or one of those in parentheses. */
+function defaultEnd(tokens: Token[], start: number): number | undefined {
+  const token = tokens[start]
+  if (token?.kind === 'string' || (token?.kind === 'word' && DEFAULT_WORDS.has(token.value))) return start + 1
+  if (token?.kind === 'word' && DEFAULT_FUNCTIONS.has(token.value)) return isPunct(tokens[start + 1], '(') && isPunct(tokens[start + 2], ')') ? start + 3 : undefined
+  if (isPunct(token, '(')) {
+    const end = defaultEnd(tokens, start + 1)
+    return end !== undefined && isPunct(tokens[end], ')') ? end + 1 : undefined
+  }
+  let at = isPunct(token, '-') ? start + 1 : start
+  const digits = at
+  while (tokens[at]?.kind === 'punct' && /^[0-9.]$/.test(tokens[at]!.value)) at += 1
+  return at > digits ? at : undefined
+}
+
+/** A column definition after its name: the type, then each of drizzle-kit's modifiers at most once, and nothing else. */
+function readColumnDefinition(name: string, definition: Token[]): CreationColumn | undefined {
+  let at = 0
+  while (at < definition.length && ((definition[at]!.kind === 'word' && COLUMN_TYPE_WORDS.has(definition[at]!.value)) || (definition[at]!.kind === 'punct' && COLUMN_TYPE_PUNCT.test(definition[at]!.value)))) at += 1
+  if (at === 0) return undefined
+  const column: CreationColumn = { name, type: spellTokens(definition.slice(0, at)), notNull: false, primaryKey: false, unique: false, autoIncrement: false }
+  const seen = new Set<string>()
+  const once = (modifier: string): boolean => !seen.has(modifier) && Boolean(seen.add(modifier))
+  while (at < definition.length) {
+    const word = (value: string, offset = 0) => isWord(definition[at + offset], value)
+    if (word('NOT') && word('NULL', 1) && once('null')) {
+      column.notNull = true
+      at += 2
+    } else if (word('PRIMARY') && word('KEY', 1) && once('primary')) {
+      column.primaryKey = true
+      at += 2
+    } else if (word('UNIQUE') && once('unique')) {
+      column.unique = true
+      at += 1
+    } else if ((word('AUTO_INCREMENT') || word('AUTOINCREMENT')) && once('auto')) {
+      column.autoIncrement = true
+      at += 1
+    } else if (word('DEFAULT') && once('default')) {
+      const end = defaultEnd(definition, at + 1)
+      if (end === undefined) return undefined
+      column.default = spellTokens(definition.slice(at + 1, end))
+      at = end
+    } else {
+      return undefined
+    }
+  }
+  return column
 }
 const REFERENTIAL_ACTIONS = ['CASCADE', 'RESTRICT', 'SET NULL', 'SET DEFAULT', 'NO ACTION']
 
@@ -981,12 +1038,9 @@ function readCreationStatement(tokens: Token[]): CreationStatement | undefined {
       const item = new CreationCursor(part)
       const column = item.ident()
       if (column !== undefined) {
-        const definition = item.rest()
-        if (definition.length === 0 || !definition.every((token) => (token.kind === 'word' && COLUMN_DEFINITION_WORDS.has(token.value)) || token.kind === 'string' || (token.kind === 'punct' && COLUMN_DEFINITION_PUNCT.test(token.value)))) return undefined
-        const end = definition.findIndex((token) => token.kind === 'word' && COLUMN_CONSTRAINT_WORDS.has(token.value))
-        const type = spellCreationType(end === -1 ? definition : definition.slice(0, end))
-        if (type === '') return undefined
-        created.columns.push({ name: column, type })
+        const read = readColumnDefinition(column, item.rest())
+        if (!read) return undefined
+        created.columns.push(read)
         continue
       }
       if (item.word('CONSTRAINT') && item.ident() === undefined) return undefined
@@ -1027,8 +1081,9 @@ function readCreationStatement(tokens: Token[]): CreationStatement | undefined {
 
 const isPunct = (token: Token | undefined, value: string): boolean => token?.kind === 'punct' && token.value === value
 
-// What follows `--` in drizzle-kit's separator, which its migrator splits on before the server reads the file.
-const STATEMENT_BREAKPOINT = '> statement-breakpoint'
+// drizzle-kit's separator: drizzle's migrator splits the raw text on it, comments and strings included, and runs each piece.
+const STATEMENT_SEPARATOR = '--> statement-breakpoint'
+const STATEMENT_BREAKPOINT = STATEMENT_SEPARATOR.slice(2)
 
 /**
  * The statements of a migration that does nothing but create tables, their indexes and their foreign
@@ -1038,6 +1093,16 @@ const STATEMENT_BREAKPOINT = '> statement-breakpoint'
  * does SQL the dialect's readings lex differently.
  */
 export function readCreationStatements(sql: string, dialect: MigrationDialect): CreationStatement[] | undefined {
+  // PostgreSQL ends a line comment at a bare `\r` too, where this lexer reads on to the `\n`.
+  if (sql.includes('\r')) return undefined
+  const whole = readCreationText(sql, dialect)
+  // Read as the migrator runs it too: a separator inside a comment or a string is a cut there.
+  const pieces = sql.split(STATEMENT_SEPARATOR).map((piece) => readCreationText(piece, dialect))
+  if (!whole || pieces.some((piece) => piece === undefined) || JSON.stringify(pieces.flat()) !== JSON.stringify(whole)) return undefined
+  return whole
+}
+
+function readCreationText(sql: string, dialect: MigrationDialect): CreationStatement[] | undefined {
   // The dialect is the schema's, not the server's: comment text MySQL executes declares nothing on any.
   if (LEX_READINGS.mysql.some((rules) => lex(sql, rules).executable.some((entry) => entry.text !== STATEMENT_BREAKPOINT))) return undefined
   let agreed: string | undefined

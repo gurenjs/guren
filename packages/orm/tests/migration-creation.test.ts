@@ -15,14 +15,14 @@ function run(folder: string) {
 
 describe('readCreationStatements', () => {
   test('should read what drizzle-kit writes for added tables, their indexes and their foreign keys', () => {
-    expect(readCreationStatements(run('pg').sql, 'postgres')).toEqual([
-      { kind: 'create-table', table: 'comments', columns: [{ name: 'id', type: 'serial' }, { name: 'body', type: 'text' }, { name: 'post_id', type: 'integer' }, { name: 'created_at', type: 'timestamp with time zone' }], foreignKeys: [], uniques: [] },
+    const read = readCreationStatements(run('pg').sql, 'postgres')!
+    const typed = read.map((statement) => (statement.kind === 'create-table' ? { ...statement, columns: statement.columns.map((column) => `${column.name} ${column.type}`) } : statement))
+
+    expect(typed).toEqual([
+      { kind: 'create-table', table: 'comments', columns: ['id serial', 'body text', 'post_id integer', 'created_at timestamp with time zone'], foreignKeys: [], uniques: [] },
       {
         kind: 'create-table', table: 'tags', foreignKeys: [], uniques: [],
-        columns: [
-          { name: 'id', type: 'serial' }, { name: 'slug', type: 'text' }, { name: 'label', type: 'text' }, { name: 'weight', type: 'numeric(8,2)' }, { name: 'active', type: 'boolean' },
-          { name: 'meta', type: 'jsonb' }, { name: 'ref', type: 'uuid' }, { name: 'seen_on', type: 'date' }, { name: 'postId', type: 'integer' }, { name: 'createdAt', type: 'timestamp with time zone' },
-        ],
+        columns: ['id serial', 'slug text', 'label text', 'weight numeric(8,2)', 'active boolean', 'meta jsonb', 'ref uuid', 'seen_on date', 'postId integer', 'createdAt timestamp with time zone'],
       },
       { kind: 'create-index', table: 'comments', columns: ['post_id'], unique: false },
       { kind: 'create-index', table: 'tags', columns: ['ref'], unique: false },
@@ -30,6 +30,24 @@ describe('readCreationStatements', () => {
       { kind: 'add-foreign-key', table: 'comments', foreignKey: { columns: ['post_id'], table: 'posts', columnsTo: ['id'], onDelete: 'CASCADE' } },
       { kind: 'add-foreign-key', table: 'tags', foreignKey: { columns: ['postId'], table: 'posts', columnsTo: ['id'], onDelete: 'SET NULL' } },
     ])
+  })
+
+  test("should read each column's modifiers and default as the SQL writes them", () => {
+    const tags = (folder: string, dialect: MigrationDialect) => {
+      const table = readCreationStatements(run(folder).sql, dialect)!.find((statement) => statement.kind === 'create-table' && statement.table === 'tags')
+      return table?.kind === 'create-table' ? Object.fromEntries(table.columns.map(({ name, type: _type, ...rest }) => [name, rest])) : undefined
+    }
+
+    expect(tags('pg', 'postgres')).toMatchObject({
+      id: { primaryKey: true, notNull: false, autoIncrement: false },
+      slug: { unique: true, notNull: true },
+      label: { notNull: true, default: "'untitled'" },
+      weight: { notNull: false, unique: false },
+      active: { default: 'false' },
+      createdAt: { notNull: true, default: 'now()' },
+    })
+    expect(tags('mysql', 'mysql')).toMatchObject({ id: { primaryKey: true, autoIncrement: true }, slug: { unique: false }, createdAt: { default: '(current_timestamp)' } })
+    expect(tags('sqlite', 'sqlite')).toMatchObject({ id: { primaryKey: true, autoIncrement: true }, slug: { unique: true }, createdAt: { default: '(unixepoch())' } })
   })
 
   test('should read a MySQL unique index and SQLite foreign keys inside the table', () => {
@@ -67,6 +85,9 @@ describe('readCreationStatements', () => {
     ['a partial index', 'CREATE TABLE "a" ("id" integer);\nCREATE INDEX "i" ON "a" ("id") WHERE "id" > 0;'],
     ['an expression index', 'CREATE TABLE "a" ("id" integer);\nCREATE INDEX "i" ON "a" (lower("id"));'],
     ['an unterminated string', `CREATE TABLE "a" ("id" text DEFAULT 'x);`],
+    ['a modifier written twice', 'CREATE TABLE "a" ("id" integer NOT NULL NOT NULL);'],
+    ['a column with no type', 'CREATE TABLE "a" ("id" NOT NULL);'],
+    ['a default that is a name', 'CREATE TABLE "a" ("id" integer DEFAULT id);'],
   ])('should read nothing from %s', (_label, sql) => {
     expect(readCreationStatements(sql, 'postgres')).toBeUndefined()
   })
@@ -79,9 +100,27 @@ describe('readCreationStatements', () => {
   })
 
   test("should read nothing where the dialect's readings split a string differently", () => {
-    const sql = "CREATE TABLE `a` (`x` text DEFAULT 'a\\', `y` text DEFAULT 'b');\nDROP TABLE `posts`; -- '"
+    // Read with backslash escapes, ` -- ` opens a comment that hides `z`; read without them, the table has three columns.
+    const sql = "CREATE TABLE `a` (`x` text DEFAULT 'a\\', `y` text DEFAULT ' -- ', `z` text\n);"
 
     expect(readCreationStatements(sql, 'mysql')).toBeUndefined()
+  })
+
+  test.each(DIALECTS)('should read nothing on %s behind a separator the migrator splits on', (folder, dialect) => {
+    const { sql } = run(folder)
+
+    // drizzle's migrator cuts the raw text at the separator, so the DROP runs as its own piece.
+    expect(readCreationStatements(`${sql}\n-- x --> statement-breakpoint DROP TABLE users;\n`, dialect)).toBeUndefined()
+    expect(readCreationStatements(`${sql}\n/* --> statement-breakpoint\nDROP TABLE users;\n/* --> statement-breakpoint\n-- */`, dialect)).toBeUndefined()
+    const q = folder === 'mysql' ? '`' : '"'
+    const quoted = `CREATE TABLE ${q}a${q} (${q}x${q} text DEFAULT 'b');`
+
+    expect(readCreationStatements(quoted, dialect)).toHaveLength(1)
+    expect(readCreationStatements(quoted.replace("'b'", "'--> statement-breakpoint'"), dialect)).toBeUndefined()
+  })
+
+  test('should read nothing holding a carriage return, which ends a PostgreSQL line comment', () => {
+    expect(readCreationStatements(`${run('pg').sql}\n-- x\rDROP TABLE "users";\n`, 'postgres')).toBeUndefined()
   })
 })
 
