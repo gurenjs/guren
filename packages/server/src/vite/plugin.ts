@@ -45,11 +45,23 @@ export interface GurenVitePluginOptions {
   chunkFileNames?: string
   /** Rollup naming pattern for extracted assets (defaults to `[name]-[hash][extname]`). */
   assetFileNames?: string
+  /**
+   * Chooses a module's chunk ahead of the built-in vendor grouping, for the client
+   * and prototype builds. Unused when `build.rollupOptions.output.manualChunks` is set.
+   */
+  manualChunks?: GurenManualChunks
   /** Prototype mode (`vite --mode prototype`, RFC 0021): the static, server-less build. */
   prototype?: GurenPrototypeOptions
   /** MCP App mode (`vite build --mode mcp-app`, RFC 0038): one inlined document per `.agent({ ui })` page. */
   mcpApp?: GurenMcpAppOptions
 }
+
+/**
+ * `id` is the module's path with forward slashes. Return a chunk name, `null` to
+ * name no chunk (the bundler splits the module by how it is imported), or
+ * `undefined` to keep the built-in grouping.
+ */
+export type GurenManualChunks = (id: string) => string | null | undefined
 
 export interface GurenPrototypeOptions {
   /** Vite `base` for a build hosted under a subpath (a GitHub project page, a preview URL). Defaults to `/`. */
@@ -70,8 +82,9 @@ export const PROTOTYPE_SHELL_FILE = '.guren/prototype/index.html'
 export const PROTOTYPE_SHELL_OVERRIDE = 'resources/js/prototype/index.html'
 export const PROTOTYPE_MODE = 'prototype'
 
-/** Every option defaulted except the two modes, which are absent for the ordinary build. */
-type ResolvedOptions = Required<Omit<GurenVitePluginOptions, 'prototype' | 'mcpApp'>> & Pick<GurenVitePluginOptions, 'prototype' | 'mcpApp'>
+/** Every option defaulted except the two modes and `manualChunks`, which have no default value. */
+type ResolvedOptions = Required<Omit<GurenVitePluginOptions, 'prototype' | 'mcpApp' | 'manualChunks'>> &
+  Pick<GurenVitePluginOptions, 'prototype' | 'mcpApp' | 'manualChunks'>
 
 const defaultOptions: ResolvedOptions = {
   appAlias: '@',
@@ -340,7 +353,7 @@ function ensurePrototype(config: Record<string, any>, options: ResolvedOptions):
   output.entryFileNames ??= options.entryFileNames
   output.chunkFileNames ??= options.chunkFileNames
   output.assetFileNames ??= options.assetFileNames
-  output.manualChunks ??= createDefaultManualChunks(root)
+  applyManualChunks(output, root, options.manualChunks)
   config.build.rollupOptions.output = output
 
   return { root, outDir: path.resolve(root, config.build.outDir), shellPath, copiedBuildDir }
@@ -566,8 +579,8 @@ function ensureBuild(
     output.assetFileNames = options.assetFileNames
   }
 
-  if (!isSsrBuild && output.manualChunks === undefined) {
-    output.manualChunks = createDefaultManualChunks(root)
+  if (!isSsrBuild) {
+    applyManualChunks(output, root, options.manualChunks)
   }
 
   config.build.rollupOptions.output = output
@@ -576,56 +589,73 @@ function ensureBuild(
 /** `@guren/inertia-client`'s prototype entry (src or dist) and the Hono router it alone imports. */
 const PROTOTYPE_RUNTIME_MODULE = /\/inertia-client\/(?:src|dist)\/prototype(?:-[^/]+)?\.[jt]sx?$|\/node_modules\/hono\/dist\/router\//u
 
-function createDefaultManualChunks(root: string) {
+function applyManualChunks(output: Record<string, any>, root: string, custom: GurenManualChunks | undefined) {
+  if (output.manualChunks !== undefined) {
+    if (custom) {
+      console.warn(
+        '[guren] The `manualChunks` plugin option is unused: `build.rollupOptions.output.manualChunks` is set and decides every chunk. Remove one of the two.',
+      )
+    }
+    return
+  }
+  output.manualChunks = createManualChunks(root, custom)
+}
+
+function createManualChunks(root: string, custom: GurenManualChunks | undefined) {
   const normalizedRoot = root.replace(/\\/gu, '/')
 
   return (id: string): string | undefined => {
     const normalizedId = id.replace(/\\/gu, '/')
-
-    // Reached only through startInertiaClient()'s dynamic import; naming a
-    // vendor chunk for it would splice it into the eagerly loaded one, and the
-    // production bundle would carry the prototype runtime and Hono's router.
-    if (PROTOTYPE_RUNTIME_MODULE.test(normalizedId)) {
-      return undefined
-    }
-
-    if (normalizedId.includes('/packages/inertia-client/')) {
-      return 'inertia-vendor'
-    }
-
-    if (normalizedId.includes('/packages/core/') || normalizedId.includes('/packages/server/') || normalizedId.includes('/packages/orm/')) {
-      return 'framework-vendor'
-    }
-
-    if (!normalizedId.includes('/node_modules/')) {
-      if (normalizedId.startsWith(normalizedRoot)) {
-        return undefined
-      }
-
-      if (normalizedId.includes('/packages/')) {
-        return 'framework-vendor'
-      }
-
-      return undefined
-    }
-
-    if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/u.test(normalizedId)) {
-      return 'react-vendor'
-    }
-
-    if (
-      /[\\/]node_modules[\\/]@inertiajs[\\/]/u.test(normalizedId) ||
-      /[\\/]node_modules[\\/](axios|qs|lodash-es|lodash)[\\/]/u.test(normalizedId)
-    ) {
-      return 'inertia-vendor'
-    }
-
-    if (/[\\/]node_modules[\\/](@guren|hono)[\\/]/u.test(normalizedId)) {
-      return 'framework-vendor'
-    }
-
-    return 'vendor'
+    const chosen = custom?.(normalizedId)
+    if (chosen !== undefined) return chosen ?? undefined
+    return defaultManualChunk(normalizedId, normalizedRoot)
   }
+}
+
+function defaultManualChunk(normalizedId: string, normalizedRoot: string): string | undefined {
+  // Reached only through startInertiaClient()'s dynamic import; naming a
+  // vendor chunk for it would splice it into the eagerly loaded one, and the
+  // production bundle would carry the prototype runtime and Hono's router.
+  if (PROTOTYPE_RUNTIME_MODULE.test(normalizedId)) {
+    return undefined
+  }
+
+  if (normalizedId.includes('/packages/inertia-client/')) {
+    return 'inertia-vendor'
+  }
+
+  if (normalizedId.includes('/packages/core/') || normalizedId.includes('/packages/server/') || normalizedId.includes('/packages/orm/')) {
+    return 'framework-vendor'
+  }
+
+  if (!normalizedId.includes('/node_modules/')) {
+    if (normalizedId.startsWith(normalizedRoot)) {
+      return undefined
+    }
+
+    if (normalizedId.includes('/packages/')) {
+      return 'framework-vendor'
+    }
+
+    return undefined
+  }
+
+  if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/u.test(normalizedId)) {
+    return 'react-vendor'
+  }
+
+  if (
+    /[\\/]node_modules[\\/]@inertiajs[\\/]/u.test(normalizedId) ||
+    /[\\/]node_modules[\\/](axios|qs|lodash-es|lodash)[\\/]/u.test(normalizedId)
+  ) {
+    return 'inertia-vendor'
+  }
+
+  if (/[\\/]node_modules[\\/](@guren|hono)[\\/]/u.test(normalizedId)) {
+    return 'framework-vendor'
+  }
+
+  return 'vendor'
 }
 
 function resolveBuildOutputDirectory(root: string, outDir: string): string {
