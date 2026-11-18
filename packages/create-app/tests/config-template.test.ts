@@ -17,7 +17,7 @@ function assignedKeys(content: string): string[] {
 describe('scaffolded config/ (RFC 0027 §1, §2)', () => {
   // One environment and one host-authorization rule in two places: an api-only
   // app silently losing a check the default template kept is the drift here.
-  test.each(['config/env.ts', 'config/http.ts'])('%s is identical in both starter templates', async (file) => {
+  test.each(['config/env.ts', 'config/http.ts', 'config/audit.ts'])('%s is identical in both starter templates', async (file) => {
     const [defaultCopy, apiCopy] = await Promise.all(TEMPLATES.map((name) => readFile(templateFile(name, file), 'utf8')))
 
     expect(apiCopy).toBe(defaultCopy)

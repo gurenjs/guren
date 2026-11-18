@@ -2180,6 +2180,32 @@ describe('runAudit ignore config', () => {
     }
   })
 
+  it('does not call a deps:* entry stale when the dependency scan did not run', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-deps-unscanned-')
+
+    try {
+      await writeRoutes(workspace.dir, `export default function registerRoutes(router: any) {}`)
+      await writeAuditConfig(
+        workspace.dir,
+        `export default {
+  ignore: [
+    { key: 'deps:picomatch:GHSA-FC5Q-39XC-VJPF', reason: 'patterns come from configuration only' },
+    { key: 'deps:runtime:GHSA-AAAA-BBBB-CCCC', reason: 'not reachable here' },
+    { key: 'authz:POST /nonexistent', reason: 'stale entry' },
+  ],
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir, deps: false })
+
+      const unused = report.findings.filter(f => f.key.startsWith('audit-config:unused:')).map(f => f.key)
+      expect(report.dependencyScan?.status).toBe('skipped')
+      expect(unused).toEqual(['audit-config:unused:authz:POST /nonexistent'])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('warns when the ignore config fails to load, but still runs the rest of the audit', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-ignore-loaderror-')
 
