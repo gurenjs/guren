@@ -581,7 +581,7 @@ interface ScannedForIgnores {
 // Under --no-deps, or with the registry unreachable, no `deps:*` finding exists to match,
 // which says nothing about whether the entry is stale.
 function couldHaveMatched(key: string, scanned: ScannedForIgnores): boolean {
-  if (key.startsWith('deps:runtime')) return scanned.runtime
+  if (/^deps:runtime(?::|-scan$|-unpinned:)/.test(key)) return scanned.runtime
   if (key.startsWith('deps:')) return scanned.dependencies
   return true
 }
