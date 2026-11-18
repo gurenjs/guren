@@ -11,3 +11,12 @@ schema edit per step, unedited. `migration-guard.test.ts` reads them as real inp
 `sqlite-rebuild/` is a second SQLite run: create `users` and `posts`, then give
 `posts.title` a default, then give `posts.user_id` a foreign key. drizzle-kit
 writes a `__new_posts` rebuild for each of the last two, copying every column.
+
+`creation/` is one run per dialect over the tables `guren plan:scaffold` writes for
+the comments plan in `packages/cli/tests/fixtures/plan/comments.plan.json` with a
+`tags` model beside it (a unique, a default of each kind, a composite index, a
+`set null` foreign key): `*_base` creates `users` and `posts`, `*_head` adds
+`comments` and `tags`. `schema.ts.txt` is the head schema it was generated from,
+importing from the drizzle-orm barrels. `readCreationStatements()` and
+`snapshotRecordsCreation()` are tested on them, and `change:lane`'s migration
+declaration in the CLI.

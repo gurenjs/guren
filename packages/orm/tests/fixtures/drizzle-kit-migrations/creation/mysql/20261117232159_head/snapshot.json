@@ -1,0 +1,381 @@
+{
+  "version": "6",
+  "dialect": "mysql",
+  "id": "d277895f-10f9-443c-82b1-5907e6fc0e25",
+  "prevIds": [
+    "91e9440b-9ad5-456c-b07c-3e11063ad536"
+  ],
+  "ddl": [
+    {
+      "name": "comments",
+      "entityType": "tables"
+    },
+    {
+      "name": "posts",
+      "entityType": "tables"
+    },
+    {
+      "name": "tags",
+      "entityType": "tables"
+    },
+    {
+      "name": "users",
+      "entityType": "tables"
+    },
+    {
+      "type": "int",
+      "notNull": true,
+      "autoIncrement": true,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "comments"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoIncrement": false,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "body",
+      "entityType": "columns",
+      "table": "comments"
+    },
+    {
+      "type": "int",
+      "notNull": true,
+      "autoIncrement": false,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "post_id",
+      "entityType": "columns",
+      "table": "comments"
+    },
+    {
+      "type": "timestamp",
+      "notNull": true,
+      "autoIncrement": false,
+      "default": "(CURRENT_TIMESTAMP)",
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "comments"
+    },
+    {
+      "type": "serial",
+      "notNull": true,
+      "autoIncrement": true,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "posts"
+    },
+    {
+      "type": "int",
+      "notNull": true,
+      "autoIncrement": true,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "tags"
+    },
+    {
+      "type": "varchar(255)",
+      "notNull": true,
+      "autoIncrement": false,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "slug",
+      "entityType": "columns",
+      "table": "tags"
+    },
+    {
+      "type": "varchar(255)",
+      "notNull": true,
+      "autoIncrement": false,
+      "default": "'untitled'",
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "label",
+      "entityType": "columns",
+      "table": "tags"
+    },
+    {
+      "type": "decimal(8,2)",
+      "notNull": false,
+      "autoIncrement": false,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "weight",
+      "entityType": "columns",
+      "table": "tags"
+    },
+    {
+      "type": "boolean",
+      "notNull": true,
+      "autoIncrement": false,
+      "default": "false",
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "active",
+      "entityType": "columns",
+      "table": "tags"
+    },
+    {
+      "type": "json",
+      "notNull": false,
+      "autoIncrement": false,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "meta",
+      "entityType": "columns",
+      "table": "tags"
+    },
+    {
+      "type": "varchar(36)",
+      "notNull": false,
+      "autoIncrement": false,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "ref",
+      "entityType": "columns",
+      "table": "tags"
+    },
+    {
+      "type": "date",
+      "notNull": false,
+      "autoIncrement": false,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "seen_on",
+      "entityType": "columns",
+      "table": "tags"
+    },
+    {
+      "type": "int",
+      "notNull": false,
+      "autoIncrement": false,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "postId",
+      "entityType": "columns",
+      "table": "tags"
+    },
+    {
+      "type": "timestamp",
+      "notNull": true,
+      "autoIncrement": false,
+      "default": "(CURRENT_TIMESTAMP)",
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "createdAt",
+      "entityType": "columns",
+      "table": "tags"
+    },
+    {
+      "type": "serial",
+      "notNull": true,
+      "autoIncrement": true,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "name": "PRIMARY",
+      "table": "comments",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "name": "PRIMARY",
+      "table": "posts",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "name": "PRIMARY",
+      "table": "tags",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "name": "PRIMARY",
+      "table": "users",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "slug",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "using": null,
+      "algorithm": null,
+      "lock": null,
+      "nameExplicit": false,
+      "name": "slug_unique",
+      "table": "tags",
+      "entityType": "indexes"
+    },
+    {
+      "columns": [
+        {
+          "value": "post_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "using": null,
+      "algorithm": null,
+      "lock": null,
+      "nameExplicit": true,
+      "name": "comments_post_id_index",
+      "entityType": "indexes",
+      "table": "comments"
+    },
+    {
+      "columns": [
+        {
+          "value": "ref",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "using": null,
+      "algorithm": null,
+      "lock": null,
+      "nameExplicit": true,
+      "name": "tags_ref_index",
+      "entityType": "indexes",
+      "table": "tags"
+    },
+    {
+      "columns": [
+        {
+          "value": "label",
+          "isExpression": false
+        },
+        {
+          "value": "weight",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "using": null,
+      "algorithm": null,
+      "lock": null,
+      "nameExplicit": true,
+      "name": "tags_label_weight_index",
+      "entityType": "indexes",
+      "table": "tags"
+    },
+    {
+      "columns": [
+        "post_id"
+      ],
+      "tableTo": "posts",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "comments_post_id_posts_id_fkey",
+      "entityType": "fks",
+      "table": "comments"
+    },
+    {
+      "columns": [
+        "postId"
+      ],
+      "tableTo": "posts",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "nameExplicit": false,
+      "name": "tags_postId_posts_id_fkey",
+      "entityType": "fks",
+      "table": "tags"
+    }
+  ],
+  "renames": []
+}

@@ -123,7 +123,8 @@ function hasColumn(table: TableRef, name: string): boolean {
   return table.opaqueColumns === true || table.columns.includes(name)
 }
 
-function sqlNameOf(column: PlanColumn): string {
+/** A planned column's SQL name, as the scaffold writes it into the builder. */
+export function sqlNameOf(column: PlanColumn): string {
   return column.columnName ?? column.name
 }
 
@@ -177,6 +178,27 @@ function nowDefault(dialect: SchemaDialect, type: PlanColumn['type']): ColumnCod
 
 function isNullDefault(text: string): boolean {
   return /^null$/i.test(text.trim())
+}
+
+/** What drizzle-kit's migration writes for each {@link nowDefault}, in `readCreationStatements()`'s spelling; SQLite's `date('now')` it does not read. */
+const NOW_SQL_DEFAULTS: Record<SchemaDialect, Partial<Record<'date' | 'datetime', string>>> = {
+  pg: { date: 'now()', datetime: 'now()' },
+  mysql: { date: '(current_date)', datetime: '(current_timestamp)' },
+  sqlite: { datetime: '(unixepoch())' },
+}
+
+/**
+ * The planned default as drizzle-kit's migration writes it (`readCreationStatements()`'s spelling): `undefined` for
+ * none, else the SQL, and `null` for one this reading cannot name (an expression the scaffold writes as SQL).
+ */
+export function plannedSqlDefault(column: PlanColumn, dialect: SchemaDialect): string | null | undefined {
+  const text = column.default?.trim()
+  if (text === undefined || isNullDefault(text)) return undefined
+  if ((column.type === 'date' || column.type === 'datetime') && /^(now\(\)|current_timestamp(\(\))?)$/i.test(text)) return NOW_SQL_DEFAULTS[dialect][column.type] ?? null
+  const literal = parseLiteral(text)
+  const written = literal && column.type !== 'json' ? literalDefault(literal.value, column.type) : undefined
+  if (written === undefined) return null
+  return typeof literal!.value === 'string' || STRING_TYPES.has(column.type) ? `'${String(literal!.value).replaceAll("'", "''")}'` : written
 }
 
 function defaultModifier(column: PlanColumn, text: string, dialect: SchemaDialect): ColumnCode {

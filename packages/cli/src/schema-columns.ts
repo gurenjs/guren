@@ -168,6 +168,27 @@ export function autoIncrementPrimaryKey(dialect: SchemaDialect, sqlName: string)
   }
 }
 
+const MIGRATION_SQL_TYPES: Record<SchemaDialect, Record<Exclude<PlanColumnType, 'decimal' | 'datetime'>, string>> = {
+  pg: { string: 'text', text: 'text', integer: 'integer', number: 'double precision', boolean: 'boolean', date: 'date', json: 'jsonb', uuid: 'uuid' },
+  mysql: { string: 'varchar(255)', text: 'text', integer: 'int', number: 'double', boolean: 'boolean', date: 'date', json: 'json', uuid: 'varchar(36)' },
+  sqlite: { string: 'text', text: 'text', integer: 'integer', number: 'real', boolean: 'integer', date: 'text', json: 'text', uuid: 'text' },
+}
+
+/**
+ * The SQL type drizzle-kit's migration writes for a planned column through the builders above, spelled as
+ * `readCreationStatements()` spells it; `undefined` where it was not measured (a precision with no scale). The
+ * `creation/` fixtures of `@guren/orm` are that output: a builder changed here must be measured again.
+ */
+export function migrationSqlType(dialect: SchemaDialect, column: PlanColumn, autoIncrement: boolean): string | undefined {
+  if (autoIncrement) return { pg: 'serial', mysql: 'int', sqlite: 'integer' }[dialect]
+  if (column.type === 'datetime') return { pg: column.withTimezone === false ? 'timestamp' : 'timestamp with time zone', mysql: 'timestamp', sqlite: 'integer' }[dialect]
+  if (column.type !== 'decimal') return MIGRATION_SQL_TYPES[dialect][column.type]
+  if (dialect === 'sqlite') return 'numeric'
+  const name = dialect === 'pg' ? 'numeric' : 'decimal'
+  if (column.precision === undefined && column.scale === undefined) return name
+  return column.precision !== undefined && column.scale !== undefined ? `${name}(${column.precision},${column.scale})` : undefined
+}
+
 /** A `--fields` entry as the resource blueprint appends it: snake-cased SQL name, `.notNull()` unless `?`. */
 export function buildFieldColumn(dialect: SchemaDialect, field: FieldDefinition): ColumnCode {
   const column = COLUMN_BUILDERS[dialect][fieldColumnType(dialect, field.type)](snakeCase(field.name), {})

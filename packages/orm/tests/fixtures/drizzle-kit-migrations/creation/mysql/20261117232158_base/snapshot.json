@@ -1,0 +1,63 @@
+{
+  "version": "6",
+  "dialect": "mysql",
+  "id": "91e9440b-9ad5-456c-b07c-3e11063ad536",
+  "prevIds": [
+    "00000000-0000-0000-0000-000000000000"
+  ],
+  "ddl": [
+    {
+      "name": "posts",
+      "entityType": "tables"
+    },
+    {
+      "name": "users",
+      "entityType": "tables"
+    },
+    {
+      "type": "serial",
+      "notNull": true,
+      "autoIncrement": true,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "posts"
+    },
+    {
+      "type": "serial",
+      "notNull": true,
+      "autoIncrement": true,
+      "default": null,
+      "onUpdateNow": false,
+      "onUpdateNowFsp": null,
+      "charSet": null,
+      "collation": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "name": "PRIMARY",
+      "table": "posts",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "name": "PRIMARY",
+      "table": "users",
+      "entityType": "pks"
+    }
+  ],
+  "renames": []
+}
