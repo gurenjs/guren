@@ -411,6 +411,7 @@ export {
   resetRateLimit,
   MemoryRateLimitStore,
   SlidingWindowRateLimitStore,
+  resolveClientIp,
   // Security headers
   createSecurityHeaders,
   // CSP
@@ -463,6 +464,7 @@ export type {
   // Rate limiting types
   RateLimitOptions,
   RateLimitStore,
+  TrustProxy,
   RateLimitEntry,
   RateLimitInfo,
   // Security headers types
