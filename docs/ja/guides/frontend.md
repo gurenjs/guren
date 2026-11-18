@@ -218,6 +218,24 @@ export default function Index({ users, permissions }: Props) {
 
 色は `resources/css/guren.css` にある Guren UI のトークンから選びます。`--g-accent` や `--g-text` といった CSS 変数と、それを使う `bg-g-panel`・`text-g-text-2`・`border-g-line` などの Tailwind ユーティリティがあります。トークンはシステムのダークモードに合わせて切り替わるので、`dark:` の指定は要りません。生成された `.oxlintrc.json` は `resources/js/` で `guren/no-raw-color` を有効にしていて、`bg-white` や `text-slate-500` のようなパレットのクラス、`bg-[#db1b1b]` のような任意の色、`style` に書いた hex 値を報告します。
 
+### vendor チャンク
+`vite build` は依存パッケージを共有チャンクにまとめます。`react-vendor`・`inertia-vendor`・`framework-vendor` の 3 つと、それ以外のパッケージをすべて入れる `vendor` です。各ページは `vendor` を直接読み込むので、一部の機能が `import()` で読み込むライブラリも、すべての訪問者に配信されます。こうしたライブラリは、プラグインの `manualChunks` オプションで `vendor` から外せます。
+
+```ts
+// vite.config.ts
+guren({
+  manualChunks: (id) => (id.includes('/node_modules/zod/') ? 'zod' : undefined),
+})
+```
+
+関数にはモジュールのパスが、区切りを `/` にそろえた形で渡されます。戻り値は次の 3 通りです。
+
+- チャンク名を返すと、モジュールはそのチャンクに入ります。ダウンロードするのは、それを import するコードだけです。
+- `null` を返すとチャンク名は付かず、import のされ方に応じて Vite が分割します。
+- `undefined` を返すと、既定のまとめ方のままになります。
+
+このオプションは SSR ビルドには適用されません。`build.rollupOptions.output.manualChunks` を自分で設定した場合も使われず、その関数がすべてのチャンクを決めます。
+
 ## favicon とドキュメント head
 本番の HTML はサーバー側で組み立てるもので、`public/index.html` は読み込まれません。そのため、このファイルに `<link>` を書いてもブラウザには届きません。サイト全体の head に入れるマークアップは `inertia` オプションで登録します。生成されたアプリでは、`src/app.ts` からプレースホルダーの `public/favicon.svg` にリンクしてあります。
 

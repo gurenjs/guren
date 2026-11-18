@@ -216,6 +216,24 @@ The scaffold ships with Tailwind CSS preconfigured. Edit `resources/css/app.css`
 
 Colors come from the Guren UI tokens in `resources/css/guren.css`: CSS variables such as `--g-accent` and `--g-text`, and Tailwind utilities over them such as `bg-g-panel`, `text-g-text-2` and `border-g-line`. The tokens switch with the system's dark mode, so a page styled with them needs no `dark:` variants. The scaffolded `.oxlintrc.json` enables `guren/no-raw-color` on `resources/js/`, which reports a palette class such as `bg-white` or `text-slate-500`, an arbitrary color such as `bg-[#db1b1b]`, and a hex value in a `style` prop.
 
+### Vendor chunks
+`vite build` groups dependencies into shared chunks: `react-vendor`, `inertia-vendor`, `framework-vendor`, and `vendor` for every other package. Pages import `vendor` directly, so a library that one feature loads through `import()` still reaches every visitor. Move it out with the plugin's `manualChunks` option:
+
+```ts
+// vite.config.ts
+guren({
+  manualChunks: (id) => (id.includes('/node_modules/zod/') ? 'zod' : undefined),
+})
+```
+
+The function receives each module's path with forward slashes and returns one of three things:
+
+- A chunk name puts the module in that chunk, which only the code importing it downloads.
+- `null` names no chunk, and Vite splits the module by how it is imported.
+- `undefined` keeps the built-in grouping.
+
+The option does not apply to the SSR build. It is also unused when you set `build.rollupOptions.output.manualChunks` yourself, since that function then decides every chunk.
+
 ## Favicon and Document Head
 The production document is built by the server, not from `public/index.html`, so a `<link>` added to that file never reaches a browser. Register site-wide head markup with the `inertia` option instead. The scaffold already links the placeholder `public/favicon.svg` from `src/app.ts`:
 
