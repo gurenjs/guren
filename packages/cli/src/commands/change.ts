@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 
 import { defineCommand } from '../define-command'
-import { judgeChangeLane, type ChangeFact, type ChangeLaneReport, type Lane } from '../change/lane'
+import { declarationNote, judgeChangeLane, type ChangeFact, type ChangeLaneReport, type Lane } from '../change/lane'
 import { openChange, resolveChange } from '../change/resolve'
 import { REVIEW_DOC_FILE, syncReviewDoc } from '../change/review-doc'
 import { policyNote, REVIEW_POLICY_FILE } from '../change/review-policy'
@@ -15,7 +15,7 @@ import { markCommandFailed } from '../command-status'
 const short = (sha: string): string => sha.slice(0, 12)
 
 function factLine(fact: ChangeFact): string {
-  return `  ${fact.code}${fact.target ? ` (${fact.target})` : ''}: ${fact.message}${policyNote(fact)}`
+  return `  ${fact.code}${fact.target ? ` (${fact.target})` : ''}: ${fact.message}${declarationNote(fact)}${policyNote(fact)}`
 }
 
 export function renderChangeLane(report: ChangeLaneReport): string {
@@ -45,6 +45,7 @@ function trustBoundary(report: ChangeLaneReport): string[] {
     'The floor guards against mistakes. It does not stop an author who writes code to defeat it.',
     'Facts are lower bounds: a fact that did not appear has not proved the code unchanged.',
     ...(report.policy.state === 'read' ? [`${REVIEW_POLICY_FILE} was read from the merge base, where a person merged it; an edit to it in this change applies only once merged.`] : []),
+    ...(report.facts.some((fact) => fact.declaredBy) ? ['An approved plan declares targets, not their implementation: a fact lowered by a declaration was matched by name, path and what the scaffold writes, and its body was not read.'] : []),
     ...(report.audit.loadedCode ? ["The audit loaded the application's code at the commits it exported, under this shell's environment, so it is no evidence about a change that attacks the runner."] : []),
   ]
 }

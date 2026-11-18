@@ -31,6 +31,16 @@ const IGNORED_ADVISORIES: IgnoredAdvisory[] = [
       'minimatch (bundledDependencies), so an override does not reach it. aws-cdk-lib 2.275.0 still ' +
       'requires ^10.2.6. Remove once an aws-cdk-lib release bundles minimatch >=11.0.1.',
   },
+  {
+    id: 'GHSA-fc5q-39xc-vjpf',
+    reason:
+      'picomatch <=4.0.7 ReDoS from a single-branch repeated extglob in the *pattern*; high. No ' +
+      'release is outside the range. Every holder takes its patterns from configuration, never a ' +
+      'request: vite and tinyglobby (4.0.7, 4.0.5), tsdown and @rolldown/plugin-babel (4.0.5), and ' +
+      'micromatch under @changesets (2.3.2); nothing in packages/*/src imports picomatch, and ' +
+      '@guren/server and @guren/cli reach vite only as a peer. Remove once a picomatch release ' +
+      'outside <=4.0.7 is locked through root overrides with --minimum-release-age.',
+  },
 ]
 
 const ignoredIds = new Set<string>()
