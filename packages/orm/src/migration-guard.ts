@@ -1043,7 +1043,8 @@ function readCreationStatement(tokens: Token[]): CreationStatement | undefined {
         created.columns.push(read)
         continue
       }
-      if (item.word('CONSTRAINT') && item.ident() === undefined) return undefined
+      // MySQL's composite key is `CONSTRAINT PRIMARY KEY(…)`, with no name.
+      if (item.word('CONSTRAINT') && item.ident() === undefined && !isWord(part[item.at], 'PRIMARY')) return undefined
       if (isWord(part[item.at], 'FOREIGN')) {
         const key = item.foreignKey()
         if (!key) return undefined

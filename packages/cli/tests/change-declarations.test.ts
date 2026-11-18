@@ -439,6 +439,24 @@ describe('declaredMigration', () => {
     }
   })
 
+  test.each<[string, string]>([
+    ['pg', 'CREATE TABLE "members" (\n\t"tenant_id" integer,\n\t"item_id" integer,\n\tCONSTRAINT "members_pkey" PRIMARY KEY("tenant_id","item_id")\n);\n'],
+    ['mysql', 'CREATE TABLE `members` (\n\t`tenant_id` int NOT NULL,\n\t`item_id` int NOT NULL,\n\tCONSTRAINT PRIMARY KEY(`tenant_id`,`item_id`)\n);\n'],
+    ['sqlite', 'CREATE TABLE `members` (\n\t`tenant_id` integer NOT NULL,\n\t`item_id` integer NOT NULL,\n\tCONSTRAINT `members_pk` PRIMARY KEY(`tenant_id`, `item_id`)\n);\n'],
+  ])('should hold a %s composite key in the order the scaffold writes it', (dialect, sql) => {
+    const { schema } = migration(dialect)
+    const plan = tagsPlan((document) => {
+      const column = (id: string, name: string, columnName: string) => ({ id, name, columnName, change: { kind: 'add' }, type: 'integer', nullable: false, unique: false, index: false, primaryKey: true })
+      document.models.push({ id: 'model.member', change: { kind: 'add' }, name: 'Member', table: 'members', relationships: [], fillable: [], indexes: [], columns: [column('column.member.tenantId', 'tenantId', 'tenant_id'), column('column.member.itemId', 'itemId', 'item_id')] })
+      document.tasks[0].covers.push('model.member')
+    })
+    const reversed = sql.replace(/PRIMARY KEY\((.)tenant_id(.),( ?)(.)item_id(.)\)/, 'PRIMARY KEY($1item_id$2,$3$4tenant_id$5)')
+
+    expect(reversed).not.toBe(sql)
+    expect(planCreatesStatements(plan, readCreationStatements(sql, DIALECT[dialect]!)!, schema, schema[0]!.dialect)).toEqual(['model.member'])
+    expect(planCreatesStatements(plan, readCreationStatements(reversed, DIALECT[dialect]!)!, schema, schema[0]!.dialect)).toBeUndefined()
+  })
+
   test('should declare nothing behind a separator inside a comment, which the migrator runs as its own statement', async () => {
     for (const dialect of ['pg', 'mysql', 'sqlite']) {
       const { subject, sql, text } = migration(dialect)

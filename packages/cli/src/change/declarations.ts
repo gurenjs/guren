@@ -416,15 +416,17 @@ function createsPlannedTable(statement: Extract<CreationStatement, { kind: 'crea
   const byName = new Map(statement.columns.map((column) => [column.name, column]))
   if (byName.size !== statement.columns.length || byName.size !== model.columns.length) return false
   const primary = model.columns.filter((column) => column.primaryKey)
-  if (primary.length > 1 ? !statement.primaryKey || !sameList([...statement.primaryKey].sort(), primary.map(sqlNameOf).sort()) : statement.primaryKey !== undefined) return false
+  // In the scaffold's column order: the key's index serves queries on its leading column.
+  if (primary.length > 1 ? !statement.primaryKey || !sameList(statement.primaryKey, primary.map(sqlNameOf)) : statement.primaryKey !== undefined) return false
   return model.columns.every((planned) => {
     const column = byName.get(sqlNameOf(planned))
     const single = planned.primaryKey === true && primary.length === 1
     const generated = isAutoIncrementPrimaryKey(planned, primary.length)
     const type = migrationSqlType(dialect, planned, generated)
-    // A primary key is not null whether or not the SQL says so; pg numbers a key by its `serial` type.
+    // drizzle-kit writes no NOT NULL on a single key, nor on pg's composite one, whose constraint holds its columns not null.
+    const keyed = planned.primaryKey === true && primary.length > 1 && dialect !== 'sqlite'
     return column !== undefined && type !== undefined && column.type === type && column.autoIncrement === (generated && dialect !== 'pg')
-      && column.primaryKey === single && (column.notNull || column.primaryKey) === (!planned.nullable || single) && sameDefault(planned, column.default, dialect)
+      && column.primaryKey === single && (column.notNull || column.primaryKey || keyed) === (!planned.nullable || single || keyed) && sameDefault(planned, column.default, dialect)
   })
 }
 

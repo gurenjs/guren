@@ -61,6 +61,15 @@ describe('readCreationStatements', () => {
     ])
   })
 
+  test("should read a composite key in the order the SQL writes it, MySQL's unnamed one included", () => {
+    const mysql = 'CREATE TABLE `m` (\n\t`tenant_id` int NOT NULL,\n\t`item_id` int NOT NULL,\n\tCONSTRAINT PRIMARY KEY(`tenant_id`,`item_id`)\n);\n'
+    const pg = 'CREATE TABLE "m" (\n\t"tenant_id" integer,\n\t"item_id" integer,\n\tCONSTRAINT "m_pkey" PRIMARY KEY("item_id","tenant_id")\n);\n'
+
+    expect(readCreationStatements(mysql, 'mysql')).toMatchObject([{ kind: 'create-table', primaryKey: ['tenant_id', 'item_id'] }])
+    expect(readCreationStatements(pg, 'postgres')).toMatchObject([{ kind: 'create-table', primaryKey: ['item_id', 'tenant_id'] }])
+    expect(readCreationStatements(mysql.replace('CONSTRAINT PRIMARY KEY', 'CONSTRAINT CHECK'), 'mysql')).toBeUndefined()
+  })
+
   test.each(DIALECTS)('should read every %s migration of the run', (folder, dialect) => {
     const { sql, baseSql } = run(folder)
 
