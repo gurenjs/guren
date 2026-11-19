@@ -502,11 +502,32 @@ describe('drizzle migrator pieces: a separator cuts the file wherever it stands'
       test('should report a DROP between two separators inside a block comment', () => {
         const sql = 'SELECT 1;\n/* x --> statement-breakpoint\nDROP TABLE "users";\n--> statement-breakpoint */\n'
         expect(found(sql, dialect)).toContainEqual({ kind: 'drop-table', table: 'users', line: 3 })
+        // The piece that opens the comment never closes it, which the migrator's server refuses to read too.
+        expect(found(sql, dialect).map(({ kind }) => kind)).toContain('unreadable')
       })
 
       test('should report a DROP between two separators inside a string', () => {
         const sql = "INSERT INTO notes (body) VALUES ('a --> statement-breakpoint\nDROP TABLE users; --> statement-breakpoint b');\n"
         expect(found(sql, dialect)).toContainEqual({ kind: 'drop-table', table: 'users', line: 2 })
+        expect(found(sql, dialect).map(({ kind }) => kind)).toContain('unreadable')
+      })
+
+      test('should report a DROP between two separators inside a quoted identifier', () => {
+        const sql = 'CREATE TABLE "a --> statement-breakpoint\nDROP TABLE users; --> statement-breakpoint b" ("id" integer);\n'
+        expect(found(sql, dialect)).toContainEqual({ kind: 'drop-table', table: 'users', line: 2 })
+      })
+
+      test('should acknowledge nothing when the whole file and its pieces each see a different marker', () => {
+        const sql = [
+          'SELECT 1; -- note --> statement-breakpoint SELECT 2; /*',
+          '-- guren:allow-destructive: whole only',
+          '-- */',
+          '-- guren:allow-destructive--> statement-breakpoint DROP TABLE users;',
+          '',
+        ].join('\n')
+        const scan = scanMigrationSql(sql, { dialect })
+        expect(scan.statements).toContainEqual(expect.objectContaining({ kind: 'drop-table', table: 'users', line: 4 }))
+        expect(scan.acknowledged).toBeNull()
       })
 
       test('should report each statement of a separated file once, at its file line', () => {

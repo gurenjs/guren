@@ -845,7 +845,7 @@ const evidence = (statement: DestructiveStatement) => JSON.stringify([statement.
  * Every way the dialect's server may read the SQL (each dialect's, when none is
  * named), on the whole text and on the pieces drizzle's migrator runs, is taken
  * and merged so that none can hide a statement: every finding counts, while
- * exemption evidence, a create and the marker count only when every reading has them.
+ * exemption evidence, a create and one same marker count only when every reading has them.
  */
 export function scanMigrationSql(sql: string, { dialect }: ScanOptions = {}): MigrationScan {
   const candidates = dialect ? LEX_READINGS[dialect] : Object.values(LEX_READINGS).flat()
@@ -883,7 +883,8 @@ export function scanMigrationSql(sql: string, { dialect }: ScanOptions = {}): Mi
     statements: statements.sort((a, b) => a.line - b.line),
     creates: first!.creates.filter((entry) => rest.every((reading) => reading.creates.some((other) => createKey(other) === createKey(entry)))),
     cascadeTargets: [...new Set(readings.flatMap((reading) => reading.cascadeTargets))],
-    acknowledged: readings.every((reading) => reading.acknowledged) ? first!.acknowledged : null,
+    // One marker, read alike by every reading: two comments that each only one reading sees acknowledge nothing.
+    acknowledged: readings.every((reading) => JSON.stringify(reading.acknowledged) === JSON.stringify(first!.acknowledged)) ? first!.acknowledged : null,
   }
 }
 
