@@ -656,8 +656,8 @@ export function planScaffoldFilePaths(plan: PlanDraft, step: PlanDerivedStep): s
   return planScaffoldOutput(plan, step).files.map((file) => file.path)
 }
 
-/** What `plan:scaffold` writes for `step` against an application holding only `app`'s schema: the files and the table blocks. */
-export function planScaffoldOutput(plan: PlanDraft, step: PlanDerivedStep, app: Partial<Pick<PlanScaffoldApp, 'dialect' | 'tables'>> = {}): Pick<PlanScaffoldOutput, 'files' | 'tables' | 'refusals'> {
+/** What `plan:scaffold` writes for `step` against an application holding only `app`'s schema and files: the files and the table blocks. */
+export function planScaffoldOutput(plan: PlanDraft, step: PlanDerivedStep, app: Partial<Pick<PlanScaffoldApp, 'dialect' | 'tables' | 'modelFiles' | 'validatorFiles'>> = {}): Pick<PlanScaffoldOutput, 'files' | 'tables' | 'refusals'> {
   const { files, tables, refusals } = emitPlanScaffold(plan, step, { ...NO_APP, ...app })
   return { files, tables, refusals }
 }

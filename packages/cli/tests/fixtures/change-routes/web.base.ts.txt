@@ -1,0 +1,5 @@
+import type { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/', (c) => c.text('ok')).name('home')
+}

@@ -4,8 +4,9 @@ import { join } from 'node:path'
 
 import { readCreationStatements, type MigrationDialect } from '@guren/orm/internal/migration-guard'
 
-import { applyPlanDeclarations, declaredExports, declaredMigration, declaredTable, planCreatesStatements, planDeclaredFiles, type DeclarationSubject, type OpenPlan } from '../src/change/declarations'
+import { applyPlanDeclarations, declaredExports, declaredMigration, declaredRoute, declaredTable, planCreatesStatements, planDeclaredFiles, type DeclarationSubject, type OpenPlan } from '../src/change/declarations'
 import type { ChangeFact } from '../src/change/lane'
+import type { RouteSecurityRecord } from '../src/change/security-records'
 import { parseSourceFile } from '../src/parse-cache'
 import { PlanSchema, type PlanDraft } from '../src/plan/schema'
 import { parseSchemaSource } from '../src/schema-parser'
@@ -77,7 +78,7 @@ describe('declaredExports', () => {
 })
 
 describe('planDeclaredFiles', () => {
-  test('should own each file the scaffold writes for added elements, routes files excepted', () => {
+  test('should own each file the scaffold writes for added elements, the routes file included', () => {
     const files = planDeclaredFiles(commentsPlan())
 
     expect([...files.keys()].sort()).toEqual([
@@ -87,7 +88,9 @@ describe('planDeclaredFiles', () => {
       'app/Models/Comment.ts',
       'app/Policies/CommentPolicy.ts',
       'app/Providers/CommentPolicyProvider.ts',
+      'routes/comments.ts',
     ])
+    expect(files.get('routes/comments.ts')).toMatchObject({ elements: ['route.comments.store', 'route.comments.destroy'], exports: ['registerCommentRoutes'], check: { kind: 'routes' } })
     expect(files.get('app/Models/Comment.ts')).toMatchObject({ elements: ['model.comment'], exports: ['Comment'], check: { kind: 'exports' } })
     expect(files.get('app/Providers/CommentPolicyProvider.ts')).toMatchObject({ exports: ['default'], check: { kind: 'whole' } })
     expect(files.get('app/Policies/CommentPolicy.ts')?.check.kind).toBe('policy')
@@ -164,6 +167,15 @@ ${COMMENTS.replace(".references(() => posts.id, { onDelete: 'cascade' })", '')}`
     const text = schemaWith(COMMENTS).replace('integer, pgTable, serial, text,', 'text as integer, pgTable, serial, integer as text,')
 
     expect(declaredTable(commentsPlan(), tableSubject(text), text)).toBeUndefined()
+  })
+
+  test("should match a statement whose builders come from its dialect's drizzle subpath and the barrel re-exporting it", () => {
+    // What `appendTableToSchema()` writes into a schema importing from `drizzle-orm/pg-core`: the new builders from the barrel.
+    const text = schemaWith(COMMENTS).replace("import { index, integer, pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'", "import { index, integer, timestamp } from '@guren/orm/drizzle/pg'\nimport { pgTable, serial, text } from 'drizzle-orm/pg-core'")
+
+    expect(text).toContain("from 'drizzle-orm/pg-core'")
+    expect(declaredTable(commentsPlan(), tableSubject(text), text)).toBe('model.comment')
+    expect(declaredTable(commentsPlan(), tableSubject(text), text.replace("from 'drizzle-orm/pg-core'", "from 'drizzle-orm/sqlite-core'"))).toBeUndefined()
   })
 
   test("should not match a statement that takes a builder from another dialect's barrel", () => {
@@ -488,5 +500,162 @@ describe('declaredMigration', () => {
     expect(await declaredMigration(subject, [...open(), { file: 'docs/plans/tags/plan.json', plan: second }], readHead)).toBeUndefined()
     expect(await declaredMigration(subject, open(inModule), readHead)).toBeUndefined()
     expect(await declaredMigration(subject, open(commentsPlan()), readHead)).toBeUndefined()
+  })
+})
+
+/** Real records of the fixture app: `scaffold` after the comments scaffold step, `mount` after its `--mount`. */
+const ROUTES_FIXTURE = join(import.meta.dir, 'fixtures/change-routes')
+const ROUTE_RECORDS = JSON.parse(readFileSync(join(ROUTES_FIXTURE, 'records.json'), 'utf8')) as Record<'scaffold' | 'mount', { routes: RouteSecurityRecord[] }>
+const [STORE, DESTROY, HOME] = ROUTE_RECORDS.mount.routes as [RouteSecurityRecord, RouteSecurityRecord, RouteSecurityRecord]
+const AUTH = STORE.middleware[0]!
+
+describe('declaredRoute', () => {
+  const only = (plan = commentsPlan()): OpenPlan[] => [{ file: PLAN_FILE, plan }]
+  const routes = [STORE, DESTROY, HOME]
+
+  test('should declare each route the mounted scaffold registers, by its plan element', () => {
+    expect(declaredRoute(STORE, routes, only())).toBe(`${PLAN_FILE}#route.comments.store`)
+    expect(declaredRoute(DESTROY, routes, only())).toBe(`${PLAN_FILE}#route.comments.destroy`)
+  })
+
+  test.each<[string, (route: RouteSecurityRecord) => RouteSecurityRecord]>([
+    ['another path', (route) => ({ ...route, path: '/comments' })],
+    ['another method', (route) => ({ ...route, method: 'PUT' })],
+    ['no name', ({ name: _name, ...route }) => route],
+    ['a module', (route) => ({ ...route, module: 'billing' })],
+    ['an action in another file', (route) => ({ ...route, action: route.action!.replace('Controllers/', 'Controllers/Admin/') })],
+    ['another action', (route) => ({ ...route, action: route.action!.replace('.destroy', '.store') })],
+    ['an inline handler', ({ action: _action, ...route }) => route],
+    ['no middleware', (route) => ({ ...route, middleware: [] })],
+    ['an inline middleware beside it', (route) => ({ ...route, middleware: [...route.middleware, { kind: 'inline', name: null, capabilities: {} }] })],
+    ['an `auth` that does not require a user', (route) => ({ ...route, middleware: [{ ...AUTH, capabilities: {} }] })],
+    ['an `auth` nothing registers', (route) => ({ ...route, middleware: [{ ...AUTH, unresolved: true }] })],
+    ['another binding', (route) => ({ ...route, bindings: { id: 'Post' } })],
+    ['no binding', ({ bindings: _bindings, ...route }) => route],
+    ['an agent tool', (route) => ({ ...route, agent: { toolName: 'comments_destroy' } })],
+    ['a body contract', (route) => ({ ...route, contracts: STORE.contracts })],
+    ['no authorize() call', (route) => ({ ...route, handler: { authenticates: false, authorizes: [], validates: [] } })],
+    ['an authorize() call for another ability', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'update', subject: '[Comment, comment]' }], validates: [] } })],
+    ['an unread body', (route) => ({ ...route, handler: { unread: 'not found' } })],
+  ])('should not declare a route with %s', (_why, edit) => {
+    const route = edit(DESTROY)
+    expect(declaredRoute(route, [STORE, route, HOME], only())).toBeUndefined()
+  })
+
+  test.each<[string, (route: RouteSecurityRecord) => RouteSecurityRecord]>([
+    ['no body contract', (route) => ({ ...route, contracts: {} })],
+    ['a contract of another export', (route) => ({ ...route, contracts: { body: { ...route.contracts.body!, exports: ['app/Http/Validators/CommentValidator.ts#OtherSchema'] } } })],
+    ['a params contract the plan does not state', (route) => ({ ...route, contracts: { ...route.contracts, params: route.contracts.body! } })],
+  ])('should not declare a store route with %s', (_why, edit) => {
+    const route = edit(STORE)
+    expect(declaredRoute(route, [route, DESTROY, HOME], only())).toBeUndefined()
+  })
+
+  test('should not declare a route registered ahead of one whose requests it answers', () => {
+    // `--mount` calls the scaffold's registrar first, so DELETE /comments/:id answers DELETE /comments/archived too.
+    const archived: RouteSecurityRecord = { ...HOME, method: 'DELETE', path: '/comments/archived', name: 'comments.archived' }
+    expect(declaredRoute(DESTROY, [STORE, DESTROY, archived, HOME], only())).toBeUndefined()
+    expect(declaredRoute(DESTROY, [archived, STORE, DESTROY, HOME], only())).toBe(`${PLAN_FILE}#route.comments.destroy`)
+    expect(declaredRoute(DESTROY, [STORE, DESTROY, { ...archived, module: 'billing' }, HOME], only())).toBeUndefined()
+  })
+
+  test('should not declare a route a second open plan names, one the plan alters, or one binding a planned key', () => {
+    expect(declaredRoute(DESTROY, routes, [...only(), { file: 'docs/plans/moderation/plan.json', plan: commentsPlan() }])).toBeUndefined()
+    expect(declaredRoute(DESTROY, routes, only(commentsPlan((plan) => {
+      plan.routes[1].change = { kind: 'alter' }
+    })))).toBeUndefined()
+    // The manifest names a binding's model and not its lookup column.
+    expect(declaredRoute(DESTROY, routes, only(commentsPlan((plan) => {
+      plan.routes[1].bind[0].key = 'slug'
+    })))).toBeUndefined()
+  })
+
+  test("should declare a route's agent tool only as the plan states it", () => {
+    const tool = { ...DESTROY, agent: { toolName: 'comments_destroy', readOnlyHint: false } }
+    const withAgent = commentsPlan((plan) => {
+      plan.routes[1].agent = { toolName: 'comments_destroy', readOnly: false }
+    })
+    expect(declaredRoute(tool, [STORE, tool, HOME], only(withAgent))).toBe(`${PLAN_FILE}#route.comments.destroy`)
+    expect(declaredRoute({ ...tool, agent: { ...tool.agent, readOnlyHint: true } }, [STORE, tool, HOME], only(withAgent))).toBeUndefined()
+    expect(declaredRoute({ ...tool, agent: { ...tool.agent, approval: 'required' } }, [STORE, tool, HOME], only(withAgent))).toBeUndefined()
+    expect(declaredRoute(DESTROY, routes, only(withAgent))).toBeUndefined()
+  })
+})
+
+describe('applyPlanDeclarations on a mount', () => {
+  const ENTRY = 'routes/web.ts'
+  const BASE = readFileSync(join(ROUTES_FIXTURE, 'web.base.ts.txt'), 'utf8')
+  const HEAD = readFileSync(join(ROUTES_FIXTURE, 'web.head.ts.txt'), 'utf8')
+  const only = (plan = commentsPlan()): OpenPlan[] => [{ file: PLAN_FILE, plan }]
+  const routes = [STORE, DESTROY, HOME]
+
+  /** The facts `judgeChangeLane()` gives the mount commit, each with its subject. */
+  function mountFacts(added: RouteSecurityRecord[] = [STORE, DESTROY], extra: Array<[ChangeFact, DeclarationSubject]> = []): { facts: ChangeFact[]; subjects: Map<ChangeFact, DeclarationSubject> } {
+    const subjects = new Map<ChangeFact, DeclarationSubject>()
+    const entry: ChangeFact = { code: 'source-edited', lane: 'medium', files: [ENTRY], evidence: 'path', message: `${ENTRY} modified` }
+    subjects.set(entry, { kind: 'routes-entry', path: ENTRY })
+    for (const route of added) {
+      subjects.set({ code: 'route-added', lane: 'medium', files: [ENTRY], evidence: 'registered', message: `${route.method} ${route.path}` }, { kind: 'route', change: 'add', route, routes })
+    }
+    for (const [fact, subject] of extra) subjects.set(fact, subject)
+    return { facts: [...subjects.keys()], subjects }
+  }
+  const read = (text: string) => async (path: string): Promise<string | null> => (path === ENTRY ? text : null)
+
+  test('should drop the entry edit of exactly the mount, once each route it adds is declared', async () => {
+    const { facts, subjects } = mountFacts()
+    const result = await applyPlanDeclarations(facts, subjects, only(), read(HEAD), read(BASE))
+
+    expect(result.map((fact) => [fact.code, fact.lane, fact.declaredBy])).toEqual([
+      ['route-added', 'low', `${PLAN_FILE}#route.comments.store`],
+      ['route-added', 'low', `${PLAN_FILE}#route.comments.destroy`],
+    ])
+  })
+
+  test.each<[string, string]>([
+    ['another line beside the mount', HEAD.replace("  router.get('/'", "  router.get('/admin', (c) => c.text('admin'))\n  router.get('/'")],
+    ['the call without its import', HEAD.replace("import { registerCommentRoutes } from './comments.js'\n", "import { registerCommentRoutes } from './other.js'\n")],
+    ['the call placed last', HEAD.replace('  registerCommentRoutes(router)\n\n', '').replace("name('home')\n", "name('home')\n  registerCommentRoutes(router)\n")],
+  ])('should keep an entry edit holding %s', async (_why, head) => {
+    const { facts, subjects } = mountFacts()
+    const result = await applyPlanDeclarations(facts, subjects, only(), read(head), read(BASE))
+
+    expect(result.filter((fact) => fact.code === 'source-edited')).toHaveLength(1)
+  })
+
+  test('should keep the entry edit when a route it adds is undeclared, one is missing, or another route changed', async () => {
+    const undeclared = mountFacts([STORE, { ...DESTROY, middleware: [] }])
+    expect((await applyPlanDeclarations(undeclared.facts, undeclared.subjects, only(), read(HEAD), read(BASE))).filter((fact) => fact.code === 'source-edited')).toHaveLength(1)
+    const missing = mountFacts([STORE])
+    expect((await applyPlanDeclarations(missing.facts, missing.subjects, only(), read(HEAD), read(BASE))).filter((fact) => fact.code === 'source-edited')).toHaveLength(1)
+    const changed: ChangeFact = { code: 'route-changed', lane: 'medium', files: [ENTRY], evidence: 'registered', message: 'GET /' }
+    const beside = mountFacts([STORE, DESTROY], [[changed, { kind: 'route', change: 'alter', route: HOME, base: HOME, routes }]])
+    expect((await applyPlanDeclarations(beside.facts, beside.subjects, only(), read(HEAD), read(BASE))).filter((fact) => fact.code === 'source-edited')).toHaveLength(1)
+  })
+
+  test('should keep the entry edit with no route fact, which a change whose records were not compared has', async () => {
+    const { facts, subjects } = mountFacts([])
+    expect(await applyPlanDeclarations(facts, subjects, only(), read(HEAD), read(BASE))).toEqual(facts)
+  })
+})
+
+describe('applyPlanDeclarations on a scaffolded routes file', () => {
+  const PATH = 'routes/comments.ts'
+  const COMMENTS_ROUTES = readFileSync(join(ROUTES_FIXTURE, 'comments.ts.txt'), 'utf8')
+  const POST_MODEL = "import { defineModel } from '@guren/core'\nimport { posts } from '@/db/schema'\n\nexport class Post extends defineModel(posts) {}\n"
+  const fact: ChangeFact = { code: 'file-added', lane: 'medium', files: [PATH], evidence: 'path', message: `${PATH} added` }
+  const judge = async (routesFile: string, files: Record<string, string> = { 'app/Models/Post.ts': POST_MODEL }) => {
+    const head: Record<string, string> = { [PATH]: routesFile, ...files }
+    const [result] = await applyPlanDeclarations([fact], new Map([[fact, { kind: 'file', path: PATH }]]), [{ file: PLAN_FILE, plan: commentsPlan() }], async (path) => head[path] ?? null)
+    return result!
+  }
+
+  test('should lower the file the scaffold wrote, binding the model the head declares', async () => {
+    expect(await judge(COMMENTS_ROUTES)).toMatchObject({ lane: 'low', declaredBy: `${PLAN_FILE}#route.comments.store,route.comments.destroy` })
+  })
+
+  test('should keep it with a route more, or when the head keeps the bound model elsewhere', async () => {
+    expect((await judge(COMMENTS_ROUTES.replace(/\n}\n$/, "\n  router.get('/comments', [CommentController, 'store'])\n}\n"))).lane).toBe('medium')
+    expect((await judge(COMMENTS_ROUTES, {})).lane).toBe('medium')
   })
 })

@@ -408,6 +408,8 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
         ...(entry.unresolvedMembers?.length ? { unresolvedMembers: entry.unresolvedMembers } : {}),
       })),
       contracts,
+      ...(route.bindings ? { bindings: route.bindings } : {}),
+      ...(route.agent ? { agent: route.agent } : {}),
       handler: ref ? await actionRecord(cwd, scan, ref, reachedByName, declarations, manifest.entry.file ?? undefined) : { unread: 'an inline handler, whose body the reader does not follow' },
     })
   }

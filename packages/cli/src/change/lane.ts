@@ -26,7 +26,8 @@ import type { ChangedDependencyFile, LockfileAdvisories } from './revision-advis
 import type { BaseRecordReading } from './base-record'
 import type { DeclarationSubject, OpenPlan } from './declarations'
 import type { ChangeAudits, HeadRecords } from './revision-audit'
-import { compareSecurityRecords, type SecurityRecords } from './security-records'
+import { ROUTES_ENTRY_CANDIDATES } from '../route-registrar'
+import { compareSecurityRecords, sameRecordPart, type RouteSecurityRecord, type SecurityRecords } from './security-records'
 
 export type { FactCode, Lane } from './fact-classes'
 
@@ -75,6 +76,11 @@ export interface ChangeLaneReport {
   plans: ChangePlan[]
   /** `guren.review.ts` at the merge base. */
   policy: LoadedReviewPolicy
+}
+
+/** `POST /comments (comments.store)`. */
+function describeRoute(route: RouteSecurityRecord): string {
+  return `${route.method} ${route.path}${route.name ? ` (${route.name})` : ''}${route.module ? ` in ${route.module}` : ''}`
 }
 
 /** ` (declared by docs/plans/comments/plan.json#model.comment)`, or nothing. */
@@ -531,10 +537,15 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     if (entries.length > 0) fact(entries, { code: 'ambient', lane: 'low', target: ambient.target, evidence: 'path', message: `${entries.length} ${entries.length === 1 ? 'file' : 'files'}: ${ambient.target}` })
   }
 
+  // The entry `--mount` patches, as the loader picks it: the first candidate the head has, edited in place.
+  const routesEntry = ROUTES_ENTRY_CANDIDATES.find((path) => trees.head.has(path))
   for (const entry of inApp) {
     if (claimed.has(entry)) continue
     const code = fallbackCode(entry)
-    fact([entry], { code, lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}${entry.oldPath ? ` from ${entry.oldPath}` : ''}` }, code === 'file-added' ? { kind: 'file', path: entry.path } : undefined)
+    const subject: DeclarationSubject | undefined = code === 'file-added' ? { kind: 'file', path: entry.path }
+      : code === 'source-edited' && entry.status === 'modified' && entry.path === routesEntry ? { kind: 'routes-entry', path: entry.path }
+      : undefined
+    fact([entry], { code, lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}${entry.oldPath ? ` from ${entry.oldPath}` : ''}` }, subject)
   }
 
   // One run serves the audit and the security records: both read the same two exports.
@@ -576,7 +587,28 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   if (compared) {
     records.compared = true
     const comparison = compareSecurityRecords(compared.base, compared.head)
-    facts.push(...comparison.facts.map((fact) => ({ ...fact, files: files.length > 0 ? files : touched })))
+    const routeFiles = files.length > 0 ? files : touched
+    facts.push(...comparison.facts.map((fact) => ({ ...fact, files: routeFiles })))
+    // The map is keyed by the object pushed, so each subject is set on the fact as it enters the list.
+    const routeFact = (value: Omit<ChangeFact, 'files' | 'lane' | 'evidence'>, subject: DeclarationSubject): void => {
+      const created: ChangeFact = { ...value, lane: 'medium', evidence: 'registered', files: routeFiles }
+      facts.push(created)
+      subjects.set(created, subject)
+    }
+    const { routes } = compared.head
+    for (const route of comparison.added) {
+      routeFact({ code: 'route-added', target: describeRoute(route), message: `${describeRoute(route)} is registered, and the base has no counterpart` }, { kind: 'route', change: 'add', route, routes })
+      if (route.agent) routeFact({ code: 'agent-tool', target: describeRoute(route), message: `${describeRoute(route)} is exposed as the agent tool ${route.agent.toolName ?? route.name ?? '(unnamed)'}` }, { kind: 'agent', route })
+    }
+    for (const route of comparison.removed) {
+      routeFact({ code: 'route-removed', target: describeRoute(route), message: `${describeRoute(route)} is no longer registered` }, { kind: 'route', change: 'drop', route, routes })
+    }
+    for (const pair of comparison.changed) {
+      routeFact({ code: 'route-changed', target: describeRoute(pair.head), message: `${describeRoute(pair.head)}${describeRoute(pair.base) === describeRoute(pair.head) ? '' : ` (was ${describeRoute(pair.base)})`}: its record changed` }, { kind: 'route', change: 'alter', route: pair.head, base: pair.base, routes })
+      if ((pair.head.agent || pair.base.agent) && !sameRecordPart(pair.base.agent, pair.head.agent)) {
+        routeFact({ code: 'agent-tool', target: describeRoute(pair.head), message: `${describeRoute(pair.head)}: ${pair.head.agent ? (pair.base.agent ? 'its agent tool changed' : 'is exposed as an agent tool') : 'is no longer an agent tool'}` }, { kind: 'agent', route: pair.head, base: pair.base })
+      }
+    }
     if (comparison.incomparable.length > 0) unjudged.push({ reader: 'security-records', reason: `routes whose records cannot be ordered against the base: ${comparison.incomparable.join('; ')}`, lane: 'high', files: files.length > 0 ? files : touched })
     // A skip the change brought in is the change's doing: a route it registers there is not on the list at all.
     const [baseSkipped, headSkipped] = [compared.base.skipped ?? [], compared.head.skipped ?? []]
@@ -638,7 +670,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   const plans = await readChangePlans(reader, trees.head)
   // A change that writes a plan record is high already, and must not cite what it wrote.
   const declared = plans.open.length > 0 && subjects.size > 0 && !facts.some((entry) => entry.code === 'plan-record')
-    ? await (await import('./declarations')).applyPlanDeclarations(facts, subjects, plans.open, (path) => reader.read('head', path))
+    ? await (await import('./declarations')).applyPlanDeclarations(facts, subjects, plans.open, (path) => reader.read('head', path), (path) => reader.read('base', path))
     : facts
   const policy = await loadBaseReviewPolicy(reader)
   const judged = policy.state === 'read' ? applyReviewPolicy(declared, change.paths, policy.policy) : declared

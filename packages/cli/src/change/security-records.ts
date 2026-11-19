@@ -4,7 +4,7 @@
  * `authorization-removed` and `validation-removed`. The comparison fails closed: only records that
  * are equal, or provably stronger, give no fact, and anything it cannot order is incomparable.
  */
-import type { MiddlewareEntry } from '@guren/server'
+import type { AgentRouteMetadata, MiddlewareEntry } from '@guren/server'
 
 import { CONTRACT_SEGMENTS, type ContractSegment } from '../contract-segments'
 import type { ChangeFact } from './lane'
@@ -13,7 +13,7 @@ import type { ChangeFact } from './lane'
  * Bumped whenever a field's meaning changes, a digest's inputs included: a stored record of another
  * version is not compared, and a differing `@guren/cli` is only named, so this is the one guard.
  */
-export const SECURITY_RECORD_VERSION = 1
+export const SECURITY_RECORD_VERSION = 2
 
 const CONTRACT_KEYS = CONTRACT_SEGMENTS
 type ContractKey = ContractSegment
@@ -70,6 +70,10 @@ export interface RouteSecurityRecord {
   middleware: MiddlewareRecord[]
   contracts: Partial<Record<ContractKey, ContractRecord>>
   handler: ActionRecord
+  /** Each bound parameter and the model class it resolves, by name: the binding's lookup column is not in the manifest. */
+  bindings?: Record<string, string>
+  /** The `.agent()` metadata as declared, which makes the route a tool. */
+  agent?: AgentRouteMetadata
 }
 
 export interface SecurityRecords {
@@ -91,6 +95,9 @@ const canonical = (value: unknown): string => JSON.stringify(value, (_key, entry
     : entry)
 
 const same = (a: unknown, b: unknown): boolean => canonical(a) === canonical(b)
+
+/** Two values of a record equal as the comparison reads them, key order aside. */
+export const sameRecordPart: (a: unknown, b: unknown) => boolean = same
 
 const LOWER_BOUNDS = new Set(['minLength', 'minimum', 'exclusiveMinimum', 'minItems', 'minProperties'])
 const UPPER_BOUNDS = new Set(['maxLength', 'maximum', 'exclusiveMaximum', 'maxItems', 'maxProperties'])
@@ -290,6 +297,12 @@ export interface SecurityComparison {
   facts: ChangeFact[]
   /** Routes whose records could not be ordered: `unjudged` at high. */
   incomparable: string[]
+  /** Head routes with no base counterpart, and not read as a move of one that left. */
+  added: RouteSecurityRecord[]
+  /** Base routes no head route was matched to. */
+  removed: RouteSecurityRecord[]
+  /** Matched pairs whose records differ in anything, endpoint and name included. */
+  changed: Array<{ base: RouteSecurityRecord; head: RouteSecurityRecord }>
 }
 
 /** The base routes a head route is compared with: by action, then by method and path in its module, then across modules. */
@@ -321,12 +334,15 @@ export function compareSecurityRecords(base: SecurityRecords, head: SecurityReco
   const incomparable: string[] = []
   const matched = new Set<RouteSecurityRecord>()
   const orphans: RouteSecurityRecord[] = []
+  const added: RouteSecurityRecord[] = []
+  const changed: SecurityComparison['changed'] = []
   for (const route of head.routes) {
     const counterparts = counterpartsOf(route, base.routes)
     if (!Array.isArray(counterparts)) { incomparable.push(`${routeLabel(route)}: ${counterparts.ambiguous}`); continue }
     if (counterparts.length === 0) { orphans.push(route); continue }
     for (const counterpart of counterparts) {
       matched.add(counterpart)
+      if (!same(counterpart, route)) changed.push({ base: counterpart, head: route })
       const result = compareRecords(counterpart, route)
       const label = counterpart.path === route.path && counterpart.method === route.method ? routeLabel(route) : `${routeLabel(route)} (against ${routeLabel(counterpart)})`
       if (result.verdict === 'incomparable') incomparable.push(`${label}: ${result.reasons.join('; ')}`)
@@ -340,6 +356,7 @@ export function compareSecurityRecords(base: SecurityRecords, head: SecurityReco
   for (const route of orphans) {
     const gone = left.find((entry) => entry.method === route.method && (entry.path === route.path || (actionMethod(entry) !== undefined && actionMethod(entry) === actionMethod(route))))
     if (gone) incomparable.push(`${routeLabel(route)} has no counterpart at the base, while ${routeLabel(gone)}${gone.action ? ` (${gone.action})` : ''} left it: a rename and a move the reader cannot pair`)
+    else added.push(route)
   }
-  return { facts, incomparable }
+  return { facts, incomparable, added, removed: left, changed }
 }
