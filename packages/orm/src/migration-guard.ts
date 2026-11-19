@@ -861,6 +861,315 @@ export function scanMigrationSql(sql: string, { dialect }: ScanOptions = {}): Mi
   }
 }
 
+/** A foreign key a creation statement states, names as the SQL spells them. */
+export interface CreationForeignKey {
+  columns: string[]
+  table: string
+  columnsTo: string[]
+  /** Upper-cased; absent when the SQL states none. */
+  onDelete?: string
+  onUpdate?: string
+}
+
+/**
+ * A column a `CREATE TABLE` defines. `type` is spelled as a drizzle-kit snapshot spells it (`numeric(8,2)`), and
+ * `default` as the SQL writes it, words lower-cased and strings single-quoted (`'draft'`, `now()`, `(unixepoch())`).
+ */
+export interface CreationColumn {
+  name: string
+  type: string
+  notNull: boolean
+  primaryKey: boolean
+  unique: boolean
+  autoIncrement: boolean
+  default?: string
+}
+
+/** One statement of a migration that only creates: a table, an index on one, or a foreign key added to one. */
+export type CreationStatement =
+  | { kind: 'create-table'; table: string; columns: CreationColumn[]; foreignKeys: CreationForeignKey[]; uniques: string[][]; primaryKey?: string[] }
+  | { kind: 'create-index'; table: string; columns: string[]; unique: boolean }
+  | { kind: 'add-foreign-key'; table: string; foreignKey: CreationForeignKey }
+
+// The type words drizzle-kit writes for the plan's column types, and the functions a default may call: the
+// timestamp ones, none of which names another object or has an effect.
+const COLUMN_TYPE_WORDS = new Set([
+  'SERIAL', 'INTEGER', 'INT', 'TEXT', 'VARCHAR', 'NUMERIC', 'DECIMAL', 'DOUBLE', 'PRECISION', 'REAL', 'BOOLEAN', 'DATE', 'TIMESTAMP',
+  'WITH', 'WITHOUT', 'TIME', 'ZONE', 'JSONB', 'JSON', 'UUID',
+])
+const DEFAULT_FUNCTIONS = new Set(['NOW', 'UNIXEPOCH'])
+const DEFAULT_WORDS = new Set(['TRUE', 'FALSE', 'NULL', 'CURRENT_TIMESTAMP', 'CURRENT_DATE'])
+const COLUMN_TYPE_PUNCT = /^[0-9(),]$/
+
+/** `NUMERIC ( 8 , 2 )` as `numeric(8,2)`, `TIMESTAMP WITH TIME ZONE` as `timestamp with time zone`, `'a''b'` as written. */
+function spellTokens(tokens: Token[]): string {
+  let text = ''
+  for (const [at, token] of tokens.entries()) {
+    const spelled = token.kind === 'word' ? token.value.toLowerCase() : token.kind === 'string' ? `'${token.value.replaceAll("'", "''")}'` : token.value
+    text += `${at > 0 && token.kind === 'word' && tokens[at - 1]!.kind === 'word' ? ' ' : ''}${spelled}`
+  }
+  return text
+}
+
+/** The end of a default expression at `start`: a string, a number, a literal word, `now()`, or one of those in parentheses. */
+function defaultEnd(tokens: Token[], start: number): number | undefined {
+  const token = tokens[start]
+  if (token?.kind === 'string' || (token?.kind === 'word' && DEFAULT_WORDS.has(token.value))) return start + 1
+  if (token?.kind === 'word' && DEFAULT_FUNCTIONS.has(token.value)) return isPunct(tokens[start + 1], '(') && isPunct(tokens[start + 2], ')') ? start + 3 : undefined
+  if (isPunct(token, '(')) {
+    const end = defaultEnd(tokens, start + 1)
+    return end !== undefined && isPunct(tokens[end], ')') ? end + 1 : undefined
+  }
+  let at = isPunct(token, '-') ? start + 1 : start
+  const digits = at
+  while (tokens[at]?.kind === 'punct' && /^[0-9.]$/.test(tokens[at]!.value)) at += 1
+  return at > digits ? at : undefined
+}
+
+/** A column definition after its name: the type, then each of drizzle-kit's modifiers at most once, and nothing else. */
+function readColumnDefinition(name: string, definition: Token[]): CreationColumn | undefined {
+  let at = 0
+  while (at < definition.length && ((definition[at]!.kind === 'word' && COLUMN_TYPE_WORDS.has(definition[at]!.value)) || (definition[at]!.kind === 'punct' && COLUMN_TYPE_PUNCT.test(definition[at]!.value)))) at += 1
+  if (at === 0) return undefined
+  const column: CreationColumn = { name, type: spellTokens(definition.slice(0, at)), notNull: false, primaryKey: false, unique: false, autoIncrement: false }
+  const seen = new Set<string>()
+  const once = (modifier: string): boolean => !seen.has(modifier) && Boolean(seen.add(modifier))
+  while (at < definition.length) {
+    const word = (value: string, offset = 0) => isWord(definition[at + offset], value)
+    if (word('NOT') && word('NULL', 1) && once('null')) {
+      column.notNull = true
+      at += 2
+    } else if (word('PRIMARY') && word('KEY', 1) && once('primary')) {
+      column.primaryKey = true
+      at += 2
+    } else if (word('UNIQUE') && once('unique')) {
+      column.unique = true
+      at += 1
+    } else if ((word('AUTO_INCREMENT') || word('AUTOINCREMENT')) && once('auto')) {
+      column.autoIncrement = true
+      at += 1
+    } else if (word('DEFAULT') && once('default')) {
+      const end = defaultEnd(definition, at + 1)
+      if (end === undefined) return undefined
+      column.default = spellTokens(definition.slice(at + 1, end))
+      at = end
+    } else {
+      return undefined
+    }
+  }
+  return column
+}
+const REFERENTIAL_ACTIONS = ['CASCADE', 'RESTRICT', 'SET NULL', 'SET DEFAULT', 'NO ACTION']
+
+/** A cursor over one statement; every reader returns `undefined` at the first token it does not allow. */
+class CreationCursor {
+  at = 0
+  constructor(private readonly tokens: Token[]) {}
+  done(): boolean {
+    return this.at === this.tokens.length
+  }
+  word(...values: string[]): boolean {
+    if (!isWord(this.tokens[this.at], ...values)) return false
+    this.at += 1
+    return true
+  }
+  words(phrase: string): boolean {
+    const start = this.at
+    if (phrase.split(' ').every((value) => this.word(value))) return true
+    this.at = start
+    return false
+  }
+  punct(value: string): boolean {
+    const token = this.tokens[this.at]
+    if (token?.kind !== 'punct' || token.value !== value) return false
+    this.at += 1
+    return true
+  }
+  /** A quoted, unqualified name. */
+  ident(): string | undefined {
+    const token = this.tokens[this.at]
+    const next = this.tokens[this.at + 1]
+    if (token?.kind !== 'ident' || (next?.kind === 'punct' && next.value === '.')) return undefined
+    this.at += 1
+    return token.value
+  }
+  identList(): string[] | undefined {
+    if (!this.punct('(')) return undefined
+    const names: string[] = []
+    do {
+      const name = this.ident()
+      if (name === undefined) return undefined
+      names.push(name)
+    } while (this.punct(','))
+    return this.punct(')') ? names : undefined
+  }
+  action(): string | undefined {
+    return REFERENTIAL_ACTIONS.find((phrase) => this.words(phrase))
+  }
+  /** `FOREIGN KEY (a) REFERENCES t (b) [ON DELETE x] [ON UPDATE y]` */
+  foreignKey(): CreationForeignKey | undefined {
+    if (!this.words('FOREIGN KEY')) return undefined
+    const columns = this.identList()
+    const table = columns && this.word('REFERENCES') ? this.ident() : undefined
+    const columnsTo = table === undefined ? undefined : this.identList()
+    if (!columns || table === undefined || !columnsTo) return undefined
+    const key: CreationForeignKey = { columns, table, columnsTo }
+    for (const [clause, field] of [['ON DELETE', 'onDelete'], ['ON UPDATE', 'onUpdate']] as const) {
+      if (!this.words(clause)) continue
+      const action = this.action()
+      if (action === undefined) return undefined
+      key[field] = action
+    }
+    return key
+  }
+  rest(): Token[] {
+    return this.tokens.slice(this.at)
+  }
+}
+
+function readCreationStatement(tokens: Token[]): CreationStatement | undefined {
+  const cursor = new CreationCursor(tokens)
+  if (cursor.words('CREATE TABLE')) {
+    const table = cursor.ident()
+    const rest = cursor.rest()
+    if (table === undefined || !isPunct(rest[0], '(') || !isPunct(rest.at(-1), ')') || depths(rest).slice(1, -1).some((depth) => depth < 1)) return undefined
+    const created: Extract<CreationStatement, { kind: 'create-table' }> = { kind: 'create-table', table, columns: [], foreignKeys: [], uniques: [] }
+    for (const part of splitTopLevel(rest.slice(1, -1))) {
+      const item = new CreationCursor(part)
+      const column = item.ident()
+      if (column !== undefined) {
+        const read = readColumnDefinition(column, item.rest())
+        if (!read) return undefined
+        created.columns.push(read)
+        continue
+      }
+      // MySQL's composite key is `CONSTRAINT PRIMARY KEY(…)`, with no name.
+      if (item.word('CONSTRAINT') && item.ident() === undefined && !isWord(part[item.at], 'PRIMARY')) return undefined
+      if (isWord(part[item.at], 'FOREIGN')) {
+        const key = item.foreignKey()
+        if (!key) return undefined
+        created.foreignKeys.push(key)
+      } else if (item.word('UNIQUE')) {
+        item.word('INDEX', 'KEY')
+        const columns = item.identList()
+        if (!columns) return undefined
+        created.uniques.push(columns)
+      } else if (item.words('PRIMARY KEY') && created.primaryKey === undefined) {
+        created.primaryKey = item.identList()
+        if (!created.primaryKey) return undefined
+      } else {
+        return undefined
+      }
+      if (!item.done()) return undefined
+    }
+    return created
+  }
+  if (cursor.word('CREATE')) {
+    const unique = cursor.word('UNIQUE')
+    const name = cursor.word('INDEX') ? cursor.ident() : undefined
+    const table = name !== undefined && cursor.word('ON') ? cursor.ident() : undefined
+    const columns = table === undefined ? undefined : cursor.identList()
+    return table !== undefined && columns && cursor.done() ? { kind: 'create-index', table, columns, unique } : undefined
+  }
+  if (cursor.words('ALTER TABLE')) {
+    const table = cursor.ident()
+    const named = table !== undefined && cursor.words('ADD CONSTRAINT') && cursor.ident() !== undefined
+    const foreignKey = named ? cursor.foreignKey() : undefined
+    return table !== undefined && foreignKey && cursor.done() ? { kind: 'add-foreign-key', table, foreignKey } : undefined
+  }
+  return undefined
+}
+
+const isPunct = (token: Token | undefined, value: string): boolean => token?.kind === 'punct' && token.value === value
+
+// drizzle-kit's separator: drizzle's migrator splits the raw text on it, comments and strings included, and runs each piece.
+const STATEMENT_SEPARATOR = '--> statement-breakpoint'
+const STATEMENT_BREAKPOINT = STATEMENT_SEPARATOR.slice(2)
+
+/**
+ * The statements of a migration that does nothing but create tables, their indexes and their foreign
+ * keys, in the shapes drizzle-kit writes them; `undefined` for anything else. An allowlist: a name
+ * qualified by a schema, an unquoted name, a body, a trigger, `AS SELECT`, a column definition with
+ * another word or a name in it, and text MySQL executes inside a comment each give `undefined`, and so
+ * does SQL the dialect's readings lex differently.
+ */
+export function readCreationStatements(sql: string, dialect: MigrationDialect): CreationStatement[] | undefined {
+  // PostgreSQL ends a line comment at a bare `\r` too, where this lexer reads on to the `\n`.
+  if (sql.includes('\r')) return undefined
+  const whole = readCreationText(sql, dialect)
+  // Read as the migrator runs it too: a separator inside a comment or a string is a cut there.
+  const pieces = sql.split(STATEMENT_SEPARATOR).map((piece) => readCreationText(piece, dialect))
+  if (!whole || pieces.some((piece) => piece === undefined) || JSON.stringify(pieces.flat()) !== JSON.stringify(whole)) return undefined
+  return whole
+}
+
+function readCreationText(sql: string, dialect: MigrationDialect): CreationStatement[] | undefined {
+  // The dialect is the schema's, not the server's: comment text MySQL executes declares nothing on any.
+  if (LEX_READINGS.mysql.some((rules) => lex(sql, rules).executable.some((entry) => entry.text !== STATEMENT_BREAKPOINT))) return undefined
+  let agreed: string | undefined
+  let statements: CreationStatement[] | undefined
+  for (const rules of LEX_READINGS[dialect]) {
+    const lexed = lex(sql, rules)
+    if (lexed.unterminatedAt !== undefined || lexed.tokens.some((token) => token.kind === 'body')) return undefined
+    const read = splitStatements(lexed.tokens).map(readCreationStatement)
+    if (read.some((statement) => statement === undefined)) return undefined
+    const key = JSON.stringify(read)
+    if (agreed !== undefined && agreed !== key) return undefined
+    agreed = key
+    statements = read as CreationStatement[]
+  }
+  return statements
+}
+
+const OWN_SNAPSHOT_ENTITIES = new Set(['tables', 'columns', 'fks', 'indexes', 'pks', 'uniques'])
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+const sameMultiset = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && JSON.stringify([...a].sort()) === JSON.stringify([...b].sort())
+
+/**
+ * Whether `current`, a drizzle-kit 1.x `snapshot.json`, is `previous` (the snapshot of the migration before it,
+ * `undefined` for the first) plus what `statements` create, as far as this guard reads a snapshot: every entry of
+ * another table unchanged, each created column with the type the SQL gives it, and each foreign key the SQL
+ * states. A later migration's widening and cascade evidence is read from these, so one that misstates them fails.
+ */
+export function snapshotRecordsCreation(previous: unknown, current: unknown, statements: readonly CreationStatement[]): boolean {
+  const snapshot = current as { id?: unknown; version?: unknown; dialect?: unknown; prevIds?: unknown; ddl?: unknown; renames?: unknown } | null
+  const before = previous as typeof snapshot | undefined
+  if (!snapshot || !Array.isArray(snapshot.ddl) || !Array.isArray(snapshot.renames) || snapshot.renames.length > 0 || readSnapshotDialect(snapshot) === undefined) return false
+  if (before !== undefined && (!before || !Array.isArray(before.ddl) || before.dialect !== snapshot.dialect || before.version !== snapshot.version
+    || !Array.isArray(snapshot.prevIds) || !snapshot.prevIds.includes(before.id))) return false
+  const created = new Map(statements.flatMap((statement) => (statement.kind === 'create-table' ? [[statement.table, statement]] : [])))
+  const own: Array<Record<string, unknown>> = []
+  const rest: string[] = []
+  for (const entry of snapshot.ddl as Array<Record<string, unknown>>) {
+    const table = entry?.entityType === 'tables' ? entry.name : entry?.table
+    const inSchema = entry?.schema === undefined || entry.schema === 'public'
+    if (typeof table === 'string' && created.has(table) && inSchema) {
+      if (!OWN_SNAPSHOT_ENTITIES.has(String(entry.entityType))) return false
+      own.push(entry)
+    } else {
+      rest.push(canonicalJson(entry))
+    }
+  }
+  if (!sameMultiset(rest, ((before?.ddl ?? []) as unknown[]).map(canonicalJson))) return false
+  const columns = own.filter((entry) => entry.entityType === 'columns').map((entry) => canonicalJson([entry.table, entry.name, entry.type]))
+  const expectedColumns = [...created.values()].flatMap((statement) => statement.columns.map((column) => canonicalJson([statement.table, column.name, column.type])))
+  const keys = own.filter((entry) => entry.entityType === 'fks').map((entry) => canonicalJson([entry.table, entry.columns, entry.tableTo, entry.columnsTo, entry.onDelete]))
+  const stated = statements.flatMap((statement) => {
+    const found = statement.kind === 'create-table' ? statement.foreignKeys : statement.kind === 'add-foreign-key' ? [statement.foreignKey] : []
+    return found.map((key) => canonicalJson([statement.table, key.columns, key.table, key.columnsTo, key.onDelete ?? 'NO ACTION']))
+  })
+  const tables = own.filter((entry) => entry.entityType === 'tables').map((entry) => String(entry.name))
+  return sameMultiset(columns, expectedColumns) && sameMultiset(keys, stated) && sameMultiset(tables, [...created.keys()])
+}
+
 /**
  * Column types from a drizzle-kit 1.x `snapshot.json`, keyed by schema, table and
  * column exactly as the snapshot names them (no case folding), so `archive.posts`

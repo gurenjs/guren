@@ -65,8 +65,10 @@ export {
   resetRateLimit,
   MemoryRateLimitStore,
   SlidingWindowRateLimitStore,
+  resolveClientIp,
   type RateLimitOptions,
   type RateLimitStore,
+  type TrustProxy,
   type RateLimitEntry,
   type RateLimitInfo,
 } from './rate-limit'

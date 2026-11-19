@@ -150,6 +150,7 @@ const SIGNATURES: Record<string, [file: string, rendered: string[]]> = {
   getApiToken: [API_TOKEN, ['ctx']],
   getApiTokenOrFail: [API_TOKEN, ['ctx']],
   createRateLimitMiddleware: [RATE_LIMIT, ['{ limit?, windowMs?, keyGenerator?, store?, keyPrefix?, skip?, trustProxy? }']],
+  resolveClientIp: [RATE_LIMIT, ['ctx', 'trustProxy?']],
 }
 
 describe('GUREN_API_DIGEST API token and rate limit entries', () => {

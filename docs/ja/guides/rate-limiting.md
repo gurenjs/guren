@@ -84,8 +84,8 @@ interface RateLimitOptions {
   /** レート制限キーのプレフィックス（デフォルト: 'rl:'） */
   keyPrefix?: string
 
-  /** プロキシヘッダー (CF-Connecting-IP, True-Client-IP, X-Real-IP, X-Forwarded-For) からクライアントIPを解決（デフォルト: false） */
-  trustProxy?: boolean
+  /** プロキシが付け加えた値からクライアントIPを読む: true、{ hops }、{ header }（デフォルト: false） */
+  trustProxy?: boolean | { hops: number } | { header: string }
 }
 ```
 
@@ -93,19 +93,27 @@ interface RateLimitOptions {
 
 アプリが常にリバースプロキシや CDN(Cloudflare、ALB、Nginx)の背後にあるなら、`trustProxy` を有効にするだけでクライアントごとに制限をかけられます。独自の `keyGenerator` を書く必要はありません。
 
+プロキシは、リクエストを受け取った相手のアドレスを `X-Forwarded-For` の末尾に追加し、クライアントがすでに書いていた値はそのまま渡します。信用できるのは右端にある、自分のプロキシが追加した値だけです。
+
 ```ts
-createRateLimitMiddleware({
-  limit: 100,
-  trustProxy: true, // CF-Connecting-IP → True-Client-IP → X-Real-IP → X-Forwarded-For[0] の順で解決
-})
+// プロキシが 1 段(ALB、proxy_add_x_forwarded_for を使う Nginx): X-Forwarded-For の最後の値
+createRateLimitMiddleware({ limit: 100, trustProxy: true })
+
+// プロキシが 2 段(Cloudflare の後ろに ALB): 右から 2 番目の値
+createRateLimitMiddleware({ limit: 100, trustProxy: { hops: 2 } })
+
+// プロキシがリクエストごとに上書きする、値が 1 つのヘッダー
+createRateLimitMiddleware({ limit: 100, trustProxy: { header: 'cf-connecting-ip' } })
 ```
 
-> **警告:** `trustProxy` は、すべてのリクエストが必ずプロキシを通る場合にだけ有効にしてください。アプリを直接公開している環境では、クライアントがこれらのヘッダーを偽装して、クライアントごとの制限をすり抜けられてしまいます。デフォルトが `false` になっているのはこのためです。
+`trustProxy: true` は `{ hops: 1 }` と同じです。ALB や Nginx は `CF-Connecting-IP`、`True-Client-IP`、`X-Real-IP` をクライアントが送ったまま転送するので、これらは読みません。プロキシがリクエストごとに設定するヘッダーがある場合だけ、`{ header }` でその名前を指定してください。クライアントのポートを保持する設定の ALB は `ip:port` の形で追加するので、値に付いたポートは取り除きます。ヘッダーがないときや、`X-Forwarded-For` の値が `hops` より少ないときは、Bun が返すソケットのアドレスをキーにします。それも取れない環境では、ルートごとに 1 つのカウンターを全員で共有します。
+
+> **警告:** `trustProxy` は、すべてのリクエストが必ずすべてのプロキシを通る場合にだけ有効にしてください。アプリを直接公開している環境では、クライアントがこれらのヘッダーを自分で付けて、クライアントごとの制限をすり抜けられてしまいます。デフォルトが `false` になっているのはこのためです。`{ hops: 2 }` や `{ header }` を使う場合は、ロードバランサーが前段のプロキシからの通信だけを受け付けるようにもしてください(Cloudflare なら、Cloudflare のアドレスだけを受け付けます)。ロードバランサーに直接送られたリクエストでは、リミッターが読む位置にクライアントの選んだ値が入ってしまいます。
 
 ### 完全な設定例
 
 ```ts
-import { AUTH_CONTEXT_KEY, createRateLimitMiddleware, MemoryRateLimitStore } from '@guren/core'
+import { AUTH_CONTEXT_KEY, createRateLimitMiddleware, MemoryRateLimitStore, resolveClientIp } from '@guren/core'
 import type { AuthContext } from '@guren/core'
 import type { Context } from 'hono'
 
@@ -136,7 +144,7 @@ const rateLimiter = createRateLimitMiddleware({
     if (user) {
       return `user:${user.id}`
     }
-    return ctx.req.header('x-forwarded-for')?.split(',')[0] ?? 'unknown'
+    return resolveClientIp(ctx, true) ?? 'unknown'
   },
 
   // 管理者ユーザーはスキップ
@@ -354,7 +362,7 @@ const rateLimiter = createRateLimitMiddleware({
     return apiKey === process.env.INTERNAL_API_KEY
 
     // または特定のIPをスキップ
-    const ip = ctx.req.header('x-forwarded-for')
+    const ip = resolveClientIp(ctx, true)
     return ['10.0.0.1', '10.0.0.2'].includes(ip ?? '')
   },
 })

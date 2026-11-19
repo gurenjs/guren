@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
-import { applyPlanDeclarations, declaredExports, declaredTable, planDeclaredFiles, type DeclarationSubject, type OpenPlan } from '../src/change/declarations'
+import { readCreationStatements, type MigrationDialect } from '@guren/orm/internal/migration-guard'
+
+import { applyPlanDeclarations, declaredExports, declaredMigration, declaredTable, planCreatesStatements, planDeclaredFiles, type DeclarationSubject, type OpenPlan } from '../src/change/declarations'
 import type { ChangeFact } from '../src/change/lane'
 import { parseSourceFile } from '../src/parse-cache'
 import { PlanSchema, type PlanDraft } from '../src/plan/schema'
@@ -325,5 +329,164 @@ export class Comment extends defineModel(comments) {}
 
     expect((await applyPlanDeclarations([table], subjects, only(), async () => text))[0]).toEqual({ ...table, lane: 'low', declaredBy: `${PLAN_FILE}#model.comment` })
     expect((await applyPlanDeclarations([table], subjects, [...only(), { file: 'docs/plans/ratings/plan.json', plan: other }], async () => text))[0]).toBe(table)
+  })
+
+  test("should account for a declared table's own residue, and keep it beside a table no plan declares", async () => {
+    const text = schemaWith(COMMENTS)
+    const table: ChangeFact = { code: 'schema-changed', lane: 'medium', target: 'comments', files: ['db/schema.ts'], evidence: 'static', message: 'table comments added (4 columns)' }
+    const residue: ChangeFact = { code: 'source-edited', lane: 'medium', target: 'comments', files: ['db/schema.ts'], evidence: 'static', message: 'db/schema.ts: table comments holds code' }
+    const subjects = new Map<ChangeFact, DeclarationSubject>([[table, tableSubject(text)], [residue, { kind: 'table-residue', file: 'db/schema.ts', identifier: 'comments' }]])
+    const edited = schemaWith(COMMENTS.replace("index('comments_post_id_index')", "index('comments_body_index')"))
+
+    expect(await applyPlanDeclarations([table, residue], subjects, only(), async () => text)).toEqual([{ ...table, lane: 'low', declaredBy: `${PLAN_FILE}#model.comment` }])
+    expect(await applyPlanDeclarations([table, residue], subjects, only(), async () => edited)).toEqual([table, residue])
+  })
+})
+
+/** The fixture run of `@guren/orm`: the comments plan's tables and a `tags` model beside them, per dialect. */
+const CREATION = join(import.meta.dir, '../../orm/tests/fixtures/drizzle-kit-migrations/creation')
+
+/** The comments plan with the `tags` model the creation fixtures were generated from. */
+function tagsPlan(edit?: (document: Record<string, any>) => void): PlanDraft {
+  return commentsPlan((document) => {
+    const column = (id: string, name: string, type: string, extra: Record<string, unknown> = {}) => ({ id, name, change: { kind: 'add' }, type, nullable: false, unique: false, index: false, ...extra })
+    document.models.push({
+      id: 'model.tag', change: { kind: 'add' }, name: 'Tag', table: 'tags', relationships: [], fillable: ['slug'],
+      columns: [
+        column('column.tag.id', 'id', 'integer', { primaryKey: true }),
+        column('column.tag.slug', 'slug', 'string', { unique: true }),
+        column('column.tag.label', 'label', 'string', { default: "'untitled'" }),
+        column('column.tag.weight', 'weight', 'decimal', { precision: 8, scale: 2, nullable: true }),
+        column('column.tag.active', 'active', 'boolean', { default: 'false' }),
+        column('column.tag.meta', 'meta', 'json', { nullable: true }),
+        column('column.tag.ref', 'ref', 'uuid', { nullable: true, index: true }),
+        column('column.tag.seenOn', 'seenOn', 'date', { nullable: true, columnName: 'seen_on' }),
+        column('column.tag.postId', 'postId', 'integer', { nullable: true, references: { model: 'model.post', column: 'id', onDelete: 'set null' } }),
+        column('column.tag.createdAt', 'createdAt', 'datetime', { default: 'now()' }),
+      ],
+      indexes: [{ columns: ['label', 'weight'], unique: false }],
+    })
+    document.tasks[0].covers.push('model.tag')
+    edit?.(document)
+  })
+}
+
+describe('declaredMigration', () => {
+  /** The fixture run of `dialect` as a migrations folder at the head, with `over` replacing a file's content. */
+  function migration(dialect: string, over: Record<string, string | null> = {}) {
+    const root = join(CREATION, dialect)
+    const [base, head] = readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
+    const subject: Extract<DeclarationSubject, { kind: 'migration' }> = { kind: 'migration', dir: `drizzle/${head}`, files: [`drizzle/${head}/migration.sql`, `drizzle/${head}/snapshot.json`], previous: `drizzle/${base}` }
+    const readHead = async (path: string): Promise<string | null> => {
+      if (path in over) return over[path]!
+      if (path === 'db/schema.ts') return readFileSync(join(root, 'schema.ts.txt'), 'utf8')
+      const [folder, file] = path.replace('drizzle/', '').split('/')
+      try {
+        return readFileSync(join(root, folder!, file!), 'utf8')
+      } catch {
+        return null
+      }
+    }
+    const schema = parseSchemaSource(readFileSync(join(root, 'schema.ts.txt'), 'utf8'), 'db/schema.ts', null)!
+    return { subject, readHead, schema, sql: `drizzle/${head}/migration.sql`, snapshot: `drizzle/${head}/snapshot.json`, text: readFileSync(join(root, head!, 'migration.sql'), 'utf8') }
+  }
+  const DIALECT: Record<string, MigrationDialect> = { pg: 'postgres', mysql: 'mysql', sqlite: 'sqlite' }
+  const open = (plan = tagsPlan()): OpenPlan[] => [{ file: PLAN_FILE, plan }]
+
+  test.each(['pg', 'mysql', 'sqlite'])('should declare the %s migration drizzle-kit writes for the tables the plan adds', async (dialect) => {
+    const { subject, readHead } = migration(dialect)
+
+    expect(await declaredMigration(subject, open(), readHead)).toBe(`${PLAN_FILE}#model.comment,model.tag`)
+  })
+
+  test.each<[string, (sql: string, quote: string, dialect: string) => string]>([
+    ['a statement about another table', (sql, q) => `${sql};\nCREATE INDEX ${q}posts_id_index${q} ON ${q}posts${q} (${q}id${q});`],
+    ['a column the plan does not add', (sql, q) => sql.replace(`${q}body${q} text NOT NULL,`, `${q}body${q} text NOT NULL,\n\t${q}secret${q} text,`)],
+    ['a planned column missing', (sql) => sql.replace(/\n\t.body. text NOT NULL,/, '')],
+    ['a planned NOT NULL missing', (sql, q) => sql.replace(`${q}body${q} text NOT NULL`, `${q}body${q} text`)],
+    ['a unique the plan does not state', (sql, q) => sql.replace(`${q}body${q} text NOT NULL`, `${q}body${q} text NOT NULL UNIQUE`)],
+    ['a planned unique missing', (sql, q, dialect) => (dialect === 'mysql' ? sql.replace(/,\n\tCONSTRAINT `slug_unique` UNIQUE INDEX\(`slug`\)/, '') : sql.replace(`${q}slug${q} text NOT NULL UNIQUE`, `${q}slug${q} text NOT NULL`))],
+    ['another default', (sql) => sql.replace("'untitled'", "'other'")],
+    ['a foreign key deleting otherwise', (sql) => sql.replace('ON DELETE CASCADE', 'ON DELETE RESTRICT')],
+    ['an index the plan does not plan', (sql, q) => sql.replace(`(${q}post_id${q});`, `(${q}body${q});`)],
+    ['a planned index missing', (sql) => sql.split('--> statement-breakpoint').filter((piece) => !piece.includes('CREATE INDEX')).join('--> statement-breakpoint')],
+    ['a planned index stated twice', (sql, q) => `${sql};\nCREATE INDEX ${q}tags_ref_again${q} ON ${q}tags${q} (${q}ref${q});`],
+    ['another column type', (sql, q) => sql.replace(`${q}body${q} text NOT NULL`, `${q}body${q} integer NOT NULL`)],
+    ['a key the database does not number', (sql, _q, dialect) => (dialect === 'pg' ? sql.replaceAll('"id" serial PRIMARY KEY', '"id" integer PRIMARY KEY') : sql.replaceAll(' AUTO_INCREMENT', '').replaceAll(' AUTOINCREMENT', ''))],
+    ["a date where the plan's now() is a timestamp", (sql, _q, dialect) => ({
+      pg: () => sql.replace('"created_at" timestamp with time zone DEFAULT now()', '"created_at" timestamp with time zone DEFAULT CURRENT_DATE'),
+      mysql: () => sql.replace('`created_at` timestamp NOT NULL DEFAULT (CURRENT_TIMESTAMP)', '`created_at` timestamp NOT NULL DEFAULT (CURRENT_DATE)'),
+      sqlite: () => sql.replace('`created_at` integer DEFAULT (unixepoch())', '`created_at` integer DEFAULT CURRENT_DATE'),
+    })[dialect]!()],
+    ['an index ahead of its table', (sql) => {
+      const pieces = sql.split('--> statement-breakpoint')
+      const [index] = pieces.splice(pieces.findIndex((piece) => piece.includes('tags_ref_index')), 1)
+      pieces.splice(1, 0, index!)
+      return pieces.join('--> statement-breakpoint')
+    }],
+  ])('should declare nothing for a migration with %s', async (_label, edit) => {
+    for (const dialect of ['pg', 'mysql', 'sqlite']) {
+      const quote = dialect === 'pg' ? '"' : '`'
+      const { subject, sql, schema, text } = migration(dialect)
+      const edited = edit(text, quote, dialect)
+
+      expect(edited).not.toBe(text)
+      expect(await declaredMigration(subject, open(), migration(dialect, { [sql]: edited }).readHead)).toBeUndefined()
+      // The plan rule alone, with no snapshot to disagree with the edit.
+      expect(planCreatesStatements(tagsPlan(), readCreationStatements(text, DIALECT[dialect]!)!, schema, schema[0]!.dialect)).toEqual(['model.comment', 'model.tag'])
+      const statements = readCreationStatements(edited, DIALECT[dialect]!)
+      expect(statements && planCreatesStatements(tagsPlan(), statements, schema, schema[0]!.dialect)).toBeUndefined()
+    }
+  })
+
+  test.each<[string, string]>([
+    ['pg', 'CREATE TABLE "members" (\n\t"tenant_id" integer,\n\t"item_id" integer,\n\tCONSTRAINT "members_pkey" PRIMARY KEY("tenant_id","item_id")\n);\n'],
+    ['mysql', 'CREATE TABLE `members` (\n\t`tenant_id` int NOT NULL,\n\t`item_id` int NOT NULL,\n\tCONSTRAINT PRIMARY KEY(`tenant_id`,`item_id`)\n);\n'],
+    ['sqlite', 'CREATE TABLE `members` (\n\t`tenant_id` integer NOT NULL,\n\t`item_id` integer NOT NULL,\n\tCONSTRAINT `members_pk` PRIMARY KEY(`tenant_id`, `item_id`)\n);\n'],
+  ])('should hold a %s composite key in the order the scaffold writes it', (dialect, sql) => {
+    const { schema } = migration(dialect)
+    const plan = tagsPlan((document) => {
+      const column = (id: string, name: string, columnName: string) => ({ id, name, columnName, change: { kind: 'add' }, type: 'integer', nullable: false, unique: false, index: false, primaryKey: true })
+      document.models.push({ id: 'model.member', change: { kind: 'add' }, name: 'Member', table: 'members', relationships: [], fillable: [], indexes: [], columns: [column('column.member.tenantId', 'tenantId', 'tenant_id'), column('column.member.itemId', 'itemId', 'item_id')] })
+      document.tasks[0].covers.push('model.member')
+    })
+    const reversed = sql.replace(/PRIMARY KEY\((.)tenant_id(.),( ?)(.)item_id(.)\)/, 'PRIMARY KEY($1item_id$2,$3$4tenant_id$5)')
+
+    expect(reversed).not.toBe(sql)
+    expect(planCreatesStatements(plan, readCreationStatements(sql, DIALECT[dialect]!)!, schema, schema[0]!.dialect)).toEqual(['model.member'])
+    expect(planCreatesStatements(plan, readCreationStatements(reversed, DIALECT[dialect]!)!, schema, schema[0]!.dialect)).toBeUndefined()
+  })
+
+  test('should declare nothing behind a separator inside a comment, which the migrator runs as its own statement', async () => {
+    for (const dialect of ['pg', 'mysql', 'sqlite']) {
+      const { subject, sql, text } = migration(dialect)
+
+      expect(await declaredMigration(subject, open(), migration(dialect, { [sql]: `${text}\n-- x --> statement-breakpoint DROP TABLE users;\n` }).readHead)).toBeUndefined()
+    }
+  })
+
+  test('should declare nothing when the folder holds another file, or its snapshot is missing or misstates the SQL', async () => {
+    const { subject, readHead, snapshot } = migration('pg')
+    const forged = JSON.parse((await readHead(snapshot))!)
+    forged.ddl.find((entry: Record<string, unknown>) => entry.entityType === 'columns' && entry.table === 'tags' && entry.name === 'slug').type = 'varchar(1)'
+
+    expect(await declaredMigration({ ...subject, files: [...subject.files, `${subject.dir}/notes.sql`] }, open(), readHead)).toBeUndefined()
+    expect(await declaredMigration(subject, open(), migration('pg', { [snapshot]: JSON.stringify(forged) }).readHead)).toBeUndefined()
+    expect(await declaredMigration(subject, open(), migration('pg', { [`${subject.previous}/snapshot.json`]: null }).readHead)).toBeUndefined()
+    expect(await declaredMigration({ ...subject, files: [subject.files[0]!] }, open(), migration('pg', { [snapshot]: null }).readHead)).toBeUndefined()
+  })
+
+  test('should declare nothing for a table a second open plan claims, or one the plan adds in a module', async () => {
+    const { subject, readHead } = migration('pg')
+    const second = tagsPlan((document) => {
+      document.models = document.models.filter((model: { id: string }) => model.id !== 'model.comment')
+    })
+    const inModule = tagsPlan((document) => {
+      document.models.find((model: { id: string }) => model.id === 'model.tag').module = 'blog'
+    })
+
+    expect(await declaredMigration(subject, [...open(), { file: 'docs/plans/tags/plan.json', plan: second }], readHead)).toBeUndefined()
+    expect(await declaredMigration(subject, open(inModule), readHead)).toBeUndefined()
+    expect(await declaredMigration(subject, open(commentsPlan()), readHead)).toBeUndefined()
   })
 })

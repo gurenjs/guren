@@ -1,0 +1,30 @@
+import { sql } from 'drizzle-orm'
+import { boolean, date, decimal, index, int, json, mysqlTable, serial, text, timestamp, varchar } from 'drizzle-orm/mysql-core'
+
+export const users = mysqlTable('users', { id: serial('id').primaryKey() })
+export const posts = mysqlTable('posts', { id: serial('id').primaryKey() })
+
+export const comments = mysqlTable('comments', {
+  id: int('id').primaryKey().autoincrement(),
+  body: text('body').notNull(),
+  postId: int('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index('comments_post_id_index').on(table.postId),
+])
+
+export const tags = mysqlTable('tags', {
+  id: int('id').primaryKey().autoincrement(),
+  slug: varchar('slug', { length: 255 }).notNull().unique(),
+  label: varchar('label', { length: 255 }).notNull().default('untitled'),
+  weight: decimal('weight', { precision: 8, scale: 2 }),
+  active: boolean('active').notNull().default(false),
+  meta: json('meta'),
+  ref: varchar('ref', { length: 36 }),
+  seenOn: date('seen_on'),
+  postId: int('postId').references(() => posts.id, { onDelete: 'set null' }),
+  createdAt: timestamp('createdAt').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index('tags_ref_index').on(table.ref),
+  index('tags_label_weight_index').on(table.label, table.weight),
+])
