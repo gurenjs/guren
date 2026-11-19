@@ -1480,7 +1480,7 @@ git commit -m "feat: add a gallery to posts"
 
 `app/Models/Post.ts` で `Post` が `cover` をどう宣言しているかを見てください。
 
-`cover.png` に改名したテキストファイルは、`cover` のバリデーションエラー「The file must be an image.」で拒否されます。決めているのは `cover: hasOneAttached({ image: 'require' })` の行です。`'require'` のとき、`attach()` はアップロードの先頭のバイト列に画像のシグネチャがあるかを調べ、ファイル名やブラウザが申告した型は判定に使いません。そのため、`cover.txt` に改名した本物の PNG は受け付けられ、`cover.txt` という名前のまま、コンテンツタイプ `image/png` で保存されます。
+`cover.png` に改名したテキストファイルは、`cover` のバリデーションエラー「The file must be an image.」で拒否されます。決めているのは `cover: hasOneAttached({ image: 'require' })` の行です。`'require'` のとき、`attach()` はアップロードの先頭のバイト列に画像のシグネチャがあるかを調べ、ファイル名やブラウザが申告した型は判定に使いません。そのため、`cover.txt` に改名した本物の PNG は受け付けられ、名前は `cover.txt` のまま、コンテンツタイプ `image/png` で記録されます。保存されるファイルの拡張子は、中身に合わせて `.png` になります。
 
 一文で言えば、attachments レイヤーはファイルの種類を中身のバイト列で判断し、名前は見ません。
 

@@ -181,6 +181,21 @@ describe('attachments queued generation', () => {
     expect(await storage.disk('media').exists(record.path)).toBe(false)
   })
 
+  test('should move a queued HEIC original stored under a mismatched name', async () => {
+    const record = await Post.attach(1, 'photo', new File([isoBmffHeader('heic')], 'shot.jpg'), {
+      queued: true,
+    })
+    expect(record.path).toBe(`attachments/${record.id}/shot.heic`)
+    expect(record.name).toBe('shot.jpg')
+
+    await runQueuedJob()
+
+    const row = (await rowOf(record.id))!
+    expect(row.path).toBe(`attachments/${record.id}/shot.jpg`)
+    expect(await storage.disk('media').exists(String(row.path))).toBe(true)
+    expect(await storage.disk('media').exists(record.path)).toBe(false)
+  })
+
   test('should repoint the row before deleting the superseded HEIC original', async () => {
     // A delete that fails must not fail the job: the row already points at the
     // converted object, so the superseded original is only a leak for the

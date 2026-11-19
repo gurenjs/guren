@@ -303,6 +303,10 @@ Other rules that hold everywhere:
   at all store HEIC bytes as opaque files.
 - **Filenames are sanitized** (no path separators or control characters)
   before becoming part of an object key.
+- **A stored image takes the extension of its bytes.** `photo.jfif` holding
+  a JPEG is stored as `photo.jpg`, and an upload with no extension gains
+  one, so whatever serves the disk types the file correctly. The row's
+  `name` keeps the uploaded filename.
 - **Serving is hardened where the framework serves.** The signed delivery
   route's proxy responses carry the hardening set listed under
   [URLs and visibility](#urls-and-visibility). Public disks still serve
