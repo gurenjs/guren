@@ -485,3 +485,86 @@ describe('post-merge review of #1206: final review round', () => {
     expect(scanMigrationSql('CREATE TABLE "a\\" (id int); DROP TABLE x;', { dialect: 'postgres' }).statements.map((statement) => statement.kind)).toEqual(['drop-table'])
   })
 })
+
+describe('drizzle migrator pieces: a separator cuts the file wherever it stands', () => {
+  const DIALECTS: MigrationDialect[] = ['postgres', 'mysql', 'sqlite']
+  const found = (sql: string, dialect?: MigrationDialect) =>
+    scanMigrationSql(sql, dialect ? { dialect } : {}).statements.map(({ kind, table, line }) => ({ kind, table, line }))
+
+  for (const dialect of DIALECTS) {
+    describe(dialect, () => {
+      test('should report a DROP that a separator inside a line comment puts on its own', () => {
+        const sql = 'CREATE TABLE "notes" ("id" integer);\n-- x --> statement-breakpoint DROP TABLE "users";\n'
+        expect(found(sql, dialect)).toContainEqual({ kind: 'drop-table', table: 'users', line: 2 })
+        expect(found(sql)).toContainEqual({ kind: 'drop-table', table: 'users', line: 2 })
+      })
+
+      test('should report a DROP between two separators inside a block comment', () => {
+        const sql = 'SELECT 1;\n/* x --> statement-breakpoint\nDROP TABLE "users";\n--> statement-breakpoint */\n'
+        expect(found(sql, dialect)).toContainEqual({ kind: 'drop-table', table: 'users', line: 3 })
+        // The piece that opens the comment never closes it, which the migrator's server refuses to read too.
+        expect(found(sql, dialect).map(({ kind }) => kind)).toContain('unreadable')
+      })
+
+      test('should report a DROP between two separators inside a string', () => {
+        const sql = "INSERT INTO notes (body) VALUES ('a --> statement-breakpoint\nDROP TABLE users; --> statement-breakpoint b');\n"
+        expect(found(sql, dialect)).toContainEqual({ kind: 'drop-table', table: 'users', line: 2 })
+        expect(found(sql, dialect).map(({ kind }) => kind)).toContain('unreadable')
+      })
+
+      test('should report a DROP between two separators inside a quoted identifier', () => {
+        const sql = 'CREATE TABLE "a --> statement-breakpoint\nDROP TABLE users; --> statement-breakpoint b" ("id" integer);\n'
+        expect(found(sql, dialect)).toContainEqual({ kind: 'drop-table', table: 'users', line: 2 })
+      })
+
+      test('should acknowledge nothing when the whole file and its pieces each see a different marker', () => {
+        const sql = [
+          'SELECT 1; -- note --> statement-breakpoint SELECT 2; /*',
+          '-- guren:allow-destructive: whole only',
+          '-- */',
+          '-- guren:allow-destructive--> statement-breakpoint DROP TABLE users;',
+          '',
+        ].join('\n')
+        const scan = scanMigrationSql(sql, { dialect })
+        expect(scan.statements).toContainEqual(expect.objectContaining({ kind: 'drop-table', table: 'users', line: 4 }))
+        expect(scan.acknowledged).toBeNull()
+      })
+
+      test('should report each statement of a separated file once, at its file line', () => {
+        const sql = 'DROP TABLE "a";--> statement-breakpoint\nCREATE TABLE "c" ("id" integer);\n--> statement-breakpoint\nDROP TABLE "b";\n'
+        expect(found(sql, dialect)).toEqual([
+          { kind: 'drop-table', table: 'a', line: 1 },
+          { kind: 'drop-table', table: 'b', line: 4 },
+        ])
+      })
+
+      test('should keep the marker of a separated file', () => {
+        const sql = '-- guren:allow-destructive: posts moved\nDROP TABLE "posts";--> statement-breakpoint\nDROP TABLE "drafts";\n'
+        expect(scanMigrationSql(sql, { dialect }).acknowledged).toEqual({ line: 1, reason: 'posts moved' })
+      })
+    })
+  }
+
+  test('should report a DROP that a separator inside a MySQL # comment puts on its own', () => {
+    const sql = 'SELECT 1;\n# x --> statement-breakpoint DROP TABLE `users`;\n'
+    expect(found(sql, 'mysql')).toContainEqual({ kind: 'drop-table', table: 'users', line: 2 })
+    expect(found(sql)).toContainEqual({ kind: 'drop-table', table: 'users', line: 2 })
+  })
+
+  test('should end a PostgreSQL line comment at a bare carriage return', () => {
+    const sql = '-- x\rDROP TABLE "users";\n'
+    expect(found(sql, 'postgres')).toEqual([{ kind: 'drop-table', table: 'users', line: 1 }])
+    expect(found(sql)).toEqual([{ kind: 'drop-table', table: 'users', line: 1 }])
+  })
+
+  test('should read on past a bare carriage return in a MySQL or SQLite line comment, as those servers do', () => {
+    const sql = '-- x\rDROP TABLE "users";\n'
+    expect(found(sql, 'mysql')).toEqual([])
+    expect(found(sql, 'sqlite')).toEqual([])
+  })
+
+  test('should still read a CRLF file line by line', () => {
+    const sql = '-- note\r\nDROP TABLE "users";\r\n'
+    for (const dialect of DIALECTS) expect(found(sql, dialect)).toEqual([{ kind: 'drop-table', table: 'users', line: 2 }])
+  })
+})
