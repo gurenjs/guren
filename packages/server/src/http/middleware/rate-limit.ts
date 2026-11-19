@@ -156,36 +156,107 @@ export interface RateLimitOptions {
   now?: () => number
 
   /**
-   * Trust reverse-proxy headers for client IP, in order: `CF-Connecting-IP`,
-   * `True-Client-IP`, `X-Real-IP`, first entry of `X-Forwarded-For`; falls back
-   * to `server.requestIP()`. Enable ONLY behind a proxy that sets or strips
-   * them, or clients spoof them to bypass limits. Ignored with a custom `keyGenerator`.
+   * Read the client IP from what a reverse proxy adds rather than from `server.requestIP()`.
+   * `true` is `{ hops: 1 }`. Enable ONLY when every request passes through that proxy, or
+   * clients send the header themselves to bypass limits. Ignored with a custom `keyGenerator`.
    * @default false
    */
-  trustProxy?: boolean
+  trustProxy?: TrustProxy
 }
+
+/**
+ * Which proxy-added value names the client. `{ hops: n }` is the `n`th `X-Forwarded-For` entry
+ * from the right: proxies append, so only the entries your own `n` proxies wrote are theirs.
+ * `{ header }` is one single-value header your proxy overwrites, such as `cf-connecting-ip`.
+ * A port on the value (`203.0.113.7:50001`, `[2001:db8::7]:50001`) is dropped. Absent, or with
+ * fewer entries than hops, the socket address is used.
+ */
+export type TrustProxy = boolean | { hops: number } | { header: string }
 
 let defaultKeyGeneratorWarned = false
 
-const PROXY_IP_HEADERS = ['cf-connecting-ip', 'true-client-ip', 'x-real-ip'] as const
+type ProxySource = { hops: number } | { header: string }
 
-function clientIpFromProxyHeaders(ctx: Context): string | null {
-  for (const header of PROXY_IP_HEADERS) {
-    const value = ctx.req.header(header)?.trim()
-    if (value) return value
+// A proxy passes these on as the client sent them, so `{ hops }` never reads them; seeing one warns once.
+const UNREAD_PROXY_HEADERS = ['cf-connecting-ip', 'true-client-ip', 'x-real-ip'] as const
+
+let unreadProxyHeaderWarned = false
+
+// RFC 9110 §5.6.2 `token`; `Headers.get()` throws on any other name, on every request.
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9a-z]+$/
+
+function proxySource(trustProxy: TrustProxy): ProxySource | undefined {
+  if (trustProxy === false) return undefined
+  if (trustProxy === true) return { hops: 1 }
+  if ('hops' in trustProxy) {
+    if (!Number.isInteger(trustProxy.hops) || trustProxy.hops < 1) {
+      throw new TypeError(`trustProxy.hops must be a positive integer, got ${String(trustProxy.hops)}.`)
+    }
+    return { hops: trustProxy.hops }
   }
-
-  const forwardedFor = ctx.req.header('x-forwarded-for')
-  if (forwardedFor) {
-    const first = forwardedFor.split(',')[0]?.trim()
-    if (first) return first
+  const header = typeof trustProxy.header === 'string' ? trustProxy.header.trim().toLowerCase() : ''
+  if (header === '') throw new TypeError('trustProxy.header must name a request header.')
+  if (!HEADER_NAME.test(header)) {
+    throw new TypeError(`trustProxy.header must be a valid header name, got ${JSON.stringify(trustProxy.header)}.`)
   }
-
-  return null
+  if (header === 'x-forwarded-for') {
+    throw new TypeError('trustProxy.header cannot be x-forwarded-for, a list clients add to; use trustProxy: { hops } for it.')
+  }
+  return { header }
 }
 
-function proxyAwareKeyGenerator(ctx: Context): string {
-  return clientIpFromProxyHeaders(ctx) ?? defaultKeyGenerator(ctx)
+// A load balancer that preserves the client port appends `ip:port`, and a port per connection
+// would give each connection its own bucket. Bare IPv6 has more than one colon and stays whole.
+function withoutPort(address: string): string {
+  if (address.startsWith('[')) {
+    const close = address.indexOf(']')
+    return close > 1 ? address.slice(1, close) : address
+  }
+  const colon = address.indexOf(':')
+  return colon > 0 && colon === address.lastIndexOf(':') ? address.slice(0, colon) : address
+}
+
+function proxyClientIp(ctx: Context, source: ProxySource): string | undefined {
+  const address = proxyValue(ctx, source)
+  return address ? withoutPort(address) || undefined : undefined
+}
+
+function proxyValue(ctx: Context, source: ProxySource): string | undefined {
+  if ('header' in source) return ctx.req.header(source.header)?.trim() || undefined
+
+  if (!unreadProxyHeaderWarned && UNREAD_PROXY_HEADERS.some((name) => ctx.req.header(name) !== undefined)) {
+    unreadProxyHeaderWarned = true
+    console.warn(
+      '[guren] Rate limiter: trustProxy keys on the X-Forwarded-For entries your proxies append and does not read ' +
+      'CF-Connecting-IP, True-Client-IP or X-Real-IP, which a client can send. If your proxy overwrites one of them, ' +
+      "pass trustProxy: { header: 'cf-connecting-ip' }; behind two proxies, trustProxy: { hops: 2 }. " +
+      'See: https://guren.dev/docs/guides/rate-limiting',
+    )
+  }
+
+  const entries = (ctx.req.header('x-forwarded-for') ?? '').split(',').map((entry) => entry.trim())
+  if (entries.length < source.hops) return undefined
+  return entries[entries.length - source.hops] || undefined
+}
+
+function socketAddress(ctx: Context): string | undefined {
+  // Bun.serve passes { server } in env.
+  const env = ctx.env as Record<string, unknown> | undefined
+  if (env?.server && typeof (env.server as any).requestIP === 'function') {
+    const info = (env.server as any).requestIP(ctx.req.raw)
+    if (info?.address) return info.address as string
+  }
+  return undefined
+}
+
+/**
+ * The client IP a rate limiter keys on: the proxy-added value `trustProxy` names, else
+ * `server.requestIP()`, else `undefined` (tests, non-Bun runtimes, Lambda). For a custom
+ * `keyGenerator` that should read the same address the built-in one does.
+ */
+export function resolveClientIp(ctx: Context, trustProxy?: TrustProxy): string | undefined {
+  const source = proxySource(trustProxy ?? false)
+  return (source ? proxyClientIp(ctx, source) : undefined) ?? socketAddress(ctx)
 }
 
 /**
@@ -194,13 +265,9 @@ function proxyAwareKeyGenerator(ctx: Context): string {
  * over-restrictive but safe — production should supply a custom `keyGenerator`.
  * Proxy headers are not trusted by default; they are spoofable on direct deploys.
  */
-function defaultKeyGenerator(ctx: Context): string {
-  // Bun.serve passes { server } in env.
-  const env = ctx.env as Record<string, unknown> | undefined
-  if (env?.server && typeof (env.server as any).requestIP === 'function') {
-    const info = (env.server as any).requestIP(ctx.req.raw)
-    if (info?.address) return info.address as string
-  }
+function defaultKeyGenerator(ctx: Context, source?: ProxySource): string {
+  const address = (source ? proxyClientIp(ctx, source) : undefined) ?? socketAddress(ctx)
+  if (address) return address
 
   if (!defaultKeyGeneratorWarned) {
     defaultKeyGeneratorWarned = true
@@ -238,6 +305,10 @@ function getDefaultStore(): MemoryRateLimitStore {
   return defaultStore
 }
 
+function keyGeneratorFor(source: ProxySource | undefined): (ctx: Context) => string {
+  return source ? (ctx) => defaultKeyGenerator(ctx, source) : (ctx) => defaultKeyGenerator(ctx)
+}
+
 /**
  * Create a rate limiting middleware.
  * @example
@@ -250,7 +321,7 @@ export function createRateLimitMiddleware(options: RateLimitOptions = {}): Middl
     limit = 100,
     windowMs = 60000,
     trustProxy = false,
-    keyGenerator = trustProxy ? proxyAwareKeyGenerator : defaultKeyGenerator,
+    keyGenerator = keyGeneratorFor(proxySource(trustProxy)),
     // The shared default store runs on real time, so an injected clock needs a
     // dedicated store or expiry and Retry-After would disagree. No auto-cleanup:
     // a real-time sweep is meaningless on a fake clock and outlives the test.

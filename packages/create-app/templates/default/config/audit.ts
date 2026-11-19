@@ -1,6 +1,8 @@
 // Findings `guren audit` reports but you have judged safe, each keyed by the
 // finding's `key` (copy it from `guren audit --json`) and a reason. An entry
 // that stops matching anything is reported, so delete it once it does.
+// The picomatch entry covers every copy in the app: delete it if your own code
+// passes a glob from a request to picomatch, micromatch or a globber.
 export default {
   ignore: [
     {

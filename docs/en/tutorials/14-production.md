@@ -192,7 +192,7 @@ The session store had to move. A session in memory is a session that a restart d
 
 The rate limiter's store did not. `createRateLimitMiddleware` defaults to an in-memory counter, which is a per-process budget: correct for one container, and wrong the moment you run two, because each one grants the full allowance. The Redis store swaps in for that case and nothing else changes. What does matter here even on one process is `keyPrefix`: the default store is a single map shared by every limiter, so two limiters without distinct prefixes spend each other's budget, and five requests to the blog would lock the sign-in page.
 
-`trustProxy` is the other line worth reading twice. Off, the limiter keys on the socket's address, which is your load balancer's if you have one, so every visitor shares a bucket. On, it reads `X-Forwarded-For` and friends, which any client can send, so it is only safe behind a proxy that overwrites them. There is no setting that is right in both places, which is why it is a decision and not a default.
+`trustProxy` is the other line worth reading twice. Off, the limiter keys on the socket's address, which is your load balancer's if you have one, so every visitor shares a bucket. On, it reads the last `X-Forwarded-For` entry, the one your proxy appended; behind two proxies (Cloudflare in front of a load balancer) it takes `{ hops: 2 }` instead. A client that reaches the app without going through the proxy writes that header itself, so it is only safe when every request passes through every proxy. There is no setting that is right in both places, which is why it is a decision and not a default.
 
 ```bash run
 bun test
@@ -345,7 +345,7 @@ More than that, you have a way of working. Every chapter here was the same four 
 - **`db:migrate` fails with `table sessions already exists`.** Chapter 6's `add auth` comparison ran while the dev server was up. Its reload applied that command's own `sessions` migration, and `git clean` then removed the folder but not the table. `bun run db:status` lists that migration as orphaned. `bun run db:reset` rebuilds the database from the migrations you have, this chapter's included, and drops every row on the way.
 - **Everyone is signed out after a deploy.** The session store is still in memory, or the new container has a different `APP_KEY`. Both are in section 1 and section 4.
 - **The rate limiter blocks the wrong thing.** Two limiters are sharing a counter: give each a distinct `keyPrefix`.
-- **Every visitor shares one rate-limit bucket.** The key is the socket address and there is a proxy in front. Set `trustProxy`, but only if the proxy overwrites the client headers.
+- **Every visitor shares one rate-limit bucket.** The key is the socket address and there is a proxy in front. Set `trustProxy`, but only if every request passes through the proxy.
 - **`bun run preview` prints one `Listening on` line and no banner.** That is correct. The banner is a development thing; ask `/health` whether the app answers.
 - **`bun run preview` fails with `Failed to start server. Is port 3333 in use?`.** Usually `bun run dev` is still running. Production does not walk to the next port: stop the other server, or set `PORT`.
 - **Assets 404 in preview.** `bun run build` has not run since the last change; the manifest is missing or stale.

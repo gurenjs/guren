@@ -6,6 +6,7 @@ import {
   resetRateLimit,
   MemoryRateLimitStore,
   SlidingWindowRateLimitStore,
+  resolveClientIp,
 } from '../../../src/http/middleware/rate-limit'
 
 // Far-future epoch (~2096): a store method that leaks Date.now() reads it as
@@ -201,12 +202,50 @@ describe('createRateLimitMiddleware', () => {
     }
   })
 
-  it('separates clients by proxy IP headers when trustProxy is enabled', async () => {
+  it('keys on the X-Forwarded-For entry the nearest proxy appended when trustProxy is true', async () => {
     app.use('*', createRateLimitMiddleware({ limit: 1, store, trustProxy: true }))
     app.get('/', (c) => c.text('OK'))
 
-    const clientA1 = await app.request('/', { headers: { 'cf-connecting-ip': '1.1.1.1' } })
-    const clientA2 = await app.request('/', { headers: { 'cf-connecting-ip': '1.1.1.1' } })
+    const first = await app.request('/', { headers: { 'x-forwarded-for': '10.0.0.1, 3.3.3.3' } })
+    const spoofed = await app.request('/', { headers: { 'x-forwarded-for': '10.0.0.2, 3.3.3.3' } })
+    const other = await app.request('/', { headers: { 'x-forwarded-for': '10.0.0.1, 4.4.4.4' } })
+
+    expect(first.status).toBe(200)
+    expect(spoofed.status).toBe(429)
+    expect(other.status).toBe(200)
+  })
+
+  it('does not read CF-Connecting-IP, True-Client-IP or X-Real-IP when trustProxy is true', async () => {
+    app.use('*', createRateLimitMiddleware({ limit: 1, store, trustProxy: true }))
+    app.get('/', (c) => c.text('OK'))
+
+    const forwarded = { 'x-forwarded-for': '3.3.3.3' }
+    const first = await app.request('/', { headers: { ...forwarded, 'cf-connecting-ip': '1.1.1.1' } })
+    const spoofed = await app.request('/', { headers: { ...forwarded, 'true-client-ip': '2.2.2.2', 'x-real-ip': '5.5.5.5' } })
+
+    expect(first.status).toBe(200)
+    expect(spoofed.status).toBe(429)
+  })
+
+  it('keys on the nth entry from the right with trustProxy: { hops }', async () => {
+    app.use('*', createRateLimitMiddleware({ limit: 1, store, trustProxy: { hops: 2 } }))
+    app.get('/', (c) => c.text('OK'))
+
+    const first = await app.request('/', { headers: { 'x-forwarded-for': '9.9.9.9, 3.3.3.3, 172.16.0.1' } })
+    const sameClient = await app.request('/', { headers: { 'x-forwarded-for': '8.8.8.8, 3.3.3.3, 172.16.0.2' } })
+    const other = await app.request('/', { headers: { 'x-forwarded-for': '4.4.4.4, 172.16.0.1' } })
+
+    expect(first.status).toBe(200)
+    expect(sameClient.status).toBe(429)
+    expect(other.status).toBe(200)
+  })
+
+  it('keys on the one header named by trustProxy: { header }', async () => {
+    app.use('*', createRateLimitMiddleware({ limit: 1, store, trustProxy: { header: 'CF-Connecting-IP' } }))
+    app.get('/', (c) => c.text('OK'))
+
+    const clientA1 = await app.request('/', { headers: { 'cf-connecting-ip': '1.1.1.1', 'x-forwarded-for': '7.7.7.7' } })
+    const clientA2 = await app.request('/', { headers: { 'cf-connecting-ip': '1.1.1.1', 'x-forwarded-for': '6.6.6.6' } })
     const clientB1 = await app.request('/', { headers: { 'cf-connecting-ip': '2.2.2.2' } })
 
     expect(clientA1.status).toBe(200)
@@ -214,17 +253,12 @@ describe('createRateLimitMiddleware', () => {
     expect(clientB1.status).toBe(200)
   })
 
-  it('uses the first X-Forwarded-For entry when trustProxy is enabled', async () => {
-    app.use('*', createRateLimitMiddleware({ limit: 1, store, trustProxy: true }))
-    app.get('/', (c) => c.text('OK'))
-
-    const first = await app.request('/', { headers: { 'x-forwarded-for': '3.3.3.3, 10.0.0.1' } })
-    const second = await app.request('/', { headers: { 'x-forwarded-for': '3.3.3.3, 10.0.0.2' } })
-    const other = await app.request('/', { headers: { 'x-forwarded-for': '4.4.4.4, 10.0.0.1' } })
-
-    expect(first.status).toBe(200)
-    expect(second.status).toBe(429)
-    expect(other.status).toBe(200)
+  it('refuses a trustProxy option it cannot read', () => {
+    expect(() => createRateLimitMiddleware({ store, trustProxy: { hops: 0 } })).toThrow('trustProxy.hops must be a positive integer')
+    expect(() => createRateLimitMiddleware({ store, trustProxy: { hops: 1.5 } })).toThrow('trustProxy.hops must be a positive integer')
+    expect(() => createRateLimitMiddleware({ store, trustProxy: { header: ' ' } })).toThrow('trustProxy.header must name a request header')
+    expect(() => createRateLimitMiddleware({ store, trustProxy: { header: 'X-Forwarded-For' } })).toThrow('use trustProxy: { hops }')
+    expect(() => createRateLimitMiddleware({ store, trustProxy: { header: 'X Real IP' } })).toThrow('must be a valid header name')
   })
 
   it('ignores proxy headers by default (spoofing cannot bypass limits)', async () => {
@@ -527,5 +561,49 @@ describe('resetRateLimit', () => {
     await resetRateLimit('key', store, { keyPrefix: 'api:' })
 
     expect(await store.get('api:key')).toBeNull()
+  })
+})
+
+describe('resolveClientIp', () => {
+  async function resolved(headers: Record<string, string>, trustProxy?: Parameters<typeof resolveClientIp>[1], peer?: string) {
+    const app = new Hono()
+    let ip: string | undefined
+    app.get('/', (c) => {
+      ip = resolveClientIp(c, trustProxy)
+      return c.text('OK')
+    })
+    const env = peer ? { server: { requestIP: () => ({ address: peer }) } } : undefined
+    await app.request('/', { headers }, env)
+    return ip
+  }
+
+  it('reads the socket address and ignores proxy headers without trustProxy', async () => {
+    expect(await resolved({ 'x-forwarded-for': '3.3.3.3' }, undefined, '10.0.0.9')).toBe('10.0.0.9')
+    expect(await resolved({ 'x-forwarded-for': '3.3.3.3' })).toBeUndefined()
+  })
+
+  it('reads the proxy value trustProxy names, else the socket address', async () => {
+    expect(await resolved({ 'x-forwarded-for': '1.1.1.1, 3.3.3.3' }, true, '10.0.0.9')).toBe('3.3.3.3')
+    expect(await resolved({ 'x-forwarded-for': '1.1.1.1, 3.3.3.3' }, { hops: 2 }, '10.0.0.9')).toBe('1.1.1.1')
+    expect(await resolved({ 'x-forwarded-for': '3.3.3.3' }, { hops: 2 }, '10.0.0.9')).toBe('10.0.0.9')
+    expect(await resolved({}, { header: 'x-real-ip' }, '10.0.0.9')).toBe('10.0.0.9')
+  })
+
+  it('drops a port the proxy appended, keeping bare IPv6 whole', async () => {
+    expect(await resolved({ 'x-forwarded-for': '1.1.1.1, 203.0.113.7:50001' }, true)).toBe('203.0.113.7')
+    expect(await resolved({ 'x-forwarded-for': '[2001:db8::7]:50001' }, true)).toBe('2001:db8::7')
+    expect(await resolved({ 'x-forwarded-for': '[2001:db8::7]' }, true)).toBe('2001:db8::7')
+    expect(await resolved({ 'x-forwarded-for': '2001:db8::7' }, true)).toBe('2001:db8::7')
+    expect(await resolved({ 'x-real-ip': '203.0.113.7:443' }, { header: 'x-real-ip' })).toBe('203.0.113.7')
+  })
+
+  it('gives one bucket to one address whatever port it arrives from', async () => {
+    const app = new Hono()
+    app.use('*', createRateLimitMiddleware({ store: new MemoryRateLimitStore(0), limit: 1, trustProxy: true }))
+    app.get('/', (c) => c.text('OK'))
+    const first = await app.request('/', { headers: { 'x-forwarded-for': '203.0.113.7:50001' } })
+    const second = await app.request('/', { headers: { 'x-forwarded-for': '203.0.113.7:50002' } })
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(429)
   })
 })

@@ -71,7 +71,7 @@ export default {
 }
 ```
 
-Ignored findings stay in the report with `status: "ignored"` and an `ignoreReason`. Nothing is silently dropped. An entry with a missing `key`/`reason`, or one that never matches a finding, produces its own warning so stale rules don't rot unnoticed. A `deps:*` entry is judged stale only when the dependency scan ran to the end, so `--no-deps` or an unreachable registry does not flag it.
+Ignored findings stay in the report with `status: "ignored"` and an `ignoreReason`. Nothing is silently dropped. An entry with a missing `key`/`reason`, or one that never matches a finding, produces its own warning so stale rules don't rot unnoticed. A `deps:*` advisory (`deps:<package>:<GHSA>`) has no source line either and is ignored the same way. Such an entry is judged stale only when the dependency scan ran to the end, so `--no-deps` or an unreachable registry does not flag it; a `deps:runtime:*`, `deps:runtime-scan` or `deps:runtime-unpinned:*` entry, only when the Bun runtime check read every source.
 
 `config/audit.ts` only accepts findings that have no source line, the route- and model-level ones above. Line-scoped findings (hardcoded secrets, raw SQL, disabled security toggles) already have `// guren-audit-ignore` for that; an entry targeting one is rejected with a warning pointing you back to the inline comment, rather than becoming a second, less visible way to silence them.
 
