@@ -66,6 +66,10 @@ export const ALLOW_DESTRUCTIVE_MARKER = 'guren:allow-destructive'
 /** One-run override of `destructiveMigrations: 'refuse'`, which `guren db:migrate --allow-destructive` sets. */
 export const ALLOW_DESTRUCTIVE_ENV = 'GUREN_ALLOW_DESTRUCTIVE_MIGRATIONS'
 
+// drizzle-kit's separator: drizzle's migrator splits the raw text on it, comments and strings included, and runs each piece.
+const STATEMENT_SEPARATOR = '--> statement-breakpoint'
+const STATEMENT_BREAKPOINT = STATEMENT_SEPARATOR.slice(2)
+
 type TokenKind = 'word' | 'ident' | 'string' | 'punct' | 'body'
 
 interface Token {
@@ -95,10 +99,12 @@ interface LexRules {
   dollarQuotes: boolean
   /** PostgreSQL nests block comments; MySQL and SQLite end one at the first close. */
   nestedComments: boolean
+  /** PostgreSQL ends a line comment at a bare `\r` as well as at `\n`. */
+  carriageReturnEndsComment: boolean
 }
 
-const POSTGRES: LexRules = { backslashEscapes: false, escapeStrings: true, mysqlComments: false, dollarQuotes: true, nestedComments: true }
-const MYSQL: LexRules = { backslashEscapes: true, escapeStrings: false, mysqlComments: true, dollarQuotes: false, nestedComments: false }
+const POSTGRES: LexRules = { backslashEscapes: false, escapeStrings: true, mysqlComments: false, dollarQuotes: true, nestedComments: true, carriageReturnEndsComment: true }
+const MYSQL: LexRules = { backslashEscapes: true, escapeStrings: false, mysqlComments: true, dollarQuotes: false, nestedComments: false, carriageReturnEndsComment: false }
 
 /**
  * Each way a dialect's server may read the SQL, all of which count: MySQL under
@@ -108,7 +114,7 @@ const MYSQL: LexRules = { backslashEscapes: true, escapeStrings: false, mysqlCom
 const LEX_READINGS: Record<MigrationDialect, LexRules[]> = {
   postgres: [POSTGRES, { ...POSTGRES, backslashEscapes: true }],
   mysql: [MYSQL, { ...MYSQL, backslashEscapes: false }],
-  sqlite: [{ backslashEscapes: false, escapeStrings: false, mysqlComments: false, dollarQuotes: false, nestedComments: false }],
+  sqlite: [{ backslashEscapes: false, escapeStrings: false, mysqlComments: false, dollarQuotes: false, nestedComments: false, carriageReturnEndsComment: false }],
 }
 
 function lex(sql: string, rules: LexRules, firstLine = 1): Lexed {
@@ -175,8 +181,10 @@ function lex(sql: string, rules: LexRules, firstLine = 1): Lexed {
     }
 
     if ((char === '-' && sql[i + 1] === '-') || (char === '#' && rules.mysqlComments)) {
-      const end = sql.indexOf('\n', i)
-      const text = advanceTo(end === -1 ? sql.length : end)
+      const newline = sql.indexOf('\n', i)
+      const carriageReturn = rules.carriageReturnEndsComment ? sql.indexOf('\r', i) : -1
+      const ends = [newline, carriageReturn].filter((at) => at !== -1)
+      const text = advanceTo(ends.length === 0 ? sql.length : Math.min(...ends))
       const body = text.slice(char === '#' ? 1 : 2)
       comments.push({ text: body, line: startLine })
       // MySQL starts a comment only at `-- ` followed by whitespace; `--1; DROP …` is SQL there.
@@ -813,15 +821,31 @@ function scanWith(sql: string, rules: LexRules): MigrationScan {
   return { ...scanTokens(lexed, rules), acknowledged: readAcknowledgement(lexed.comments) }
 }
 
+/** The file as drizzle's migrator runs it: each piece between separators lexed on its own, then read as one file. */
+function scanPieces(sql: string, rules: LexRules): MigrationScan {
+  const joined: Lexed = { tokens: [], comments: [], executable: [] }
+  let line = 1
+  for (const piece of sql.split(STATEMENT_SEPARATOR)) {
+    const lexed = lex(piece, rules, line)
+    // Each piece runs as a statement of its own, whatever the previous one left open.
+    joined.tokens.push(...lexed.tokens, { kind: 'punct', value: ';', line })
+    joined.comments.push(...lexed.comments)
+    joined.executable.push(...lexed.executable)
+    joined.unterminatedAt ??= lexed.unterminatedAt
+    for (const char of piece) if (char === '\n') line += 1
+  }
+  return { ...scanTokens(joined, rules), acknowledged: readAcknowledgement(joined.comments) }
+}
+
 const findingKey = (statement: DestructiveStatement) => [statement.kind, statement.line, statement.table, statement.column].join('\u0000')
 const evidence = (statement: DestructiveStatement) => JSON.stringify([statement.copiedColumns, statement.copiedColumnTypes, statement.targetType])
 
 /**
  * Every destructive statement in one migration file, and its acknowledgement.
  * Every way the dialect's server may read the SQL (each dialect's, when none is
- * named) is taken and merged so that none can hide a statement: every finding
- * counts, while exemption evidence, a create and the marker count only when
- * every reading has them.
+ * named), on the whole text and on the pieces drizzle's migrator runs, is taken
+ * and merged so that none can hide a statement: every finding counts, while
+ * exemption evidence, a create and one same marker count only when every reading has them.
  */
 export function scanMigrationSql(sql: string, { dialect }: ScanOptions = {}): MigrationScan {
   const candidates = dialect ? LEX_READINGS[dialect] : Object.values(LEX_READINGS).flat()
@@ -829,6 +853,8 @@ export function scanMigrationSql(sql: string, { dialect }: ScanOptions = {}): Mi
   const sameRules = (a: LexRules, b: LexRules) => JSON.stringify({ ...a, backslashEscapes: false }) === JSON.stringify({ ...b, backslashEscapes: false })
   const distinct = sql.includes('\\') ? candidates : candidates.filter((rules, at) => candidates.findIndex((other) => sameRules(other, rules)) === at)
   const readings = distinct.map((rules) => scanWith(sql, rules))
+  // A separator inside a comment or a string is still a cut for the migrator.
+  if (sql.includes(STATEMENT_SEPARATOR)) readings.push(...distinct.map((rules) => scanPieces(sql, rules)))
   if (readings.length === 1) return readings[0]!
   const merged = new Map<string, DestructiveStatement[]>()
   for (const reading of readings) {
@@ -857,7 +883,8 @@ export function scanMigrationSql(sql: string, { dialect }: ScanOptions = {}): Mi
     statements: statements.sort((a, b) => a.line - b.line),
     creates: first!.creates.filter((entry) => rest.every((reading) => reading.creates.some((other) => createKey(other) === createKey(entry)))),
     cascadeTargets: [...new Set(readings.flatMap((reading) => reading.cascadeTargets))],
-    acknowledged: readings.every((reading) => reading.acknowledged) ? first!.acknowledged : null,
+    // One marker, read alike by every reading: two comments that each only one reading sees acknowledge nothing.
+    acknowledged: readings.every((reading) => JSON.stringify(reading.acknowledged) === JSON.stringify(first!.acknowledged)) ? first!.acknowledged : null,
   }
 }
 
@@ -1082,10 +1109,6 @@ function readCreationStatement(tokens: Token[]): CreationStatement | undefined {
 
 const isPunct = (token: Token | undefined, value: string): boolean => token?.kind === 'punct' && token.value === value
 
-// drizzle-kit's separator: drizzle's migrator splits the raw text on it, comments and strings included, and runs each piece.
-const STATEMENT_SEPARATOR = '--> statement-breakpoint'
-const STATEMENT_BREAKPOINT = STATEMENT_SEPARATOR.slice(2)
-
 /**
  * The statements of a migration that does nothing but create tables, their indexes and their foreign
  * keys, in the shapes drizzle-kit writes them; `undefined` for anything else. An allowlist: a name
@@ -1094,7 +1117,7 @@ const STATEMENT_BREAKPOINT = STATEMENT_SEPARATOR.slice(2)
  * does SQL the dialect's readings lex differently.
  */
 export function readCreationStatements(sql: string, dialect: MigrationDialect): CreationStatement[] | undefined {
-  // PostgreSQL ends a line comment at a bare `\r` too, where this lexer reads on to the `\n`.
+  // A bare `\r` ends a line comment on PostgreSQL alone, and drizzle-kit writes none.
   if (sql.includes('\r')) return undefined
   const whole = readCreationText(sql, dialect)
   // Read as the migrator runs it too: a separator inside a comment or a string is a cut there.
