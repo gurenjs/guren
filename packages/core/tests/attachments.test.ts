@@ -307,6 +307,22 @@ describe('attachments', () => {
       expect(dotted.path).toBe(`attachments/${dotted.id}/cover.png`)
     })
 
+    test('should give a dotfile-shaped name a real extension', async () => {
+      // `extname('.png')` is empty, so whatever types a file by extension skips it.
+      const record = await Post.attach(1, 'images', PNG_1X1, { name: '.png' })
+      expect(record.path).toBe(`attachments/${record.id}/file.png`)
+      expect(record.name).toBe('.png')
+    })
+
+    test('should keep a rewritten name within 255 bytes', async () => {
+      const name = '\u3042'.repeat(84)
+      const record = await Post.attach(1, 'images', PNG_1X1, { name })
+      const stored = record.path.split('/').pop()!
+      expect(stored).toBe(`${'\u3042'.repeat(83)}.png`)
+      expect(Buffer.byteLength(stored)).toBeLessThanOrEqual(255)
+      expect(record.name).toBe(name)
+    })
+
     test('should keep an extension that already names the detected format', async () => {
       const record = await Post.attach(1, 'images', PNG_1X1, { name: 'Scan.PNG' })
       expect(record.path).toBe(`attachments/${record.id}/Scan.PNG`)

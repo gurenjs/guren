@@ -1593,9 +1593,29 @@ export function sanitizeFilename(name: string): string {
 function objectName(name: string, format: string | null): string {
   const extensions = format ? IMAGE_EXTENSIONS[format] : undefined
   if (!extensions) return name
-  const current = /\.([^.]*)$/.exec(name)?.[1]?.toLowerCase()
-  if (current !== undefined && extensions.includes(current)) return name
-  return replaceExtension(name, extensions[0])
+  // Read as `extname()` reads it, which is how the root asset server picks a
+  // type: a name that is only a leading dot and letters (`.png`) has no extension.
+  const dot = name.lastIndexOf('.')
+  if (dot > 0 && extensions.includes(name.slice(dot + 1).toLowerCase())) return name
+  const suffix = `.${extensions[0]}`
+  const stem = truncateToBytes(dot < 0 ? name : name.slice(0, dot), MAX_OBJECT_NAME_BYTES - suffix.length)
+  return `${stem === '' ? 'file' : stem}${suffix}`
+}
+
+/** The longest file name ext4 and APFS take, in UTF-8 bytes. */
+const MAX_OBJECT_NAME_BYTES = 255
+
+/** By code point, so the cut never lands inside a character. */
+function truncateToBytes(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value) <= maxBytes) return value
+  let kept = ''
+  let bytes = 0
+  for (const char of value) {
+    bytes += Buffer.byteLength(char)
+    if (bytes > maxBytes) break
+    kept += char
+  }
+  return kept
 }
 
 function replaceExtension(name: string, extension: string): string {
