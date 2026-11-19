@@ -16,7 +16,7 @@ body:
     id: runtime
     attributes:
       label: Runtime
-      placeholder: "e.g. Bun 1.4.4"
+      placeholder: "e.g. Bun 1.4.5"
     validations:
       required: true
   - type: textarea

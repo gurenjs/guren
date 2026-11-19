@@ -199,7 +199,7 @@ function CreateStep({ options }: { options: StartOptions }) {
         <a href="https://bun.sh" target="_blank" rel="noopener noreferrer" className="text-crimson-300 underline">
           Bun
         </a>{' '}
-        1.4.2 or later
+        1.4.5 or later
         {usesDatabaseContainer(options.db) ? <>, and Docker running for {database}</> : null}.
       </p>
       <CopyCommand command={buildCreateCommand(options)} />
