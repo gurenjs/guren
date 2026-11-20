@@ -34,6 +34,16 @@ const CLASS_ABILITIES: ReadonlySet<string> = new Set(['viewAny', 'create'])
 const CONTROLLER_MEMBERS: ReadonlySet<string> = new Set(['constructor', ...Object.keys(CONTROLLER_MEMBER_KINDS)])
 
 /** The routes file a scaffold step writes for its entity, and the registrar it exports: `plan:scaffold`, `--mount`, `plan:next` and `guren check` all read it here. */
+/** The middleware a plan route runs, in order: its own, then its action's authorization middleware, which applies on the route. */
+export function plannedRouteMiddleware(route: Pick<PlanRoute, 'middleware'>, action: Pick<PlanAction, 'authorization'>): string[] {
+  return [...new Set([...route.middleware, ...action.authorization.middleware])]
+}
+
+/** The `.agent()` metadata the scaffold registers for a plan route: what the manifest reads back. */
+export function plannedAgentMetadata(route: Pick<PlanRoute, 'agent'>): { toolName: string; readOnlyHint: boolean } | undefined {
+  return route.agent ? { toolName: route.agent.toolName, readOnlyHint: route.agent.readOnly } : undefined
+}
+
 export function scaffoldRoutesFile(model: Pick<PlanModel, 'name'>): { path: string; registrar: string } {
   return { path: `${ROUTES_DIR}/${collectionSlug(model.name)}.ts`, registrar: `register${model.name}Routes` }
 }
@@ -313,9 +323,9 @@ export class PlanHttpEmitter {
         return [`${quoteObjectKey(binding.param)}: ${binding.key ? `[${name}, ${quoteString(binding.key)}]` : name}`]
       })
       if (bindings.length > 0) contract.push(`bind: { ${bindings.join(', ')} }`)
-      if (route.agent) contract.push(`agent: { toolName: ${quoteString(route.agent.toolName)}, readOnlyHint: ${route.agent.readOnly} }`)
-      // The action's own authorization middleware runs on the route too: that is where a middleware applies.
-      const middleware = [...new Set([...route.middleware, ...action.authorization.middleware])].filter((name) => {
+      const agent = plannedAgentMetadata(route)
+      if (agent) contract.push(`agent: { toolName: ${quoteString(agent.toolName)}, readOnlyHint: ${agent.readOnlyHint} }`)
+      const middleware = plannedRouteMiddleware(route, action).filter((name) => {
         if (name === AUTH_ALIAS) return true
         this.leave(route.id, `middleware ${name}`, `plan:scaffold registers only the ${AUTH_ALIAS} alias; the http step applies ${name} with the handler the application aliases it to`)
         return false

@@ -581,6 +581,18 @@ function patternSegments(path: string): PatternSegment[] {
   })
 }
 
+/**
+ * Whether some request could match both paths: `false` only when, segment by segment, two literals differ or the
+ * counts differ. A `*`, a constraint, an optional parameter or text beside a parameter in its segment may overlap.
+ */
+export function routePathsMayOverlap(a: string, b: string): boolean {
+  const [left, right] = [patternSegments(a), patternSegments(b)]
+  const open = (segments: PatternSegment[]): boolean => segments.some((segment) => segment.source === null || segment.param?.constraint !== undefined || segment.param?.optional || segment.literal?.includes(HOLE))
+  if (open(left) || open(right)) return true
+  if (left.length !== right.length) return false
+  return left.every((segment, index) => segment.literal === undefined || right[index]!.literal === undefined || segment.literal === right[index]!.literal)
+}
+
 export interface RoutePathMatchOptions {
   /**
    * Read a runtime segment at a constrained parameter as filling it, one segment. For a caller
