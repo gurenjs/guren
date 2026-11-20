@@ -861,6 +861,7 @@ export class CommentPolicy extends Policy {
       ['route-added', 'low', 'POST /posts/:postId/comments (comments.store)', ['routes/web.ts'], 'docs/plans/comments/plan.json#route.comments.store'],
       ['route-added', 'low', 'DELETE /comments/:id (comments.destroy)', ['routes/web.ts'], 'docs/plans/comments/plan.json#route.comments.destroy'],
     ])
+    expect(renderChangeLane(mounted)).toContain('A declared route was read off its security record')
 
     // A planned `auth` the registered route lacks keeps the route and the entry edit with a person.
     const [store, destroy, ...rest] = records.mount.routes

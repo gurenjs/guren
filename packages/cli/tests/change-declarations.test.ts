@@ -546,6 +546,7 @@ describe('declaredRoute', () => {
     ["an authorize() call of another model's policy", (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: '[Post, post]' }], validates: [] } })],
     ['an authorize() call of a model whose name starts the same', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: '[CommentDraft, draft]' }], validates: [] } })],
     ['the bare class where every route binds the record', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: 'Comment' }], validates: [] } })],
+    ['a subject that only starts as the tuple', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: '[Comment, comment][0] && Post' }], validates: [] } })],
     ['an unread body', (route) => ({ ...route, handler: { unread: 'not found' } })],
   ])('should not declare a route with %s', async (_why, edit) => {
     const route = edit(DESTROY)
@@ -600,7 +601,7 @@ describe('declaredRoute', () => {
     expect(await declare(DESTROY, [STORE, DESTROY, later('DELETE', '/posts/:id'), later('DELETE', '/comments/:id/likes'), later('GET', '/comments/:id'), later('ALL', '/api/*'), HOME])).toBe(`${PLAN_FILE}#route.comments.destroy`)
   })
 
-  test('should hold the bare model class as the subject where the plan binds no record, as the scaffold writes it', async () => {
+  test('should take the bare model class where the plan binds no record, as the scaffold writes it, or the record once the action loads it', async () => {
     const unbound = commentsPlan((plan) => {
       plan.routes[1].bind = []
     })
@@ -609,7 +610,9 @@ describe('declaredRoute', () => {
     const bare = asked('Comment')
     expect(await declare(bare, [STORE, bare, HOME], only(unbound), { added: [STORE, bare] })).toBe(`${PLAN_FILE}#route.comments.destroy`)
     const record = asked('[Comment, comment]')
-    expect(await declare(record, [STORE, record, HOME], only(unbound), { added: [STORE, record] })).toBeUndefined()
+    expect(await declare(record, [STORE, record, HOME], only(unbound), { added: [STORE, record] })).toBe(`${PLAN_FILE}#route.comments.destroy`)
+    const post = asked('Post')
+    expect(await declare(post, [STORE, post, HOME], only(unbound), { added: [STORE, post] })).toBeUndefined()
   })
 
   test('should not declare a route a second open plan names, one the plan alters, or one binding a planned key', async () => {

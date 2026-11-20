@@ -388,9 +388,10 @@ export async function declaredRoute(route: RouteSecurityRecord, head: HeadRoutes
   if (policy) {
     const model = plan.models.find((candidate) => candidate.id === plan.policies.find((entry) => entry.id === policy.id)?.model)
     if (!model || model.module !== undefined || 'unread' in route.handler) return undefined
-    // The subject the scaffold writes: `[Model, record]` when every route binds one record, the bare class otherwise.
-    const subject = asksPolicyOfRecord(plan, action) ? new RegExp(`^\\[\\s*${model.name}\\s*,`) : new RegExp(`^${model.name}$`)
-    if (!route.handler.authorizes.some((call) => call.member === 'authorize' && call.ability === policy.ability && subject.test(call.subject))) return undefined
+    // `[Model, record]` where every route binds one record, as the scaffold writes it; elsewhere the bare class, or the record once the action loads it.
+    const tuple = new RegExp(`^\\[\\s*${model.name}\\s*,\\s*[A-Za-z_$][\\w$]*\\s*\\]$`)
+    const asks = (subject: string): boolean => tuple.test(subject) || (!asksPolicyOfRecord(plan, action) && subject === model.name)
+    if (!route.handler.authorizes.some((call) => call.member === 'authorize' && call.ability === policy.ability && asks(call.subject))) return undefined
     // The subject is read as written, so the name must be the model the plan names: imported as itself, bound nowhere else.
     const path = controllerFilePath(controller)
     const source = await readHead(path)
