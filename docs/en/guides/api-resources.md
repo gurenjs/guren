@@ -354,7 +354,7 @@ The second type argument is the payload type, and passing it makes `toJSON()` re
 
 The interface must be declared in the resource's own file — one imported from a shared types module is not read. A Resource codegen cannot extract a type from is named in a `guren codegen` warning rather than dropped in silence, so a missing `Data.*` member always says why.
 
-The payload type does not have to be a plain interface. An **exported** alias whose shape codegen cannot copy (one derived from a Zod schema, an intersection, a merged interface) is emitted as a reference to the declaration itself, so one schema can be the single source of truth for the runtime contract and the payload type alike:
+The payload type does not have to be a plain interface. An **exported** type whose shape codegen cannot copy (one derived from a Zod schema, an intersection, a merged interface, an interface that extends another type) is emitted as a reference to the declaration itself, so one schema can be the single source of truth for the runtime contract and the payload type alike:
 
 ```ts
 export const UserResourceSchema = z.object({ id: z.number(), name: z.string() })
@@ -367,7 +367,7 @@ export class UserResource extends Resource<User> {
 }
 ```
 
-The declaration must be exported (`data.gen.ts` names it through the resource's module), and a generic type stays unsupported either way, since a reference has no type arguments to pass it.
+The declaration must be exported (`data.gen.ts` names it through the resource's module), and a generic type stays unsupported either way, since a reference has no type arguments to pass it. An interface that extends only `Record<string, unknown>`, as `make:resource` writes it, is still copied, and the copy leaves the index signature out.
 
 ### Resources inside modules
 
