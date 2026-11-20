@@ -1,0 +1,23 @@
+import { Controller, HttpException } from '@guren/core'
+import { CommentPayloadSchema } from '../Validators/CommentValidator.js'
+import { Comment } from '../../Models/Comment.js'
+
+/**
+ * Written by plan:scaffold: each action validates and authorizes as planned, then answers 501 until the http step writes it.
+ */
+export default class CommentController extends Controller {
+  // Planned response: a redirect to /posts/:postId
+  // Rule: The comment's author is the signed-in user.
+  // postId is not fillable: write it with Comment.create(data, { set: { postId } }) (RFC 0031)
+  async store(): Promise<Response> {
+    await this.validateBody(CommentPayloadSchema)
+    throw HttpException.notImplemented('CommentController.store is planned and not written yet')
+  }
+
+  // Planned response: a redirect to /posts/:postId
+  async destroy(): Promise<Response> {
+    const comment = this.model(Comment)
+    await this.authorize('delete', [Comment, comment])
+    throw HttpException.notImplemented('CommentController.destroy is planned and not written yet')
+  }
+}

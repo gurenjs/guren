@@ -21,7 +21,7 @@ import { MODELS_DIR } from '../discovery'
 import { DIALECT_BARRELS, DRIZZLE_CORE_SUBPATHS } from '../drizzle-specifiers'
 import { isAutoIncrementPrimaryKey, migrationSqlType } from '../schema-columns'
 import { policyFilePath, providerFilePath, resourceFilePath, validatorFilePath } from '../plan/scaffold-http'
-import { controllerFilePath, plannedAgentMetadata, plannedRouteMiddleware, scaffoldRoutesFile, sideEffectFilePath } from '../plan/scaffold-controller'
+import { asksPolicyOfRecord, controllerFilePath, plannedAgentMetadata, plannedRouteMiddleware, scaffoldRoutesFile, sideEffectFilePath } from '../plan/scaffold-controller'
 import { derivePlanTasks, type PlanDerivedStep } from '../plan/tasks'
 import { composeRouteRegistrarCall, findRouteRegistrar } from '../route-registrar'
 import { parseSchemaSource, type SchemaDialect, type SchemaTable } from '../schema-parser'
@@ -41,11 +41,17 @@ export type DeclarationSubject =
   | { kind: 'table'; table: SchemaTable; file: string; tables: readonly SchemaTable[] }
   | { kind: 'migration'; dir: string; files: string[]; previous?: string }
   | { kind: 'table-residue'; file: string; identifier: string }
-  /** A route as the head's records hold it (`base` for a change), with every head route in registration order. */
-  | { kind: 'route'; change: 'add' | 'drop' | 'alter'; route: RouteSecurityRecord; base?: RouteSecurityRecord; routes: readonly RouteSecurityRecord[] }
+  /** A route as the head's records hold it (`base` for a change), with every head route in registration order and the ones the change adds. */
+  | { kind: 'route'; change: 'add' | 'drop' | 'alter'; route: RouteSecurityRecord; base?: RouteSecurityRecord } & HeadRoutes
   | { kind: 'agent'; route: RouteSecurityRecord; base?: RouteSecurityRecord }
   /** The routes entry, edited in place. */
   | { kind: 'routes-entry'; path: string }
+
+/** Every route the head registers, in registration order, and those of them with no counterpart at the base. */
+export interface HeadRoutes {
+  routes: readonly RouteSecurityRecord[]
+  added: readonly RouteSecurityRecord[]
+}
 
 /** An approved plan that is not closed, as the head has it; `file` is app-relative. */
 export interface OpenPlan {
@@ -315,8 +321,8 @@ export async function applyPlanDeclarations(
     const subject = subjects.get(fact)
     const declaredBy = subject?.kind === 'table-residue' || subject?.kind === 'routes-entry' ? undefined
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
-      : subject?.kind === 'route' ? (subject.change === 'add' ? declaredRoute(subject.route, subject.routes, plans) : undefined)
-      : subject?.kind === 'agent' ? (subject.base === undefined ? declaredAgentOf(subject.route, facts, subjects, plans) : undefined)
+      : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : undefined)
+      : subject?.kind === 'agent' ? (subject.base === undefined ? await declaredAgentOf(subject.route, facts, subjects, plans, readHead) : undefined)
       : subject ? await declarationOf(subject, owned, readHead) : undefined
     if (declaredBy && subject?.kind === 'table') declaredTables.add(`${subject.file}\u0000${subject.table.identifier}`)
     const judged = declaredBy ? { ...fact, lane: FACT_CLASSES[fact.code].lowest, declaredBy } : fact
@@ -344,7 +350,7 @@ function claimsRoute(plan: PlanDraft, route: RouteSecurityRecord): boolean {
  * A route registered before another that a request could match too takes that request without either record
  * changing, so it declares nothing. A binding's lookup column is not in the record, so an unplanned one is unseen.
  */
-export function declaredRoute(route: RouteSecurityRecord, routes: readonly RouteSecurityRecord[], plans: readonly OpenPlan[]): string | undefined {
+export async function declaredRoute(route: RouteSecurityRecord, head: HeadRoutes, plans: readonly OpenPlan[], readHead: (path: string) => Promise<string | null>): Promise<string | undefined> {
   const claims = plans.filter((open) => claimsRoute(open.plan, route))
   if (claims.length !== 1 || route.module !== null || route.name === undefined) return undefined
   const { file, plan } = claims[0]!
@@ -381,20 +387,54 @@ export function declaredRoute(route: RouteSecurityRecord, routes: readonly Route
   const policy = action.authorization.policy
   if (policy) {
     const model = plan.models.find((candidate) => candidate.id === plan.policies.find((entry) => entry.id === policy.id)?.model)
-    // The two subjects the scaffold writes: `[Model, record]` for a record ability, the bare class otherwise.
-    const asksModel = (subject: string): boolean => model !== undefined && (subject === model.name || new RegExp(`^\\[\\s*${model.name}\\s*,`).test(subject))
-    if ('unread' in route.handler || !route.handler.authorizes.some((call) => call.member === 'authorize' && call.ability === policy.ability && asksModel(call.subject))) return undefined
+    if (!model || model.module !== undefined || 'unread' in route.handler) return undefined
+    // The subject the scaffold writes: `[Model, record]` when every route binds one record, the bare class otherwise.
+    const subject = asksPolicyOfRecord(plan, action) ? new RegExp(`^\\[\\s*${model.name}\\s*,`) : new RegExp(`^${model.name}$`)
+    if (!route.handler.authorizes.some((call) => call.member === 'authorize' && call.ability === policy.ability && subject.test(call.subject))) return undefined
+    // The subject is read as written, so the name must be the model the plan names: imported as itself, bound nowhere else.
+    const path = controllerFilePath(controller)
+    const source = await readHead(path)
+    const ast = source === null ? null : parseSourceFile(source, path)
+    if (!ast || !namesModelAsItself(ast, path, model.name)) return undefined
   }
 
-  const self = { module: route.module, index: routes.indexOf(route) }
+  const self = { module: route.module, index: head.routes.indexOf(route) }
   if (self.index === -1) return undefined
-  for (const [index, other] of routes.entries()) {
-    // A plan route is never `ALL`; an `ALL` route registered after it answers its method too.
+  const added = new Set(head.added)
+  for (const [index, other] of head.routes.entries()) {
+    // A plan route is never `ALL`; an `ALL` route registered after it answers its method too. A route the change adds loses no request.
     const methods = route.method === other.method || other.method === 'ALL'
-    if (other === route || !methods || registeredBefore(self, { module: other.module, index }) === false) continue
+    if (added.has(other) || !methods || registeredBefore(self, { module: other.module, index }) === false) continue
     if (routePathsMayOverlap(route.path, other.path)) return undefined
   }
   return `${file}#${planned.id}`
+}
+
+/** Whether the file imports `name` as itself from that model's file, and binds the name nowhere else. */
+function namesModelAsItself(ast: File, path: string, name: string): boolean {
+  const specifier = importSpecifier(path, `${MODELS_DIR}/${name}.ts`)
+  const imported = ast.program.body.some((node) => node.type === 'ImportDeclaration' && node.importKind !== 'type' && node.source.value === specifier
+    && node.specifiers.some((entry) => entry.type === 'ImportSpecifier' && entry.importKind !== 'type' && entry.local.name === name && entry.imported.type === 'Identifier' && entry.imported.name === name))
+  return imported && bindingsOf(ast, name) === 1
+}
+
+/** How many declarations bind `name` anywhere in the file: imports, declarators, functions, classes, parameters, catch clauses. */
+function bindingsOf(ast: File, name: string): number {
+  const roots: unknown[] = []
+  walk(ast.program, (node) => {
+    const value = node as unknown as Record<string, unknown>
+    if (node.type === 'ImportSpecifier' || node.type === 'ImportDefaultSpecifier' || node.type === 'ImportNamespaceSpecifier') roots.push(value.local)
+    else if (node.type === 'VariableDeclarator') roots.push(value.id)
+    else if (node.type === 'CatchClause') roots.push(value.param)
+    else if (/^(?:Function|Class)(?:Declaration|Expression)$/u.test(node.type)) roots.push(value.id)
+    if (Array.isArray(value.params)) roots.push(...value.params)
+  })
+  let count = 0
+  // A pattern root counts every identifier inside it, a destructured key included: an over-count only keeps a fact.
+  walk(roots, (node) => {
+    if (node.type === 'Identifier' && (node as unknown as { name: string }).name === name) count += 1
+  })
+  return count
 }
 
 /** Whether a rendered contract schema is an object with exactly the validator's planned keys, required as planned. */
@@ -409,13 +449,13 @@ function rendersPlannedFields(schema: unknown, validator: PlanDraft['validators'
 }
 
 /** An added route's agent tool is declared with the route: `declaredRoute()` holds its metadata to the plan's. */
-function declaredAgentOf(route: RouteSecurityRecord, facts: readonly ChangeFact[], subjects: ReadonlyMap<ChangeFact, DeclarationSubject>, plans: readonly OpenPlan[]): string | undefined {
+async function declaredAgentOf(route: RouteSecurityRecord, facts: readonly ChangeFact[], subjects: ReadonlyMap<ChangeFact, DeclarationSubject>, plans: readonly OpenPlan[], readHead: (path: string) => Promise<string | null>): Promise<string | undefined> {
   const added = facts.find((fact) => {
     const subject = subjects.get(fact)
     return subject?.kind === 'route' && subject.change === 'add' && subject.route === route
   })
   const subject = added && subjects.get(added)
-  return subject?.kind === 'route' && route.agent !== undefined ? declaredRoute(route, subject.routes, plans) : undefined
+  return subject?.kind === 'route' && route.agent !== undefined ? declaredRoute(route, subject, plans, readHead) : undefined
 }
 
 /**
@@ -458,24 +498,22 @@ async function declaredMount(
     const aliases = mountedText === null ? undefined : aliasNames(mountedText, mount.path)
     if (!aliases) continue
     const entryAliases = registrarAliases(base, subject.path)
-    const replaced = aliases.filter((name) => headRoutes.some((route) => !addedRoutes.has(route) && route.middleware.some((entry) => entry.name === name)) && !entryAliases?.has(name))
+    const replaced = aliases.filter((name) => headRoutes.some((route) => !addedRoutes.has(route) && route.middleware.some((entry) => entry.name === name || entry.members?.includes(name) === true)) && !entryAliases.has(name))
     if (replaced.length === 0) mounted.add(subject.path)
   }
   return mounted
 }
 
 /** The names a file passes to `aliasMiddleware()`; `undefined` when it does not parse or names one other than by a literal. */
-function aliasNames(text: string, path: string, within?: { start: number; end: number }): string[] | undefined {
+function aliasNames(text: string, path: string): string[] | undefined {
   const ast = parseSourceFile(text, path)
   if (!ast) return undefined
   const names: string[] = []
   let open = false
   walk(ast.program, (node) => {
-    if (node.type !== 'CallExpression') return
-    const call = node as unknown as CallExpression
-    const callee = call.callee
-    if ((callee.type !== 'MemberExpression' && callee.type !== 'OptionalMemberExpression') || callee.property.type !== 'Identifier' || callee.property.name !== 'aliasMiddleware') return
-    if (within && ((call.start ?? -1) < within.start || (call.end ?? Infinity) > within.end)) return
+    const call = node.type === 'CallExpression' ? (node as unknown as CallExpression) : undefined
+    const callee = call?.callee
+    if (!callee || (callee.type !== 'MemberExpression' && callee.type !== 'OptionalMemberExpression') || callee.property.type !== 'Identifier' || callee.property.name !== 'aliasMiddleware') return
     const [first] = call.arguments
     if (first?.type === 'StringLiteral') names.push(first.value)
     else open = true
@@ -483,11 +521,41 @@ function aliasNames(text: string, path: string, within?: { start: number; end: n
   return open ? undefined : names
 }
 
-/** The aliases the entry's registrar body sets, which run after a call `--mount` puts at its start. */
-function registrarAliases(text: string, path: string): Set<string> | undefined {
+/**
+ * The aliases the entry's registrar sets whenever it runs, after a call `--mount` puts first: a top-level statement of
+ * its body chaining `aliasMiddleware('<name>', …)` off its router, or off a constant a statement before bound from it.
+ */
+function registrarAliases(text: string, path: string): Set<string> {
+  const names = new Set<string>()
   const registrar = findRouteRegistrar(text)
-  const names = registrar ? aliasNames(text, path, { start: registrar.bodyStart, end: registrar.bodyEnd }) : undefined
-  return names ? new Set(names) : undefined
+  const ast = registrar ? parseSourceFile(text, path) : null
+  let body: Statement[] | undefined
+  walk(ast?.program, (node) => {
+    if (body === undefined && node.type === 'BlockStatement' && node.start === registrar!.bodyStart - 1) body = (node as unknown as { body: Statement[] }).body
+  })
+  const routers = new Set([registrar?.parameterName])
+  // The names one chain sets, when it starts at a router; `undefined` when it does not.
+  const chain = (expression: unknown): string[] | undefined => {
+    const set: string[] = []
+    let current = expression as { type?: string; callee?: { type: string; object?: unknown; property?: { type: string; name?: string } }; arguments?: Array<{ type: string; value?: unknown }>; name?: string } | undefined
+    while (current?.type === 'CallExpression' && current.callee?.type === 'MemberExpression') {
+      const [first] = current.arguments ?? []
+      if (current.callee.property?.name === 'aliasMiddleware' && first?.type === 'StringLiteral') set.push(String(first.value))
+      current = current.callee.object as typeof current
+    }
+    return current?.type === 'Identifier' && routers.has(current.name) ? set : undefined
+  }
+  for (const statement of body ?? []) {
+    if (statement.type === 'ExpressionStatement') for (const name of chain(statement.expression) ?? []) names.add(name)
+    if (statement.type !== 'VariableDeclaration' || statement.kind !== 'const') continue
+    for (const declarator of statement.declarations) {
+      const set = chain(declarator.init)
+      if (!set) continue
+      for (const name of set) names.add(name)
+      if (declarator.id.type === 'Identifier') routers.add(declarator.id.name)
+    }
+  }
+  return names
 }
 
 async function declarationOf(

@@ -582,15 +582,23 @@ function patternSegments(path: string): PatternSegment[] {
 }
 
 /**
- * Whether some request could match both paths: `false` only when, segment by segment, two literals differ or the
- * counts differ. A `*`, a constraint, an optional parameter or text beside a parameter in its segment may overlap.
+ * Whether some request could match both paths: `false` only when, segment by segment, two literals differ, or the
+ * counts differ where neither ends in `*`, which matches any rest (none included). A `*` elsewhere, a constraint or an
+ * optional parameter may match anything.
  */
 export function routePathsMayOverlap(a: string, b: string): boolean {
-  const [left, right] = [patternSegments(a), patternSegments(b)]
-  const open = (segments: PatternSegment[]): boolean => segments.some((segment) => segment.source === null || segment.param?.constraint !== undefined || segment.param?.optional || segment.literal?.includes(HOLE))
-  if (open(left) || open(right)) return true
-  if (left.length !== right.length) return false
-  return left.every((segment, index) => segment.literal === undefined || right[index]!.literal === undefined || segment.literal === right[index]!.literal)
+  const split = (path: string): { fixed: PatternSegment[]; rest: boolean } | undefined => {
+    const segments = patternSegments(path)
+    const rest = segments.at(-1)?.source === null
+    const fixed = rest ? segments.slice(0, -1) : segments
+    return fixed.some((segment) => segment.source === null || segment.param?.constraint !== undefined || segment.param?.optional) ? undefined : { fixed, rest }
+  }
+  const [left, right] = [split(a), split(b)]
+  if (!left || !right) return true
+  if (!left.rest && !right.rest && left.fixed.length !== right.fixed.length) return false
+  if ((!right.rest && right.fixed.length < left.fixed.length) || (!left.rest && left.fixed.length < right.fixed.length)) return false
+  const shared = Math.min(left.fixed.length, right.fixed.length)
+  return left.fixed.slice(0, shared).every((segment, index) => segment.literal === undefined || right.fixed[index]!.literal === undefined || segment.literal === right.fixed[index]!.literal)
 }
 
 export interface RoutePathMatchOptions {

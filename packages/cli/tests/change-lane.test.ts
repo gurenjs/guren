@@ -840,7 +840,11 @@ export class CommentPolicy extends Policy {
     const fixture = join(import.meta.dir, 'fixtures/change-routes')
     const records = JSON.parse(readFileSync(join(fixture, 'records.json'), 'utf8')) as Record<'scaffold' | 'mount', { recordVersion: number; routes: RouteSecurityRecord[] }>
     const { repo } = await planRepo()
-    const base = await commit(repo, { 'routes/web.ts': readFileSync(join(fixture, 'web.base.ts.txt'), 'utf8'), 'routes/comments.ts': readFileSync(join(fixture, 'comments.ts.txt'), 'utf8') })
+    const base = await commit(repo, {
+      'routes/web.ts': readFileSync(join(fixture, 'web.base.ts.txt'), 'utf8'),
+      'routes/comments.ts': readFileSync(join(fixture, 'comments.ts.txt'), 'utf8'),
+      'app/Http/Controllers/CommentController.ts': readFileSync(join(fixture, 'CommentController.ts.txt'), 'utf8'),
+    })
     const head = await commit(repo, { 'routes/web.ts': readFileSync(join(fixture, 'web.head.ts.txt'), 'utf8') })
     const judge = async (pair: SecurityRecordPair): Promise<ChangeLaneReport> => {
       const change = await resolveChange(repo, base, head)

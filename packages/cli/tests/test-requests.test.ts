@@ -406,10 +406,17 @@ describe('routePathsMayOverlap', () => {
     ['/comments/:id', '/posts/:id', false],
     ['/comments/:id', '/comments/:id/likes', false],
     ['/comments', '/comments', true],
-    ['/comments/:id', '/api/*', true],
+    ['/comments/:id', '/api/*', false],
+    ['/comments/:id', '/comments/*', true],
+    ['/comments', '/comments/*', true],
+    ['/comments/:id/likes', '/:any/*', true],
+    ['/comments', '/api/v1/*', false],
+    ['/comments/*', '/api/*', false],
+    ['/*', '/api/:id', true],
     ['/comments/:id', '/comments/:id{[0-9]+}', true],
     ['/comments/:id?', '/comments', true],
     ['/comments/:id', '/comments/v:version', true],
+    ['/comments/:id', '/comments/v:version/x', false],
   ])('should read %s and %s as %p', (a, b, expected) => {
     expect(routePathsMayOverlap(a, b)).toBe(expected)
     expect(routePathsMayOverlap(b, a)).toBe(expected)
