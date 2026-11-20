@@ -366,7 +366,9 @@ export function compareSecurityRecords(base: SecurityRecords, head: SecurityReco
   for (const route of head.routes) {
     const count = (seen.get(endpoint(route)) ?? 0) + 1
     seen.set(endpoint(route), count)
-    if (count > (atBase.get(endpoint(route)) ?? 0) && !added.includes(route) && !orphans.includes(route)) added.push(route)
+    // An endpoint the base lacks is a move or an addition, which the pairing above has judged.
+    const before = atBase.get(endpoint(route)) ?? 0
+    if (before > 0 && count > before && !added.includes(route) && !orphans.includes(route)) added.push(route)
   }
   return { facts, incomparable, added, removed: left, changed }
 }

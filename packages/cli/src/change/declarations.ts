@@ -425,11 +425,12 @@ export async function declaredRoute(route: RouteSecurityRecord, head: HeadRoutes
  */
 function awaitsPolicy(ast: File, className: string, actionName: string, ability: string, model: string, recordOnly: boolean): boolean {
   const declaration = exportedClass(ast, className)
-  const member = declaration?.body.body.find((entry) => (entry.type === 'ClassMethod' || entry.type === 'ClassProperty') && !entry.computed && entry.key.type === 'Identifier' && entry.key.name === actionName)
-  const fn = member?.type === 'ClassMethod' ? member : member?.type === 'ClassProperty' && (member.value?.type === 'ArrowFunctionExpression' || member.value?.type === 'FunctionExpression') ? member.value : undefined
-  if (!fn || fn.body.type !== 'BlockStatement') return false
+  // Two members of the name leave which one the router dispatches to unread.
+  const members = declaration ? [...classActionMembers(declaration)].filter((entry) => entry.name === actionName) : []
+  const body = members.length === 1 && !members[0]!.member.static ? members[0]!.body : undefined
+  if (body?.type !== 'BlockStatement') return false
   const isModel = (node: unknown): boolean => (node as { type?: string; name?: string } | null)?.type === 'Identifier' && (node as { name: string }).name === model
-  return fn.body.body.some((statement) => {
+  return body.body.some((statement) => {
     if (statement.type !== 'ExpressionStatement' || statement.expression.type !== 'AwaitExpression') return false
     const call = statement.expression.argument
     if (call.type !== 'CallExpression' || call.callee.type !== 'MemberExpression' || call.callee.object.type !== 'ThisExpression') return false
