@@ -778,6 +778,17 @@ export class CommentPolicy extends Policy {
     expect(report.facts.filter((fact) => fact.code === 'source-edited')).toEqual([])
   })
 
+  test("should keep a table dropped from the schema's aggregate object, beside a declared table", async () => {
+    const { repo } = await planRepo()
+    const tables = SCHEMA.slice(0, SCHEMA.indexOf('\nexport const comments'))
+    const base = await commit(repo, { 'db/schema.ts': `${tables}\nexport const schema = { users, posts }\n` })
+    const listed = await laneOf(repo, base, await commit(repo, { 'db/schema.ts': `${SCHEMA}\nexport const schema = { users, posts, comments }\n` }))
+    expect(listed.facts.map((fact) => [fact.code, fact.lane])).toEqual([['schema-changed', 'low']])
+
+    const dropped = await laneOf(repo, base, await commit(repo, { 'db/schema.ts': `${SCHEMA}\nexport const schema = { users, comments }\n` }))
+    expect(dropped.facts.map((fact) => [fact.code, fact.lane])).toEqual([['schema-changed', 'low'], ['source-edited', 'medium']])
+  })
+
   test('should lower the migration drizzle-kit writes for the tables the plan adds', async () => {
     const { repo } = await planRepo()
     const folder = join(import.meta.dir, 'fixtures/change-migrations')
@@ -844,6 +855,7 @@ export class CommentPolicy extends Policy {
       'routes/web.ts': readFileSync(join(fixture, 'web.base.ts.txt'), 'utf8'),
       'routes/comments.ts': readFileSync(join(fixture, 'comments.ts.txt'), 'utf8'),
       'app/Http/Controllers/CommentController.ts': readFileSync(join(fixture, 'CommentController.ts.txt'), 'utf8'),
+      'app/Models/Post.ts': "import { defineModel } from '@guren/core'\nimport { posts } from '@/db/schema'\n\nexport class Post extends defineModel(posts) {}\n",
     })
     const head = await commit(repo, { 'routes/web.ts': readFileSync(join(fixture, 'web.head.ts.txt'), 'utf8') })
     const judge = async (pair: SecurityRecordPair): Promise<ChangeLaneReport> => {

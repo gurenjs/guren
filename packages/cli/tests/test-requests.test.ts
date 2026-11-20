@@ -417,6 +417,7 @@ describe('routePathsMayOverlap', () => {
     ['/comments/:id?', '/comments', true],
     ['/comments/:id', '/comments/v:version', true],
     ['/comments/:id', '/comments/v:version/x', false],
+    ['/downloads/public', '/downloads*', true],
   ])('should read %s and %s as %p', (a, b, expected) => {
     expect(routePathsMayOverlap(a, b)).toBe(expected)
     expect(routePathsMayOverlap(b, a)).toBe(expected)

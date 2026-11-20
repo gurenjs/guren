@@ -591,7 +591,8 @@ export function routePathsMayOverlap(a: string, b: string): boolean {
     const segments = patternSegments(path)
     const rest = segments.at(-1)?.source === null
     const fixed = rest ? segments.slice(0, -1) : segments
-    return fixed.some((segment) => segment.source === null || segment.param?.constraint !== undefined || segment.param?.optional) ? undefined : { fixed, rest }
+    // Hono reads a `*` inside a segment (`/downloads*`) as a wildcard too, across `/`.
+    return fixed.some((segment) => segment.source === null || segment.param?.constraint !== undefined || segment.param?.optional || segment.literal?.includes('*')) ? undefined : { fixed, rest }
   }
   const [left, right] = [split(a), split(b)]
   if (!left || !right) return true

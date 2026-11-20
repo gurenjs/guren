@@ -70,7 +70,7 @@ export interface RouteSecurityRecord {
   middleware: MiddlewareRecord[]
   contracts: Partial<Record<ContractKey, ContractRecord>>
   handler: ActionRecord
-  /** Each bound parameter and the model class it resolves, by name: the binding's lookup column is not in the manifest. */
+  /** Each bound parameter and its model class, as `file#export` where introspection found the class, else by name. The lookup column is not in the manifest. */
   bindings?: Record<string, string>
   /** The `.agent()` metadata as declared, which makes the route a tool. */
   agent?: AgentRouteMetadata
@@ -357,6 +357,16 @@ export function compareSecurityRecords(base: SecurityRecords, head: SecurityReco
     const gone = left.find((entry) => entry.method === route.method && (entry.path === route.path || (actionMethod(entry) !== undefined && actionMethod(entry) === actionMethod(route))))
     if (gone) incomparable.push(`${routeLabel(route)} has no counterpart at the base, while ${routeLabel(gone)}${gone.action ? ` (${gone.action})` : ''} left it: a rename and a move the reader cannot pair`)
     else added.push(route)
+  }
+  // Pairing compares each head route with its counterparts, so one endpoint registered once more pairs twice: the extra registrations are added.
+  const endpoint = (route: RouteSecurityRecord): string => `${moduleOf(route)}\u0000${route.method}\u0000${route.path}`
+  const atBase = new Map<string, number>()
+  for (const route of base.routes) atBase.set(endpoint(route), (atBase.get(endpoint(route)) ?? 0) + 1)
+  const seen = new Map<string, number>()
+  for (const route of head.routes) {
+    const count = (seen.get(endpoint(route)) ?? 0) + 1
+    seen.set(endpoint(route), count)
+    if (count > (atBase.get(endpoint(route)) ?? 0) && !added.includes(route) && !orphans.includes(route)) added.push(route)
   }
   return { facts, incomparable, added, removed: left, changed }
 }

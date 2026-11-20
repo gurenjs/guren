@@ -171,6 +171,11 @@ describe('compareSecurityRecords', () => {
     expect(compareSecurityRecords(records(route(), health), records(route()))).toEqual({ facts: [], incomparable: [], added: [], removed: [health], changed: [] })
   })
 
+  test('lists a registration of an endpoint the base registers fewer times as added', () => {
+    const health = route({ method: 'GET', path: '/health', action: undefined, middleware: [] })
+    expect(compareSecurityRecords(records(health), records(health, { ...health })).added).toEqual([health])
+  })
+
   test('reads a gained agent tool as a changed record, which the security verdict leaves the same', () => {
     const tool = route({ agent: { toolName: 'posts_update' } })
     expect(compareSecurityRecords(records(route()), records(tool))).toEqual({ facts: [], incomparable: [], added: [], removed: [], changed: [{ base: route(), head: tool }] })

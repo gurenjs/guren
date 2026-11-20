@@ -59,7 +59,7 @@
           }
         },
         "bindings": {
-          "postId": "Post"
+          "postId": "app/Models/Post.ts#Post"
         },
         "handler": {
           "authenticates": false,
@@ -92,7 +92,7 @@
         ],
         "contracts": {},
         "bindings": {
-          "id": "Comment"
+          "id": "app/Models/Comment.ts#Comment"
         },
         "handler": {
           "authenticates": false,

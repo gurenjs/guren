@@ -721,6 +721,15 @@ function schemaResidue(text: string | null, file: string | undefined, tables: re
       kept.push({ text: canonicalSyntax(statement) })
       continue
     }
+    // An object listing tables is the aggregate a database is configured with: each listed table is its own item, so a
+    // table dropped from it is residue, and an added one belongs to that table.
+    for (const declarator of declaration.declarations) {
+      if (declarator.id.type !== 'Identifier' || names.has(declarator.id.name)) continue
+      for (const property of objectLiteral(declarator.init as never)?.properties ?? []) {
+        if (property.type === 'ObjectProperty' && property.value.type === 'Identifier') kept.push({ table: property.value.name, text: `${declarator.id.name} lists ${property.value.name}` })
+      }
+    }
+    if (declaration.declarations.every((declarator) => declarator.id.type === 'Identifier' && !names.has(declarator.id.name))) continue
     // One table's own residue is told apart only where the statement declares that table alone.
     const only = declaration.declarations.length === 1 && declaration.declarations[0]!.id.type === 'Identifier' && names.has(declaration.declarations[0]!.id.name) ? declaration.declarations[0]!.id.name : undefined
     const keep = (node: Parameters<typeof canonicalSyntax>[0]): void => void kept.push({ ...(only ? { table: only } : {}), text: canonicalSyntax(node) })

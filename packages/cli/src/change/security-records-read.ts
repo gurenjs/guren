@@ -379,7 +379,7 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
   let routesFiles: Promise<string> | undefined
   const routes: RouteSecurityRecord[] = []
   for (const [index, route] of targets.entries()) {
-    const sources = (manifest.routes[index] as GraphRouteEntry).contractSources
+    const { contractSources: sources, bindingSources } = manifest.routes[index] as GraphRouteEntry
     const contracts: RouteSecurityRecord['contracts'] = {}
     for (const key of CONTRACT_SEGMENTS) {
       const schema = route.schemas[key]
@@ -408,7 +408,11 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
         ...(entry.unresolvedMembers?.length ? { unresolvedMembers: entry.unresolvedMembers } : {}),
       })),
       contracts,
-      ...(route.bindings ? { bindings: route.bindings } : {}),
+      // A model by the file and export introspection found it under, so two classes of one name stay apart; else by name.
+      ...(route.bindings ? { bindings: Object.fromEntries(Object.entries(route.bindings).map(([parameter, name]) => {
+        const source = bindingSources?.[parameter]
+        return [parameter, source ? `${source.file}#${source.exportName}` : name]
+      })) } : {}),
       ...(route.agent ? { agent: route.agent } : {}),
       handler: ref ? await actionRecord(cwd, scan, ref, reachedByName, declarations, manifest.entry.file ?? undefined) : { unread: 'an inline handler, whose body the reader does not follow' },
     })
