@@ -209,9 +209,11 @@ Apps that configure storage in a service provider keep working; see [Apps with s
 **Local Driver:**
 | Option | Default | Description |
 |--------|---------|-------------|
-| `root` | required | Root directory for file storage |
+| `root` | required | Root directory for file storage. A relative path resolves from the directory the process starts in |
 | `url` | `''` | Base URL for public file access |
 | `visibility` | `'private'` | Default visibility for new files |
+
+Start the app from its own root directory, or give `root` an absolute path. A server started from another directory writes uploads somewhere else than `attachments:prune` scans, and than `public/` is served from, because the public directory is found from the app's files and not from the working directory.
 
 Local disks reject a path that leaves the disk through a symbolic link, including a dangling link whose target sits outside. Links that resolve inside the disk are followed as usual, and the configured root itself may be a link. Keep the root and its parent directories under trusted ownership: path checks do not protect against another process replacing directories during an operation.
 

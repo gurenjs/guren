@@ -1462,7 +1462,7 @@ git commit -m "feat: add a gallery to posts"
 
 Look at how `Post` declares `cover` in `app/Models/Post.ts`.
 
-The text file named `cover.png` is refused with a validation error on `cover`: "The file must be an image." The deciding line is `cover: hasOneAttached({ image: 'require' })`. With `'require'`, `attach()` inspects the first bytes of the upload for an image signature, and the file name and the type the browser declared play no part. So the real PNG renamed `cover.txt` is accepted and stored with the content type `image/png`, under its name `cover.txt`. In one sentence: the attachments layer decides what a file is from its bytes, not from its name.
+The text file named `cover.png` is refused with a validation error on `cover`: "The file must be an image." The deciding line is `cover: hasOneAttached({ image: 'require' })`. With `'require'`, `attach()` inspects the first bytes of the upload for an image signature, and the file name and the type the browser declared play no part. So the real PNG renamed `cover.txt` is accepted and recorded with the content type `image/png` and the name `cover.txt`, while the stored file takes the `.png` extension its bytes call for. In one sentence: the attachments layer decides what a file is from its bytes, not from its name.
 
 If you uploaded through the new-post form, notice that `store` had already saved the post before `attach()` refused the file, so the post exists without a cover.
 

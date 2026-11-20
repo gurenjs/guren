@@ -291,6 +291,50 @@ describe('attachments', () => {
       expect(record.name).toBe('evil.png')
       expect(record.path).toBe(`attachments/${record.id}/evil.png`)
     })
+
+    test('should store an image under the extension of its detected format', async () => {
+      const mismatched = await Post.attach(1, 'images', new File([PNG_1X1], 'photo.jfif', { type: 'image/jpeg' }))
+      expect(mismatched.path).toBe(`attachments/${mismatched.id}/photo.png`)
+      expect(mismatched.name).toBe('photo.jfif')
+      expect(mismatched.contentType).toBe('image/png')
+      expect(await storage.disk('media').exists(mismatched.path)).toBe(true)
+
+      const bare = await Post.attach(1, 'images', PNG_1X1)
+      expect(bare.path).toBe(`attachments/${bare.id}/file.png`)
+      expect(bare.name).toBe('file')
+
+      const dotted = await Post.attach(1, 'images', PNG_1X1, { name: 'cover.txt' })
+      expect(dotted.path).toBe(`attachments/${dotted.id}/cover.png`)
+    })
+
+    test('should give a dotfile-shaped name a real extension', async () => {
+      // `extname('.png')` is empty, so whatever types a file by extension skips it.
+      const record = await Post.attach(1, 'images', PNG_1X1, { name: '.png' })
+      expect(record.path).toBe(`attachments/${record.id}/file.png`)
+      expect(record.name).toBe('.png')
+    })
+
+    test('should keep a rewritten name within 255 bytes', async () => {
+      const name = '\u3042'.repeat(84)
+      const record = await Post.attach(1, 'images', PNG_1X1, { name })
+      const stored = record.path.split('/').pop()!
+      expect(stored).toBe(`${'\u3042'.repeat(83)}.png`)
+      expect(Buffer.byteLength(stored)).toBeLessThanOrEqual(255)
+      expect(record.name).toBe(name)
+    })
+
+    test('should keep an extension that already names the detected format', async () => {
+      const record = await Post.attach(1, 'images', PNG_1X1, { name: 'Scan.PNG' })
+      expect(record.path).toBe(`attachments/${record.id}/Scan.PNG`)
+    })
+
+    test('should leave the name of opaque bytes alone', async () => {
+      const untyped = await Post.attach(1, 'draftPdf', PNG_1X1, { name: 'notes.bin' })
+      expect(untyped.path).toBe(`attachments/${untyped.id}/notes.bin`)
+
+      const text = await Post.attach(1, 'banner', new Uint8Array(Buffer.from('plain text')), { name: 'readme' })
+      expect(text.path).toBe(`attachments/${text.id}/readme`)
+    })
   })
 
   describe('variants', () => {

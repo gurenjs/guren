@@ -277,11 +277,20 @@ const IMAGE_MIME: Record<string, string> = {
   tiff: 'image/tiff',
 }
 
-const VARIANT_EXTENSION: Record<string, string> = {
-  jpeg: 'jpg',
-  png: 'png',
-  webp: 'webp',
-  avif: 'avif',
+/**
+ * Extensions a stored object may carry per image format, the first being the one
+ * written. What serves a disk types a file by its extension (the root asset
+ * server answers only for an allowlist of them), so the key follows the bytes.
+ */
+const IMAGE_EXTENSIONS: Record<string, readonly [string, ...string[]]> = {
+  jpeg: ['jpg', 'jpeg'],
+  png: ['png'],
+  gif: ['gif'],
+  webp: ['webp'],
+  avif: ['avif'],
+  heic: ['heic', 'heif'],
+  bmp: ['bmp'],
+  tiff: ['tiff', 'tif'],
 }
 
 interface NormalizedSource {
@@ -295,6 +304,8 @@ interface ImageInspection {
   height: number | null
   placeholder: string | null
   contentType: string | null
+  /** The image format the bytes were read as; `null` for opaque bytes. */
+  format: string | null
   /** Whether a full decode succeeded (variants can be generated). */
   decoded: boolean
   /** Whether decode and variant generation were deferred to the queue. */
@@ -437,7 +448,7 @@ export class AttachmentEngine {
 
     const id = ulid()
     const name = inspection.name
-    const path = `${ATTACHMENT_OBJECT_PREFIX}/${id}/${name}`
+    const path = `${ATTACHMENT_OBJECT_PREFIX}/${id}/${objectName(name, inspection.format)}`
     const diskName = options.disk ?? this.defaultDisk
     const disk = this.storage().disk(diskName)
     const contentType = inspection.contentType ?? normalized.declaredContentType ?? 'application/octet-stream'
@@ -626,6 +637,7 @@ export class AttachmentEngine {
       height: null,
       placeholder: null,
       contentType: null,
+      format: null,
       decoded: false,
       bytes: source.bytes,
       name: source.name,
@@ -689,6 +701,7 @@ export class AttachmentEngine {
         height: sniffed.height ?? null,
         placeholder: null,
         contentType: IMAGE_MIME[sniffed.format] ?? null,
+        format: sniffed.format,
         decoded: false,
         deferred: true,
         bytes: source.bytes,
@@ -704,6 +717,7 @@ export class AttachmentEngine {
         height: sniffed.height ?? null,
         placeholder: null,
         contentType: IMAGE_MIME[sniffed.format] ?? null,
+        format: sniffed.format,
         decoded: false,
         bytes: source.bytes,
         name: source.name,
@@ -731,6 +745,7 @@ export class AttachmentEngine {
         height: converted.height,
         placeholder: probed.placeholder ?? null,
         contentType: 'image/jpeg',
+        format: 'jpeg',
         decoded: true,
         bytes: converted.bytes,
         name: replaceExtension(source.name, 'jpg'),
@@ -742,6 +757,7 @@ export class AttachmentEngine {
       height: probed.height,
       placeholder: probed.placeholder ?? null,
       contentType: IMAGE_MIME[probed.format] ?? IMAGE_MIME[sniffed.format] ?? null,
+      format: IMAGE_MIME[probed.format] ? probed.format : sniffed.format,
       decoded: true,
       bytes: source.bytes,
       name: source.name,
@@ -778,7 +794,7 @@ export class AttachmentEngine {
       }
       try {
         const result = await this.processor.process(inspection.bytes, variantSpec)
-        const extension = VARIANT_EXTENSION[result.format] ?? result.format
+        const extension = IMAGE_EXTENSIONS[result.format]?.[0] ?? result.format
         const path = `${ATTACHMENT_OBJECT_PREFIX}/${id}/variants/${name}.${extension}`
         await disk.put(path, Buffer.from(result.bytes), {
           contentType: IMAGE_MIME[result.format] ?? 'application/octet-stream',
@@ -1568,6 +1584,38 @@ export function sanitizeFilename(name: string): string {
     .join('')
   if (cleaned === '' || /^\.+$/.test(cleaned)) return 'file'
   return cleaned
+}
+
+/**
+ * The object key's last segment: `name` with the extension of the detected
+ * format, kept as written when it already names that format (`photo.JPEG`).
+ */
+function objectName(name: string, format: string | null): string {
+  const extensions = format ? IMAGE_EXTENSIONS[format] : undefined
+  if (!extensions) return name
+  // Read as `extname()` reads it, which is how the root asset server picks a
+  // type: a name that is only a leading dot and letters (`.png`) has no extension.
+  const dot = name.lastIndexOf('.')
+  if (dot > 0 && extensions.includes(name.slice(dot + 1).toLowerCase())) return name
+  const suffix = `.${extensions[0]}`
+  const stem = truncateToBytes(dot < 0 ? name : name.slice(0, dot), MAX_OBJECT_NAME_BYTES - suffix.length)
+  return `${stem === '' ? 'file' : stem}${suffix}`
+}
+
+/** The longest file name ext4 and APFS take, in UTF-8 bytes. */
+const MAX_OBJECT_NAME_BYTES = 255
+
+/** By code point, so the cut never lands inside a character. */
+function truncateToBytes(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value) <= maxBytes) return value
+  let kept = ''
+  let bytes = 0
+  for (const char of value) {
+    bytes += Buffer.byteLength(char)
+    if (bytes > maxBytes) break
+    kept += char
+  }
+  return kept
 }
 
 function replaceExtension(name: string, extension: string): string {
