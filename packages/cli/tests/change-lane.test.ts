@@ -778,6 +778,17 @@ export class CommentPolicy extends Policy {
     expect(report.facts.filter((fact) => fact.code === 'source-edited')).toEqual([])
   })
 
+  test("should keep a table dropped from the schema's aggregate object, beside a declared table", async () => {
+    const { repo } = await planRepo()
+    const tables = SCHEMA.slice(0, SCHEMA.indexOf('\nexport const comments'))
+    const base = await commit(repo, { 'db/schema.ts': `${tables}\nexport const schema = { users, posts }\n` })
+    const listed = await laneOf(repo, base, await commit(repo, { 'db/schema.ts': `${SCHEMA}\nexport const schema = { users, posts, comments }\n` }))
+    expect(listed.facts.map((fact) => [fact.code, fact.lane])).toEqual([['schema-changed', 'low']])
+
+    const dropped = await laneOf(repo, base, await commit(repo, { 'db/schema.ts': `${SCHEMA}\nexport const schema = { users, comments }\n` }))
+    expect(dropped.facts.map((fact) => [fact.code, fact.lane])).toEqual([['schema-changed', 'low'], ['source-edited', 'medium']])
+  })
+
   test('should lower the migration drizzle-kit writes for the tables the plan adds', async () => {
     const { repo } = await planRepo()
     const folder = join(import.meta.dir, 'fixtures/change-migrations')
@@ -836,6 +847,40 @@ export class CommentPolicy extends Policy {
     expect(report.facts.filter((fact) => fact.code === 'source-edited')).toEqual([expect.objectContaining({ lane: 'medium', target: 'comments', files: ['db/schema.ts'] })])
   })
 
+  test('should lower the routes a mount adds and drop its entry edit, once the records show each as planned', async () => {
+    const fixture = join(import.meta.dir, 'fixtures/change-routes')
+    const records = JSON.parse(readFileSync(join(fixture, 'records.json'), 'utf8')) as Record<'scaffold' | 'mount', { recordVersion: number; routes: RouteSecurityRecord[] }>
+    const { repo } = await planRepo()
+    const base = await commit(repo, {
+      'routes/web.ts': readFileSync(join(fixture, 'web.base.ts.txt'), 'utf8'),
+      'routes/comments.ts': readFileSync(join(fixture, 'comments.ts.txt'), 'utf8'),
+      'app/Http/Controllers/CommentController.ts': readFileSync(join(fixture, 'CommentController.ts.txt'), 'utf8'),
+      'app/Models/Post.ts': "import { defineModel } from '@guren/core'\nimport { posts } from '@/db/schema'\n\nexport class Post extends defineModel(posts) {}\n",
+    })
+    const head = await commit(repo, { 'routes/web.ts': readFileSync(join(fixture, 'web.head.ts.txt'), 'utf8') })
+    const judge = async (pair: SecurityRecordPair): Promise<ChangeLaneReport> => {
+      const change = await resolveChange(repo, base, head)
+      const { reader, dispose } = openChange(repo, change)
+      try {
+        return await judgeChangeLane(change, reader, { audit: async () => ({ unavailable: 'not audited in this test', records: pair }) })
+      } finally {
+        await dispose()
+      }
+    }
+
+    const mounted = await judge({ base: records.scaffold, head: records.mount })
+    expect(mounted.facts.map((fact) => [fact.code, fact.lane, fact.target, fact.files, fact.declaredBy])).toEqual([
+      ['route-added', 'low', 'POST /posts/:postId/comments (comments.store)', ['routes/web.ts'], 'docs/plans/comments/plan.json#route.comments.store'],
+      ['route-added', 'low', 'DELETE /comments/:id (comments.destroy)', ['routes/web.ts'], 'docs/plans/comments/plan.json#route.comments.destroy'],
+    ])
+    expect(renderChangeLane(mounted)).toContain('A declared route was read off its security record')
+
+    // A planned `auth` the registered route lacks keeps the route and the entry edit with a person.
+    const [store, destroy, ...rest] = records.mount.routes
+    const open = await judge({ base: records.scaffold, head: { ...records.mount, routes: [store!, { ...destroy!, middleware: [] }, ...rest] } })
+    expect(open.facts.map((fact) => [fact.code, fact.lane])).toEqual([['source-edited', 'medium'], ['route-added', 'low'], ['route-added', 'medium']])
+  })
+
   test('should declare nothing in a change that writes a plan record', async () => {
     const { repo, base } = await planRepo()
     const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL, 'docs/plans/comments/decisions.json': '{"waivers":[]}' }))
@@ -875,6 +920,18 @@ describe('judgeChangeLane with per-route security records', () => {
     expect(report.facts).toContainEqual(expect.objectContaining({ code: 'authorization-removed', lane: 'high', files: ['app/Http/Controllers/PostController.ts'] }))
     expect(report.records).toEqual({ compared: true })
     expect(security(report)).toEqual([])
+  })
+
+  test('should give each added, removed or changed route and each agent tool a medium fact of its own', async () => {
+    const health: RouteSecurityRecord = { ...route([]), method: 'GET', path: '/health', name: 'health', action: 'HealthController.show' }
+    const routeFacts = (report: ChangeLaneReport) => report.facts.filter((fact) => fact.code.startsWith('route-') || fact.code === 'agent-tool').map((fact) => [fact.code, fact.lane, fact.target])
+
+    expect(routeFacts(await laneWith(controller, { base: records(route([auth])), head: records(route([auth]), health) }))).toEqual([['route-added', 'medium', 'GET /health (health)']])
+    expect(routeFacts(await laneWith(controller, { base: records(route([auth]), health), head: records(route([auth])) }))).toEqual([['route-removed', 'medium', 'GET /health (health)']])
+    const tool = { ...route([auth]), agent: { toolName: 'posts_update' } }
+    expect(routeFacts(await laneWith(controller, { base: records(route([auth])), head: records(tool) }))).toEqual([['route-changed', 'medium', 'PUT /posts/:id'], ['agent-tool', 'medium', 'PUT /posts/:id']])
+    expect(routeFacts(await laneWith(controller, { base: records(route([auth])), head: records(route([auth]), { ...health, agent: { toolName: 'health' } }) }))).toEqual([['route-added', 'medium', 'GET /health (health)'], ['agent-tool', 'medium', 'GET /health (health)']])
+    expect(routeFacts(await laneWith(controller, { base: records(route([auth])), head: records(route([auth])) }))).toEqual([])
   })
 
   test('should hold a record it cannot order at high, and say nothing of an unchanged one', async () => {

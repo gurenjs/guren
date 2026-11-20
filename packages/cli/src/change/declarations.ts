@@ -2,10 +2,12 @@
  * The declaration matcher of RFC 0040 §3: a fact takes its declarable lane only when an approved, open plan
  * declares it. Matched so far: an added file of added elements and an added table of an added model, both
  * against what `plan:scaffold` writes (a declared table taking its own residue with it), and an added migration
- * that only creates such tables. A subject two open plans claim, or one the plan does not determine, stays.
+ * that only creates such tables; an added route, and the routes entry edited by `--mount` alone. A subject
+ * two open plans claim, or one the plan does not determine, stays.
  */
 
-import type { ClassDeclaration, File, Statement } from '@babel/types'
+import type { CallExpression, ClassDeclaration, File, Statement } from '@babel/types'
+import type { JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
 import { readCreationStatements, snapshotRecordsCreation, type CreationForeignKey, type CreationStatement, type MigrationDialect } from '@guren/orm/internal/migration-guard'
 
@@ -13,17 +15,23 @@ import { canonicalSyntax, referencedIdentifiers, walk } from '../ast-walk'
 import { classActionMembers } from '../controller-methods'
 import { extractClassDeclaration } from '../model-parser'
 import { parseSourceFile } from '../parse-cache'
+import { validatorFieldProperties } from '../plan/field-status'
 import { readPolicyAbilities } from '../plan/policy-abilities'
 import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
-import { plannedSqlDefault, planScaffoldOutput, sqlNameOf, type PlanScaffoldApp } from '../plan/scaffold'
+import { plannedSqlDefault, planScaffoldMounts, planScaffoldOutput, sqlNameOf, type PlanScaffoldApp } from '../plan/scaffold'
 import { MODELS_DIR } from '../discovery'
+import { DIALECT_BARRELS, DRIZZLE_CORE_SUBPATHS } from '../drizzle-specifiers'
 import { isAutoIncrementPrimaryKey, migrationSqlType } from '../schema-columns'
 import { policyFilePath, providerFilePath, resourceFilePath, validatorFilePath } from '../plan/scaffold-http'
-import { controllerFilePath, sideEffectFilePath } from '../plan/scaffold-controller'
+import { asksPolicyOfRecord, controllerFilePath, plannedAgentMetadata, plannedRouteMiddleware, scaffoldRoutesFile, sideEffectFilePath } from '../plan/scaffold-controller'
 import { derivePlanTasks, type PlanDerivedStep } from '../plan/tasks'
+import { composeRouteRegistrarCall, findRouteRegistrar } from '../route-registrar'
 import { parseSchemaSource, type SchemaDialect, type SchemaTable } from '../schema-parser'
+import { registeredBefore, routePathsMayOverlap } from '../test-requests'
+import { importSpecifier } from '../utils'
 import { FACT_CLASSES } from './fact-classes'
 import type { ChangeFact } from './lane'
+import { sameRecordPart, type RouteSecurityRecord } from './security-records'
 
 /**
  * What a fact is about, kept beside it by the reader that emitted it. `tables` are the head's tables of the same
@@ -35,6 +43,17 @@ export type DeclarationSubject =
   | { kind: 'table'; table: SchemaTable; file: string; tables: readonly SchemaTable[] }
   | { kind: 'migration'; dir: string; files: string[]; previous?: string }
   | { kind: 'table-residue'; file: string; identifier: string }
+  /** A route as the head's records hold it (`base` for a change), with every head route in registration order and the ones the change adds. */
+  | { kind: 'route'; change: 'add' | 'drop' | 'alter'; route: RouteSecurityRecord; base?: RouteSecurityRecord } & HeadRoutes
+  | { kind: 'agent'; route: RouteSecurityRecord; base?: RouteSecurityRecord }
+  /** The routes entry, edited in place. */
+  | { kind: 'routes-entry'; path: string }
+
+/** Every route the head registers, in registration order, and those of them with no counterpart at the base. */
+export interface HeadRoutes {
+  routes: readonly RouteSecurityRecord[]
+  added: readonly RouteSecurityRecord[]
+}
 
 /** An approved plan that is not closed, as the head has it; `file` is app-relative. */
 export interface OpenPlan {
@@ -46,7 +65,13 @@ export interface OpenPlan {
  * How a file is held to the plan beyond its exports: a provider runs at boot and the plan determines all of
  * it, a policy's abilities are planned by name, and a controller's members are the planned actions.
  */
-export type DeclaredFileCheck = { kind: 'exports' } | { kind: 'whole' } | { kind: 'policy'; policy: PlanPolicy } | { kind: 'controller'; controller: PlanController }
+export type DeclaredFileCheck =
+  | { kind: 'exports' }
+  | { kind: 'whole' }
+  | { kind: 'policy'; policy: PlanPolicy }
+  | { kind: 'controller'; controller: PlanController }
+  /** The whole file, as the scaffold writes it against the head's model and validator files, which it imports. */
+  | { kind: 'routes'; step: PlanDerivedStep }
 
 export interface DeclaredFile {
   elements: string[]
@@ -95,29 +120,28 @@ function scaffoldSteps(plan: PlanDraft): PlanDerivedStep[] {
   return derivePlanTasks(plan).tasks.flatMap((task) => task.steps.filter((step) => step.kind === 'scaffold'))
 }
 
-function checkOf(path: string, owners: readonly PlanElementEntry[]): DeclaredFileCheck {
+function checkOf(path: string, owners: readonly PlanElementEntry[], step: PlanDerivedStep): DeclaredFileCheck {
+  // Unmounted, a routes file registers nothing; what it registers once mounted is read off the records.
+  if (owners.some((entry) => entry.section === 'routes')) return { kind: 'routes', step }
   const policy = owners.find((entry) => entry.section === 'policies')?.element as PlanPolicy | undefined
   if (policy) return path === providerFilePath(policy) ? { kind: 'whole' } : { kind: 'policy', policy }
   const controller = owners.find((entry) => entry.section === 'controllers')?.element as PlanController | undefined
   return controller ? { kind: 'controller', controller } : { kind: 'exports' }
 }
 
-/**
- * The files the plan's scaffold steps write, each owned by its elements when every one is an `add` in
- * the project root. A routes file is left out: no route fact is emitted yet, so nothing declares one.
- */
+/** The files the plan's scaffold steps write, each owned by its elements when every one is an `add` in the project root. */
 export function planDeclaredFiles(plan: PlanDraft): Map<string, DeclaredFile> {
   const entries = new Map(listPlanElementEntries(plan).map((entry) => [entry.id, entry]))
   const files = new Map<string, DeclaredFile | null>()
   for (const step of scaffoldSteps(plan)) {
     for (const file of planScaffoldOutput(plan, step).files) {
       const owners = file.elements.map((id) => entries.get(id))
-      const owned = owners.length > 0 && owners.every((entry) => entry !== undefined && entry.section !== 'routes' && changeKind(entry) === 'add' && entry.element.module === undefined)
+      const owned = owners.length > 0 && owners.every((entry) => entry !== undefined && changeKind(entry) === 'add' && entry.element.module === undefined)
       const ast = owned ? parseSourceFile(file.contents, file.path) : null
       const exports = ast ? declaredExports(ast) : undefined
       // Two steps naming one path cannot both own it.
       if (files.has(file.path) || !exports || exports.length === 0) files.set(file.path, null)
-      else files.set(file.path, { elements: file.elements, exports, contents: file.contents, check: checkOf(file.path, owners as PlanElementEntry[]) })
+      else files.set(file.path, { elements: file.elements, exports, contents: file.contents, check: checkOf(file.path, owners as PlanElementEntry[], step) })
     }
   }
   return new Map([...files].filter((entry): entry is [string, DeclaredFile] => entry[1] !== null))
@@ -134,12 +158,12 @@ function exportedClass(ast: File, name: string): ClassDeclaration | undefined {
 }
 
 /** Whether the head file holds no more than the plan declares, beyond the exports both have. */
-function passesCheck(declared: DeclaredFile, ast: File, path: string): boolean {
+function passesCheck(declared: DeclaredFile, ast: File, path: string, contents = declared.contents): boolean {
   const { check } = declared
   if (check.kind === 'exports') return true
-  const planned = parseSourceFile(declared.contents, path)
+  const planned = parseSourceFile(contents, path)
   if (!planned) return false
-  if (check.kind === 'whole') return canonicalSyntax(ast.program.body) === canonicalSyntax(planned.program.body)
+  if (check.kind === 'whole' || check.kind === 'routes') return canonicalSyntax(ast.program.body) === canonicalSyntax(planned.program.body)
   const className = check.kind === 'policy' ? check.policy.name : check.controller.className
   const members = new Set(check.kind === 'policy' ? check.policy.abilities.map((ability) => ability.name) : check.controller.actions.map((action) => action.name))
   const head = classFileAllowed(ast, planned, className, members)
@@ -210,9 +234,12 @@ function importsBuildersAsThemselves(ast: File, statement: Statement, tables: re
   const factory = factoryName(statement)
   const source = factory === undefined ? undefined : importOf(ast, factory)?.split('#')[0]
   if (source === undefined || !FRAMEWORK_MODULE.test(source)) return false
+  // `appendTableToSchema()` adds builders from the dialect's `@guren/orm` barrel beside a `drizzle-orm` subpath, which it re-exports.
+  const dialect = (Object.keys(DRIZZLE_CORE_SUBPATHS) as SchemaDialect[]).find((key) => DRIZZLE_CORE_SUBPATHS[key] === source || DIALECT_BARRELS[key] === source)
+  const sources = new Set(dialect ? [DRIZZLE_CORE_SUBPATHS[dialect], DIALECT_BARRELS[dialect]] : [source])
   const builders = new Set<string>()
   for (const node of ast.program.body) {
-    if (node.type !== 'ImportDeclaration' || node.source.value !== source) continue
+    if (node.type !== 'ImportDeclaration' || !sources.has(node.source.value)) continue
     for (const specifier of node.specifiers) {
       if (specifier.type === 'ImportSpecifier' && specifier.imported.type === 'Identifier' && specifier.imported.name === specifier.local.name) builders.add(specifier.local.name)
     }
@@ -232,7 +259,7 @@ function importsBuildersAsThemselves(ast: File, statement: Statement, tables: re
  */
 export function planClaimedPaths(plan: PlanDraft): Set<string> {
   return new Set([
-    ...plan.models.flatMap((model) => [`${MODELS_DIR}/${model.name}.ts`, validatorFilePath(model)]),
+    ...plan.models.flatMap((model) => [`${MODELS_DIR}/${model.name}.ts`, validatorFilePath(model), scaffoldRoutesFile(model).path]),
     ...plan.resources.map(resourceFilePath),
     ...plan.policies.flatMap((policy) => [policyFilePath(policy), providerFilePath(policy)]),
     ...plan.controllers.map(controllerFilePath),
@@ -285,23 +312,291 @@ export async function applyPlanDeclarations(
   subjects: ReadonlyMap<ChangeFact, DeclarationSubject>,
   plans: readonly OpenPlan[],
   readHead: (path: string) => Promise<string | null>,
+  readBase: (path: string) => Promise<string | null> = async () => null,
 ): Promise<ChangeFact[]> {
   const owned = plans.map((open) => ({ open, files: planDeclaredFiles(open.plan), paths: planClaimedPaths(open.plan) }))
   const result: ChangeFact[] = []
+  // A lowered fact is a new object, so the subjects are keyed again by what the result holds.
+  const resultSubjects = new Map<ChangeFact, DeclarationSubject>()
   const declaredTables = new Set<string>()
   for (const fact of facts) {
     const subject = subjects.get(fact)
-    const declaredBy = subject?.kind === 'table-residue' ? undefined
+    const declaredBy = subject?.kind === 'table-residue' || subject?.kind === 'routes-entry' ? undefined
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
+      : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : undefined)
+      : subject?.kind === 'agent' ? (subject.base === undefined ? await declaredAgentOf(subject.route, facts, subjects, plans, readHead) : undefined)
       : subject ? await declarationOf(subject, owned, readHead) : undefined
     if (declaredBy && subject?.kind === 'table') declaredTables.add(`${subject.file}\u0000${subject.table.identifier}`)
-    result.push(declaredBy ? { ...fact, lane: FACT_CLASSES[fact.code].lowest, declaredBy } : fact)
+    const judged = declaredBy ? { ...fact, lane: FACT_CLASSES[fact.code].lowest, declaredBy } : fact
+    result.push(judged)
+    if (subject) resultSubjects.set(judged, subject)
   }
+  const mounted = await declaredMount(result, resultSubjects, plans, readHead, readBase)
   // The statement a declared table matched is the scaffold's whole, its `sql` defaults and index callback included.
   return result.filter((fact) => {
-    const subject = subjects.get(fact)
+    const subject = resultSubjects.get(fact)
+    if (subject?.kind === 'routes-entry') return !mounted.has(subject.path)
     return subject?.kind !== 'table-residue' || !declaredTables.has(`${subject.file}\u0000${subject.identifier}`)
   })
+}
+
+/** The plan routes naming this route by name or by endpoint, in any change: a claim, before anything is compared. */
+function claimsRoute(plan: PlanDraft, route: RouteSecurityRecord): boolean {
+  return plan.routes.some((planned) => planned.name === route.name || (planned.method === route.method && planned.path === route.path))
+}
+
+/**
+ * The added plan route this registered route is, by every property the record holds: its endpoint and name, its
+ * action as the controller file the scaffold writes exports it, its middleware by name, its bindings, its agent
+ * metadata, its contracts by export and rendered keys, the policy ability the action asks of the policy's model.
+ * A route registered before another that a request could match too takes that request without either record
+ * changing, so it declares nothing. A binding's lookup column is not in the record, so an unplanned one is unseen.
+ */
+export async function declaredRoute(route: RouteSecurityRecord, head: HeadRoutes, plans: readonly OpenPlan[], readHead: (path: string) => Promise<string | null>): Promise<string | undefined> {
+  const claims = plans.filter((open) => claimsRoute(open.plan, route))
+  if (claims.length !== 1 || route.module !== null || route.name === undefined) return undefined
+  const { file, plan } = claims[0]!
+  const planned = plan.routes.find((candidate) => candidate.name === route.name)
+  if (!planned || planned.change.kind !== 'add' || planned.method !== route.method || planned.path !== route.path) return undefined
+  // A name registered twice points the router's name map at one of them, so an existing `route(name)` would move.
+  if (head.routes.some((other) => other !== route && other.name === route.name)) return undefined
+  const controller = plan.controllers.find((candidate) => candidate.actions.some((action) => action.id === planned.action))
+  const action = controller?.actions.find((candidate) => candidate.id === planned.action)
+  if (!controller || !action || controller.module !== undefined || controller.change.kind !== 'add' || action.change.kind !== 'add') return undefined
+  if (route.action !== `${controllerFilePath(controller)}#default.${action.name}`) return undefined
+
+  const middleware = plannedRouteMiddleware(planned, action)
+  if (route.middleware.length !== middleware.length) return undefined
+  for (const [at, entry] of route.middleware.entries()) {
+    if (entry.kind === 'inline' || entry.unresolved || entry.name !== middleware[at]) return undefined
+    if (entry.name === 'auth' && entry.capabilities.authentication?.mode !== 'required') return undefined
+  }
+  // The manifest names each binding's model and not its lookup column, so a planned key cannot be held.
+  if (planned.bind.some((binding) => binding.key !== undefined)) return undefined
+  const boundModel = (id: string): string | undefined => {
+    const model = plan.models.find((entry) => entry.id === id)
+    return model && model.module === undefined ? `${MODELS_DIR}/${model.name}.ts#${model.name}` : undefined
+  }
+  const bindings = Object.fromEntries(planned.bind.map((binding) => [binding.param, boundModel(binding.model)]))
+  if (!sameRecordPart(route.bindings ?? {}, bindings)) return undefined
+  if (!sameRecordPart(route.agent ?? null, plannedAgentMetadata(planned) ?? null)) return undefined
+  for (const segment of ['params', 'query', 'body'] as const) {
+    const validator = action[segment] === undefined ? undefined : plan.validators.find((candidate) => candidate.id === action[segment])
+    const contract = route.contracts[segment]
+    if (!validator) {
+      if (contract) return undefined
+      continue
+    }
+    if (validator.module !== undefined || !contract || contract.exports.length !== 1) return undefined
+    const validatorFiles = new Set(plan.models.filter((model) => model.module === undefined).map(validatorFilePath))
+    const [exportFile, exportName] = contract.exports[0]!.split('#')
+    if (exportName !== validator.name || exportFile === undefined || !validatorFiles.has(exportFile) || !rendersPlannedFields(contract.schema, validator)) return undefined
+  }
+  const policy = action.authorization.policy
+  if (policy) {
+    const model = plan.models.find((candidate) => candidate.id === plan.policies.find((entry) => entry.id === policy.id)?.model)
+    if (!model || model.module !== undefined || 'unread' in route.handler) return undefined
+    const tuple = new RegExp(`^\\[\\s*${model.name}\\s*,\\s*[A-Za-z_$][\\w$]*\\s*\\]$`)
+    const asks = (subject: string): boolean => tuple.test(subject) || (!asksPolicyOfRecord(plan, action) && subject === model.name)
+    if (!route.handler.authorizes.some((call) => call.member === 'authorize' && call.ability === policy.ability && asks(call.subject))) return undefined
+    // The record reads calls by pattern, so the action is read for the call itself: awaited, a statement of the body, on the model.
+    const path = controllerFilePath(controller)
+    const source = await readHead(path)
+    const ast = source === null ? null : parseSourceFile(source, path)
+    if (!ast || !namesModelAsItself(ast, path, model.name)) return undefined
+    if (!awaitsPolicy(ast, controller.className, action.name, policy.ability, model.name, asksPolicyOfRecord(plan, action))) return undefined
+  }
+
+  const self = { module: route.module, index: head.routes.indexOf(route) }
+  if (self.index === -1) return undefined
+  const added = new Set(head.added)
+  for (const [index, other] of head.routes.entries()) {
+    // A plan route is never `ALL`; an `ALL` route registered after it answers its method too. A route the change adds loses no request.
+    const methods = route.method === other.method || other.method === 'ALL'
+    if (added.has(other) || !methods || registeredBefore(self, { module: other.module, index }) === false) continue
+    if (routePathsMayOverlap(route.path, other.path)) return undefined
+  }
+  return `${file}#${planned.id}`
+}
+
+/**
+ * Whether the action's body holds, as a statement of its own, `await this.authorize(ability, subject)`: the subject
+ * `[Model, record]`, or also the bare class where the scaffold writes that. A call not awaited lets the action run on.
+ */
+function awaitsPolicy(ast: File, className: string, actionName: string, ability: string, model: string, recordOnly: boolean): boolean {
+  const declaration = exportedClass(ast, className)
+  // Two members of the name leave which one the router dispatches to unread.
+  const members = declaration ? [...classActionMembers(declaration)].filter((entry) => entry.name === actionName) : []
+  const body = members.length === 1 && !members[0]!.member.static ? members[0]!.body : undefined
+  if (body?.type !== 'BlockStatement') return false
+  const isModel = (node: unknown): boolean => (node as { type?: string; name?: string } | null)?.type === 'Identifier' && (node as { name: string }).name === model
+  return body.body.some((statement) => {
+    if (statement.type !== 'ExpressionStatement' || statement.expression.type !== 'AwaitExpression') return false
+    const call = statement.expression.argument
+    if (call.type !== 'CallExpression' || call.callee.type !== 'MemberExpression' || call.callee.object.type !== 'ThisExpression') return false
+    if (call.callee.computed || call.callee.property.type !== 'Identifier' || call.callee.property.name !== 'authorize' || call.arguments.length !== 2) return false
+    const [first, subject] = call.arguments
+    if (first?.type !== 'StringLiteral' || first.value !== ability) return false
+    if (subject?.type === 'ArrayExpression') return subject.elements.length === 2 && isModel(subject.elements[0]) && subject.elements[1]?.type === 'Identifier'
+    return !recordOnly && isModel(subject)
+  })
+}
+
+/** Whether the file imports `name` as itself from that model's file, and binds the name nowhere else. */
+function namesModelAsItself(ast: File, path: string, name: string): boolean {
+  const specifier = importSpecifier(path, `${MODELS_DIR}/${name}.ts`)
+  const imported = ast.program.body.some((node) => node.type === 'ImportDeclaration' && node.importKind !== 'type' && node.source.value === specifier
+    && node.specifiers.some((entry) => entry.type === 'ImportSpecifier' && entry.importKind !== 'type' && entry.local.name === name && entry.imported.type === 'Identifier' && entry.imported.name === name))
+  return imported && bindingsOf(ast, name) === 1
+}
+
+/** How many declarations bind `name` anywhere in the file: imports, declarators, functions, classes, parameters, catch clauses. */
+function bindingsOf(ast: File, name: string): number {
+  const roots: unknown[] = []
+  walk(ast.program, (node) => {
+    const value = node as unknown as Record<string, unknown>
+    if (node.type === 'ImportSpecifier' || node.type === 'ImportDefaultSpecifier' || node.type === 'ImportNamespaceSpecifier') roots.push(value.local)
+    else if (node.type === 'VariableDeclarator') roots.push(value.id)
+    else if (node.type === 'CatchClause') roots.push(value.param)
+    else if (/^(?:Function|Class)(?:Declaration|Expression)$/u.test(node.type)) roots.push(value.id)
+    if (Array.isArray(value.params)) roots.push(...value.params)
+  })
+  let count = 0
+  // A pattern root counts every identifier inside it, a destructured key included: an over-count only keeps a fact.
+  walk(roots, (node) => {
+    if (node.type === 'Identifier' && (node as unknown as { name: string }).name === name) count += 1
+  })
+  return count
+}
+
+/**
+ * Whether a rendered contract schema is an object with exactly the validator's planned keys, each matching its planned
+ * type, requiredness and rules as `plan:status` judges them: a verdict that is not a match keeps the route.
+ */
+function rendersPlannedFields(schema: unknown, validator: PlanDraft['validators'][number]): boolean {
+  if (!schema || typeof schema !== 'object' || 'unreadable' in schema) return false
+  const { type, properties, required } = schema as { type?: unknown; properties?: unknown; required?: unknown }
+  if (type !== 'object' || !properties || typeof properties !== 'object') return false
+  if (!sameRecordPart(Object.keys(properties).sort(), validator.fields.map((field) => field.name).sort())) return false
+  const requiredKeys = new Set(Array.isArray(required) ? required : [])
+  const fields = Object.fromEntries(Object.entries(properties as Record<string, JsonSchemaObject>).map(([name, output]) => [name, { output, date: false, required: requiredKeys.has(name) }]))
+  return validatorFieldProperties(validator.fields, { fields }).every((property) => property.verdict === 'match')
+}
+
+/** An added route's agent tool is declared with the route: `declaredRoute()` holds its metadata to the plan's. */
+async function declaredAgentOf(route: RouteSecurityRecord, facts: readonly ChangeFact[], subjects: ReadonlyMap<ChangeFact, DeclarationSubject>, plans: readonly OpenPlan[], readHead: (path: string) => Promise<string | null>): Promise<string | undefined> {
+  const added = facts.find((fact) => {
+    const subject = subjects.get(fact)
+    return subject?.kind === 'route' && subject.change === 'add' && subject.route === route
+  })
+  const subject = added && subjects.get(added)
+  return subject?.kind === 'route' && route.agent !== undefined ? declaredRoute(route, subject, plans, readHead) : undefined
+}
+
+/**
+ * The routes entries `--mount` alone edited: the head is the base with one scaffolded registrar's call and import
+ * composed in, as `composeRouteRegistrarCall()` writes them, and the change's route facts are exactly that file's
+ * routes added, each declared by the plan that mounts it. A route changed, removed or added beside them keeps the edit,
+ * and so does an alias the mounted file sets that another route names, unless the entry's registrar sets it after.
+ */
+async function declaredMount(
+  facts: readonly ChangeFact[],
+  subjects: ReadonlyMap<ChangeFact, DeclarationSubject>,
+  plans: readonly OpenPlan[],
+  readHead: (path: string) => Promise<string | null>,
+  readBase: (path: string) => Promise<string | null>,
+): Promise<Set<string>> {
+  const mounted = new Set<string>()
+  const routeFacts = facts.filter((fact) => fact.code === 'route-added' || fact.code === 'route-changed' || fact.code === 'route-removed' || fact.code === 'agent-tool')
+  for (const fact of facts) {
+    const subject = subjects.get(fact)
+    if (subject?.kind !== 'routes-entry') continue
+    const [base, head] = [await readBase(subject.path), await readHead(subject.path)]
+    if (base === null || head === null) continue
+    const candidates = plans.flatMap((open) => planScaffoldMounts(open.plan, derivePlanTasks(open.plan)).flatMap((mount) => {
+      const composed = composeRouteRegistrarCall(base, subject.path, mount.registrar, `import { ${mount.registrar} } from '${importSpecifier(subject.path, mount.path)}'`)
+      return 'content' in composed && composed.content === head ? [{ open, mount }] : []
+    }))
+    if (candidates.length !== 1) continue
+    const { open, mount } = candidates[0]!
+    const declaredRoutes = new Set(mount.routes.map((id) => `${open.file}#${id}`))
+    const added = routeFacts.filter((entry) => entry.code === 'route-added')
+    if (routeFacts.some((entry) => entry.declaredBy === undefined) || added.length !== declaredRoutes.size) continue
+    // Each planned route once: two additions citing one element stand in for a route the mount did not register.
+    if (!added.every((entry) => declaredRoutes.has(entry.declaredBy!)) || new Set(added.map((entry) => entry.declaredBy)).size !== added.length) continue
+    // One alias map serves the router: the mounted file's alias, set first, replaces one set before the entry registrar runs.
+    const addedRoutes = new Set(added.flatMap((entry) => {
+      const subject = subjects.get(entry)
+      return subject?.kind === 'route' ? [subject.route] : []
+    }))
+    const headRoutes = [...subjects.values()].find((entry): entry is Extract<DeclarationSubject, { kind: 'route' }> => entry.kind === 'route')?.routes ?? []
+    // The file runs at mount, past what its routes' records show (a router-wide binding, an alias), so it must be the scaffold's.
+    const mountedText = await readHead(mount.path)
+    const step = derivePlanTasks(open.plan).tasks.flatMap((task) => task.steps).find((entry) => entry.id === mount.scaffoldStep)
+    const scaffolded = step && mountedText !== null ? await routesFileAtHead(open.plan, step, mount.path, readHead) : undefined
+    const [mountedAst, scaffoldedAst] = [mountedText === null ? null : parseSourceFile(mountedText, mount.path), scaffolded === undefined ? null : parseSourceFile(scaffolded, mount.path)]
+    if (!mountedAst || !scaffoldedAst || canonicalSyntax(mountedAst.program.body) !== canonicalSyntax(scaffoldedAst.program.body)) continue
+    const aliases = aliasNames(mountedText!, mount.path)
+    if (!aliases) continue
+    const entryAliases = registrarAliases(base, subject.path)
+    const replaced = aliases.filter((name) => headRoutes.some((route) => !addedRoutes.has(route) && route.middleware.some((entry) => entry.name === name || entry.members?.includes(name) === true)) && !entryAliases.has(name))
+    if (replaced.length === 0) mounted.add(subject.path)
+  }
+  return mounted
+}
+
+/** The names a file passes to `aliasMiddleware()`; `undefined` when it does not parse or names one other than by a literal. */
+function aliasNames(text: string, path: string): string[] | undefined {
+  const ast = parseSourceFile(text, path)
+  if (!ast) return undefined
+  const names: string[] = []
+  let open = false
+  walk(ast.program, (node) => {
+    const call = node.type === 'CallExpression' ? (node as unknown as CallExpression) : undefined
+    const callee = call?.callee
+    if (!callee || (callee.type !== 'MemberExpression' && callee.type !== 'OptionalMemberExpression') || callee.property.type !== 'Identifier' || callee.property.name !== 'aliasMiddleware') return
+    const [first] = call.arguments
+    if (first?.type === 'StringLiteral') names.push(first.value)
+    else open = true
+  })
+  return open ? undefined : names
+}
+
+/**
+ * The aliases the entry's registrar sets whenever it runs, after a call `--mount` puts first: a top-level statement of
+ * its body chaining `aliasMiddleware('<name>', …)` off its router, or off a constant a statement before bound from it.
+ */
+function registrarAliases(text: string, path: string): Set<string> {
+  const names = new Set<string>()
+  const registrar = findRouteRegistrar(text)
+  const ast = registrar ? parseSourceFile(text, path) : null
+  let body: Statement[] | undefined
+  walk(ast?.program, (node) => {
+    if (body === undefined && node.type === 'BlockStatement' && node.start === registrar!.bodyStart - 1) body = (node as unknown as { body: Statement[] }).body
+  })
+  const routers = new Set([registrar?.parameterName])
+  // The names one chain sets, when it starts at a router; `undefined` when it does not.
+  const chain = (expression: unknown): string[] | undefined => {
+    const set: string[] = []
+    let current = expression as { type?: string; callee?: { type: string; object?: unknown; property?: { type: string; name?: string } }; arguments?: Array<{ type: string; value?: unknown }>; name?: string } | undefined
+    while (current?.type === 'CallExpression' && current.callee?.type === 'MemberExpression') {
+      const [first] = current.arguments ?? []
+      if (current.callee.property?.name === 'aliasMiddleware' && first?.type === 'StringLiteral') set.push(String(first.value))
+      current = current.callee.object as typeof current
+    }
+    return current?.type === 'Identifier' && routers.has(current.name) ? set : undefined
+  }
+  for (const statement of body ?? []) {
+    if (statement.type === 'ExpressionStatement') for (const name of chain(statement.expression) ?? []) names.add(name)
+    if (statement.type !== 'VariableDeclaration' || statement.kind !== 'const') continue
+    for (const declarator of statement.declarations) {
+      const set = chain(declarator.init)
+      if (!set) continue
+      for (const name of set) names.add(name)
+      if (declarator.id.type === 'Identifier') routers.add(declarator.id.name)
+    }
+  }
+  return names
 }
 
 async function declarationOf(
@@ -322,8 +617,35 @@ async function declarationOf(
   const text = await readHead(subject.path)
   const ast = text === null ? null : parseSourceFile(text, subject.path)
   const exports = ast ? declaredExports(ast) : undefined
-  if (!ast || !exports || !declared.exports.every((name) => exports.includes(name)) || !passesCheck(declared, ast, subject.path)) return undefined
+  if (!ast || !exports || !declared.exports.every((name) => exports.includes(name))) return undefined
+  const contents = declared.check.kind === 'routes' ? await routesFileAtHead(open.plan, declared.check.step, subject.path, readHead) : declared.contents
+  if (contents === undefined || !passesCheck(declared, ast, subject.path, contents)) return undefined
   return `${open.file}#${declared.elements.join(',')}`
+}
+
+/**
+ * The routes file the scaffold writes for `step` against the head: each plan model whose class its
+ * conventional file declares, and each plan validator a plan model's validator file exports. A class or
+ * schema the head keeps elsewhere is not found, and the file then differs from what the scaffold wrote.
+ */
+async function routesFileAtHead(plan: PlanDraft, step: PlanDerivedStep, path: string, readHead: (path: string) => Promise<string | null>): Promise<string | undefined> {
+  const modelFiles: Record<string, string> = {}
+  const validatorFiles: Record<string, string> = {}
+  for (const model of plan.models.filter((entry) => entry.module === undefined)) {
+    const file = `${MODELS_DIR}/${model.name}.ts`
+    const text = await readHead(file)
+    const ast = text === null ? null : parseSourceFile(text, file)
+    if (ast && exportedClass(ast, model.name)) modelFiles[model.name] = file
+    const validators = validatorFilePath(model)
+    const source = await readHead(validators)
+    const parsed = source === null ? null : parseSourceFile(source, validators)
+    const exported = parsed ? declaredExports(parsed) : undefined
+    for (const validator of plan.validators) if (exported?.includes(validator.name) && validatorFiles[validator.name] === undefined) validatorFiles[validator.name] = validators
+  }
+  const output = planScaffoldOutput(plan, step, { modelFiles, validatorFiles })
+  const file = output.files.find((entry) => entry.path === path)
+  // A binding or contract the scaffold would leave out here is one the real run, finding the class elsewhere, writes.
+  return file && !output.unwritten.some((entry) => file.elements.includes(entry.element)) ? file.contents : undefined
 }
 
 const MIGRATION_DIALECTS: Record<SchemaDialect, MigrationDialect> = { pg: 'postgres', mysql: 'mysql', sqlite: 'sqlite' }

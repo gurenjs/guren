@@ -33,6 +33,28 @@ const CLASS_ABILITIES: ReadonlySet<string> = new Set(['viewAny', 'create'])
 /** `Controller`'s own members, which an action of the same name would replace. */
 const CONTROLLER_MEMBERS: ReadonlySet<string> = new Set(['constructor', ...Object.keys(CONTROLLER_MEMBER_KINDS)])
 
+/** The middleware a plan route runs, in order: its own, then its action's authorization middleware, which applies on the route. */
+export function plannedRouteMiddleware(route: Pick<PlanRoute, 'middleware'>, action: Pick<PlanAction, 'authorization'>): string[] {
+  return [...new Set([...route.middleware, ...action.authorization.middleware])]
+}
+
+/** The `.agent()` metadata the scaffold registers for a plan route: what the manifest reads back. */
+export function plannedAgentMetadata(route: Pick<PlanRoute, 'agent'>): { toolName: string; readOnlyHint: boolean } | undefined {
+  return route.agent ? { toolName: route.agent.toolName, readOnlyHint: route.agent.readOnly } : undefined
+}
+
+/**
+ * Whether the scaffold asks an action's policy of one bound record (`[Model, record]`) or of the bare class: a record
+ * ability, on an action every route to which binds exactly one record of the policy's model, since `this.model()` throws otherwise.
+ */
+export function asksPolicyOfRecord(plan: Pick<PlanDraft, 'routes' | 'policies'>, action: PlanAction): boolean {
+  const policy = action.authorization.policy
+  const planned = policy && plan.policies.find((candidate) => candidate.id === policy.id)
+  if (!policy || !planned || CLASS_ABILITIES.has(policy.ability)) return false
+  const routes = plan.routes.filter((route) => route.action === action.id)
+  return routes.length > 0 && routes.every((route) => route.bind.filter((binding) => binding.model === planned.model).length === 1)
+}
+
 /** The routes file a scaffold step writes for its entity, and the registrar it exports: `plan:scaffold`, `--mount`, `plan:next` and `guren check` all read it here. */
 export function scaffoldRoutesFile(model: Pick<PlanModel, 'name'>): { path: string; registrar: string } {
   return { path: `${ROUTES_DIR}/${collectionSlug(model.name)}.ts`, registrar: `register${model.name}Routes` }
@@ -237,8 +259,7 @@ export class PlanHttpEmitter {
         const name = imports.add(subject)
         const ability = quoteString(policy.ability)
         const record = isBindingName(camelCase(name)) ? camelCase(name) : 'record'
-        // this.model() throws on a route that binds no record of the class, so every route must bind exactly one.
-        if (!CLASS_ABILITIES.has(policy.ability) && routes.length > 0 && routes.every((route) => route.bind.filter((binding) => binding.model === planned!.model).length === 1)) {
+        if (asksPolicyOfRecord(this.plan, action)) {
           lines.push(`    const ${record} = this.model(${name})`, `    await this.authorize(${ability}, [${name}, ${record}])`)
         } else {
           lines.push(`    await this.authorize(${ability}, ${name})`)
@@ -313,9 +334,9 @@ export class PlanHttpEmitter {
         return [`${quoteObjectKey(binding.param)}: ${binding.key ? `[${name}, ${quoteString(binding.key)}]` : name}`]
       })
       if (bindings.length > 0) contract.push(`bind: { ${bindings.join(', ')} }`)
-      if (route.agent) contract.push(`agent: { toolName: ${quoteString(route.agent.toolName)}, readOnlyHint: ${route.agent.readOnly} }`)
-      // The action's own authorization middleware runs on the route too: that is where a middleware applies.
-      const middleware = [...new Set([...route.middleware, ...action.authorization.middleware])].filter((name) => {
+      const agent = plannedAgentMetadata(route)
+      if (agent) contract.push(`agent: { toolName: ${quoteString(agent.toolName)}, readOnlyHint: ${agent.readOnlyHint} }`)
+      const middleware = plannedRouteMiddleware(route, action).filter((name) => {
         if (name === AUTH_ALIAS) return true
         this.leave(route.id, `middleware ${name}`, `plan:scaffold registers only the ${AUTH_ALIAS} alias; the http step applies ${name} with the handler the application aliases it to`)
         return false

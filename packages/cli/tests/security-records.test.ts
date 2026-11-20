@@ -142,8 +142,9 @@ describe('schemaOnlyTightens', () => {
 describe('compareSecurityRecords', () => {
   const records = (...routes: RouteSecurityRecord[]) => ({ recordVersion: SECURITY_RECORD_VERSION, routes })
 
-  test('matches a moved route by its action, so a move reads as the same record', () => {
-    expect(compareSecurityRecords(records(route()), records(route({ path: '/articles/:id' })))).toEqual({ facts: [], incomparable: [] })
+  test('matches a moved route by its action, so a move reads as the same record and a changed route', () => {
+    const moved = route({ path: '/articles/:id' })
+    expect(compareSecurityRecords(records(route()), records(moved))).toEqual({ facts: [], incomparable: [], added: [], removed: [], changed: [{ base: route(), head: moved }] })
   })
 
   test('compares an added route to an action with each of its base routes, so a second path with fewer guards is weaker', () => {
@@ -164,7 +165,19 @@ describe('compareSecurityRecords', () => {
     expect(compareSecurityRecords(records(route()), records(renamed)).incomparable).toEqual([expect.stringContaining('a rename and a move the reader cannot pair')])
   })
 
-  test('says nothing of an added route that pairs with nothing that left', () => {
-    expect(compareSecurityRecords(records(route()), records(route(), route({ method: 'GET', path: '/health', action: undefined, middleware: [] })))).toEqual({ facts: [], incomparable: [] })
+  test('lists an added route that pairs with nothing that left, and a base route no head route matched', () => {
+    const health = route({ method: 'GET', path: '/health', action: undefined, middleware: [] })
+    expect(compareSecurityRecords(records(route()), records(route(), health))).toEqual({ facts: [], incomparable: [], added: [health], removed: [], changed: [] })
+    expect(compareSecurityRecords(records(route(), health), records(route()))).toEqual({ facts: [], incomparable: [], added: [], removed: [health], changed: [] })
+  })
+
+  test('lists a registration of an endpoint the base registers fewer times as added', () => {
+    const health = route({ method: 'GET', path: '/health', action: undefined, middleware: [] })
+    expect(compareSecurityRecords(records(health), records(health, { ...health })).added).toEqual([health])
+  })
+
+  test('reads a gained agent tool as a changed record, which the security verdict leaves the same', () => {
+    const tool = route({ agent: { toolName: 'posts_update' } })
+    expect(compareSecurityRecords(records(route()), records(tool))).toEqual({ facts: [], incomparable: [], added: [], removed: [], changed: [{ base: route(), head: tool }] })
   })
 })
