@@ -549,6 +549,23 @@ describe('generateDataTypes references exported types it cannot copy', () => {
       + '  id: number\n}',
     ],
     [
+      // The copied body holds `own` alone; the payload has `inherited` too.
+      'an interface extending a base declared beside it',
+      'interface Base {\n  inherited: string\n}\n\n'
+      + 'export interface PostResourceData extends Base {\n  own: number\n}',
+    ],
+    [
+      // An imported base loses its members the same way, and cannot be read here.
+      'an interface extending an imported base',
+      "import type { Timestamps } from '../../Models/Post.js'\n\n"
+      + 'export interface PostResourceData extends Timestamps {\n  id: number\n}',
+    ],
+    [
+      'an interface extending a Record and a base',
+      'interface Base {\n  inherited: string\n}\n\n'
+      + 'export interface PostResourceData extends Record<string, unknown>, Base {\n  own: number\n}',
+    ],
+    [
       // Copying either block alone drops the other's members — a type that
       // compiles and is wrong. The reference resolves to the merged type.
       'a type merged across two declarations',
@@ -596,6 +613,53 @@ describe('generateDataTypes references exported types it cannot copy', () => {
       expect(definitions.map((d) => d.rawType)).toEqual([POST_REFERENCE])
     })
   }
+
+  it('keeps the copy of an unexported interface extending a base, and warns', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'interface Base {\n  inherited: string\n}\n\n'
+        + 'interface PostResourceData extends Base {\n  own: number\n}',
+        'PostResourceData',
+      ),
+    })
+
+    const { outputPath, definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions.map((d) => [d.dataName, d.rawType])).toEqual([['Post', '{\n  own: number\n}']])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Resource PostResource (app/Http/Resources/PostResource.ts)')
+    expect(warnings[0]).toContain('extending Base, and data.gen.ts holds only the members the type declares itself')
+    expect(warnings[0]).toContain('Export the payload type')
+    expect(await readFile(outputPath, 'utf8')).toContain('own: number')
+  })
+
+  it('reads a Record heritage with a comment beside it as the scaffold shape', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'export interface PostResourceData extends Record<string, unknown> /* for Resource */ {\n  id: number\n}',
+        'PostResourceData',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => d.rawType)).toEqual(['{\n  id: number\n}'])
+  })
+
+  it('still copies an interface extending only Record<string, unknown>, without its index signature', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'interface PostResourceData extends Record<string, unknown> {\n  id: number\n}',
+        'PostResourceData',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => [d.dataName, d.rawType])).toEqual([['Post', '{\n  id: number\n}']])
+  })
 
   it('prefers a plainly-named export specifier over an unspellable alias', async () => {
     await writeWorkspaceFiles(appRoot, {

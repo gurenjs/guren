@@ -80,6 +80,7 @@ export async function generateDataTypes(
     definitions = []
   }
 
+  resolveInheritedMembers(definitions, warnings)
   resolveEmittableNames(definitions, warnings)
   resolveImportBindings(definitions, warnings)
 
@@ -158,6 +159,45 @@ async function collectResourceDefinitions(
   }
 
   return { definitions, warnings }
+}
+
+/** `Record<string, …>` adds no named member, so a heritage of that one clause leaves the key set closed. */
+export function isRecordOnlyHeritage(heritage: string): boolean {
+  // Masked, so a comment beside the clause is not read as a second one.
+  const text = maskCommentsAndStrings(heritage).replace(/=>/gu, '=').trim()
+  if (!/^Record\s*<\s*string\s*,/u.test(text)) return false
+  let depth = 0
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === '<') depth += 1
+    else if (text[index] === '>' && --depth === 0) return text.slice(index + 1).trim() === ''
+  }
+  return false
+}
+
+/**
+ * A copied body holds only the members its own block declares, so an interface extending
+ * anything but a lone `Record<string, …>` takes its reference. One the file does not export
+ * keeps the copy, with a warning: the type understates the payload but names no wrong member.
+ * `Record<string, …>` is dropped on purpose: the scaffold writes it to satisfy `Resource`.
+ */
+function resolveInheritedMembers(definitions: ResourceDefinition[], warnings: string[]): void {
+  for (const definition of definitions) {
+    const { heritage } = definition
+    if (definition.rawType === null || heritage === undefined || isRecordOnlyHeritage(heritage)) continue
+
+    if (definition.reference !== undefined) {
+      definition.rawType = definition.reference
+      definition.imports = []
+      delete definition.heritage
+      continue
+    }
+    warnings.push(
+      `Resource ${definition.className} (${definition.filePath}) has a payload type extending `
+      + `${heritage.replace(/\s+/gu, ' ')}, and data.gen.ts holds only the members the type `
+      + 'declares itself, without the inherited ones. Export the payload type so data.gen.ts '
+      + 'can reference the declaration itself, or declare the inherited members in it.',
+    )
+  }
 }
 
 /**

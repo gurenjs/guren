@@ -18,7 +18,7 @@ import {
 } from '@guren/server/internal/zod-compat'
 import { isZodSchema, toJsonSchema, type JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
-import { readResourceDefinitions, type ResourceDefinition } from '../data-types'
+import { isRecordOnlyHeritage, readResourceDefinitions, type ResourceDefinition } from '../data-types'
 import { parseSourceFile } from '../parse-cache'
 import { readMember, type PagePropKey } from '../page-props-extractor'
 import { BUILT_IN_OVERWRITES } from '../zod-overwrites'
@@ -199,18 +199,6 @@ export async function readResourcePayloads(root: string): Promise<PlanAppResourc
   }))
 }
 
-/** `Record<string, …>` adds no named member, so a heritage of that one clause leaves the key set closed. */
-function isRecordOnly(heritage: string): boolean {
-  if (!/^Record\s*<\s*string\s*,/u.test(heritage)) return false
-  const text = heritage.replace(/=>/gu, '=')
-  let depth = 0
-  for (let index = 0; index < text.length; index += 1) {
-    if (text[index] === '<') depth += 1
-    else if (text[index] === '>' && --depth === 0) return text.slice(index + 1).trim() === ''
-  }
-  return false
-}
-
 function payloadMembers(definition: ResourceDefinition, warning: string | undefined): PlanAppResourcePayload['payload'] {
   const rawType = definition.rawType
   if (rawType === null) return { unreadable: `guren codegen finds no payload type for it${warning ? `: ${warning}` : ''}` }
@@ -222,7 +210,7 @@ function payloadMembers(definition: ResourceDefinition, warning: string | undefi
   if (literal?.type !== 'TSTypeLiteral') return { unreadable: 'the payload type guren codegen copies does not parse as an object type' }
 
   const members: PagePropKey[] = []
-  let open = definition.heritage !== undefined && !isRecordOnly(definition.heritage)
+  let open = definition.heritage !== undefined && !isRecordOnlyHeritage(definition.heritage)
     ? `the payload type extends ${definition.heritage}, whose members the copied body leaves out`
     : undefined
   for (const element of literal.members) {

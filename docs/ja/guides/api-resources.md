@@ -354,7 +354,7 @@ export class UserResource extends Resource<User, UserResourceData> {
 
 interface は Resource 自身のファイルで宣言してください。共通の型モジュールから import した interface は読み取られません。型を取り出せなかった Resource は、`guren codegen` の警告に名前が出ます。何も言わずに除外されることはないので、`Data.*` に型が生成されなかったときは必ず理由が分かります。
 
-ペイロード型はプレーンな interface でなくても構いません。Zod スキーマから導いた型、交差型、宣言マージされた interface のように codegen が中身を書き写せない型でも、**エクスポート済み**のエイリアスであれば、宣言そのものを参照する形で出力されます。これを使えば、1 つのスキーマをランタイムのコントラクトとペイロード型の両方の元にできます。
+ペイロード型はプレーンな interface でなくても構いません。Zod スキーマから導いた型、交差型、宣言マージされた interface、別の型を継承する interface のように codegen が中身を書き写せない型でも、**エクスポート済み**であれば、宣言そのものを参照する形で出力されます。これを使えば、1 つのスキーマをランタイムのコントラクトとペイロード型の両方の元にできます。
 
 ```ts
 export const UserResourceSchema = z.object({ id: z.number(), name: z.string() })
@@ -367,7 +367,7 @@ export class UserResource extends Resource<User> {
 }
 ```
 
-`data.gen.ts` は Resource のモジュールを経由して宣言を名前で参照するので、宣言はエクスポートしておく必要があります。また、参照には型引数を渡せないため、ジェネリック型はどちらの書き方でも扱えません。
+`data.gen.ts` は Resource のモジュールを経由して宣言を名前で参照するので、宣言はエクスポートしておく必要があります。また、参照には型引数を渡せないため、ジェネリック型はどちらの書き方でも扱えません。`make:resource` が書くように `Record<string, unknown>` だけを継承する interface は、これまでどおり中身を書き写し、インデックスシグネチャは含めません。
 
 ### モジュール内の Resource
 
