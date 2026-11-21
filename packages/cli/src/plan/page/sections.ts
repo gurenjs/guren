@@ -17,6 +17,8 @@ type SectionKey =
   | 'resources'
   | 'policies'
   | 'sideEffects'
+  | 'providers'
+  | 'config'
   | 'flows'
   | 'commands'
   | 'tasks'
@@ -38,6 +40,8 @@ export const SECTIONS: readonly Section[] = [
   { key: 'resources', label: 'sections.resources', render: renderResources },
   { key: 'policies', label: 'sections.policies', render: renderPolicies },
   { key: 'sideEffects', label: 'sections.sideEffects', render: renderSideEffects },
+  { key: 'providers', label: 'sections.providers', render: renderProviders },
+  { key: 'config', label: 'sections.config', render: renderConfig },
   { key: 'flows', label: 'sections.flows', render: renderFlows },
   { key: 'commands', label: 'sections.commands', render: renderCommands },
   { key: 'tasks', label: 'sections.tasks', render: renderTasks },
@@ -306,6 +310,20 @@ function renderSideEffects(host: HTMLElement, { plan }: PlanPagePayload): void {
       ['sideEffects.description', effect.description],
     ])
     host.appendChild(card({ id: effect.id, title: effect.name, change: effect.change, body: body }))
+  }
+}
+
+function renderProviders(host: HTMLElement, { plan }: PlanPagePayload): void {
+  for (const provider of plan.providers ?? []) {
+    const body = kv([['providers.purpose', provider.purpose]])
+    host.appendChild(card({ id: provider.id, title: provider.className, change: provider.change, body: body }))
+  }
+}
+
+function renderConfig(host: HTMLElement, { plan }: PlanPagePayload): void {
+  for (const entry of plan.config ?? []) {
+    const body = kv([['config.file', 'config/' + entry.name + '.ts']])
+    host.appendChild(card({ id: entry.id, title: entry.name, change: entry.change, body: body }))
   }
 }
 

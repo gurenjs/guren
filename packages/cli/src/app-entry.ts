@@ -56,6 +56,35 @@ function importedArrayEntries(
   })
 }
 
+/** What one list of `createApp()` registers: the default imports it lists, as absolute files without extension. */
+export interface CreateAppListedFiles {
+  files: string[]
+  /** An element that is no default import of a file this can name: a call, a named import, a package. */
+  untraced: boolean
+}
+
+/**
+ * The `providers` and `config` lists of `createApp({ … })`: a list the literal does not spell is empty, one
+ * that is no array literal `undefined`; `null` when there is no literal or it may hide a key.
+ */
+export function createAppListedFiles(
+  program: File['program'],
+  cwd: string,
+  entryFile: string,
+): Record<'providers' | 'config', CreateAppListedFiles | undefined> | null {
+  const options = createAppOptions(program)
+  if (!options || hidesKeys(options)) return null
+  const read = (key: 'providers' | 'config'): CreateAppListedFiles | undefined => {
+    const declared = propertyValue(options, key)
+    if (declared === undefined) return { files: [], untraced: false }
+    const entries = importedArrayEntries(declared, program, cwd, entryFile)
+    if (entries === undefined) return undefined
+    const files = entries.flatMap((entry) => (entry?.kind === 'default' && entry.file !== null ? [entry.file] : []))
+    return { files, untraced: files.length < entries.length }
+  }
+  return { providers: read('providers'), config: read('config') }
+}
+
 /** {@link importedArrayEntries} as files; `null` for an element this cannot trace to one. */
 export function importedArrayFiles(
   declared: Node,

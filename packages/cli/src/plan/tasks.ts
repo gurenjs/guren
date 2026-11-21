@@ -217,6 +217,9 @@ export const PLAN_SECTION_STEP: Record<PlanElementSection, { step: WorkStep; sca
   resources: { step: 'http', scaffoldable: true },
   policies: { step: 'http', scaffoldable: true },
   sideEffects: { step: 'http', scaffoldable: true },
+  // The scaffold writes a policy's provider, an element of `policies`; a planned provider or config is written by hand or a command.
+  providers: { step: 'http', scaffoldable: false },
+  config: { step: 'http', scaffoldable: false },
   // Pages are not emitted (Part 3 D4): a page written with the plan's props would match by construction.
   views: { step: 'pages', scaffoldable: false },
   commands: { step: 'commands', scaffoldable: false },
@@ -557,6 +560,9 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     place(decide(validator, { users: validatorUsers.get(validator.id), className: validator.name, wiredThroughUsers: true }), 'validators', validator)
   }
   for (const effect of plan.sideEffects) place(decide(effect, { className: effect.name }), 'sideEffects', effect)
+  // An app-wide registration belongs to Foundation unless an intent covers it: that is no placement to ask about.
+  for (const provider of plan.providers ?? []) place(coveredOnce(provider.id) ?? foundation, 'providers', provider)
+  for (const entry of plan.config ?? []) place(coveredOnce(entry.id) ?? foundation, 'config', entry)
 
   /** Element id → the elements whose work it needs done first. An `existing` target is already there. */
   const needs = new Map<string, string[]>()

@@ -12,13 +12,15 @@ import type { RouteDefinition } from '@guren/server'
 import type { File, Node, Statement } from '@babel/types'
 
 import { memberKeyName, unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
-import { createAppOptions, findModuleDescriptor, hidesKeys, moduleMountState } from '../app-entry'
+import { createAppListedFiles, createAppOptions, findModuleDescriptor, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
 import { blankCommentsAndStrings, literalAbilities, VALIDATE_CALL_PATTERN, type ControllerMethodScan } from '../controller-methods'
 import {
+  discoverConfigFiles,
   discoverModuleRoutesFiles,
   discoverPolicyFiles,
+  discoverProviderFiles,
   discoverResourceFiles,
   discoverRoutesFiles,
   discoverSideEffectFiles,
@@ -166,6 +168,21 @@ export interface PlanAppMounts {
   files: { entry: string[]; descriptors: Record<string, string> }
 }
 
+/** One list of `createApp()`: the files its default imports name, app-relative without extension. */
+export interface PlanAppEntryList {
+  files: string[]
+  /** An entry that is no default import of a file, which may register anything. */
+  untraced: boolean
+}
+
+export interface PlanAppEntryLists {
+  /** The entry `createApp()` is read from, app-relative. */
+  file: string
+  /** `undefined` where the option is not an array literal. */
+  providers: PlanAppEntryList | undefined
+  config: PlanAppEntryList | undefined
+}
+
 export interface PlanAppDetail {
   routes: PlanAppRouteDetail[] | PlanAppUnreadable
   /** Set when a module's routes did not load, which leaves `routes` a lower bound. */
@@ -187,6 +204,12 @@ export interface PlanAppDetail {
   policies: PlanAppPolicyDetail[] | PlanAppUnreadable
   routeFiles: PlanAppRouteFile[]
   sideEffects: Record<PlanAppSideEffectKind, PlanAppSideEffectDetail[] | PlanAppUnreadable>
+  /** Provider classes under `app/Providers/`; absent where a caller built the detail without them. */
+  providers?: PlanAppClassDetail[] | PlanAppUnreadable
+  /** Config definitions under `config/`, as provider classes are read. */
+  config?: PlanAppClassDetail[] | PlanAppUnreadable
+  /** What the application entry's `providers` and `config` lists register (RFC 0040 §5): what a provider or config is wired by. */
+  entryLists?: PlanAppEntryLists | PlanAppUnreadable
   /** Per kind, why an absent use proves nothing: a source file that did not parse, a scan that failed, `AutoDiscovery`. */
   sideEffectUsesUnread?: Partial<Record<PlanAppSideEffectKind, string>>
 }
@@ -230,7 +253,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
   const { root } = input
   const cache = new ParseCache()
 
-  const [tables, models, pages, validatorRead, resources, resourcePayloads, policies, routeFiles, sideEffects, mounts] = await Promise.all([
+  const [tables, models, pages, validatorRead, resources, resourcePayloads, policies, routeFiles, sideEffects, mounts, providers, config, entryLists] = await Promise.all([
     tableDetail(root),
     modelDetail(root, input.models, input.modelReading),
     pageDetail(root, input.pages, input.pageReading),
@@ -241,6 +264,9 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     routeFileDetail(root, cache, input.routesFile),
     sideEffectDetail(root, cache),
     mountDetail(root, cache, input),
+    classDetail(root, discoverProviderFiles),
+    classDetail(root, discoverConfigFiles),
+    entryListDetail(root, cache),
   ])
 
   return {
@@ -257,7 +283,22 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     policies,
     routeFiles,
     ...sideEffects,
+    providers,
+    config,
+    entryLists,
   }
+}
+
+/** The files the entry's `createApp()` lists register, or why it could not be read. */
+async function entryListDetail(root: string, cache: ParseCache): Promise<PlanAppEntryLists | PlanAppUnreadable> {
+  const entryPath = await resolveAppEntry(root)
+  if (entryPath === null) return { unreadable: 'the application has no src/app.ts or app.ts to read createApp() from' }
+  const parsed = await cache.get(resolve(root, entryPath))
+  const lists = parsed ? createAppListedFiles(parsed.ast.program, root, resolve(root, entryPath)) : null
+  if (!lists) return { unreadable: `${entryPath} does not call createApp() with an object literal that spells its keys` }
+  const relativeList = (list: { files: string[]; untraced: boolean } | undefined): PlanAppEntryList | undefined =>
+    list && { files: list.files.map((file) => toPosixRelative(root, file)), untraced: list.untraced }
+  return { file: entryPath, providers: relativeList(lists.providers), config: relativeList(lists.config) }
 }
 
 /** The live contract schemas of every registered route, whatever a plan calls them. */

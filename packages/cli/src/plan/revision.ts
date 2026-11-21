@@ -15,6 +15,7 @@ import { formatSchemaIssues } from '../cli-error'
 import type { PlanFeedback } from './feedback'
 import { canonicalJson, planDigest } from './identity'
 import { listPlanReferences } from './references'
+import { PLAN_VERSION } from './version'
 import {
   AcceptanceSchema,
   findDuplicatePlanIds,
@@ -24,10 +25,12 @@ import {
   PlanActionSchema,
   PlanColumnSchema,
   PlanCommandSchema,
+  PlanConfigSchema,
   PlanControllerSchema,
   PlanFlowSchema,
   PlanModelSchema,
   PlanPolicySchema,
+  PlanProviderSchema,
   PlanQuestionSchema,
   planBaseline,
   PlanResourceSchema,
@@ -68,10 +71,15 @@ export const PLAN_TOP_SECTIONS = [
   'resources',
   'policies',
   'sideEffects',
+  'providers',
+  'config',
   'flows',
   'commands',
   'tasks',
 ] as const satisfies ReadonlyArray<PlanElementSection>
+
+/** The sections a plan omits when empty (RFC 0040 §5); a version 1 plan holds none of them. */
+const SECTIONS_ABSENT_WHEN_EMPTY = ['providers', 'config'] as const
 
 // Array order is part of the hash, so an ADD says where it goes: before a sibling, or at the end.
 const add = <S extends string, E extends z.ZodType>(section: S, element: E) =>
@@ -102,6 +110,8 @@ const AddOpSchema = z.discriminatedUnion('section', [
   add('resources', PlanResourceSchema),
   add('policies', PlanPolicySchema),
   add('sideEffects', PlanSideEffectSchema),
+  add('providers', PlanProviderSchema),
+  add('config', PlanConfigSchema),
   add('flows', PlanFlowSchema),
   add('commands', PlanCommandSchema),
   add('tasks', PlanTaskIntentSchema),
@@ -132,6 +142,8 @@ const ModifyOpSchema = z.discriminatedUnion('section', [
   modify('resources', PlanResourceSchema.omit({ id: true })),
   modify('policies', PlanPolicySchema.omit({ id: true })),
   modify('sideEffects', PlanSideEffectSchema.omit({ id: true })),
+  modify('providers', PlanProviderSchema.omit({ id: true })),
+  modify('config', PlanConfigSchema.omit({ id: true })),
   modify('flows', PlanFlowSchema.omit({ id: true })),
   modify('commands', PlanCommandSchema.omit({ id: true })),
   modify('tasks', PlanTaskIntentSchema.omit({ id: true, acceptance: true })),
@@ -226,7 +238,7 @@ interface Located {
 
 function locate(plan: Holder, id: string): Located | undefined {
   for (const section of PLAN_TOP_SECTIONS) {
-    const list = plan[section] as Element[]
+    const list = (plan[section] ?? []) as Element[]
     for (const [index, element] of list.entries()) {
       if (element.id === id) return { section, list, index, element }
       const key = NESTED_KEY[section]
@@ -316,6 +328,7 @@ function applyOps<P extends PlanDraft>(
   const { locked, rejections } = lockedIds(parent, feedback)
   // `baseline` is carried over untouched: no op names it, so the hash moves through ops alone.
   const plan = structuredClone(parent) as PlanDraft & Holder
+  for (const section of SECTIONS_ABSENT_WHEN_EMPTY) plan[section] ??= []
   const declared = new Set(listPlanElements(parent).map((ref) => ref.id))
   const reopened: PlanReopenedElement[] = []
   const targeted = new Map<string, PlanRevisionOp['op']>()
@@ -435,6 +448,8 @@ function applyOps<P extends PlanDraft>(
 
   if (rejections.length > 0) return { ok: false, rejections }
 
+  // A section a version 1 plan cannot hold moves the plan to the version that reads it.
+  if (SECTIONS_ABSENT_WHEN_EMPTY.some((section) => (plan[section] ?? []).length > 0)) plan.planVersion = PLAN_VERSION
   const parsed = planSchemaFor(parent).safeParse(plan)
   if (!parsed.success) return refuse('invalid-result', formatSchemaIssues(parsed.error))
 
@@ -522,7 +537,7 @@ export function diffPlans(parent: PlanDraft, child: PlanDraft, options: DiffPlan
     })
   }
 
-  for (const section of PLAN_TOP_SECTIONS) diffList(section, parent[section], child[section])
+  for (const section of PLAN_TOP_SECTIONS) diffList(section, parent[section] ?? [], child[section] ?? [])
   // Removes first: an element that moved is free to be added again, and every `before` names a kept sibling.
   return z.array(PlanRevisionOpSchema).parse([...removes, ...modifies, ...adds])
 }

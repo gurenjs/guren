@@ -367,6 +367,13 @@ export function discoverProviderFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, PROVIDERS_DIR)
 }
 
+/** Where a config definition lives, `config/<name>.ts`, which `wireConfig()` registers under `<name>` (RFC 0027 §2). */
+export const CONFIG_DIR = 'config'
+
+export function discoverConfigFiles(appRoot: string): Promise<string[]> {
+  return discoverDir(appRoot, CONFIG_DIR)
+}
+
 export const CONTROLLERS_DIR = 'app/Http/Controllers'
 
 export function discoverControllerFiles(appRoot: string): Promise<string[]> {

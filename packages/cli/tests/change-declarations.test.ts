@@ -857,3 +857,57 @@ describe('applyPlanDeclarations on a provider registration', () => {
     expect(lanes(await judge([{ file: PLAN_FILE, plan: commentsPlan() }], head))).toEqual([['provider-added', 'medium', undefined]])
   })
 })
+
+describe('applyPlanDeclarations on an entry a providers or config element declares', () => {
+  const ENTRY = 'src/app.ts'
+  const BASE = readFileSync(join(import.meta.dir, 'fixtures/change-providers/app.base.ts.txt'), 'utf8')
+  const HEAD = BASE.replace("import { createApp } from '@guren/core'\n", "import { createApp } from '@guren/core'\nimport JobsProvider from '../app/Providers/JobsProvider.js'\nimport queue from '../config/queue.js'\n")
+    .replace('providers: []', 'providers: [JobsProvider],\n  config: [queue]')
+  const FILES: Record<string, string> = { 'app/Providers/JobsProvider.ts': 'export default class JobsProvider {}\n', 'config/queue.ts': 'export default {}\n' }
+  const declaring = (edit?: (document: Record<string, any>) => void): PlanDraft => commentsPlan((document) => {
+    document.planVersion = 2
+    document.providers = [{ id: 'provider.jobs', change: { kind: 'add' }, className: 'JobsProvider', purpose: 'Registers the queue jobs' }]
+    document.config = [{ id: 'config.queue', change: { kind: 'add' }, name: 'queue' }]
+    edit?.(document)
+  })
+  const ENTRIES: Array<['providers' | 'config', string]> = [['providers', 'JobsProvider'], ['config', 'queue']]
+
+  const judge = async (plans: OpenPlan[], options: { head?: string; files?: Record<string, string>; entries?: Array<['providers' | 'config', string]> } = {}) => {
+    const subjects = new Map<ChangeFact, DeclarationSubject>()
+    for (const [list, name] of options.entries ?? ENTRIES) {
+      subjects.set({ code: list === 'providers' ? 'provider-added' : 'config-added', lane: 'medium', target: name, files: [ENTRY], evidence: 'static', message: name }, { kind: 'app-entry', path: ENTRY, list, name })
+    }
+    const head: Record<string, string> = { [ENTRY]: options.head ?? HEAD, ...(options.files ?? FILES) }
+    const result = await applyPlanDeclarations([...subjects.keys()], subjects, plans, async (path) => head[path] ?? null, async (path) => (path === ENTRY ? BASE : null))
+    return result.map((fact) => [fact.code, fact.lane, fact.declaredBy])
+  }
+
+  test('should declare each entry an added element names, bound to its conventional file', async () => {
+    expect(await judge([{ file: PLAN_FILE, plan: declaring() }])).toEqual([
+      ['provider-added', 'low', `${PLAN_FILE}#provider.jobs`],
+      ['config-added', 'low', `${PLAN_FILE}#config.queue`],
+    ])
+    const aliased = HEAD.replace('import queue from', 'import queueConfig from').replace('config: [queue]', 'config: [queueConfig]')
+    expect(await judge([{ file: PLAN_FILE, plan: declaring() }], { head: aliased, entries: [['providers', 'JobsProvider'], ['config', 'queueConfig']] }))
+      .toEqual([['provider-added', 'low', `${PLAN_FILE}#provider.jobs`], ['config-added', 'low', `${PLAN_FILE}#config.queue`]])
+  })
+
+  test('should not declare an entry no added element names, or two open plans name', async () => {
+    const existing = declaring((document) => {
+      document.config[0].change = { kind: 'existing' }
+    })
+    expect(await judge([{ file: PLAN_FILE, plan: existing }])).toEqual([['provider-added', 'low', `${PLAN_FILE}#provider.jobs`], ['config-added', 'medium', undefined]])
+    const twice = [{ file: PLAN_FILE, plan: declaring() }, { file: 'docs/plans/jobs/plan.json', plan: declaring() }]
+    expect(await judge(twice)).toEqual([['provider-added', 'medium', undefined], ['config-added', 'medium', undefined]])
+  })
+
+  test('should not declare an entry imported from another file, missing, or beside a twin that would answer its import', async () => {
+    const elsewhere = HEAD.replace("'../config/queue.js'", "'../config/other.js'")
+    expect(await judge([{ file: PLAN_FILE, plan: declaring() }], { head: elsewhere, files: { ...FILES, 'config/other.ts': 'export default {}\n' } }))
+      .toEqual([['provider-added', 'low', `${PLAN_FILE}#provider.jobs`], ['config-added', 'medium', undefined]])
+    expect(await judge([{ file: PLAN_FILE, plan: declaring() }], { files: { 'config/queue.ts': 'export default {}\n' } }))
+      .toEqual([['provider-added', 'medium', undefined], ['config-added', 'low', `${PLAN_FILE}#config.queue`]])
+    expect(await judge([{ file: PLAN_FILE, plan: declaring() }], { files: { ...FILES, 'config/queue.js': 'export default {}\n' } }))
+      .toEqual([['provider-added', 'low', `${PLAN_FILE}#provider.jobs`], ['config-added', 'medium', undefined]])
+  })
+})

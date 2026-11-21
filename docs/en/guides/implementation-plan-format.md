@@ -6,11 +6,12 @@ This page describes the plan file itself: its sections, element ids and changes,
 
 | Field | Holds |
 |---|---|
-| `planVersion` | `1` |
+| `planVersion` | `2`; a plan with no `providers` or `config` may keep `1` |
 | `title`, `summary`, `locale` | What the plan is about, and the language its prose is written in (`en`, `ja`), view labels excepted |
 | `scope` | `goals` and `nonGoals` |
 | `assumptions`, `questions` | What the plan decided without being told, and what it could not decide |
 | `models`, `validators`, `controllers`, `routes`, `views`, `resources`, `policies`, `sideEffects` | The design, one section per kind of element |
+| `providers`, `config` | What the change registers in `createApp()` (see [Providers and config](#providers-and-config)) |
 | `flows` | How a request moves through what the plan adds, as nodes and edges |
 | `commands` | Commands such as `guren add attachments` the change needs first |
 | `tasks` | What each slice must achieve, and its acceptance behaviours |
@@ -145,6 +146,25 @@ A question is a decision the author could not make alone, with the options, the 
 ```
 
 A plan with an open question cannot be approved. Answer it by editing the plan: apply the answer, remove the question, and record the decision under `assumptions`. Before approval, editing `plan.json` by hand is the normal way to change it.
+
+## Providers and config
+
+`providers` and `config` list what the change adds to the `providers` and `config` arrays of `createApp()`. A provider is the default export of `app/Providers/<className>.ts`, and a config definition the default export of `config/<name>.ts`:
+
+```json
+{
+  "planVersion": 2,
+  "providers": [{ "id": "provider.jobs", "change": { "kind": "add" }, "className": "JobsProvider", "purpose": "Registers the queue jobs" }],
+  "config": [{ "id": "config.queue", "change": { "kind": "add" }, "name": "queue" }]
+}
+```
+
+- `change.kind` is `add` or `existing`. Changing or removing a registration is left to the person reviewing it, so the schema refuses the other kinds.
+- A plan holding either section declares `planVersion` `2`, and a release that reads only version 1 refuses it. `plan:revise` moves a version 1 plan to `2` when it adds an entry.
+- Leave out the provider an added policy needs. `plan:scaffold` writes and registers `<Policy>Provider` with the policy, and a `providers` element of that name fails the check.
+- The checks treat each name like a class name: an `add` whose file already exists fails, and so does an `existing` whose file is missing. Two elements of one name fail too.
+- `plan:status` calls an entry `present` once its file exists and `wired` once the entry's `createApp()` lists that file's default export. Nothing a behaviour requests reaches a registration, so `plan:approve` accepts an added entry on its step's verified run alone, as it does a command.
+- `guren change:lane` reads an entry added to either list as `provider-added` or `config-added`, and lowers it to `low` when one open plan adds an element of that name and the entry is a default import of its conventional file. The provider or config file itself stays `medium`, since the plan names it but does not determine what it holds.
 
 ## Commands
 

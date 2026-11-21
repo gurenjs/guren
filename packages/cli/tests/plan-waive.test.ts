@@ -14,9 +14,11 @@ import {
   listPlanElements,
   PlanColumnSchema,
   PlanCommandSchema,
+  PlanConfigSchema,
   PlanControllerSchema,
   PlanModelSchema,
   PlanPolicySchema,
+  PlanProviderSchema,
   PlanResourceSchema,
   PlanRouteSchema,
   PlanSideEffectSchema,
@@ -189,12 +191,17 @@ describe('plan:waive', () => {
       resources: PlanResourceSchema,
       policies: PlanPolicySchema,
       sideEffects: PlanSideEffectSchema,
+      providers: PlanProviderSchema,
+      config: PlanConfigSchema,
       commands: PlanCommandSchema,
     }
     const document = loadApprovedCommentsPlan()
     document.sideEffects = [
       { id: 'side.comment.notify', change: { kind: 'add' }, kind: 'notification', name: 'CommentPosted', trigger: 'a comment is created', description: 'notifies the post author' },
     ]
+    document.planVersion = 2
+    document.providers = [{ id: 'provider.jobs', change: { kind: 'add' }, className: 'JobsProvider', purpose: 'registers the jobs' }]
+    document.config = [{ id: 'config.queue', change: { kind: 'add' }, name: 'queue' }]
     // Every `change` in the document, found by shape rather than by naming a section.
     const changed = new Set<string>()
     const markExisting = (value: unknown): void => {

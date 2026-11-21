@@ -13,6 +13,8 @@
   "sections.resources": "Resource",
   "sections.policies": "ポリシー",
   "sections.sideEffects": "副作用",
+  "sections.providers": "Provider",
+  "sections.config": "設定",
   "sections.flows": "フロー",
   "sections.commands": "コマンド",
   "sections.tasks": "タスクと受け入れ条件",
@@ -155,6 +157,8 @@
   "sideEffects.kind": "種類",
   "sideEffects.trigger": "トリガー",
   "sideEffects.description": "説明",
+  "providers.purpose": "目的",
+  "config.file": "ファイル",
 
   "tasks.entity": "エンティティ",
   "tasks.covers": "対象の要素",

@@ -76,6 +76,8 @@ function existingIds(plan: PlanDraft): Set<string> {
     ...plan.resources,
     ...plan.policies,
     ...plan.sideEffects,
+    ...(plan.providers ?? []),
+    ...(plan.config ?? []),
   ]
   return new Set(changed.filter((element) => element.change.kind === 'existing').map((element) => element.id))
 }

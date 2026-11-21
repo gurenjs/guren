@@ -13,6 +13,8 @@
   "sections.resources": "Resources",
   "sections.policies": "Policies",
   "sections.sideEffects": "Side effects",
+  "sections.providers": "Providers",
+  "sections.config": "Config",
   "sections.flows": "Flows",
   "sections.commands": "Commands",
   "sections.tasks": "Tasks & acceptance",
@@ -155,6 +157,8 @@
   "sideEffects.kind": "Kind",
   "sideEffects.trigger": "Trigger",
   "sideEffects.description": "Description",
+  "providers.purpose": "Purpose",
+  "config.file": "File",
 
   "tasks.entity": "Entity",
   "tasks.covers": "Covers",
