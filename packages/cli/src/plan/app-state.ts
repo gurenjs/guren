@@ -285,7 +285,6 @@ async function envSection(root: string): Promise<PlanAppNames> {
 }
 
 /** A section named after the class each discovered file declares, as `guren context` names them. */
-
 async function classSection(
   cwd: string,
   discover: (appRoot: string) => Promise<string[]>,

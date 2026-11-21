@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { parseExpression } from '@babel/parser'
+import { defineEnv, Env } from '@guren/server'
 
 import { createAppListedFiles } from '../src/app-entry'
 import { envBuilderSignature } from '../src/env-declarations'
@@ -134,9 +135,26 @@ describe('the env section of a plan (RFC 0040 §5)', () => {
   test('should refuse a key guren plugin would refuse, two elements of one key, and an added key the application declares', () => {
     expect(failures(draft({ env: [{ ...ENV, type: 'port', default: 'sync' }] }))).toEqual([['plan:env-declaration', 'fail']])
     for (const key of ['GUREN_TESTING', 'NODE_ENV']) expect([key, failures(draft({ env: [{ ...ENV, key }] }))]).toEqual([key, [['plan:env-declaration', 'fail']]])
-    expect(PlanDraftSchema.safeParse({ ...draft(), env: [{ ...ENV, key: 'apiKey' }] }).success).toBe(false)
+    // The schema restates defineEnv()'s pattern, so the two answer alike.
+    for (const key of ['A', '_A', 'A1', 'a', 'apiKey', 'A-B', '1A', '']) {
+      const declares = (() => {
+        try {
+          defineEnv({ [key]: Env.string().optional() })
+          return true
+        } catch {
+          return false
+        }
+      })()
+      expect([key, PlanDraftSchema.safeParse({ ...draft(), env: [{ ...ENV, key }] }).success]).toEqual([key, declares])
+    }
     expect(failures(draft({ env: [ENV, { ...ENV, id: 'env.queue.again' }] }))).toEqual([['plan:duplicate-entry', 'fail']])
     expect(failures(draft({ env: [ENV] }), planAppState({ env: ['QUEUE_CONNECTION'] }))).toEqual([['plan:app-collision', 'fail']])
+  })
+
+  test('should warn of an unreadable config/env.ts only a plan stating a key', () => {
+    const app = planAppState({ env: { unreadable: 'config/env.ts spreads its keys' } })
+    expect(failures(draft(), app)).toEqual([])
+    expect(failures(draft({ env: [ENV] }), app)).toEqual([['plan:app-unreadable', 'warn']])
   })
 
   test('should judge a declared key by what its chain declares', () => {

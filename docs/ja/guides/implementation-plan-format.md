@@ -180,7 +180,7 @@ Guren は、GET 以外のリクエストに対するリダイレクトを 303 �
 - `type` は `string`(省略時)、`url`、`number`、`port`、`boolean`、`choices` を伴う `enum` のどれかです。`default` を持つキーは未設定になりません。`default` も `required` も持たないキーは省略できるキーになります。`secret` を付けると値を表示しません。`description` は `.describe()` の文言です。
 - キーの宣言は、`guren plugin` がそのキーについて書く宣言と同じ意味で読みます。文字列の `default` を持つ `port` のように、このコマンドが受け付けないキーはチェックで失敗します。同じキーの要素が 2 つある場合と、`config/env.ts` が既に宣言しているキーを `add` にした場合も失敗します。
 - `plan:status` は `config/env.ts` をソースのまま読み、キーのビルダーの連なりを計画のものと比べます。`.describe()` は比べません。`type` を書かず `"default": "sync"` とだけ書いたキーなら、`Env.string().default('sync')` は一致し、`Env.string()` は一致しません。追加するキーは、コマンドと同じく、ステップの検証が通った時点で承認時に受け入れます。
-- `guren change:lane` は、`defineEnv()` に足したキーを `env-added` として読みます。開いている計画のうち 1 つだけがそのキーの要素を足していて、宣言が要素の書いたとおりなら `low` に下げます。キーを変えたり外したりした場合、ファイルは `source-edited` のままです。
+- `guren change:lane` は、`defineEnv()` に足したキーを `env-added` として読みます。開いている計画のうち 1 つだけがそのキーの要素を足していて、宣言が要素の書いたとおりなら `low` に下げます。キーを変えたり外したりした場合と、キーと一緒にコメントを足したり消したりした場合、ファイルは `source-edited` のままです。
 - ほかの 2 つのセクションと同じく、`env` を持つ計画は `planVersion` を `2` にします。
 
 ## コマンド
