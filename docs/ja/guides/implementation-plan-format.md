@@ -6,11 +6,12 @@
 
 | フィールド | 中身 |
 |---|---|
-| `planVersion` | `1` |
+| `planVersion` | `2`。`providers` も `config` も持たない計画は `1` のままでかまいません |
 | `title`、`summary`、`locale` | 計画の題と要約、本文の言語 (`en`、`ja`。ビューのラベルは除く) |
 | `scope` | `goals` と `nonGoals` |
 | `assumptions`、`questions` | 指示なしに決めたことと、決めきれなかったこと |
 | `models`、`validators`、`controllers`、`routes`、`views`、`resources`、`policies`、`sideEffects` | 設計の本体。要素の種類ごとに 1 セクション |
+| `providers`、`config` | 変更が `createApp()` に登録するもの([Provider と config](#provider-と-config) を参照) |
 | `flows` | 計画で足すものの中を、リクエストがどう流れるか。ノードとエッジで書く |
 | `commands` | 変更の前に実行しておく `guren add attachments` などのコマンド |
 | `tasks` | スライスごとに達成すべきことと、その受け入れ振る舞い |
@@ -147,6 +148,25 @@ Guren は、GET 以外のリクエストに対するリダイレクトを 303 �
 ```
 
 質問が残っている計画は承認できません。答えが出たら計画を編集して反映します。答えに沿って要素を直し、質問を消して、決めたことを `assumptions` に残してください。承認前の計画は、`plan.json` を直接編集して変えるのが普通です。
+
+## Provider と config
+
+`providers` と `config` には、変更が `createApp()` の `providers` と `config` の配列に足すものを書きます。Provider は `app/Providers/<className>.ts` の default export、config の定義は `config/<name>.ts` の default export です。
+
+```json
+{
+  "planVersion": 2,
+  "providers": [{ "id": "provider.jobs", "change": { "kind": "add" }, "className": "JobsProvider", "purpose": "Registers the queue jobs" }],
+  "config": [{ "id": "config.queue", "change": { "kind": "add" }, "name": "queue" }]
+}
+```
+
+- `change.kind` は `add` か `existing` です。登録を変えたり外したりする判断はレビューする人に任せるので、ほかの種類はスキーマが受け付けません。
+- どちらかのセクションを持つ計画は `planVersion` を `2` にします。version 1 しか読めないリリースは、その計画を受け付けません。`plan:revise` で項目を足すと、version 1 の計画は `2` に上がります。
+- 追加する Policy が必要とする Provider は書きません。`plan:scaffold` が `<Policy>Provider` を Policy と一緒に書いて登録するので、同じ名前の `providers` の要素はチェックで失敗します。
+- 名前はクラス名と同じように照合します。ファイルが既にある `add` と、ファイルが見つからない `existing` は失敗します。同じ名前の要素が 2 つある場合も失敗します。
+- `plan:status` は、ファイルがあれば `present`(存在する)、エントリの `createApp()` がそのファイルの default export を並べていれば `wired`(登録済み)と判定します。登録には振る舞いのリクエストが届かないので、`plan:approve` はコマンドと同じく、追加する項目をステップの検証が通った時点で完了として受け入れます。
+- `guren change:lane` は、どちらかの配列に足した項目を `provider-added` か `config-added` として読みます。開いている計画のうち 1 つだけがその名前の要素を足していて、項目が決まった場所のファイルの default import なら、`low` に下げます。Provider や config のファイル自体は `medium` のままです。計画が決めるのはファイルの名前だけで、中身までは決めないからです。
 
 ## コマンド
 

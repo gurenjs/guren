@@ -7,7 +7,7 @@
 // A classic script is sloppy unless it says otherwise, and the bundler keeps this directive.
 'use strict'
 
-import { PLAN_VERSION } from '../version'
+import { PLAN_VERSION, SUPPORTED_PLAN_VERSIONS } from '../version'
 import { indexPlan } from './card'
 import { mountDiagram } from './diagram'
 import { byId } from './dom'
@@ -38,7 +38,7 @@ async function start(): Promise<void> {
   initLocale(data.i18n)
 
   const version: unknown = data.plan.planVersion
-  if (version !== PLAN_VERSION) {
+  if (typeof version !== 'number' || !SUPPORTED_PLAN_VERSIONS.includes(version)) {
     refuse(version)
     return
   }

@@ -169,7 +169,7 @@ function sectionItems(plan: PlanDraft, section: PlanElementSection): ReadonlyArr
     case 'acceptance':
       return plan.tasks.flatMap((task) => task.acceptance)
     default:
-      return plan[section]
+      return plan[section] ?? []
   }
 }
 

@@ -22,6 +22,7 @@ import { readPlanRevisionRecords, writePlanRevisionRecord } from './plan/revisio
 import { readSavedPlanFeedback, savedFeedbackFile } from './plan/saved-feedback'
 import { createPlanRevision, diffPlans, type PlanReopenedElement, type PlanRevisionRejection, type PlanRevisionOp } from './plan/revision'
 import { hasBaseline, planBaseline, PlanDraftSchema, planSchemaFor, type Plan, type PlanDraft } from './plan/schema'
+import { ENTRY_SECTIONS_VERSION } from './plan/version'
 import { planSlug } from './plan/state'
 
 export const PLAN_REVISE_REPORT_VERSION = 1
@@ -151,6 +152,14 @@ async function readEditedPlan(
       `The edited plan on ${origin} has ${hasBaseline(parsed.data) ? 'a different baseline' : 'no baseline'} from ${parentPath}${hasBaseline(parent) ? '' : ', which is a draft'}. A revision carries the baseline over unchanged; copy the plan with its baseline as it stands and edit the copy.`,
     )
   }
+  // No op names `planVersion`: a revision moves it only when it adds the first entry of a version 2 section.
+  const holdsEntries = parsed.data.providers !== undefined || parsed.data.config !== undefined
+  const version = parent.planVersion < ENTRY_SECTIONS_VERSION && holdsEntries ? ENTRY_SECTIONS_VERSION : parent.planVersion
+  if (parsed.data.planVersion !== version) {
+    throw new CliError(
+      `The edited plan on ${origin} declares planVersion ${parsed.data.planVersion}, and the revision would give it ${version}. A revision moves planVersion only when it adds the first providers or config entry; leave it as ${version}.`,
+    )
+  }
   return { child: parsed.data, raw }
 }
 
@@ -182,9 +191,12 @@ function revisedDocument(parentDocument: unknown, result: PlanDraft | Plan): Rec
   const keys = [...Object.keys(authored).filter((key) => key in values), ...Object.keys(values).filter((key) => !(key in authored))]
   return Object.fromEntries(
     keys.flatMap((key) => {
+      // A section absent when empty parses to an own key holding `undefined`, which no document writes.
+      if (values[key] === undefined) return []
       if (!(key in authored) && key in shape) {
         const fallback = shape[key]!.safeParse(undefined)
-        if (fallback.success && canonicalJson(fallback.data) === canonicalJson(values[key])) return []
+        // A section with no default parses `undefined` to itself, and an entry it holds is no default.
+        if (fallback.success && fallback.data !== undefined && canonicalJson(fallback.data) === canonicalJson(values[key])) return []
       }
       return [[key, values[key]]]
     }),

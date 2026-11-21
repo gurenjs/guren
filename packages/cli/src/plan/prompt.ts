@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto'
 
 import { PLAN_COMMAND_FORM, planGeneratorNames } from './command-allowlist'
 import { planDraftJsonSchema } from './schema'
+import { PLAN_VERSION } from './version'
 
 export interface PlanPrompt {
   prompt: string
@@ -59,7 +60,7 @@ If the change can be described in one sentence (one column, one form field), ans
 const DOCUMENT = `## The document
 
 - Write it to \`docs/plans/<slug>/plan.json\`, where \`<slug>\` is a short kebab-case name for the change (\`comments\`).
-- It must validate against the JSON Schema (draft-07) given with this prompt. Every plan has \`planVersion\` (\`1\`), \`title\`, \`summary\`, \`scope\` with its \`goals\` and \`nonGoals\`, and \`locale\`.
+- It must validate against the JSON Schema (draft-07) given with this prompt. Every plan has \`planVersion\` (\`${PLAN_VERSION}\`), \`title\`, \`summary\`, \`scope\` with its \`goals\` and \`nonGoals\`, and \`locale\`.
 - Never write \`baseline\`. \`plan:approve\` stamps it when the person approves the plan, and the draft schema has no such field.
 - \`locale\` is the BCP 47 tag of the request's language (\`en\`, \`ja\`). Write every piece of prose in that language: the summary, descriptions, rules, questions and acceptance descriptions. View labels (\`views[].form.fields[].label\` and \`views[].actions[].label\`) are the exception: they are the text the page shows, and the browser specs look for them on a page rendered in the app's default locale, so write them in that locale even when the request is in another (the \`fallback\` of \`createApp({ i18n })\` in the app entry, else the first of its \`supported\`). With no \`i18n\` option, write them as the page shows them.
 - Every other section is optional. Leave out the ones the change does not touch.`
@@ -114,6 +115,12 @@ const COMMANDS = `## Commands
 
 The commands run before every other step. Keep \`commands\` for what the plan does not declare: a generator for an element the plan adds or renames fails the check where running it first breaks a later step. In an app that is not API-only, \`plan:scaffold\` writes each model the plan adds in the project root, with its table, validators, resources, policies, controllers, routes and side effects, and refuses a target that already exists (\`make:model\`, \`make:feature\`). A blueprint that declares an added model's table in \`db/schema.ts\` declares it a second time beside the data step's, some with a migration as well (\`add session\` beside an added \`sessions\` table). Output that imports what no step has written yet fails the commands step's typecheck (\`make:factory\` or \`make:resource\` for an added model).`
 
+const ENTRY = `## Providers and config
+
+- \`providers\` lists the service providers the change registers in \`createApp({ providers })\`, each a default export of \`app/Providers/<className>.ts\` with a one-sentence \`purpose\`. \`config\` lists the config definitions it registers in \`createApp({ config })\`, each the default export of \`config/<name>.ts\`, named by \`name\`.
+- \`change.kind\` is \`add\` or \`existing\` there: changing or removing a registration is left to the person.
+- Leave out the provider an added policy needs: \`plan:scaffold\` writes and registers \`<Policy>Provider\` with the policy.`
+
 const CHECK = `## Check the plan
 
 Run \`bunx guren plan:render docs/plans/<slug>/plan.json --json\` once the file is written. A schema error names the field at fault. Otherwise it prints \`{ path, checks }\` as JSON: fix the plan and run it again until no check has \`"status": "fail"\`. Fix the warnings that are mistakes, and tell the person about the ones you leave. The page at \`path\` is what the person reviews.
@@ -122,7 +129,7 @@ Do not run \`plan:approve\`. Approval is the person's decision, made after readi
 
 /** `request` is the person's words, or absent when the agent is to ask for them first. */
 export function buildPlanPrompt(request?: string): PlanPrompt {
-  const prompt = [INTRO, requestSection(request), CONTEXT, QUESTIONS, DOCUMENT, SCOPE, IDS, ALTERS, TASKS, COMMANDS, CHECK].join('\n\n')
+  const prompt = [INTRO, requestSection(request), CONTEXT, QUESTIONS, DOCUMENT, SCOPE, IDS, ALTERS, TASKS, ENTRY, COMMANDS, CHECK].join('\n\n')
   return { prompt: `${prompt}\n`, schema: planDraftJsonSchema() }
 }
 

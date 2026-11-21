@@ -82,7 +82,7 @@ export const PLAN_APP_TABLES: TableEntry[] = [
   { identifier: 'users', tableName: 'users', columns: ['id', 'email'] },
 ]
 
-type ScopedSection = 'models' | 'controllers' | 'actions' | 'resources' | 'policies' | 'pages' | 'validators'
+type ScopedSection = 'models' | 'controllers' | 'actions' | 'resources' | 'policies' | 'providers' | 'config' | 'pages' | 'validators'
 
 export type PlanAppStateInput = Omit<Partial<PlanAppState>, ScopedSection | 'tables'> &
   Partial<Record<ScopedSection, NameInput>> & { tables?: TableInput }
@@ -97,13 +97,15 @@ function tables(input: TableInput): PlanAppState['tables'] {
 
 /** An application the comments fixture is a clean delta against. */
 export function planAppState(overrides: PlanAppStateInput = {}): PlanAppState {
-  const { models, controllers, actions, resources, policies, pages, validators, tables: tableInput, ...rest } = overrides
+  const { models, controllers, actions, resources, policies, providers, config, pages, validators, tables: tableInput, ...rest } = overrides
   return {
     models: names(models ?? ['Post', 'User']),
     controllers: names(controllers ?? ['PostController']),
     actions: names(actions ?? ['PostController.index', 'PostController.show']),
     resources: names(resources ?? ['PostResource']),
     policies: names(policies ?? ['PostPolicy']),
+    providers: names(providers ?? []),
+    config: names(config ?? []),
     pages: names(pages ?? ['posts/Index', 'posts/Show']),
     validators: names(validators ?? []),
     routes: [

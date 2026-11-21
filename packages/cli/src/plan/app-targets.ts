@@ -8,7 +8,7 @@
 import type { PlanChange, PlanController, PlanDraft, PlanElementSection, PlanModel, PlanRoute } from './schema'
 
 /** The `PlanAppState` sections {@link namedTargets} reads, in the order their findings are reported. */
-export const NAMED_APP_SECTIONS = ['models', 'controllers', 'validators', 'resources', 'policies', 'pages'] as const
+export const NAMED_APP_SECTIONS = ['models', 'controllers', 'validators', 'resources', 'policies', 'providers', 'config', 'pages'] as const
 
 /** The `PlanAppState` section a target is looked up in. */
 export type PlanAppTargetSection = (typeof NAMED_APP_SECTIONS)[number] | 'tables' | 'actions' | 'routes'
@@ -76,6 +76,9 @@ export function namedTargets(plan: PlanDraft): PlanAppTarget[] {
     ...named(plan.validators, 'validators', 'validators', 'validator', (v) => v.name),
     ...named(plan.resources, 'resources', 'resources', 'resource', (r) => r.name),
     ...named(plan.policies, 'policies', 'policies', 'policy', (p) => p.name),
+    // The application entry's lists are the project root's: neither section takes a `module`.
+    ...named(plan.providers ?? [], 'providers', 'providers', 'provider class', (p) => p.className),
+    ...named(plan.config ?? [], 'config', 'config', 'config definition', (c) => c.name),
     // A module's pages are not colocated: they live in the project's own resources/js/pages
     // under the module's name, so the page id carries the root and the name does not.
     ...named(plan.views, 'views', 'pages', 'page', (v) => v.page, false),

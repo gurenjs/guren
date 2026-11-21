@@ -8,9 +8,9 @@
 
 import { z } from 'zod'
 
-import { PLAN_VERSION } from './version'
+import { ENTRY_SECTIONS_VERSION, PLAN_VERSION, SUPPORTED_PLAN_VERSIONS } from './version'
 
-export { PLAN_VERSION }
+export { PLAN_VERSION, SUPPORTED_PLAN_VERSIONS }
 
 export const NonEmptySchema = z.string().min(1)
 
@@ -37,6 +37,12 @@ const ChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('alter') }),
   z.strictObject({ kind: z.literal('rename'), from: NonEmptySchema }),
   z.strictObject({ kind: z.literal('drop'), reason: NonEmptySchema }),
+])
+
+/** An entry of a list in `createApp()` is added or named as already there; changing or removing one stays a person's. */
+const EntryChangeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('existing') }),
+  z.strictObject({ kind: z.literal('add') }),
 ])
 
 const DataMigrationSchema = z.discriminatedUnion('kind', [
@@ -238,6 +244,24 @@ export const PlanSideEffectSchema = z.strictObject({
   description: NonEmptySchema,
 })
 
+/** A file's stem and the binding it is imported under, which is spliced into its path: no separator, no extension. */
+const EntryNameSchema = z.string().regex(/^[A-Za-z_$][\w$]*$/u, { message: 'must be an identifier, the stem of its file' })
+
+/** A provider class at `app/Providers/<className>.ts`, a default export, in the `providers` of `createApp()` (RFC 0040 §5). */
+export const PlanProviderSchema = z.strictObject({
+  id: IdSchema,
+  change: EntryChangeSchema,
+  className: EntryNameSchema,
+  purpose: NonEmptySchema,
+})
+
+/** A config definition `config/<name>.ts` default-exports, bound as `name` in the `config` of `createApp()` (RFC 0040 §5). */
+export const PlanConfigSchema = z.strictObject({
+  id: IdSchema,
+  change: EntryChangeSchema,
+  name: EntryNameSchema,
+})
+
 export const PLAN_FLOW_NODE_KINDS = ['actor', 'page', 'route', 'action', 'job', 'store', 'external', 'decision'] as const
 
 /**
@@ -336,9 +360,13 @@ export const PlanQuestionSchema = z.strictObject({
   affects: z.array(IdSchema),
 })
 
+function absentWhenEmpty<T>(items: T[] | undefined): T[] | undefined {
+  return items !== undefined && items.length > 0 ? items : undefined
+}
+
 // Sections default to [], so parsing normalizes an omitted section and an empty one to the same plan.
 const draftShape = {
-  planVersion: z.literal(PLAN_VERSION),
+  planVersion: z.union([z.literal(1), z.literal(PLAN_VERSION)]),
   title: NonEmptySchema,
   summary: NonEmptySchema,
   scope: z.strictObject({ goals: z.array(z.string()), nonGoals: z.array(z.string()) }),
@@ -352,6 +380,9 @@ const draftShape = {
   resources: z.array(PlanResourceSchema).default([]),
   policies: z.array(PlanPolicySchema).default([]),
   sideEffects: z.array(PlanSideEffectSchema).default([]),
+  // Absent when empty, not defaulted: a default would add `[]` to every version 1 plan and rename each one its hash names.
+  providers: z.array(PlanProviderSchema).optional().transform(absentWhenEmpty),
+  config: z.array(PlanConfigSchema).optional().transform(absentWhenEmpty),
   flows: z.array(PlanFlowSchema).default([]),
   locale: LocaleSchema,
   commands: z.array(PlanCommandSchema).default([]),
@@ -359,15 +390,23 @@ const draftShape = {
   hints: z.array(z.string()).default([]),
 }
 
+/** The sections a version 1 plan cannot hold, since a CLI that reads only version 1 refuses them. */
+function holdsSectionsOfItsVersion(plan: { planVersion: number; providers?: unknown; config?: unknown }, context: z.core.$RefinementCtx): void {
+  if (plan.planVersion >= ENTRY_SECTIONS_VERSION) return
+  for (const key of ['providers', 'config'] as const) {
+    if (plan[key] !== undefined) context.addIssue({ code: 'custom', path: [key], message: `needs planVersion ${ENTRY_SECTIONS_VERSION}` })
+  }
+}
+
 /** What a producer emits. `baseline` is absent: Guren stamps it, a model never does. */
-export const PlanDraftSchema = z.strictObject(draftShape)
+export const PlanDraftSchema = z.strictObject(draftShape).superRefine(holdsSectionsOfItsVersion)
 
 export const PlanBaselineSchema = z.strictObject({
   rev: NonEmptySchema,
   contextHash: z.record(z.string(), z.string()),
 })
 
-export const PlanSchema = z.strictObject({ ...draftShape, baseline: PlanBaselineSchema })
+export const PlanSchema = z.strictObject({ ...draftShape, baseline: PlanBaselineSchema }).superRefine(holdsSectionsOfItsVersion)
 
 export type PlanDraft = z.infer<typeof PlanDraftSchema>
 export type Plan = z.infer<typeof PlanSchema>
@@ -382,6 +421,8 @@ export type PlanView = z.infer<typeof PlanViewSchema>
 export type PlanResource = z.infer<typeof PlanResourceSchema>
 export type PlanPolicy = z.infer<typeof PlanPolicySchema>
 export type PlanSideEffect = z.infer<typeof PlanSideEffectSchema>
+export type PlanProvider = z.infer<typeof PlanProviderSchema>
+export type PlanConfig = z.infer<typeof PlanConfigSchema>
 export type PlanFlow = z.infer<typeof PlanFlowSchema>
 export type PlanFlowNode = z.infer<typeof PlanFlowNodeSchema>
 export type PlanFlowEdge = z.infer<typeof PlanFlowEdgeSchema>
@@ -408,6 +449,8 @@ export type PlanElementSection =
   | 'resources'
   | 'policies'
   | 'sideEffects'
+  | 'providers'
+  | 'config'
   | 'flows'
   | 'commands'
   | 'tasks'
@@ -455,6 +498,8 @@ export function listPlanElementEntries(plan: PlanDraft): PlanElementEntry[] {
   push('resources', plan.resources)
   push('policies', plan.policies)
   push('sideEffects', plan.sideEffects)
+  push('providers', plan.providers ?? [])
+  push('config', plan.config ?? [])
   push('flows', plan.flows)
   push('commands', plan.commands)
   for (const task of plan.tasks) {

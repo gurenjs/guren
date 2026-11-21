@@ -98,6 +98,9 @@ function everyBranch(): Loose[] {
   plan[UNDECLARED] = { nested: true }
   plan.models[0][UNDECLARED] = 'unread'
   plan.tasks[0].acceptance[0].alreadyHolds = true
+  plan.planVersion = 2
+  plan.providers = [{ id: 'provider.jobs', change: { kind: 'add' }, className: 'JobsProvider', purpose: 'Registers the queue jobs.' }]
+  plan.config = [{ id: 'config.queue', change: { kind: 'add' }, name: 'queue' }]
   plan.flows = [
     {
       id: 'flow.comment',

@@ -5,10 +5,10 @@
  * could carry a list the reader does not see, or an added import of a name the base reads.
  */
 
-import type { ArrayExpression, CallExpression, File, ObjectExpression, ObjectProperty, Statement } from '@babel/types'
+import type { ArrayExpression, File, ObjectExpression, ObjectProperty, Statement } from '@babel/types'
 
-import { hidesKeys } from '../app-entry'
-import { canonicalSyntax, memberKeyName, referencedIdentifiers, walk } from '../ast-walk'
+import { frameworkCreateAppOptions, spellsEntryLists } from '../app-entry'
+import { canonicalSyntax, referencedIdentifiers } from '../ast-walk'
 import { parseSourceFile } from '../parse-cache'
 
 export const APP_ENTRY_LISTS = ['providers', 'config'] as const
@@ -21,65 +21,27 @@ export interface AppEntryAddition {
   name: string
 }
 
-const FACTORY_PACKAGES = new Set(['@guren/core', '@guren/server'])
-
-/** Whether the module binds `createApp` to the framework's factory, by a value import of that name. */
-function importsFactory(ast: File): boolean {
-  return ast.program.body.some((node) => node.type === 'ImportDeclaration' && node.importKind !== 'type' && FACTORY_PACKAGES.has(node.source.value)
-    && node.specifiers.some((specifier) => specifier.type === 'ImportSpecifier' && specifier.importKind !== 'type' && specifier.local.name === 'createApp'
-      && (specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value) === 'createApp'))
-}
-
-/** The call a top-level statement makes directly: `const app = createApp(…)`, `export default createApp(…)`, or a bare call. */
-function topLevelCall(statement: Statement): CallExpression | undefined {
-  const node = statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportDefaultDeclaration' ? statement.declaration : statement
-  if (!node) return undefined
-  if (node.type === 'CallExpression') return node
-  if (node.type === 'ExpressionStatement' && node.expression.type === 'CallExpression') return node.expression
-  if (node.type === 'VariableDeclaration' && node.declarations.length === 1) {
-    const init = node.declarations[0]!.init
-    return init?.type === 'CallExpression' ? init : undefined
-  }
-  return undefined
-}
-
-/**
- * The `createApp()` call's options object, when the file holds exactly one such call, at its top level where no
- * binding can shadow the framework's import, with an object literal.
- */
-function createAppOptions(ast: File): ObjectExpression | undefined {
-  if (!importsFactory(ast)) return undefined
-  let calls = 0
-  walk(ast.program, (node) => {
-    if (node.type !== 'CallExpression') return
-    const call = node as unknown as CallExpression
-    if (call.callee.type === 'Identifier' && call.callee.name === 'createApp') calls += 1
-  })
-  if (calls !== 1) return undefined
-  const call = ast.program.body.map(topLevelCall).find((entry) => entry?.callee.type === 'Identifier' && entry.callee.name === 'createApp')
-  const [first] = call?.arguments ?? []
-  return call?.arguments.length === 1 && first?.type === 'ObjectExpression' ? first : undefined
-}
-
-/**
- * Whether the literal spells each list only as a property the reader sees: a spread or a computed key may carry one,
- * `__proto__` sets a prototype `createApp()` reads a list through, and a method or accessor may be keyed by a list.
- */
-function listsReadable(options: ObjectExpression): boolean {
-  if (hidesKeys(options)) return false
-  return options.properties.every((property) => {
-    if (property.type === 'SpreadElement') return false
-    const name = memberKeyName(property)
-    return name !== '__proto__' && (property.type === 'ObjectProperty' || !APP_ENTRY_LISTS.includes(name as AppEntryList))
-  })
-}
-
 function listProperty(options: ObjectExpression, list: AppEntryList): ObjectProperty | undefined {
   const matches = options.properties.filter((property): property is ObjectProperty => {
     if (property.type !== 'ObjectProperty' || property.computed) return false
     return (property.key.type === 'Identifier' && property.key.name === list) || (property.key.type === 'StringLiteral' && property.key.value === list)
   })
   return matches.length === 1 ? matches[0] : undefined
+}
+
+/**
+ * The identifiers `list` holds in the entry's `createApp()` literal, in order; `undefined` where the literal is not
+ * the one {@link appEntryAdditions} reads or the list holds anything else. A name twice is two registrations.
+ */
+export function appEntryListNames(source: string, path: string, list: AppEntryList): string[] | undefined {
+  const ast = parseSourceFile(source, path)
+  const options = ast ? frameworkCreateAppOptions(ast.program) : undefined
+  if (!options || !spellsEntryLists(options)) return undefined
+  const property = listProperty(options, list)
+  if (!property) return []
+  if (property.value.type !== 'ArrayExpression') return undefined
+  const names = property.value.elements.map((element) => (element?.type === 'Identifier' ? element.name : undefined))
+  return names.every((name): name is string => name !== undefined) ? names : undefined
 }
 
 /** The value bindings the file imports: a type import binds no name a list can hold. */
@@ -98,8 +60,8 @@ function importLocals(ast: File): Set<string> {
 export function appEntryAdditions(base: string, head: string, path: string): AppEntryAddition[] | undefined {
   const [before, after] = [parseSourceFile(base, path), parseSourceFile(head, path)]
   if (!before || !after) return undefined
-  const [baseOptions, headOptions] = [createAppOptions(before), createAppOptions(after)]
-  if (!baseOptions || !headOptions || !listsReadable(baseOptions) || !listsReadable(headOptions)) return undefined
+  const [baseOptions, headOptions] = [frameworkCreateAppOptions(before.program), frameworkCreateAppOptions(after.program)]
+  if (!baseOptions || !headOptions || !spellsEntryLists(baseOptions) || !spellsEntryLists(headOptions)) return undefined
   const additions: AppEntryAddition[] = []
   for (const list of APP_ENTRY_LISTS) {
     const [old, now] = [listProperty(baseOptions, list), listProperty(headOptions, list)]

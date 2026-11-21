@@ -20,7 +20,7 @@ import { validatorFieldProperties } from '../plan/field-status'
 import { readPolicyAbilities } from '../plan/policy-abilities'
 import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
 import { plannedSqlDefault, planScaffoldMounts, planScaffoldOutput, sqlNameOf, type PlanScaffoldApp } from '../plan/scaffold'
-import { MODELS_DIR, PROVIDERS_DIR } from '../discovery'
+import { CONFIG_DIR, MODELS_DIR, PROVIDERS_DIR } from '../discovery'
 import { defaultImportBinding } from '../patch-helpers'
 import { DIALECT_BARRELS, DRIZZLE_CORE_SUBPATHS } from '../drizzle-specifiers'
 import { isAutoIncrementPrimaryKey, migrationSqlType } from '../schema-columns'
@@ -32,7 +32,7 @@ import { parseSchemaSource, type SchemaDialect, type SchemaTable } from '../sche
 import { registeredBefore, routePathsMayOverlap } from '../test-requests'
 import { importSpecifier } from '../utils'
 import { composeAppProviderRegistration } from '../provider-registrar'
-import type { AppEntryList } from './app-entry'
+import { appEntryListNames, type AppEntryList } from './app-entry'
 import { FACT_CLASSES } from './fact-classes'
 import type { ChangeFact } from './lane'
 import { sameRecordPart, type RouteSecurityRecord } from './security-records'
@@ -329,7 +329,7 @@ export async function applyPlanDeclarations(
   for (const fact of facts) {
     const subject = subjects.get(fact)
     const declaredBy = subject?.kind === 'table-residue' || subject?.kind === 'routes-entry' ? undefined
-      : subject?.kind === 'app-entry' ? registered.get(subject.name)
+      : subject?.kind === 'app-entry' ? registered.get(entryKey(subject.list, subject.name))
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
       : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : undefined)
       : subject?.kind === 'agent' ? (subject.base === undefined ? await declaredAgentOf(subject.route, facts, subjects, plans, readHead) : undefined)
@@ -638,12 +638,64 @@ async function holdsDeclared(plan: PlanDraft, declared: DeclaredFile, path: stri
   return contents !== undefined && passesCheck(declared, ast, path, contents)
 }
 
+const entryKey = (list: AppEntryList, name: string): string => `${list}\u0000${name}`
+
+/**
+ * The entries the application entry gains that a plan declares, keyed by {@link entryKey}: the providers a scaffold
+ * step implies, as {@link impliedRegistrations} reads them, and else each entry a `providers` or `config` element adds.
+ */
+async function declaredRegistrations(
+  facts: readonly ChangeFact[],
+  subjects: ReadonlyMap<ChangeFact, DeclarationSubject>,
+  owned: ReadonlyArray<{ open: OpenPlan; files: Map<string, DeclaredFile>; paths: Set<string> }>,
+  readHead: (path: string) => Promise<string | null>,
+  readBase: (path: string) => Promise<string | null>,
+): Promise<Map<string, string>> {
+  const implied = await impliedRegistrations(facts, subjects, owned, readHead, readBase)
+  const added = facts.map((fact) => subjects.get(fact)).filter((subject): subject is Extract<DeclarationSubject, { kind: 'app-entry' }> => subject?.kind === 'app-entry')
+  for (const subject of added) {
+    const key = entryKey(subject.list, subject.name)
+    if (implied.has(key)) continue
+    const declaredBy = await declaredEntry(subject, owned, readHead)
+    if (declaredBy) implied.set(key, declaredBy)
+  }
+  return implied
+}
+
+/**
+ * An entry one open plan's `providers` or `config` element adds (RFC 0040 §5): the head binds the entry by a real
+ * default import of `app/Providers/<className>` or `config/<name>`, and nothing but that file answers the import.
+ * The file itself is the plan's to name, not to write, so it stays a fact of its own.
+ */
+async function declaredEntry(
+  subject: Extract<DeclarationSubject, { kind: 'app-entry' }>,
+  owned: ReadonlyArray<{ open: OpenPlan }>,
+  readHead: (path: string) => Promise<string | null>,
+): Promise<string | undefined> {
+  const head = await readHead(subject.path)
+  if (head === null) return undefined
+  // One element declares one registration: a name the list holds twice, or held before the change, is a second one.
+  if (appEntryListNames(head, subject.path, subject.list)?.filter((name) => name === subject.name).length !== 1) return undefined
+  const claims = owned.flatMap(({ open }) => {
+    const elements = subject.list === 'providers'
+      ? (open.plan.providers ?? []).map((element) => ({ id: element.id, change: element.change, target: `${PROVIDERS_DIR}/${element.className}` }))
+      : (open.plan.config ?? []).map((element) => ({ id: element.id, change: element.change, target: `${CONFIG_DIR}/${element.name}` }))
+    return elements.filter((element) => element.change.kind === 'add' && defaultImportBinding(head, subject.path, element.target) === subject.name)
+      .map((element) => ({ open, element }))
+  })
+  if (claims.length !== 1) return undefined
+  const { open, element } = claims[0]!
+  // A twin of another extension may answer the import in the file's place, as it does for a declared file.
+  const present = await Promise.all(TWIN_EXTENSIONS.map(async (extension) => (await readHead(`${element.target}${extension}`)) !== null))
+  return present.filter(Boolean).length === 1 ? `${open.file}#${element.id}` : undefined
+}
+
 /**
  * The providers the application entry gains that a plan implies, by name: the head is `composeAppProviderRegistration()`
  * of the base for one scaffold step's providers, in its order, byte for byte, and each provider and the policy it
  * registers hold what the plan declares. A provider runs at boot, so one the plan does not determine stays.
  */
-async function declaredRegistrations(
+async function impliedRegistrations(
   facts: readonly ChangeFact[],
   subjects: ReadonlyMap<ChangeFact, DeclarationSubject>,
   owned: ReadonlyArray<{ open: OpenPlan; files: Map<string, DeclaredFile>; paths: Set<string> }>,
@@ -681,7 +733,7 @@ async function declaredRegistrations(
       const file = files.get(path)
       if (!file || !(await holdsDeclared(open.plan, file, path, readHead))) return declared
     }
-    matched.set(added[providers.indexOf(provider)]!.name, `${open.file}#${policy.id}`)
+    matched.set(entryKey('providers', added[providers.indexOf(provider)]!.name), `${open.file}#${policy.id}`)
   }
   return matched
 }

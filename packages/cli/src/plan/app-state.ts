@@ -12,6 +12,9 @@
 import { readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
+  CONFIG_DIR,
+  discoverEntryFiles,
+  PROVIDERS_DIR,
   discoverPolicyFiles,
   discoverResourceFiles,
   isDefinitelyAbsent,
@@ -119,6 +122,10 @@ export interface PlanAppState {
   actions: PlanAppNames
   resources: PlanAppNames
   policies: PlanAppNames
+  /** Provider classes, by the file `app/Providers/<className>.ts` that holds each. */
+  providers: PlanAppNames
+  /** Config definitions, by the file `config/<name>.ts` that holds each. */
+  config: PlanAppNames
   /**
    * Inertia page ids, e.g. `posts/Show`. Every page sits in the project's own
    * `resources/js/pages`, a module's under its name, so the id carries the scope and
@@ -160,11 +167,13 @@ export async function loadPlanAppState(
 
   // One cache keeps the shared graph readers and Impact scans on the same source readings.
   const cache = new ParseCache()
-  const [apiOnly, models, resources, policies, pages, validators, routes, controllers, tables] = await Promise.all([
+  const [apiOnly, models, resources, policies, providers, config, pages, validators, routes, controllers, tables] = await Promise.all([
     isConfirmedApiOnlyApp(root).catch(() => false),
     modelSection(root, cache),
     classSection(root, discoverResourceFiles),
     classSection(root, discoverPolicyFiles),
+    classSection(root, (appRoot) => discoverEntryFiles(appRoot, PROVIDERS_DIR)),
+    classSection(root, (appRoot) => discoverEntryFiles(appRoot, CONFIG_DIR)),
     pageSection(root, cache),
     validatorSections(root, roots, cache),
     readRoutesFileGraph(root, options.routesFile),
@@ -178,6 +187,8 @@ export async function loadPlanAppState(
     actions: controllers.actions,
     resources,
     policies,
+    providers,
+    config,
     pages,
     validators: validators.names,
     routes: isUnreadable(routes.routes)

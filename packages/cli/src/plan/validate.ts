@@ -30,6 +30,7 @@ import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
 import { planCommandTargets, type PlanCommandTargetHit } from './command-targets'
 import { elementsAtPlannedEnd, judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
+import { policyProviderName } from './scaffold-http'
 import { planMayPassNow, routeAnswersBefore } from './scaffold-tests'
 import { derivePlanTasks, type PlanTaskDerivation } from './tasks'
 import {
@@ -128,6 +129,7 @@ export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResul
   checkCommandTargets(plan, app, results)
   checkInternalReferences(plan, index, results)
   checkChangeConsistency(plan, results)
+  checkEntryNames(plan, results)
   checkAgainstApp(plan, app, results)
   checkInflectedNames(plan, results)
   checkRouteAuthorization(plan, index, results)
@@ -445,6 +447,32 @@ function checkChangeConsistency(plan: PlanDraft, results: PlanCheckResult[]): vo
     for (const action of controller.actions) {
       if (allowed.includes(action.change.kind)) continue
       report(action.id, 'actions', 'action', action.change.kind, controller.change.kind, `controller "${controller.className}"`, allowed)
+    }
+  }
+}
+
+/**
+ * The application entry's lists (RFC 0040 §5): one element per name, since two would declare one entry, and no
+ * provider an added policy implies, which the policy's scaffold writes and registers and the policy element declares.
+ */
+function checkEntryNames(plan: PlanDraft, results: PlanCheckResult[]): void {
+  const implied = new Map(plan.policies.filter((policy) => policy.change.kind === 'add').map((policy) => [policyProviderName(policy), policy.id]))
+  const lists = [
+    { section: 'providers' as const, noun: 'provider class', entries: (plan.providers ?? []).map((entry) => ({ id: entry.id, name: entry.className })) },
+    { section: 'config' as const, noun: 'config definition', entries: (plan.config ?? []).map((entry) => ({ id: entry.id, name: entry.name })) },
+  ]
+  for (const { section, noun, entries } of lists) {
+    const seen = new Map<string, string>()
+    for (const entry of entries) {
+      const first = seen.get(entry.name)
+      if (first !== undefined) {
+        results.push(finding('plan:duplicate-entry', 'fail', `The ${noun} "${entry.name}" is declared by "${first}" and "${entry.id}"; one element declares one entry.`, { elementId: entry.id, section }))
+      } else {
+        seen.set(entry.name, entry.id)
+      }
+      const policy = section === 'providers' ? implied.get(entry.name) : undefined
+      if (policy === undefined) continue
+      results.push(finding('plan:provider-implied', 'fail', `The provider "${entry.name}" is the one the policy "${policy}" implies, which its scaffold writes and registers; leave it to the policy element.`, { elementId: entry.id, section }))
     }
   }
 }

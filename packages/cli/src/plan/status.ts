@@ -7,13 +7,14 @@
  */
 
 import { CONTRACT_SEGMENTS } from '../contract-segments'
-import { ROUTES_DIR } from '../discovery'
+import { CONFIG_DIR, PROVIDERS_DIR, ROUTES_DIR } from '../discovery'
 import type { SchemaColumnDefault, SchemaConstraint } from '../schema-parser'
 import type { RuntimeSchemaColumn, SourcedSchemaTable } from '../schema-runtime'
 import type {
   PlanAppActionDetail,
   PlanAppClassDetail,
   PlanAppDetail,
+  PlanAppEntryLists,
   PlanAppMount,
   PlanAppMounts,
   PlanAppPolicyDetail,
@@ -32,11 +33,13 @@ import {
   type PlanChange,
   type PlanColumn,
   type PlanCommand,
+  type PlanConfig,
   type PlanController,
   type PlanDraft,
   type PlanElementSection,
   type PlanModel,
   type PlanPolicy,
+  type PlanProvider,
   type PlanResource,
   type PlanRoute,
   type PlanSideEffect,
@@ -131,6 +134,8 @@ export const PLAN_STATUS_SECTIONS = [
   'resources',
   'policies',
   'sideEffects',
+  'providers',
+  'config',
   'commands',
 ] as const satisfies readonly PlanElementSection[]
 
@@ -333,6 +338,8 @@ const NOUNS = {
   validators: { plural: 'validators', singular: 'validator' },
   resources: { plural: 'resources', singular: 'resource' },
   policies: { plural: 'policies', singular: 'policy' },
+  providers: { plural: 'providers', singular: 'provider' },
+  config: { plural: 'config definitions', singular: 'config definition' },
 } as const satisfies Record<string, PlanNoun>
 
 function inSection(section: PlanAppNames, name: string, plural: string): Existence {
@@ -474,6 +481,8 @@ function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit, deri
     ...plan.resources.map((resource) => context.resource(resource)),
     ...plan.policies.map((policy) => context.policy(policy)),
     ...plan.sideEffects.map((effect) => context.sideEffect(effect)),
+    ...(plan.providers ?? []).map((provider) => context.provider(provider)),
+    ...(plan.config ?? []).map((entry) => context.config(entry)),
     ...plan.commands.map((command) => context.command(command)),
   ]
   return { elements, summary: summarize(elements) }
@@ -1262,6 +1271,36 @@ class StatusContext {
       // Removing the last use is what unwires it, and a use sits in the file that makes it.
       mount: { verdict: (found) => this.sideEffectMount(effect, found), files: (found) => found.usedIn },
     })
+  }
+
+  /** Wired once the entry's `createApp()` lists the default export of `app/Providers/<className>`. */
+  provider(provider: PlanProvider): PlanElementStatus {
+    return this.named('providers', { id: provider.id, change: provider.change, name: provider.className }, this.app.providers, NOUNS.providers, this.detail?.providers, {
+      mount: { verdict: () => this.entryMount('providers', `${PROVIDERS_DIR}/${provider.className}`), files: () => this.entryFiles() },
+    })
+  }
+
+  /** Wired once the entry's `createApp()` lists the default export of `config/<name>`. */
+  config(entry: PlanConfig): PlanElementStatus {
+    return this.named('config', { id: entry.id, change: entry.change, name: entry.name }, this.app.config, NOUNS.config, this.detail?.config, {
+      mount: { verdict: () => this.entryMount('config', `${CONFIG_DIR}/${entry.name}`), files: () => this.entryFiles() },
+    })
+  }
+
+  private entryMount(list: 'providers' | 'config', file: string): PlanAppMount {
+    const lists: PlanAppEntryLists | PlanAppUnreadable = this.detail?.entryLists ?? NO_DETAIL
+    if ('unreadable' in lists) return { unconfirmed: lists.unreadable }
+    const entries = lists[list]
+    if (!entries) return { unconfirmed: `${lists.file} gives createApp() a ${list} that is not an array literal` }
+    if (entries.files.includes(file)) return 'mounted'
+    if (entries.untraced) return { unconfirmed: `${lists.file} lists an entry in createApp()'s ${list} that is no default import of a file` }
+    return { unconfirmed: `${lists.file} does not list it in createApp()'s ${list}` }
+  }
+
+  /** Removing the entry is what unwires it, and the entry sits in the application entry. */
+  private entryFiles(): string[] {
+    const lists = this.detail?.entryLists
+    return lists && !('unreadable' in lists) ? [lists.file] : []
   }
 
   /**

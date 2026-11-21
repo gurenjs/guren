@@ -93,13 +93,14 @@ export function behaviourCanReach(plan: PlanDraft | Plan): Set<string> {
 
 export interface PlanElementWithoutBehaviour {
   id: string
-  section: 'columns' | 'sideEffects' | 'commands'
+  section: 'columns' | 'sideEffects' | 'commands' | 'providers' | 'config'
 }
 
 /**
  * The elements an approval accepts as complete on their step's verified run alone (RFC 0030 §4):
  * outside {@link behaviourCanReach}, and of a kind no planned property lifts. A command, an added or
- * altered side effect, and an altered column; an added or renamed column is read by its properties.
+ * altered side effect, an altered column, and an added provider or config entry (RFC 0040 §5), whose
+ * registration is its mount; an added or renamed column is read by its properties.
  * Pure over the plan, so an added column none of whose properties reads stays a case for a waiver.
  */
 export function planElementsWithoutBehaviour(plan: PlanDraft | Plan): PlanElementWithoutBehaviour[] {
@@ -110,6 +111,7 @@ export function planElementsWithoutBehaviour(plan: PlanDraft | Plan): PlanElemen
     if (section === 'commands') return [{ id, section }]
     if (section === 'sideEffects' && (change === 'add' || change === 'alter')) return [{ id, section }]
     if (section === 'columns' && change === 'alter') return [{ id, section }]
+    if ((section === 'providers' || section === 'config') && change === 'add') return [{ id, section }]
     return []
   })
 }
@@ -118,6 +120,8 @@ const WITHOUT_BEHAVIOUR_NOUNS: Record<PlanElementWithoutBehaviour['section'], st
   commands: 'commands',
   sideEffects: 'side effects',
   columns: 'altered columns',
+  providers: 'providers',
+  config: 'config definitions',
 }
 
 /** `<kind>: <ids>` per section with any, so a long list still reads at a glance; `plan:approve` and `plan:render` print it. */

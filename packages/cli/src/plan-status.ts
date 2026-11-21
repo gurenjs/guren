@@ -86,6 +86,8 @@ const SECTION_TITLES: Record<(typeof PLAN_STATUS_SECTIONS)[number], string> = {
   resources: 'Resources',
   policies: 'Policies',
   sideEffects: 'Side effects',
+  providers: 'Providers',
+  config: 'Config',
   commands: 'Commands',
 }
 
