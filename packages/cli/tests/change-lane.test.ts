@@ -837,6 +837,27 @@ export class CommentPolicy extends Policy {
     ])
   })
 
+  test('should lower the provider a planned policy implies and the entry edit registering it, as plan:scaffold writes them', async () => {
+    // Taken from a real run: the comments plan approved, then plan:scaffold on its scaffold step.
+    const fixture = (name: string): string => readFileSync(join(import.meta.dir, 'fixtures/change-providers', `${name}.ts.txt`), 'utf8')
+    const { repo } = await planRepo()
+    const base = await commit(repo, { 'src/app.ts': fixture('app.base') })
+    const written = { 'app/Providers/CommentPolicyProvider.ts': fixture('CommentPolicyProvider'), 'app/Policies/CommentPolicy.ts': fixture('CommentPolicy') }
+    const entryFacts = (report: ChangeLaneReport) => report.facts.filter((fact) => fact.files.includes('src/app.ts')).map((fact) => [fact.code, fact.lane, fact.target, fact.declaredBy])
+    const head = await commit(repo, { ...written, 'src/app.ts': fixture('app.head') })
+
+    const report = await laneOf(repo, base, head)
+    expect(entryFacts(report)).toEqual([['provider-added', 'low', 'CommentPolicyProvider', 'docs/plans/comments/plan.json#policy.comment']])
+    expect(factAt(report, 'file-added')).toMatchObject({ lane: 'low', files: ['app/Providers/CommentPolicyProvider.ts'] })
+
+    // The provider runs at boot, so one the scaffold did not write keeps its registration with a person.
+    const edited = await laneOf(repo, base, await commit(repo, { 'app/Providers/CommentPolicyProvider.ts': `${fixture('CommentPolicyProvider')}\nconsole.log('booted')\n` }))
+    expect(entryFacts(edited)).toEqual([['provider-added', 'medium', 'CommentPolicyProvider', undefined]])
+
+    const used = await laneOf(repo, base, await commit(repo, { ...written, 'src/app.ts': fixture('app.head').replace('export default app', "app.use('*', async (_c, next) => next())\n\nexport default app") }))
+    expect(entryFacts(used)).toEqual([['source-edited', 'medium', undefined, undefined]])
+  })
+
   test('should declare nothing from a plan nobody approved', async () => {
     const { repo, base } = await planRepo(false)
     const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL, 'db/schema.ts': SCHEMA }))
