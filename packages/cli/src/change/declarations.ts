@@ -2,7 +2,8 @@
  * The declaration matcher of RFC 0040 §3: a fact takes its declarable lane only when an approved, open plan
  * declares it. Matched so far: an added file of added elements and an added table of an added model, both
  * against what `plan:scaffold` writes (a declared table taking its own residue with it), and an added migration
- * that only creates such tables; an added route, and the routes entry edited by `--mount` alone. A subject
+ * that only creates such tables; an added route, the routes entry edited by `--mount` alone, and a provider a planned
+ * policy implies, registered in the application entry as `plan:scaffold` registers it. A subject
  * two open plans claim, or one the plan does not determine, stays.
  */
 
@@ -22,13 +23,15 @@ import { plannedSqlDefault, planScaffoldMounts, planScaffoldOutput, sqlNameOf, t
 import { MODELS_DIR } from '../discovery'
 import { DIALECT_BARRELS, DRIZZLE_CORE_SUBPATHS } from '../drizzle-specifiers'
 import { isAutoIncrementPrimaryKey, migrationSqlType } from '../schema-columns'
-import { policyFilePath, providerFilePath, resourceFilePath, validatorFilePath } from '../plan/scaffold-http'
+import { policyFilePath, policyProviderName, providerFilePath, resourceFilePath, validatorFilePath } from '../plan/scaffold-http'
 import { asksPolicyOfRecord, controllerFilePath, plannedAgentMetadata, plannedRouteMiddleware, scaffoldRoutesFile, sideEffectFilePath } from '../plan/scaffold-controller'
 import { derivePlanTasks, type PlanDerivedStep } from '../plan/tasks'
 import { composeRouteRegistrarCall, findRouteRegistrar } from '../route-registrar'
 import { parseSchemaSource, type SchemaDialect, type SchemaTable } from '../schema-parser'
 import { registeredBefore, routePathsMayOverlap } from '../test-requests'
 import { importSpecifier } from '../utils'
+import { composeAppProviderRegistration } from '../provider-registrar'
+import type { AppEntryList } from './app-entry'
 import { FACT_CLASSES } from './fact-classes'
 import type { ChangeFact } from './lane'
 import { sameRecordPart, type RouteSecurityRecord } from './security-records'
@@ -48,6 +51,8 @@ export type DeclarationSubject =
   | { kind: 'agent'; route: RouteSecurityRecord; base?: RouteSecurityRecord }
   /** The routes entry, edited in place. */
   | { kind: 'routes-entry'; path: string }
+  /** An entry the application entry's `createApp()` list gains, with the import binding it and nothing else. */
+  | { kind: 'app-entry'; path: string; list: AppEntryList; name: string }
 
 /** Every route the head registers, in registration order, and those of them with no counterpart at the base. */
 export interface HeadRoutes {
@@ -319,9 +324,11 @@ export async function applyPlanDeclarations(
   // A lowered fact is a new object, so the subjects are keyed again by what the result holds.
   const resultSubjects = new Map<ChangeFact, DeclarationSubject>()
   const declaredTables = new Set<string>()
+  const registered = await declaredRegistrations(facts, subjects, owned, readHead, readBase)
   for (const fact of facts) {
     const subject = subjects.get(fact)
     const declaredBy = subject?.kind === 'table-residue' || subject?.kind === 'routes-entry' ? undefined
+      : subject?.kind === 'app-entry' ? registered.get(subject.name)
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
       : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : undefined)
       : subject?.kind === 'agent' ? (subject.base === undefined ? await declaredAgentOf(subject.route, facts, subjects, plans, readHead) : undefined)
@@ -614,13 +621,63 @@ async function declarationOf(
     return id ? `${open.file}#${id}` : undefined
   }
   const declared = files.get(subject.path)!
-  const text = await readHead(subject.path)
-  const ast = text === null ? null : parseSourceFile(text, subject.path)
+  return (await holdsDeclared(open.plan, declared, subject.path, readHead)) ? `${open.file}#${declared.elements.join(',')}` : undefined
+}
+
+/** Whether the head's file at `path` is what the plan declares there: its exports, and the check its kind takes. */
+async function holdsDeclared(plan: PlanDraft, declared: DeclaredFile, path: string, readHead: (path: string) => Promise<string | null>): Promise<boolean> {
+  const text = await readHead(path)
+  const ast = text === null ? null : parseSourceFile(text, path)
   const exports = ast ? declaredExports(ast) : undefined
-  if (!ast || !exports || !declared.exports.every((name) => exports.includes(name))) return undefined
-  const contents = declared.check.kind === 'routes' ? await routesFileAtHead(open.plan, declared.check.step, subject.path, readHead) : declared.contents
-  if (contents === undefined || !passesCheck(declared, ast, subject.path, contents)) return undefined
-  return `${open.file}#${declared.elements.join(',')}`
+  if (!ast || !exports || !declared.exports.every((name) => exports.includes(name))) return false
+  const contents = declared.check.kind === 'routes' ? await routesFileAtHead(plan, declared.check.step, path, readHead) : declared.contents
+  return contents !== undefined && passesCheck(declared, ast, path, contents)
+}
+
+/**
+ * The providers the application entry gains that a plan implies, by name: the head is `composeAppProviderRegistration()`
+ * of the base for one scaffold step's providers, in its order, byte for byte, and each provider and the policy it
+ * registers hold what the plan declares. A provider runs at boot, so one the plan does not determine stays.
+ */
+async function declaredRegistrations(
+  facts: readonly ChangeFact[],
+  subjects: ReadonlyMap<ChangeFact, DeclarationSubject>,
+  owned: ReadonlyArray<{ open: OpenPlan; files: Map<string, DeclaredFile>; paths: Set<string> }>,
+  readHead: (path: string) => Promise<string | null>,
+  readBase: (path: string) => Promise<string | null>,
+): Promise<Map<string, string>> {
+  const declared = new Map<string, string>()
+  const added = facts.map((fact) => subjects.get(fact)).filter((subject): subject is Extract<DeclarationSubject, { kind: 'app-entry' }> => subject?.kind === 'app-entry')
+  const [first] = added
+  if (!first || added.some((subject) => subject.list !== 'providers' || subject.path !== first.path)) return declared
+  const [base, head] = [await readBase(first.path), await readHead(first.path)]
+  if (base === null || head === null) return declared
+  const candidates = owned.flatMap(({ open, files }) => scaffoldSteps(open.plan).flatMap((step) => {
+    const { providers } = planScaffoldOutput(open.plan, step)
+    if (providers.length !== added.length) return []
+    let content = base
+    for (const provider of providers) {
+      const { wiring, content: patched } = composeAppProviderRegistration(content, first.path, provider)
+      if (!wiring.registered || !wiring.entry.modified || patched === undefined) return []
+      content = patched
+    }
+    return content === head ? [{ open, files, providers }] : []
+  }))
+  if (candidates.length !== 1) return declared
+  const { open, files, providers } = candidates[0]!
+  const matched = new Map<string, string>()
+  for (const provider of providers) {
+    const policy = open.plan.policies.find((entry) => policyProviderName(entry) === provider)
+    if (!policy) return declared
+    for (const path of [providerFilePath(policy), policyFilePath(policy)]) {
+      // Claimed by one plan alone, as a file is; a second plan's policy of that name is a question for a person.
+      if (owned.filter((entry) => entry.files.has(path) || entry.paths.has(path)).length !== 1) return declared
+      const file = files.get(path)
+      if (!file || !(await holdsDeclared(open.plan, file, path, readHead))) return declared
+    }
+    matched.set(provider, `${open.file}#${policy.id}`)
+  }
+  return matched
 }
 
 /**

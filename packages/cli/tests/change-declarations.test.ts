@@ -788,3 +788,45 @@ describe('applyPlanDeclarations on a scaffolded routes file', () => {
     expect((await judge(unbound, { 'app/Models/Content/Post.ts': POST_MODEL })).lane).toBe('medium')
   })
 })
+
+describe('applyPlanDeclarations on a provider registration', () => {
+  // Taken from a real run: the comments plan approved, then plan:scaffold on its scaffold step.
+  const fixture = (name: string): string => readFileSync(join(import.meta.dir, 'fixtures/change-providers', `${name}.ts.txt`), 'utf8')
+  const ENTRY = 'src/app.ts'
+  const PROVIDER = 'app/Providers/CommentPolicyProvider.ts'
+  const HEAD: Record<string, string> = { [ENTRY]: fixture('app.head'), [PROVIDER]: fixture('CommentPolicyProvider'), 'app/Policies/CommentPolicy.ts': fixture('CommentPolicy') }
+
+  function entryFacts(names: Array<['providers' | 'config', string]> = [['providers', 'CommentPolicyProvider']]): { facts: ChangeFact[]; subjects: Map<ChangeFact, DeclarationSubject> } {
+    const subjects = new Map<ChangeFact, DeclarationSubject>()
+    for (const [list, name] of names) {
+      subjects.set({ code: list === 'providers' ? 'provider-added' : 'config-added', lane: 'medium', target: name, files: [ENTRY], evidence: 'static', message: name }, { kind: 'app-entry', path: ENTRY, list, name })
+    }
+    return { facts: [...subjects.keys()], subjects }
+  }
+  const judge = (plans: OpenPlan[], head = HEAD, names?: Array<['providers' | 'config', string]>) => {
+    const { facts, subjects } = entryFacts(names)
+    return applyPlanDeclarations(facts, subjects, plans, async (path) => head[path] ?? null, async (path) => (path === ENTRY ? fixture('app.base') : null))
+  }
+  const lanes = (facts: ChangeFact[]) => facts.map((fact) => [fact.code, fact.lane, fact.declaredBy])
+
+  test('should declare the provider a planned policy implies, registered as plan:scaffold registers it', async () => {
+    expect(lanes(await judge([{ file: PLAN_FILE, plan: commentsPlan() }]))).toEqual([['provider-added', 'low', `${PLAN_FILE}#policy.comment`]])
+  })
+
+  test('should not declare a provider two open plans imply', async () => {
+    const plans = [{ file: PLAN_FILE, plan: commentsPlan() }, { file: 'docs/plans/moderation/plan.json', plan: commentsPlan() }]
+    expect(lanes(await judge(plans))).toEqual([['provider-added', 'medium', undefined]])
+  })
+
+  test('should not declare a provider registered beside an entry the scaffold does not write', async () => {
+    const head = { ...HEAD, [ENTRY]: HEAD[ENTRY]!.replace('routes: registerWebRoutes,', 'routes: registerWebRoutes,\n  config: [queue],').replace("import { createApp }", "import queue from '../config/queue.js'\nimport { createApp }") }
+    const result = await judge([{ file: PLAN_FILE, plan: commentsPlan() }], head, [['providers', 'CommentPolicyProvider'], ['config', 'queue']])
+    expect(lanes(result)).toEqual([['provider-added', 'medium', undefined], ['config-added', 'medium', undefined]])
+  })
+
+  test('should not declare a provider whose policy holds an ability the plan does not', async () => {
+    const head = { ...HEAD, 'app/Policies/CommentPolicy.ts': HEAD['app/Policies/CommentPolicy.ts']!.replace(/\}\n$/u, '\n  update(_user: AuthUser | null): boolean {\n    return true\n  }\n}\n') }
+    expect(head['app/Policies/CommentPolicy.ts']).toContain('update(')
+    expect(lanes(await judge([{ file: PLAN_FILE, plan: commentsPlan() }], head))).toEqual([['provider-added', 'medium', undefined]])
+  })
+})

@@ -1,0 +1,10 @@
+import { createApp } from '@guren/core'
+import { registerWebRoutes } from '../routes/web.js'
+import CommentPolicyProvider from '../app/Providers/CommentPolicyProvider.js'
+
+const app = createApp({
+  routes: registerWebRoutes,
+  providers: [CommentPolicyProvider],
+})
+
+export default app

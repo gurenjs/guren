@@ -27,6 +27,8 @@ import type { BaseRecordReading } from './base-record'
 import type { DeclarationSubject, OpenPlan } from './declarations'
 import type { ChangeAudits, HeadRecords } from './revision-audit'
 import { ROUTES_ENTRY_CANDIDATES } from '../route-registrar'
+import { APP_ENTRY_CANDIDATES } from '../provider-registrar'
+import { appEntryAdditions } from './app-entry'
 import { compareSecurityRecords, sameRecordPart, type RouteSecurityRecord, type SecurityRecords } from './security-records'
 
 export type { FactCode, Lane } from './fact-classes'
@@ -535,6 +537,19 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   for (const ambient of AMBIENT) {
     const entries = inApp.filter((entry) => !claimed.has(entry) && Object.values(sides(entry)).every(ambient.test))
     if (entries.length > 0) fact(entries, { code: 'ambient', lane: 'low', target: ambient.target, evidence: 'path', message: `${entries.length} ${entries.length === 1 ? 'file' : 'files'}: ${ambient.target}` })
+  }
+
+  // The application entry, as `plan:scaffold` resolves it: entries added to its two lists are facts of their own.
+  const appEntry = APP_ENTRY_CANDIDATES.find((path) => trees.head.has(path))
+  for (const entry of inApp) {
+    if (claimed.has(entry) || entry.status !== 'modified' || entry.path !== appEntry) continue
+    const [base, head] = [await reader.read('base', entry.path), await reader.read('head', entry.path)]
+    const additions = base === null || head === null ? undefined : appEntryAdditions(base, head, entry.path)
+    if (!additions || additions.length === 0) continue
+    for (const { list, name } of additions) {
+      const subject: DeclarationSubject = { kind: 'app-entry', path: entry.path, list, name }
+      fact([entry], { code: list === 'providers' ? 'provider-added' : 'config-added', lane: 'medium', target: name, evidence: 'static', message: `${entry.path}: ${name} added to the createApp() ${list}` }, subject)
+    }
   }
 
   // The entry `--mount` patches, as the loader picks it: the first candidate the head has, edited in place.
