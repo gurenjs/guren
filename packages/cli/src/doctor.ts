@@ -65,6 +65,14 @@ import {
   type TokenSheetPlan,
 } from './guren-css'
 
+import {
+  addHtmlHandling,
+  CF_CONFIG_FILE,
+  planAppHtmlHandling,
+  STAGED_ASSETS_DIRECTORY,
+  WRANGLER_CONFIG_FILE,
+} from './wrangler-html-handling'
+
 export type { DoctorStatus } from './doctor-report'
 export { DOCTOR_RECOMMENDED_COMMANDS, DOCTOR_STATUSES, summarizeDoctorReport } from './doctor-report'
 
@@ -1498,6 +1506,95 @@ async function createGurenUiComponentsAutofix(_context: DoctorRuleContext, check
   }
 }
 
+const HTML_HANDLING_KEY = 'cloudflare-html-handling'
+const HTML_HANDLING_TITLE = 'Cloudflare HTML Handling'
+const HTML_HANDLING_CONSEQUENCE = 'a document staged from public/ answers at its extensionless path, where the /*.html rule in '
+  + '_headers does not reach it and where it shadows a route of that name'
+
+async function detectCloudflareHtmlHandling(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const check = (status: DoctorStatus, message: string, options?: Parameters<typeof createCheck>[4]): DoctorCheck =>
+    createCheck(HTML_HANDLING_KEY, HTML_HANDLING_TITLE, status, message, options)
+  const manual = (message: string, steps: string): DoctorCheck => check('warn', message, { fix: steps, manualFix: steps })
+  const add = `Add "html_handling": "none" to the "assets" object in ${WRANGLER_CONFIG_FILE}.`
+
+  const plan = await planAppHtmlHandling(context.cwd)
+  if (plan.kind === 'no-config') {
+    return check('pass', `No ${WRANGLER_CONFIG_FILE}; the app is not deployed through Wrangler.`)
+  }
+  if (plan.kind === 'cf-backend') {
+    return check('pass', `The app deploys through ${CF_CONFIG_FILE}, where the build sets "html_handling": "none"; ${WRANGLER_CONFIG_FILE} is not read.`)
+  }
+  if (plan.kind === 'unreadable') {
+    return manual(
+      `${WRANGLER_CONFIG_FILE} could not be read, so its "html_handling" was not checked: ${plan.reason}`,
+      `Make ${WRANGLER_CONFIG_FILE} valid JSON with comments.`,
+    )
+  }
+
+  const environments = plan.environments.map((name) => `env.${name}`).join(', ')
+  const overridden = environments === ''
+    ? undefined
+    : {
+        note: `The "assets" under ${environments} replace the root object in a deploy to that environment, and do not set "html_handling": "none".`,
+        step: `Add "html_handling": "none" to the "assets" under ${environments} by hand; \`guren upgrade\` edits the root object only.`,
+      }
+  const withOverride = (text: string, extra: string | undefined): string => (extra ? `${text} ${extra}` : text)
+
+  switch (plan.kind) {
+    case 'no-assets':
+    case 'set': {
+      const root = plan.kind === 'set'
+        ? `${WRANGLER_CONFIG_FILE} sets "html_handling": "none" under "assets".`
+        : `${WRANGLER_CONFIG_FILE} declares no "assets" at its root, so that worker serves no static files.`
+      return overridden ? manual(`${root} ${overridden.note}`, overridden.step) : check('pass', root)
+    }
+    case 'other':
+      return manual(
+        withOverride(
+          `${WRANGLER_CONFIG_FILE} sets "html_handling": ${plan.value} under "assets". With that value ${HTML_HANDLING_CONSEQUENCE}.`,
+          overridden?.note,
+        ),
+        withOverride('Set it to "none" unless the app serves those documents at their extensionless paths on purpose.', overridden?.step),
+      )
+    case 'missing': {
+      if (!plan.staged) {
+        return manual(
+          withOverride(
+            `${WRANGLER_CONFIG_FILE} does not serve "assets" from the ${STAGED_ASSETS_DIRECTORY} the build stages public/ into, and sets no "html_handling", `
+            + 'so an HTML file in that directory answers at its extensionless path.',
+            overridden?.note,
+          ),
+          withOverride(`${add} \`guren upgrade\` leaves a directory the build does not stage as it is.`, overridden?.step),
+        )
+      }
+      const message = withOverride(
+        `${WRANGLER_CONFIG_FILE} does not set "html_handling" under "assets", so ${HTML_HANDLING_CONSEQUENCE}.`,
+        overridden?.note,
+      )
+      if (plan.patched === undefined) return manual(message, withOverride(add, overridden?.step))
+      return check('warn', message, {
+        fix: withOverride('Run `guren upgrade` to add "html_handling": "none". public/about.html then stops answering at /about.', overridden?.step),
+        canAutofix: true,
+      })
+    }
+  }
+}
+
+async function createCloudflareHtmlHandlingAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
+  if (check.status === 'pass' || !check.canAutofix) {
+    return null
+  }
+
+  return {
+    key: check.key,
+    title: check.title,
+    summary: `Add "html_handling": "none" under "assets" in ${WRANGLER_CONFIG_FILE}; the rest of the file is kept as written.`,
+    async apply(cwd: string) {
+      await addHtmlHandling(cwd)
+    },
+  }
+}
+
 const doctorRules: DoctorRule[] = [
   { key: 'runtime', title: 'Runtime Environment', detect: detectRuntime },
   { key: 'bun-version', title: 'Bun Version', detect: detectBunVersion },
@@ -1522,6 +1619,7 @@ const doctorRules: DoctorRule[] = [
   { key: RELEASE_AGE_KEY, title: RELEASE_AGE_TITLE, detect: detectSupplyChainCooldown, autofix: createSupplyChainCooldownAutofix },
   { key: 'guren-ui-tokens', title: 'Guren UI Tokens', detect: detectGurenUiTokens, autofix: createGurenUiTokensAutofix },
   { key: 'guren-ui-components', title: 'Guren UI Components', detect: detectGurenUiComponents, autofix: createGurenUiComponentsAutofix },
+  { key: HTML_HANDLING_KEY, title: HTML_HANDLING_TITLE, detect: detectCloudflareHtmlHandling, autofix: createCloudflareHtmlHandlingAutofix },
 ]
 
 /**
