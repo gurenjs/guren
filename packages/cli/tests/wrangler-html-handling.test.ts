@@ -46,7 +46,7 @@ describe('planHtmlHandling', () => {
 
   it('reads the assets of the root object, not a nested key of that name', () => {
     const root = '"assets": { "directory": ".cloudflare/assets" }'
-    const text = `{\n  "env": { "staging": { "assets": { "directory": ".cloudflare/assets" } } },\n  ${root}\n}\n`
+    const text = `{\n  "env": { "staging": { "assets": { "directory": "staging" } } },\n  ${root}\n}\n`
     expect(patchedOf(text)).toBe(text.replace(root, '"assets": { "directory": ".cloudflare/assets", "html_handling": "none" }'))
   })
 
