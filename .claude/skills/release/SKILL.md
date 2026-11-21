@@ -201,8 +201,10 @@ judge it by job and step conclusions, not by grepping the log. The `New tag:`
 lines in the log list what was published.
 
 npm's `latest` lags the publish by several minutes, and one package can lag the
-others by ten. Poll the registry until every published package shows its new
-version before you report the release as out:
+others by ten. A version's tarball can lag its `latest` by a few minutes more,
+and an install fails on the 404 until it is served. Poll the registry until
+every published package shows its new version and its tarball answers 200
+before you report the release as out (troubleshooting has the loop):
 
 ```bash
 curl -s https://registry.npmjs.org/@guren/server | jq -r '."dist-tags".latest'
@@ -217,7 +219,8 @@ curl -s https://registry.npmjs.org/@guren/server | jq -r '."dist-tags".latest'
   checkout that has pulled the release. The user runs
   `bun run publish:agent-catalog --yes`; `--dry-run` shows the diff first.
   Without `--yes` it exits 0 at its prompt and publishes nothing.
-- `gh workflow run published-drift.yml --ref main`, then wait for it. It
+- Once every tarball answers 200, `gh workflow run published-drift.yml --ref main`,
+  then wait for it. It
   installs the published packages into fresh scaffolds and compares the agent
   catalog. All jobs green is the evidence that the release works from npm.
 - `git worktree remove <scratch dir>/release`. The version branch can stay; it

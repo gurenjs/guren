@@ -37,13 +37,17 @@ gh run view <id> --json conclusion,jobs -q '.conclusion, (.jobs[] | .name+": "+(
 Find a run you dispatched with
 `gh run list --workflow <file> --branch <ref> --limit 1`.
 
-For npm, print each published package's `latest` beside the version you expect,
-and repeat until they match. Give the repeat a limit, so a publish that never
-arrives ends the wait:
+For npm, print each published package's `latest` and the status of its tarball
+beside the version you expect, and repeat until every line shows that version
+and 200. Give the repeat a limit, so a publish that never arrives ends the
+wait:
 
 ```bash
 while read -r pkg want; do
-  echo "$pkg $(curl -s "https://registry.npmjs.org/$pkg" | jq -r '."dist-tags".latest') (want $want)"
+  latest=$(curl -s "https://registry.npmjs.org/$pkg" | jq -r '."dist-tags".latest')
+  tarball=$(curl -s "https://registry.npmjs.org/$pkg/$want" | jq -r '.dist.tarball // empty' 2>/dev/null)
+  code=$([ -n "$tarball" ] && curl -s -o /dev/null -w '%{http_code}' -I "$tarball")
+  echo "$pkg latest $latest, tarball ${code:-absent} (want $want, 200)"
 done <<'LIST'
 @guren/server X.Y.Z
 create-guren-app X.Y.Z
@@ -207,6 +211,13 @@ the changeset.
 - Right after the publish, `npm view` and the registry return the old `latest`,
   and for a new package a 404. `New tag:` in the workflow log is the proof of
   publish; then wait for the registry.
+- `latest` moving is not the end of the wait. The version's tarball can answer
+  404 for a few minutes more, and `bun install` fails on it: a drift run
+  started about a minute after `latest` moved failed all three smokes on
+  `GET .../@guren/core/-/core-1.28.0.tgz - 404`. Start `published-drift.yml`
+  once every tarball answers 200 (the loop under "Waiting for a run"). A run
+  that already failed that way needs only `gh run rerun <id> --failed` after
+  the tarballs are served.
 - `publish:agent-catalog` does nothing when `@guren/cli` did not move. When it
   did, the diff is usually five version strings. It clones over SSH; with a
   dead SSH agent it hangs, and this environment makes git use HTTPS through
