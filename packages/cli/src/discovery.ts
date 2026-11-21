@@ -1,5 +1,5 @@
 import { readdir, access, lstat, readFile, stat } from 'node:fs/promises'
-import { basename, resolve, join, extname, relative, sep, posix } from 'node:path'
+import { basename, dirname, resolve, join, extname, relative, sep, posix } from 'node:path'
 import { collectionName } from './inflect'
 import { escapeRegExp } from './utils'
 
@@ -370,8 +370,14 @@ export function discoverProviderFiles(appRoot: string): Promise<string[]> {
 /** Where a config definition lives, `config/<name>.ts`, which `wireConfig()` registers under `<name>` (RFC 0027 §2). */
 export const CONFIG_DIR = 'config'
 
-export function discoverConfigFiles(appRoot: string): Promise<string[]> {
-  return discoverDir(appRoot, CONFIG_DIR)
+/**
+ * The files directly under `subDir` of each app root, where an entry of `createApp()` is imported from by convention
+ * (`app/Providers/<Name>.ts`, `config/<name>.ts`): a nested file of that stem is no such entry.
+ */
+export async function discoverEntryFiles(appRoot: string, subDir: string): Promise<string[]> {
+  const roots = await listAppRoots(appRoot)
+  const directories = new Set(roots.map((root) => resolve(root.dir, subDir)))
+  return (await discoverDir(appRoot, subDir, roots)).filter((file) => directories.has(dirname(file)))
 }
 
 export const CONTROLLERS_DIR = 'app/Http/Controllers'

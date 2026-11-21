@@ -17,10 +17,11 @@ import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
 import { blankCommentsAndStrings, literalAbilities, VALIDATE_CALL_PATTERN, type ControllerMethodScan } from '../controller-methods'
 import {
-  discoverConfigFiles,
+  CONFIG_DIR,
+  discoverEntryFiles,
+  PROVIDERS_DIR,
   discoverModuleRoutesFiles,
   discoverPolicyFiles,
-  discoverProviderFiles,
   discoverResourceFiles,
   discoverRoutesFiles,
   discoverSideEffectFiles,
@@ -264,8 +265,8 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     routeFileDetail(root, cache, input.routesFile),
     sideEffectDetail(root, cache),
     mountDetail(root, cache, input),
-    classDetail(root, discoverProviderFiles),
-    classDetail(root, discoverConfigFiles),
+    classDetail(root, (appRoot) => discoverEntryFiles(appRoot, PROVIDERS_DIR)),
+    classDetail(root, (appRoot) => discoverEntryFiles(appRoot, CONFIG_DIR)),
     entryListDetail(root, cache),
   ])
 

@@ -134,7 +134,11 @@ describe('the application entry lists plan:status reads', () => {
       providers: { files: ['/app/app/Providers/JobsProvider'], untraced: true },
       config: { files: ['/app/config/database', '/app/config/queue'], untraced: false },
     })
-    expect(createAppListedFiles(parseSourceFile("const app = createApp({ ...shared })", 'src/app.ts')!.program, '/app', '/app/src/app.ts')).toBeNull()
+    const read = (text: string) => createAppListedFiles(parseSourceFile(text, 'src/app.ts')!.program, '/app', '/app/src/app.ts')
+    expect(read("import { createApp } from '@guren/core'\nconst app = createApp({ ...shared })")).toBeNull()
+    // Only the framework's factory, called once at the top level, is what the application registers.
+    expect(read("import { createApp } from '@guren/core'\nimport queue from '../config/queue.js'\nfunction preview() { return createApp({ config: [queue] }) }\nconst app = createApp({ config: [] })")).toBeNull()
+    expect(read("import * as core from '@guren/core'\nimport queue from '../config/queue.js'\nfunction createApp(options: object) { return core.createApp(options) }\nconst app = createApp({ config: [queue] })")).toBeNull()
   })
 
   test('should read the providers and config the application holds from their directories', async () => {
@@ -144,6 +148,9 @@ describe('the application entry lists plan:status reads', () => {
       'app/Providers/JobsProvider.ts': 'export default class JobsProvider {}\n',
       'config/queue.ts': 'export default {}\n',
       'config/database.ts': 'export default {}\n',
+      // A nested file is no entry `createApp()` imports by convention, whatever its stem.
+      'config/legacy/mail.ts': 'export default {}\n',
+      'app/Providers/Nested/MailProvider.ts': 'export default class MailProvider {}\n',
     }
     for (const [path, content] of Object.entries(files)) {
       await mkdir(dirname(join(root, path)), { recursive: true })

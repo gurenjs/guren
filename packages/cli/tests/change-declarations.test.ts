@@ -901,6 +901,12 @@ describe('applyPlanDeclarations on an entry a providers or config element declar
     expect(await judge(twice)).toEqual([['provider-added', 'medium', undefined], ['config-added', 'medium', undefined]])
   })
 
+  test('should declare one registration of a name, never a second in the same list or one the base held', async () => {
+    const twice = HEAD.replace('config: [queue]', 'config: [queue, queue]')
+    expect(await judge([{ file: PLAN_FILE, plan: declaring() }], { head: twice, entries: [['providers', 'JobsProvider'], ['config', 'queue'], ['config', 'queue']] }))
+      .toEqual([['provider-added', 'low', `${PLAN_FILE}#provider.jobs`], ['config-added', 'medium', undefined], ['config-added', 'medium', undefined]])
+  })
+
   test('should not declare an entry imported from another file, missing, or beside a twin that would answer its import', async () => {
     const elsewhere = HEAD.replace("'../config/queue.js'", "'../config/other.js'")
     expect(await judge([{ file: PLAN_FILE, plan: declaring() }], { head: elsewhere, files: { ...FILES, 'config/other.ts': 'export default {}\n' } }))

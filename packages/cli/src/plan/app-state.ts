@@ -12,9 +12,10 @@
 import { readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
-  discoverConfigFiles,
+  CONFIG_DIR,
+  discoverEntryFiles,
+  PROVIDERS_DIR,
   discoverPolicyFiles,
-  discoverProviderFiles,
   discoverResourceFiles,
   isDefinitelyAbsent,
   listAppRoots,
@@ -171,8 +172,8 @@ export async function loadPlanAppState(
     modelSection(root, cache),
     classSection(root, discoverResourceFiles),
     classSection(root, discoverPolicyFiles),
-    classSection(root, discoverProviderFiles),
-    classSection(root, discoverConfigFiles),
+    classSection(root, (appRoot) => discoverEntryFiles(appRoot, PROVIDERS_DIR)),
+    classSection(root, (appRoot) => discoverEntryFiles(appRoot, CONFIG_DIR)),
     pageSection(root, cache),
     validatorSections(root, roots, cache),
     readRoutesFileGraph(root, options.routesFile),

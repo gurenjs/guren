@@ -32,7 +32,7 @@ import { parseSchemaSource, type SchemaDialect, type SchemaTable } from '../sche
 import { registeredBefore, routePathsMayOverlap } from '../test-requests'
 import { importSpecifier } from '../utils'
 import { composeAppProviderRegistration } from '../provider-registrar'
-import type { AppEntryList } from './app-entry'
+import { appEntryListNames, type AppEntryList } from './app-entry'
 import { FACT_CLASSES } from './fact-classes'
 import type { ChangeFact } from './lane'
 import { sameRecordPart, type RouteSecurityRecord } from './security-records'
@@ -674,6 +674,8 @@ async function declaredEntry(
 ): Promise<string | undefined> {
   const head = await readHead(subject.path)
   if (head === null) return undefined
+  // One element declares one registration: a name the list holds twice, or held before the change, is a second one.
+  if (appEntryListNames(head, subject.path, subject.list)?.filter((name) => name === subject.name).length !== 1) return undefined
   const claims = owned.flatMap(({ open }) => {
     const elements = subject.list === 'providers'
       ? (open.plan.providers ?? []).map((element) => ({ id: element.id, change: element.change, target: `${PROVIDERS_DIR}/${element.className}` }))

@@ -5,8 +5,8 @@
  * so the two cannot disagree about whether a module is mounted.
  */
 import { basename, dirname, resolve, sep } from 'node:path'
-import type { File, Node, ObjectExpression } from '@babel/types'
-import { objectLiteral, propertyValue, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
+import type { CallExpression, File, Node, ObjectExpression, Program, Statement } from '@babel/types'
+import { memberKeyName, objectLiteral, propertyValue, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 import { toPosixRelative } from './discovery'
 import { MODULE_ENTRY_FILE, moduleEntryFile, type FileProbe } from './import-resolution'
 import type { ParseCache } from './parse-cache'
@@ -56,6 +56,62 @@ function importedArrayEntries(
   })
 }
 
+const ENTRY_LIST_KEYS = new Set(['providers', 'config'])
+
+const FACTORY_PACKAGES = new Set(['@guren/core', '@guren/server'])
+
+/** Whether the module binds `createApp` to the framework's factory, by a value import of that name. */
+function importsFactory(program: Program): boolean {
+  return program.body.some((node) => node.type === 'ImportDeclaration' && node.importKind !== 'type' && FACTORY_PACKAGES.has(node.source.value)
+    && node.specifiers.some((specifier) => specifier.type === 'ImportSpecifier' && specifier.importKind !== 'type' && specifier.local.name === 'createApp'
+      && (specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value) === 'createApp'))
+}
+
+/** The call a top-level statement makes directly: `const app = createApp(…)`, `export default createApp(…)`, or a bare call. */
+function topLevelCall(statement: Statement): CallExpression | undefined {
+  const node = statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportDefaultDeclaration' ? statement.declaration : statement
+  if (!node) return undefined
+  if (node.type === 'CallExpression') return node
+  if (node.type === 'ExpressionStatement' && node.expression.type === 'CallExpression') return node.expression
+  if (node.type === 'VariableDeclaration' && node.declarations.length === 1) {
+    const init = node.declarations[0]!.init
+    return init?.type === 'CallExpression' ? init : undefined
+  }
+  return undefined
+}
+
+/**
+ * The framework's `createApp()` call's options object, when the file holds exactly one such call, at its top level
+ * where no binding can shadow the factory's import, with an object literal. Stricter than {@link createAppOptions}:
+ * what it reads is what the application registers, which the RFC 0040 §5 entry lists are judged by.
+ */
+export function frameworkCreateAppOptions(program: Program): ObjectExpression | undefined {
+  if (!importsFactory(program)) return undefined
+  let calls = 0
+  walk(program, (node) => {
+    if (node.type !== 'CallExpression') return
+    const target = node.callee as BabelNode | undefined
+    if (target?.type === 'Identifier' && target.name === 'createApp') calls += 1
+  })
+  if (calls !== 1) return undefined
+  const call = program.body.map(topLevelCall).find((entry) => entry?.callee.type === 'Identifier' && entry.callee.name === 'createApp')
+  const [first] = call?.arguments ?? []
+  return call?.arguments.length === 1 && first?.type === 'ObjectExpression' ? first : undefined
+}
+
+/**
+ * Whether the literal spells each list only as a property the reader sees: a spread or a computed key may carry one,
+ * `__proto__` sets a prototype `createApp()` reads a list through, and a method or accessor may be keyed by a list.
+ */
+export function spellsEntryLists(options: ObjectExpression): boolean {
+  if (hidesKeys(options)) return false
+  return options.properties.every((property) => {
+    if (property.type === 'SpreadElement') return false
+    const name = memberKeyName(property)
+    return name !== '__proto__' && (property.type === 'ObjectProperty' || !ENTRY_LIST_KEYS.has(name ?? ''))
+  })
+}
+
 /** What one list of `createApp()` registers: the default imports it lists, as absolute files without extension. */
 export interface CreateAppListedFiles {
   files: string[]
@@ -64,16 +120,17 @@ export interface CreateAppListedFiles {
 }
 
 /**
- * The `providers` and `config` lists of `createApp({ … })`: a list the literal does not spell is empty, one
- * that is no array literal `undefined`; `null` when there is no literal or it may hide a key.
+ * The `providers` and `config` lists of the framework's `createApp({ … })`, as {@link frameworkCreateAppOptions} finds
+ * it: a list the literal does not spell is empty, one that is no array literal `undefined`; `null` when there is no
+ * such literal or it may hide a list.
  */
 export function createAppListedFiles(
   program: File['program'],
   cwd: string,
   entryFile: string,
 ): Record<'providers' | 'config', CreateAppListedFiles | undefined> | null {
-  const options = createAppOptions(program)
-  if (!options || hidesKeys(options)) return null
+  const options = frameworkCreateAppOptions(program)
+  if (!options || !spellsEntryLists(options)) return null
   const read = (key: 'providers' | 'config'): CreateAppListedFiles | undefined => {
     const declared = propertyValue(options, key)
     if (declared === undefined) return { files: [], untraced: false }
