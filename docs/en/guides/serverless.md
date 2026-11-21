@@ -160,6 +160,8 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 
 Install the driver alongside it (`bun add @aws-sdk/client-rds-data`). The function needs the `rds-data` actions on the cluster plus `secretsmanager:GetSecretValue` on the secret. The CDK construct's `dataApi` option (below) wires both, and authentication uses the function's IAM role. For `drizzle-kit generate`/`push`, set `driver: 'aws-data-api'` in `drizzle.config.ts`.
 
+A cluster with a minimum capacity of 0 ACUs pauses when idle, and the first call to it is cancelled while it resumes. The adapter retries that call for up to 60 seconds; see [A cluster that pauses when idle](./database.md#a-cluster-that-pauses-when-idle) for the timeout that goes with it.
+
 See the [Database Guide](./database.md) for the full factory reference.
 
 ### Classic RDS with RDS Proxy

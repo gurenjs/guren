@@ -172,6 +172,8 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 
 `drizzle-kit generate`/`push` を使うときは、`drizzle.config.ts` で `driver: 'aws-data-api'` を設定します。
 
+最小キャパシティが 0 ACU のクラスターはアイドル時に停止し、再開するまでのあいだ最初の呼び出しはキャンセルされます。アダプタはこの呼び出しを最大 60 秒まで再試行します。あわせて見直すタイムアウトは、[アイドル時に停止するクラスター](./database.md#アイドル時に停止するクラスター)を参照してください。
+
 ファクトリの詳細は[データベースガイド](./database.md)を参照してください。
 
 ### 従来の RDS + RDS Proxy

@@ -61,6 +61,7 @@ export type {
   D1DatabaseOptions,
   AwsDataApiDatabase,
   AwsDataApiDatabaseOptions,
+  AwsDataApiResumeRetryOptions,
   ConnectionContext,
   MigrationRunSummary,
   MigrationStatusEntry,

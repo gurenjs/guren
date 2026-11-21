@@ -74,6 +74,7 @@ export { createD1Database } from './d1'
 export type { D1DatabaseHandle, D1DatabaseOptions } from './d1'
 export { createAwsDataApiDatabase } from './aws-data-api'
 export type { AwsDataApiDatabase, AwsDataApiDatabaseOptions } from './aws-data-api'
+export type { AwsDataApiResumeRetryOptions } from './aws-data-api-resume'
 export { runSeeders, defineSeeder, loadSeeders } from './seeder'
 export type {
   SeederContext,
