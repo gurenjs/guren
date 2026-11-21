@@ -3,7 +3,7 @@
  * (RFC 0040 §5): the plan's `env` section, `plan:status` and `change:lane` judge a key through these, so a key
  * the plan states and the declaration the application holds are compared one way.
  */
-import type { Expression, ObjectExpression, ObjectProperty, Program } from '@babel/types'
+import type { CallExpression, Expression, ObjectExpression, ObjectProperty, Program } from '@babel/types'
 import { parseExpression } from '@babel/parser'
 
 import { ENV_SCHEMA_FILE } from './app-env'
@@ -29,33 +29,37 @@ export function declaredEnvKeys(options: ObjectExpression): Array<{ key: string;
   return (options.properties as ObjectProperty[]).map((property) => ({ key: memberKeyName(property)!, value: property.value }))
 }
 
-/** The calls that set a key's presence: the last one wins, so their order is part of what a chain means. */
+/** The calls that set a key's presence. */
 const PRESENCE = new Set(['optional', 'default', 'requiredInProduction'])
 /** Calls that set a flag whatever their place in the chain. */
 const FLAGS = new Set(['secret', 'allowEmpty'])
 
 /**
- * What a builder chain declares, as one comparable string: the `Env` builder with its arguments, the presence the
- * last presence call leaves, and the flags. `.describe()` is prose and left out. `undefined` for a chain holding
- * anything else, which no plan states.
+ * What a builder chain declares, as one comparable string: the `Env` builder with its arguments, its one presence
+ * call, and the flags. `.describe()` with a string is prose and left out. `undefined` for a chain holding anything
+ * else (a second presence call, an argument to a flag), which no plan states.
  */
 export function envBuilderSignature(value: ObjectProperty['value']): string | undefined {
-  const calls: Array<{ name: string; args: string }> = []
+  const calls: Array<{ name: string; args: CallExpression['arguments'] }> = []
   let node: ObjectProperty['value'] = value
   while (node.type === 'CallExpression' && node.callee.type === 'MemberExpression' && !node.callee.computed && node.callee.property.type === 'Identifier') {
-    calls.unshift({ name: node.callee.property.name, args: canonicalSyntax(node.arguments) })
+    calls.unshift({ name: node.callee.property.name, args: node.arguments })
     node = node.callee.object
   }
   const root = calls.shift()
   if (node.type !== 'Identifier' || node.name !== 'Env' || root === undefined) return undefined
-  let presence = 'required'
+  // `optional()` keeps an earlier `default()`'s value as the schema's default, so two presence calls are not the last one.
+  const presences = calls.filter((call) => PRESENCE.has(call.name))
+  if (presences.length > 1) return undefined
   const flags = new Set<string>()
   for (const call of calls) {
-    if (PRESENCE.has(call.name)) presence = `${call.name}${call.args}`
-    else if (FLAGS.has(call.name)) flags.add(call.name)
-    else if (call.name !== 'describe') return undefined
+    if (PRESENCE.has(call.name)) continue
+    // Every argument the comparison leaves out is code the import runs, so a flag takes none and prose one string.
+    if (FLAGS.has(call.name) && call.args.length === 0) flags.add(call.name)
+    else if (!(call.name === 'describe' && call.args.length === 1 && call.args[0]!.type === 'StringLiteral')) return undefined
   }
-  return JSON.stringify([root.name, root.args, presence, [...flags].sort()])
+  const presence = presences[0] ? `${presences[0].name}${canonicalSyntax(presences[0].args)}` : 'required'
+  return JSON.stringify([root.name, canonicalSyntax(root.args), presence, [...flags].sort()])
 }
 
 /** The signature of the declaration `guren plugin` would write for `entry`, the one rule for what a planned key means. */

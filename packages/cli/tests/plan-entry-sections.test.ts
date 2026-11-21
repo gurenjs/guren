@@ -133,6 +133,8 @@ describe('the env section of a plan (RFC 0040 §5)', () => {
 
   test('should refuse a key guren plugin would refuse, two elements of one key, and an added key the application declares', () => {
     expect(failures(draft({ env: [{ ...ENV, type: 'port', default: 'sync' }] }))).toEqual([['plan:env-declaration', 'fail']])
+    for (const key of ['GUREN_TESTING', 'NODE_ENV']) expect([key, failures(draft({ env: [{ ...ENV, key }] }))]).toEqual([key, [['plan:env-declaration', 'fail']]])
+    expect(PlanDraftSchema.safeParse({ ...draft(), env: [{ ...ENV, key: 'apiKey' }] }).success).toBe(false)
     expect(failures(draft({ env: [ENV, { ...ENV, id: 'env.queue.again' }] }))).toEqual([['plan:duplicate-entry', 'fail']])
     expect(failures(draft({ env: [ENV] }), planAppState({ env: ['QUEUE_CONNECTION'] }))).toEqual([['plan:app-collision', 'fail']])
   })

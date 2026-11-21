@@ -28,7 +28,9 @@ describe('envKeyAdditions', () => {
     const head = declared(bare, [QUEUE])
     expect(head).toContain("import { Env, defineEnv } from '@guren/core'")
     expect(envKeyAdditions(bare, head, PATH)).toEqual(['QUEUE_CONNECTION'])
-    expect(envKeyAdditions(BASE, BASE.replace('const env', '// the schema\nconst env'), PATH)).toEqual([])
+    expect(envKeyAdditions(BASE, BASE, PATH)).toEqual([])
+    // A comment may carry a directive (`// @ts-nocheck`) the structure comparison cannot see.
+    expect(envKeyAdditions(BASE, `// @ts-nocheck\n${declared(BASE, [QUEUE])}`, PATH)).toBeUndefined()
   })
 
   test('should refuse a change to a key the base declares, and anything beyond the keys it adds', () => {
@@ -43,6 +45,8 @@ describe('envKeyAdditions', () => {
       'the Env import dropped': head.replace("import { defineEnv, Env, type InferEnv } from '@guren/core'", "import { defineEnv, type InferEnv } from '@guren/core'"),
     }
     for (const [label, text] of Object.entries(refused)) expect([label, envKeyAdditions(BASE, text, PATH)]).toEqual([label, undefined])
+    const renamed = (text: string): string => text.replace("import { defineEnv, Env, type InferEnv } from '@guren/core'", "import { defineEnv, Other as Env, type InferEnv } from '@guren/core'")
+    expect(envKeyAdditions(BASE, renamed(head), PATH)).toBeUndefined()
     const local = (text: string): string => text.replace("import { defineEnv, Env, type InferEnv } from '@guren/core'", "import { Env, type InferEnv } from '@guren/core'\nconst defineEnv = (keys: object) => keys")
     expect(envKeyAdditions(local(BASE), local(head), PATH)).toBeUndefined()
   })
@@ -54,10 +58,13 @@ describe('envBuilderSignature', () => {
   test('should read a chain by what it declares: the builder, the last presence call, the flags, never the prose', () => {
     expect(signature("Env.string().describe('The queue driver.').default('sync')")).toBe(signature("Env.string().default('sync')"))
     expect(signature("Env.string().secret().default('x')")).toBe(signature("Env.string().default('x').secret()"))
-    // The last presence call is the one that holds.
-    expect(signature("Env.string().default('sync').optional()")).not.toBe(signature("Env.string().default('sync')"))
     expect(signature("Env.enum(['a', 'b'])")).not.toBe(signature("Env.enum(['b', 'a'])"))
     expect(signature("Env.string().transform((value) => value)")).toBeUndefined()
+    // An argument the comparison leaves out would be code the import runs.
+    expect(signature("Env.string().default('sync').describe(process.env.GUREN_TESTING = '1')")).toBeUndefined()
+    expect(signature('Env.string().optional().secret(run())')).toBeUndefined()
+    // `optional()` keeps an earlier `default()`'s value as the schema's default.
+    expect(signature("Env.string().default('leftover').optional()")).toBeUndefined()
     expect(signature("Other.string()")).toBeUndefined()
   })
 

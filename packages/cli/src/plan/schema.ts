@@ -273,7 +273,8 @@ export const PLAN_ENV_TYPES = ['string', 'url', 'number', 'port', 'boolean', 'en
 export const PlanEnvSchema = z.strictObject({
   id: IdSchema,
   change: EntryChangeSchema,
-  key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/u, { message: 'must be an environment variable name' }),
+  // `defineEnv()`'s own pattern (ENV_KEY_PATTERN in packages/server/src/config/env.ts); keep the two alike.
+  key: z.string().regex(/^[A-Z_][A-Z0-9_]*$/u, { message: 'must be an environment variable name (A-Z, 0-9 and _)' }),
   type: z.enum(PLAN_ENV_TYPES).optional(),
   choices: z.array(NonEmptySchema).optional(),
   default: z.union([z.string(), z.number(), z.boolean()]).optional(),

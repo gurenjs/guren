@@ -278,12 +278,13 @@ function byName(a: PlanAppName, b: PlanAppName): number {
   return a.name < b.name ? -1 : 1
 }
 
-/** A section named after the class each discovered file declares, as `guren context` names them. */
 /** The project root's `config/env.ts`: the keys of a module are its own, and the application entry reads the root's. */
 async function envSection(root: string): Promise<PlanAppNames> {
   const declarations = await readEnvDeclarations(root)
   return isUnreadable(declarations) ? declarations : declarations.map(({ key }) => ({ name: key, module: null })).sort(byName)
 }
+
+/** A section named after the class each discovered file declares, as `guren context` names them. */
 
 async function classSection(
   cwd: string,

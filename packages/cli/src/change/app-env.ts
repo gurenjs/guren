@@ -6,7 +6,7 @@
 
 import type { ImportDeclaration, ObjectProperty, Program } from '@babel/types'
 
-import { canonicalSyntax, memberKeyName } from '../ast-walk'
+import { canonicalSyntax, memberKeyName, sameComments } from '../ast-walk'
 import { declaredEnvKeys, defineEnvOptions } from '../env-declarations'
 import { parseSourceFile } from '../parse-cache'
 
@@ -17,7 +17,8 @@ function envImports(program: Program): Array<{ declaration: ImportDeclaration; i
   return program.body.flatMap((node) => {
     if (node.type !== 'ImportDeclaration' || node.importKind === 'type' || !FRAMEWORK.has(node.source.value)) return []
     return node.specifiers.flatMap((specifier, index) =>
-      specifier.type === 'ImportSpecifier' && specifier.importKind !== 'type' && specifier.local.name === 'Env' ? [{ declaration: node, index }] : [])
+      specifier.type === 'ImportSpecifier' && specifier.importKind !== 'type' && specifier.local.name === 'Env'
+        && (specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value) === 'Env' ? [{ declaration: node, index }] : [])
   })
 }
 
@@ -37,7 +38,7 @@ function normalizeImports(program: Program): void {
  */
 export function envKeyAdditions(base: string, head: string, path: string): string[] | undefined {
   const [before, after] = [parseSourceFile(base, path), parseSourceFile(head, path)]
-  if (!before || !after) return undefined
+  if (!before || !after || !sameComments(before, after)) return undefined
   const [baseOptions, headOptions] = [defineEnvOptions(before.program), defineEnvOptions(after.program)]
   if (!baseOptions || !headOptions) return undefined
   if (envImports(before.program).length > 0 && envImports(after.program).length === 0) return undefined

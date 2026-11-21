@@ -947,6 +947,11 @@ describe('applyPlanDeclarations on a key an env element declares', () => {
     }
   })
 
+  test('should not declare a key whose Env is not the framework\'s', async () => {
+    const local = HEAD.replace("import { defineEnv, Env, type InferEnv } from '@guren/core'", "import { defineEnv, type InferEnv } from '@guren/core'\nimport { Env } from './env-builders.js'")
+    expect(await judge([{ file: PLAN_FILE, plan: declaring() }], local)).toEqual([['medium', undefined]])
+  })
+
   test('should not declare a key no added element names, or two open plans name', async () => {
     expect(await judge([{ file: PLAN_FILE, plan: declaring({ ...ELEMENT, change: { kind: 'existing' } }) }])).toEqual([['medium', undefined]])
     expect(await judge([{ file: PLAN_FILE, plan: declaring() }, { file: 'docs/plans/jobs/plan.json', plan: declaring() }])).toEqual([['medium', undefined]])

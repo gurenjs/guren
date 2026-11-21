@@ -315,3 +315,13 @@ export function referencedIdentifiers(node: unknown): string[] {
   })
   return [...found]
 }
+
+/**
+ * Whether two files hold the same comments, as a multiset. `canonicalSyntax` drops comments, and a reader that lets an
+ * edit through on it must not let one carry a directive (`// @ts-nocheck`) the structure comparison cannot see.
+ */
+export function sameComments(before: { comments?: ReadonlyArray<{ value: string }> | null }, after: { comments?: ReadonlyArray<{ value: string }> | null }): boolean {
+  const values = (file: typeof before): string[] => (file.comments ?? []).map((comment) => comment.value.trim()).sort()
+  const [a, b] = [values(before), values(after)]
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
