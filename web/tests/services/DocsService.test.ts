@@ -13,4 +13,13 @@ describe('resolveDefaultDocsDir', () => {
 
     expect(docsDir).toBe(resolve(repoRoot, 'docs'))
   })
+
+  it("skips the app's own docs bundle, which holds no locale directory", () => {
+    const docsDir = resolveDefaultDocsDir({
+      importMetaDir: resolve(repoRoot, 'web/app/Services'),
+      cwd: resolve(repoRoot, 'web/docs/adr'),
+    })
+
+    expect(docsDir).toBe(resolve(repoRoot, 'docs'))
+  })
 })

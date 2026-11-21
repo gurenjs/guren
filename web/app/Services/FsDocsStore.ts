@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
 import {
+  DEFAULT_DOC_LOCALE,
   docCategoryDir,
   docLocaleDir,
   extractDocDescription,
@@ -28,7 +29,8 @@ function findNearestDocsDir(startDir: string, maxDepth = 6): string | null {
 
   for (let depth = 0; depth < maxDepth; depth += 1) {
     const candidate = resolve(currentDir, 'docs')
-    if (existsSync(candidate)) {
+    // web/docs (this app's ADRs and spec views) is nearer than the repository's docs/ and holds no locale directory.
+    if (existsSync(resolve(candidate, docLocaleDir(DEFAULT_DOC_LOCALE)))) {
       return candidate
     }
 

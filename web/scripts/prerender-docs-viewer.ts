@@ -6,7 +6,7 @@
  * request, but this app deploys to Workers (no filesystem; wrangler.jsonc
  * aliases @guren/cli to a stub), so the payload and shell are emitted once as
  * static assets. `isDocsViewerEnabled()` still refuses to mount in production;
- * what this publishes is the blog example's public docs.
+ * what this publishes is this app's own docs/ (ADRs and committed spec views).
  */
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -19,11 +19,8 @@ import { stageMermaid } from './lib/stage-mermaid.js'
 
 const webRoot = fileURLToPath(new URL('..', import.meta.url))
 
-/**
- * The framework's own docs/ carries no OKF relations (109 documents, zero
- * edges), so the blog example is the only bundle with a graph to show.
- */
-const bundleRoot = resolve(webRoot, '../examples/blog')
+// web/docs, not the repository's docs/: those guides carry no OKF relations, so they draw no graph.
+const bundleRoot = resolve(webRoot)
 const outDir = resolve(webRoot, 'public/_guren/docs')
 
 /** Injected once each; every replacement is asserted, so a reshaped shell fails the build. */
@@ -45,9 +42,9 @@ const BANNER = `
 
 const BANNER_BODY = `
 <p class="demo-banner">
-  A static snapshot of the blog example's docs. In your own app the viewer
-  runs on your machine: <code>GUREN_DOCS=1 bun run dev</code>, then
-  <code>/_guren/docs</code>.
+  A static snapshot of the docs of guren.dev itself, a Guren app. In your own
+  app the viewer runs on your machine: <code>GUREN_DOCS=1 bun run dev</code>,
+  then <code>/_guren/docs</code>.
   <a href="https://guren.dev/docs/guides/spec-anchored">how this works ↗</a>
 </p>
 `
@@ -92,6 +89,12 @@ if (data.nodes.length === 0 || data.edges.length === 0) {
   process.exit(1)
 }
 
+// `check --spec` passes when docs/spec/ is absent, and the ADRs alone still draw a graph.
+if (!data.docs.some((doc) => doc.type === 'spec')) {
+  console.error(`No generated spec view under ${bundleRoot}/docs/spec. Run \`guren spec:generate\` there and commit the result.`)
+  process.exit(1)
+}
+
 mkdirSync(resolve(outDir, 'assets'), { recursive: true })
 
 const json = JSON.stringify(data)
@@ -106,7 +109,7 @@ write(
   resolve(outDir, 'index.html'),
   inject(
     inject(
-      inject(shell, '<title>Guren docs</title>', '<title>Guren docs graph — blog example</title>'),
+      inject(shell, '<title>Guren docs</title>', '<title>Guren docs graph — guren.dev</title>'),
       '</head>',
       `${BANNER}</head>`,
     ),
@@ -116,5 +119,5 @@ write(
 )
 
 // The shell loads mermaid from a fixed path and degrades to "bun add -d
-// mermaid" hints without it; three of the example's spec views are diagrams.
+// mermaid" hints without it; three of the spec views are diagrams.
 report(stageMermaid().path)

@@ -424,19 +424,19 @@ export default function Home({ codeExamples }: Props) {
             </div>
             <figure className="grid grid-cols-1 items-center gap-8 border-t border-home-line px-6 py-12 sm:px-10 lg:grid-cols-[minmax(0,4fr)_minmax(0,7fr)] lg:gap-14">
               <figcaption className="text-[0.9375rem] leading-relaxed text-home-text-2">
-                The blog example&apos;s docs graph. Your app gets the same view at{' '}
+                This site&apos;s own docs graph. Your app gets the same view at{' '}
                 <InlineCode>/_guren/docs</InlineCode>.
               </figcaption>
               <a
                 href="/_guren/docs"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Open the blog example's docs graph in the Guren docs viewer"
+                aria-label="Open this site's docs graph in the Guren docs viewer"
                 className="block overflow-hidden rounded-lg border border-home-line-strong bg-home-ink p-1.5 transition hover:border-crimson-300/40"
               >
                 <img
                   src="/docs-graph.png"
-                  alt="The Guren docs viewer rendering a blog app's knowledge graph: decision records, generated spec views, model entities, and source files connected by verified links"
+                  alt="The Guren docs viewer rendering this site's knowledge graph: decision records, generated spec views, model entities, and source files connected by verified links"
                   width={1440}
                   height={900}
                   loading="lazy"
