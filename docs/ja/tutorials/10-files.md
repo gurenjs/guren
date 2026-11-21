@@ -6,7 +6,7 @@
 
 - サーバーから見たアップロードの実体: multipart ボディの中の `File`、`attachments` テーブルの 1 行、ディスク上のオブジェクト
 - アップロードを `public/` の下に置かない理由と、代わりに使う署名付き配信ルートの役割
-- モデルでの attachments の宣言方法と、それを扱う 4 つの呼び出し: `attach`、`withAttachments`、`detach`、`purgeAttachments`
+- モデルでの attachments の宣言方法と、それを扱う 5 つの呼び出し: `inspectAttachment`、`attach`、`withAttachments`、`detach`、`purgeAttachments`
 - フォームからファイルを送る方法と、テストから送る方法
 - `guren check` が検査する attachment のルールと、そのうち 1 つだけが警告でなく失敗になる理由
 
@@ -210,6 +210,21 @@ describe('post attachments', () => {
     await response.assertBodyContains('/attachments/')
   })
 
+  it('refuses a cover that is not an image and stores no post', async () => {
+    const form = new FormData()
+    form.append('title', 'Not a picture')
+    form.append('body', 'Plain text inside')
+    form.append('tags', '')
+    form.append('cover', new File(['plain text'], 'cover.png', { type: 'image/png' }))
+
+    await asAda
+      .post('/posts', form)
+      .assertStatus(422)
+      .assertJsonPath('errors.cover.0', 'The file must be an image.')
+
+    expect(await Post.where('title', 'Not a picture').first()).toBeNull()
+  })
+
   it('replaces the cover, and lets only the author do it', async () => {
     const grace = await User.create({ name: 'Grace', email: 'grace@example.com', password: 'correct horse battery' })
     const asGrace = await http.actingAs(grace).withCsrf()
@@ -240,11 +255,13 @@ describe('post attachments', () => {
 })
 ```
 
-このファイルで注目したい点は 3 つあります。1 つ目は、アップロードが `File` を含む `FormData` になっていることです。`TestApp` は `File` を見つけると multipart で送ります。JSON のボディではファイルを運べません。
+このファイルで注目したい点は 4 つあります。1 つ目は、アップロードが `File` を含む `FormData` になっていることです。`TestApp` は `File` を見つけると multipart で送ります。JSON のボディではファイルを運べません。
 
 2 つ目に、URL については署名されていることまでアサートしています。署名の無い URL が返るなら、ディスクが公開されていることになるからです。
 
-3 つ目に、最後のテストは attachment の行に記録されたオブジェクトキーを使って、ディスクそのものを調べています。投稿を削除したらファイルも残してはいけませんが、これはデータベースへのアサーションでは確かめられません。
+3 つ目に、2 番目のテストは中身がテキストのファイルを `cover.png` という名前で送り、422 と `cover` へのメッセージが返ること、投稿が保存されていないことの両方を確かめています。拒否されたのに投稿だけが残ると、著者がファイルを直して送り直したときに、同じ投稿がもう 1 件できてしまいます。
+
+4 つ目に、最後のテストは attachment の行に記録されたオブジェクトキーを使って、ディスクそのものを調べています。投稿を削除したらファイルも残してはいけませんが、これはデータベースへのアサーションでは確かめられません。
 
 テストは `NODE_ENV=test` で実行され、雛形で作られた `config/storage.ts` はこのとき `local` ディスクの保存先を `./storage/app/testing` にします。`disk()` がパスを自分で組み立てずにディスクへ問い合わせているのはこのためで、テストでアップロードしたファイルが、開発用データベースの参照するファイルと混ざることもありません。
 
@@ -252,11 +269,11 @@ describe('post attachments', () => {
 bun test
 ```
 
-3 件とも失敗します。1 件は `Post.withAttachments is not a function`、残りの 2 件は `Post.attach is not a function` です。`Post` がまだ attachable になっていないためです。
+4 件とも失敗します。3 件は `Post.withAttachments is not a function` か `Post.attach is not a function` で、`Post` がまだ attachable になっていないためです。2 番目のテストは 422 を期待していますが、`store` がファイルを読まずに投稿を保存するので、リダイレクトが返ります。
 
 ## 3. カバー画像を手で書く
 
-モデルは、クラスを包む形でコレクションを宣言します。`image: 'require'` を指定すると、画像でないファイルは、名前や type ヘッダーが何を名乗っていても、attach の時点でバリデーションメッセージ付きで拒否されます。
+モデルは、クラスを包む形でコレクションを宣言します。`image: 'require'` を指定すると、画像でないファイルは、名前や type ヘッダーが何を名乗っていても、バリデーションメッセージ付きで拒否されます。
 
 ```ts file=app/Models/Post.ts
 import { Attachable, defineModel, hasOneAttached, type BelongsToRecord, type BelongsToManyRecord, type HasManyRecord } from '@guren/core'
@@ -283,7 +300,7 @@ Post.hasMany('comments', () => import('./Comment.js').then((m) => m.Comment), 'p
 Post.belongsToMany('tags', () => import('./Tag.js').then((m) => m.Tag), postTags, 'postId', 'tagId')
 ```
 
-`Attachable` は `Post` に 4 つの static メソッドを加えます。`attach(id, collection, file)`、`detach(id, collection, attachmentId?)`、`withAttachments(records, names)`、`purgeAttachments(id)` です。テーブルやディスクはここには出てきません。どちらも config で一度決めてあります。
+`Attachable` は `Post` に 5 つの static メソッドを加えます。`inspectAttachment(collection, file)`、`attach(id, collection, file)`、`detach(id, collection, attachmentId?)`、`withAttachments(records, names)`、`purgeAttachments(id)` です。テーブルやディスクはここには出てきません。どちらも config で一度決めてあります。
 
 リソースはカバー画像を `AttachmentData` として渡します。中身は id、名前、コンテンツタイプ、サイズ、寸法と、ページで使う URL です。その URL が署名付きのルートになるか CDN のパスになるかは config が決めることで、リソースは関知しません。
 
@@ -327,7 +344,7 @@ export class PostResource extends Resource<PostWithRelations, PostResourceData> 
 }
 ```
 
-次はコントローラーです。`store` はカバー画像が送られてきたら attach し、`show` はそれを読み込みます。`destroy` は行を消す前にファイルを purge し、新しく加える `cover` アクションはカバー画像を差し替えます。`this.file('cover')` は multipart のフィールドを読み、フィールドが無いか空なら `null` を返します。
+次はコントローラーです。`store` はカバー画像が送られてきたらまず検査し、投稿を作ってから attach します。`show` はそれを読み込みます。`destroy` は行を消す前にファイルを purge し、新しく加える `cover` アクションはカバー画像を差し替えます。`this.file('cover')` は multipart のフィールドを読み、フィールドが無いか空なら `null` を返します。
 
 ```ts file=app/Http/Controllers/PostController.ts
 import { Controller, ValidationException, paginate, type PaginatedPageProps } from '@guren/core'
@@ -391,9 +408,10 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const { tags, ...data } = await this.validateBody(PostPayloadSchema)
+    const coverFile = await this.file('cover')
+    const cover = coverFile ? await Post.inspectAttachment('cover', coverFile) : null
     const post = await Post.create(data, { set: { authorId: author.id } })
     await syncTags(post.id, tags)
-    const cover = await this.file('cover')
     if (cover) {
       await Post.attach(post.id, 'cover', cover)
     }
@@ -454,9 +472,11 @@ export default class PostController extends Controller {
 }
 ```
 
-この章の要になる細部が 2 つあります。1 つは、`hasOneAttached` のコレクションに `Post.attach(post.id, 'cover', cover)` を呼ぶと**差し替え**になることです。古いファイルは削除されて新しいファイルが保存され、行は 1 件のままです。
+この章の要になる細部が 3 つあります。1 つ目は `store` の中の順序です。`attach()` には投稿の id が必要なので、`attach()` だけに任せると、ファイルを拒否できるのは投稿を保存したあとになります。`Post.inspectAttachment('cover', coverFile)` は投稿が無くても同じ検査を行い、何も書き込みません。画像でなければ `Post.create` より前に 422 を投げるので、2 番目のテストが期待するとおりになります。戻り値を `attach()` に渡すと、`attach()` は検査を繰り返さずにファイルを保存します。`cover` アクションでは、アップロードをそのまま `attach()` に渡しています。投稿はすでにあり、このアクションがほかに保存するものも無いからです。
 
-もう 1 つは、`purgeAttachments` を `delete` より先に呼ぶことです。attachments テーブルはポリモーフィックで、すべてのモデルが 1 つのテーブルを共有するため、`posts` への外部キーを持ちません。そのため削除は連鎖(cascade)せず、purge せずに投稿を削除すると、ディスクには持ち主のいないファイルが、テーブルには持ち主のいない行が残ります。`attachments:prune` はそうした残り物をあとから見つけるためのコマンドで、3 つ目のテストはそもそもこの状態を許しません。
+2 つ目は、`hasOneAttached` のコレクションに `Post.attach(post.id, 'cover', cover)` を呼ぶと**差し替え**になることです。古いファイルは削除されて新しいファイルが保存され、行は 1 件のままです。
+
+3 つ目は、`purgeAttachments` を `delete` より先に呼ぶことです。attachments テーブルはポリモーフィックで、すべてのモデルが 1 つのテーブルを共有するため、`posts` への外部キーを持ちません。そのため削除は連鎖(cascade)せず、purge せずに投稿を削除すると、ディスクには持ち主のいないファイルが、テーブルには持ち主のいない行が残ります。`attachments:prune` はそうした残り物をあとから見つけるためのコマンドで、最後のテストはそもそもこの状態を許しません。
 
 カバー画像を差し替えるルートは `update` に含めず、独立した `POST` にしています。Inertia のフォームからファイルを `PUT` で送るにはメソッドの偽装(method spoofing)が必要ですが、Guren はそれを行いません。ルートを分けたほうが単純で、読みやすくもなります。
 
@@ -822,6 +842,21 @@ describe('post attachments', () => {
     await response.assertBodyContains('/attachments/')
   })
 
+  it('refuses a cover that is not an image and stores no post', async () => {
+    const form = new FormData()
+    form.append('title', 'Not a picture')
+    form.append('body', 'Plain text inside')
+    form.append('tags', '')
+    form.append('cover', new File(['plain text'], 'cover.png', { type: 'image/png' }))
+
+    await asAda
+      .post('/posts', form)
+      .assertStatus(422)
+      .assertJsonPath('errors.cover.0', 'The file must be an image.')
+
+    expect(await Post.where('title', 'Not a picture').first()).toBeNull()
+  })
+
   it('replaces the cover, and lets only the author do it', async () => {
     const grace = await User.create({ name: 'Grace', email: 'grace@example.com', password: 'correct horse battery' })
     const asGrace = await http.actingAs(grace).withCsrf()
@@ -865,6 +900,22 @@ describe('post attachments', () => {
     expect(loaded!.images.map((img) => img.name).sort()).toEqual(['one.png', 'two.png'])
   })
 
+  it('stores no post when one gallery file is not an image', async () => {
+    const form = new FormData()
+    form.append('title', 'Half a gallery')
+    form.append('body', 'Pictures')
+    form.append('tags', '')
+    form.append('images', image('one.png'))
+    form.append('images', new File(['plain text'], 'two.png', { type: 'image/png' }))
+
+    await asAda
+      .post('/posts', form)
+      .assertStatus(422)
+      .assertJsonPath('errors.images.0', 'The file must be an image.')
+
+    expect(await Post.where('title', 'Half a gallery').first()).toBeNull()
+  })
+
   it('lets the author remove one gallery image, and nobody else', async () => {
     const grace = await User.create({ name: 'Grace', email: 'grace@example.com', password: 'correct horse battery' })
     const asGrace = await http.actingAs(grace).withCsrf()
@@ -887,17 +938,17 @@ describe('post attachments', () => {
 bun test
 ```
 
-2 件が失敗します。`images` は `Post` が宣言しているコレクションではないからです。
+3 件が失敗します。2 件は、`images` が `Post` の宣言しているコレクションではないためです。残りの 1 件は 422 を期待していますが、`store` がこのフィールドを読まずに投稿を保存するので、リダイレクトが返ります。
 
 ## 6. エージェントに任せる
 
 エージェントに次のプロンプトを送ります。
 
 ```text
-Add a gallery to posts: a `hasManyAttached` collection named `images` (images only) on `Post`. The new-post form accepts several files under `images`, `store` attaches each one, the post page shows them, and `DELETE /posts/:id/images/:attachment`, named `posts.images.destroy`, removes one image for the post's author. Load the gallery with `withAttachments` and expose it through `PostResource`. `tests/PostAttachments.test.ts` describes it; make it pass.
+Add a gallery to posts: a `hasManyAttached` collection named `images` (images only) on `Post`. The new-post form accepts several files under `images`, `store` checks each one with `inspectAttachment` before it creates the post and attaches them after, the post page shows them, and `DELETE /posts/:id/images/:attachment`, named `posts.images.destroy`, removes one image for the post's author. Load the gallery with `withAttachments` and expose it through `PostResource`. `tests/PostAttachments.test.ts` describes it; make it pass.
 ```
 
-やることはカバー画像と同じで、それを複数枚に広げるだけです。`this.file('cover')` の代わりに `this.files('images')` を、nullable の代わりに配列を使い、差し替えの `attach` の代わりに attachment の id を渡す `detach` を使います。
+やることはカバー画像と同じで、それを複数枚に広げるだけです。`this.file('cover')` の代わりに `this.files('images')` を、nullable の代わりに配列を使い、差し替えの `attach` の代わりに attachment の id を渡す `detach` を使います。`store` はファイルを 1 つずつ検査し、すべて通ったときだけ投稿を作ります。検査の間はデコードした画像をメモリに持つことがあるので、まとめては行いません。
 
 確認項目で見どころになるのは削除ルートです。URL の id で attachment を探すだけでなく、探す範囲を*この投稿の*コレクションに限る必要があります。そうすれば、他人の投稿に付いた有効な attachment id が渡されても拒否できます。`detach(post.id, 'images', attachmentId)` はまさにこの動きをしますが、attachment の id だけで削除する処理を自分で書いた場合はそうなりません。
 
@@ -1062,14 +1113,19 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const { tags, ...data } = await this.validateBody(PostPayloadSchema)
+    const coverFile = await this.file('cover')
+    const cover = coverFile ? await Post.inspectAttachment('cover', coverFile) : null
+    const images = []
+    for (const file of await this.files('images')) {
+      images.push(await Post.inspectAttachment('images', file))
+    }
     const post = await Post.create(data, { set: { authorId: author.id } })
     await syncTags(post.id, tags)
-    const cover = await this.file('cover')
     if (cover) {
       await Post.attach(post.id, 'cover', cover)
     }
-    for (const file of await this.files('images')) {
-      await Post.attach(post.id, 'images', file)
+    for (const image of images) {
+      await Post.attach(post.id, 'images', image)
     }
     return this.redirect(`/posts/${post.id}`)
   }
@@ -1439,10 +1495,10 @@ bun test
 確認項目は次のとおりです。
 
 - `images` が `hasManyAttached({ image: 'require' })` で宣言されていて、モデルのほかの宣言は変わっていない。
-- `store` が `this.files('images')` のファイルをすべて attach している。`destroyImage` は、投稿の範囲に絞った `detach(post.id, 'images', attachmentId)` で 1 枚を削除し、投稿へのほかの変更と同じく、その前に `authorize('update', ...)` を通している。
+- `store` が `this.files('images')` のファイルをすべて `Post.create` より前に `inspectAttachment` へ渡し、その結果を作成後に attach している。`destroyImage` は、投稿の範囲に絞った `detach(post.id, 'images', attachmentId)` で 1 枚を削除し、投稿へのほかの変更と同じく、その前に `authorize('update', ...)` を通している。
 - `show` が `cover` と `images` を 1 回の `withAttachments` 呼び出しで読み込み、リソースがギャラリーを `AttachmentData[]` として公開している。
 - 削除ルートは `auth` グループの中にあり、投稿には `bind`、attachment の id には `params` スキーマが付いている。
-- attachment のテスト 5 件がすべて通り、`guren check` の attachment のルール 4 つも引き続き通っている。
+- attachment のテスト 7 件がすべて通り、`guren check` の attachment のルール 4 つも引き続き通っている。
 
 **チェックポイント:** 画像が 3 枚付いた投稿があり、4 枚目は一度追加してから削除してある状態です。
 
@@ -1480,11 +1536,11 @@ git commit -m "feat: add a gallery to posts"
 
 `app/Models/Post.ts` で `Post` が `cover` をどう宣言しているかを見てください。
 
-`cover.png` に改名したテキストファイルは、`cover` のバリデーションエラー「The file must be an image.」で拒否されます。決めているのは `cover: hasOneAttached({ image: 'require' })` の行です。`'require'` のとき、`attach()` はアップロードの先頭のバイト列に画像のシグネチャがあるかを調べ、ファイル名やブラウザが申告した型は判定に使いません。そのため、`cover.txt` に改名した本物の PNG は受け付けられ、名前は `cover.txt` のまま、コンテンツタイプ `image/png` で記録されます。保存されるファイルの拡張子は、中身に合わせて `.png` になります。
+`cover.png` に改名したテキストファイルは、`cover` のバリデーションエラー「The file must be an image.」で拒否されます。決めているのは `cover: hasOneAttached({ image: 'require' })` の行です。`'require'` のとき、`inspectAttachment()` はアップロードの先頭のバイト列に画像のシグネチャがあるかを調べ、ファイル名やブラウザが申告した型は判定に使いません。ファイルをそのまま渡された `attach()` も同じ検査をします。そのため、`cover.txt` に改名した本物の PNG は受け付けられ、名前は `cover.txt` のまま、コンテンツタイプ `image/png` で記録されます。保存されるファイルの拡張子は、中身に合わせて `.png` になります。
 
 一文で言えば、attachments レイヤーはファイルの種類を中身のバイト列で判断し、名前は見ません。
 
-新規投稿のフォームからアップロードした場合、`attach()` がファイルを拒否する前に `store` が投稿を保存しています。そのため、カバー画像のない投稿が残ります。
+新規投稿のフォームからアップロードした場合は、あとで投稿の一覧を見てください。投稿は作られていません。`store` が `Post.create()` より前に `inspectAttachment()` を呼ぶので、行を書き込む前にファイルが拒否されます。
 
 </details>
 

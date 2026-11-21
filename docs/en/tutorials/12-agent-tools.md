@@ -338,14 +338,19 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const { tags, ...data } = await this.validateBody(PostPayloadSchema)
+    const coverFile = await this.file('cover')
+    const cover = coverFile ? await Post.inspectAttachment('cover', coverFile) : null
+    const images = []
+    for (const file of await this.files('images')) {
+      images.push(await Post.inspectAttachment('images', file))
+    }
     const post = await Post.create(data, { set: { authorId: author.id } })
     await syncTags(post.id, tags)
-    const cover = await this.file('cover')
     if (cover) {
       await Post.attach(post.id, 'cover', cover)
     }
-    for (const file of await this.files('images')) {
-      await Post.attach(post.id, 'images', file)
+    for (const image of images) {
+      await Post.attach(post.id, 'images', image)
     }
     return this.redirect(`/posts/${post.id}`)
   }

@@ -6,7 +6,7 @@ A blog wants pictures. This chapter installs Guren's attachments layer, gives ev
 
 - What an upload is on the server: a `File` in a multipart body, a row in the `attachments` table, an object on a disk
 - Why uploads never live under `public/`, and what a signed delivery route does instead
-- How a model declares its attachments, and the four calls that manage them: `attach`, `withAttachments`, `detach`, `purgeAttachments`
+- How a model declares its attachments, and the five calls that manage them: `inspectAttachment`, `attach`, `withAttachments`, `detach`, `purgeAttachments`
 - How a form sends a file and how a test does
 - The attachment rules `guren check` enforces, and why one of them is a hard failure
 
@@ -204,6 +204,21 @@ describe('post attachments', () => {
     await response.assertBodyContains('/attachments/')
   })
 
+  it('refuses a cover that is not an image and stores no post', async () => {
+    const form = new FormData()
+    form.append('title', 'Not a picture')
+    form.append('body', 'Plain text inside')
+    form.append('tags', '')
+    form.append('cover', new File(['plain text'], 'cover.png', { type: 'image/png' }))
+
+    await asAda
+      .post('/posts', form)
+      .assertStatus(422)
+      .assertJsonPath('errors.cover.0', 'The file must be an image.')
+
+    expect(await Post.where('title', 'Not a picture').first()).toBeNull()
+  })
+
   it('replaces the cover, and lets only the author do it', async () => {
     const grace = await User.create({ name: 'Grace', email: 'grace@example.com', password: 'correct horse battery' })
     const asGrace = await http.actingAs(grace).withCsrf()
@@ -234,17 +249,17 @@ describe('post attachments', () => {
 })
 ```
 
-Three things worth reading in this file. The upload is a `FormData` with a `File` in it, and `TestApp` sends it as multipart when it sees one; a JSON body could not carry a file. The URL is asserted to be signed, not merely present, because an unsigned URL would mean the disk is public. And the last test checks the disk itself, through the object key the attachment row records: deleting a post must not leave its files behind, and no database assertion can tell you that. The suite runs with `NODE_ENV=test`, and the scaffolded `config/storage.ts` then roots the `local` disk at `./storage/app/testing`. That is why `disk()` asks the disk instead of building a path, and why test uploads never mix with the files your development database points at.
+Four things worth reading in this file. The upload is a `FormData` with a `File` in it, and `TestApp` sends it as multipart when it sees one; a JSON body could not carry a file. The URL is asserted to be signed, not merely present, because an unsigned URL would mean the disk is public. The second test uploads plain text under the name `cover.png` and asserts two things: the answer is 422 with a message on `cover`, and no post was saved. A refused upload that still leaves a post behind gets a second post when the author fixes the file and submits again. And the last test checks the disk itself, through the object key the attachment row records: deleting a post must not leave its files behind, and no database assertion can tell you that. The suite runs with `NODE_ENV=test`, and the scaffolded `config/storage.ts` then roots the `local` disk at `./storage/app/testing`. That is why `disk()` asks the disk instead of building a path, and why test uploads never mix with the files your development database points at.
 
 ```bash run expect-fail
 bun test
 ```
 
-Red, all three: `Post.withAttachments is not a function` in one and `Post.attach is not a function` in the other two, because `Post` is not attachable yet.
+Red, all four. Three fail on `Post.withAttachments is not a function` or `Post.attach is not a function`, because `Post` is not attachable yet. The second gets a redirect where it expected 422: `store` does not read the file, so it saves the post.
 
 ## 3. The cover, by hand
 
-The model declares its collections by wrapping the class. `image: 'require'` means a file that is not an image is refused with a validation message, at attach time, whatever its name or type header claim:
+The model declares its collections by wrapping the class. `image: 'require'` means a file that is not an image is refused with a validation message, whatever its name or type header claim:
 
 ```ts file=app/Models/Post.ts
 import { Attachable, defineModel, hasOneAttached, type BelongsToRecord, type BelongsToManyRecord, type HasManyRecord } from '@guren/core'
@@ -271,7 +286,7 @@ Post.hasMany('comments', () => import('./Comment.js').then((m) => m.Comment), 'p
 Post.belongsToMany('tags', () => import('./Tag.js').then((m) => m.Tag), postTags, 'postId', 'tagId')
 ```
 
-`Attachable` adds four statics to `Post`: `attach(id, collection, file)`, `detach(id, collection, attachmentId?)`, `withAttachments(records, names)` and `purgeAttachments(id)`. Nothing about the table or the disk appears here; the config decided those once.
+`Attachable` adds five statics to `Post`: `inspectAttachment(collection, file)`, `attach(id, collection, file)`, `detach(id, collection, attachmentId?)`, `withAttachments(records, names)` and `purgeAttachments(id)`. Nothing about the table or the disk appears here; the config decided those once.
 
 The resource carries the cover as an `AttachmentData`: id, name, content type, size, dimensions, and the URL the page should use. Whether that URL is a signed route or a CDN path is the config's business, not the resource's:
 
@@ -315,7 +330,7 @@ export class PostResource extends Resource<PostWithRelations, PostResourceData> 
 }
 ```
 
-The controller: `store` attaches the cover if one was sent, `show` loads it, `destroy` purges the files before the row, and a new `cover` action replaces it. `this.file('cover')` reads the multipart field and returns `null` when it is absent or empty:
+The controller: `store` checks the cover if one was sent, creates the post and then attaches it, `show` loads it, `destroy` purges the files before the row, and a new `cover` action replaces it. `this.file('cover')` reads the multipart field and returns `null` when it is absent or empty:
 
 ```ts file=app/Http/Controllers/PostController.ts
 import { Controller, ValidationException, paginate, type PaginatedPageProps } from '@guren/core'
@@ -379,9 +394,10 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const { tags, ...data } = await this.validateBody(PostPayloadSchema)
+    const coverFile = await this.file('cover')
+    const cover = coverFile ? await Post.inspectAttachment('cover', coverFile) : null
     const post = await Post.create(data, { set: { authorId: author.id } })
     await syncTags(post.id, tags)
-    const cover = await this.file('cover')
     if (cover) {
       await Post.attach(post.id, 'cover', cover)
     }
@@ -442,7 +458,9 @@ export default class PostController extends Controller {
 }
 ```
 
-Two details carry the chapter. `Post.attach(post.id, 'cover', cover)` on a `hasOneAttached` collection **replaces**: the old file is removed, the new one stored, one row. And `purgeAttachments` comes before `delete`: the attachments table has no foreign key to `posts` (it is polymorphic, one table for every model), so nothing cascades, and a post deleted without the purge would leave orphaned files on the disk and orphaned rows in the table. That is what `attachments:prune` exists to find later, and what the third test refuses to allow.
+Three details carry the chapter. The first is the order in `store`. `attach()` needs the post's id, so on its own it can refuse a file only after the post is saved. `Post.inspectAttachment('cover', coverFile)` runs the same checks with no post and writes nothing, and it throws the 422 the second test expects before `Post.create` runs. Its result goes to `attach()`, which stores the file without checking it a second time. The `cover` action hands the upload straight to `attach()`, because its post already exists and the action saves nothing else.
+
+`Post.attach(post.id, 'cover', cover)` on a `hasOneAttached` collection **replaces**: the old file is removed, the new one stored, one row. And `purgeAttachments` comes before `delete`: the attachments table has no foreign key to `posts` (it is polymorphic, one table for every model), so nothing cascades, and a post deleted without the purge would leave orphaned files on the disk and orphaned rows in the table. That is what `attachments:prune` exists to find later, and what the last test refuses to allow.
 
 The route for replacing a cover is a `POST`, not part of `update`. A file cannot travel in a `PUT` from an Inertia form without method spoofing, which Guren does not do; a separate route is simpler and reads better:
 
@@ -806,6 +824,21 @@ describe('post attachments', () => {
     await response.assertBodyContains('/attachments/')
   })
 
+  it('refuses a cover that is not an image and stores no post', async () => {
+    const form = new FormData()
+    form.append('title', 'Not a picture')
+    form.append('body', 'Plain text inside')
+    form.append('tags', '')
+    form.append('cover', new File(['plain text'], 'cover.png', { type: 'image/png' }))
+
+    await asAda
+      .post('/posts', form)
+      .assertStatus(422)
+      .assertJsonPath('errors.cover.0', 'The file must be an image.')
+
+    expect(await Post.where('title', 'Not a picture').first()).toBeNull()
+  })
+
   it('replaces the cover, and lets only the author do it', async () => {
     const grace = await User.create({ name: 'Grace', email: 'grace@example.com', password: 'correct horse battery' })
     const asGrace = await http.actingAs(grace).withCsrf()
@@ -849,6 +882,22 @@ describe('post attachments', () => {
     expect(loaded!.images.map((img) => img.name).sort()).toEqual(['one.png', 'two.png'])
   })
 
+  it('stores no post when one gallery file is not an image', async () => {
+    const form = new FormData()
+    form.append('title', 'Half a gallery')
+    form.append('body', 'Pictures')
+    form.append('tags', '')
+    form.append('images', image('one.png'))
+    form.append('images', new File(['plain text'], 'two.png', { type: 'image/png' }))
+
+    await asAda
+      .post('/posts', form)
+      .assertStatus(422)
+      .assertJsonPath('errors.images.0', 'The file must be an image.')
+
+    expect(await Post.where('title', 'Half a gallery').first()).toBeNull()
+  })
+
   it('lets the author remove one gallery image, and nobody else', async () => {
     const grace = await User.create({ name: 'Grace', email: 'grace@example.com', password: 'correct horse battery' })
     const asGrace = await http.actingAs(grace).withCsrf()
@@ -871,17 +920,17 @@ describe('post attachments', () => {
 bun test
 ```
 
-Two red: `images` is not a collection `Post` declares.
+Three red. Two fail because `images` is not a collection `Post` declares. The third gets a redirect where it expected 422, because `store` ignores the field and saves the post.
 
 ## 6. Delegate it
 
 Ask your agent:
 
 ```text
-Add a gallery to posts: a `hasManyAttached` collection named `images` (images only) on `Post`. The new-post form accepts several files under `images`, `store` attaches each one, the post page shows them, and `DELETE /posts/:id/images/:attachment`, named `posts.images.destroy`, removes one image for the post's author. Load the gallery with `withAttachments` and expose it through `PostResource`. `tests/PostAttachments.test.ts` describes it; make it pass.
+Add a gallery to posts: a `hasManyAttached` collection named `images` (images only) on `Post`. The new-post form accepts several files under `images`, `store` checks each one with `inspectAttachment` before it creates the post and attaches them after, the post page shows them, and `DELETE /posts/:id/images/:attachment`, named `posts.images.destroy`, removes one image for the post's author. Load the gallery with `withAttachments` and expose it through `PostResource`. `tests/PostAttachments.test.ts` describes it; make it pass.
 ```
 
-This is the same shape as the cover, one level up: `this.files('images')` instead of `this.file('cover')`, an array instead of a nullable, and `detach` with an attachment id instead of a replacing `attach`. The interesting part of the rubric is the delete route: it must find the attachment by the id in the URL *and* only within this post's collection, so a valid attachment id from someone else's post is refused. `detach(post.id, 'images', attachmentId)` does exactly that; a hand-rolled delete by attachment id alone would not.
+This is the same shape as the cover, one level up: `this.files('images')` instead of `this.file('cover')`, an array instead of a nullable, and `detach` with an attachment id instead of a replacing `attach`. `store` checks the files one at a time, since each check may hold a decoded image in memory, and creates the post only when every file passed. The interesting part of the rubric is the delete route: it must find the attachment by the id in the URL *and* only within this post's collection, so a valid attachment id from someone else's post is refused. `detach(post.id, 'images', attachmentId)` does exactly that; a hand-rolled delete by attachment id alone would not.
 
 **No agent handy?** The model gains a collection:
 
@@ -1044,14 +1093,19 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const { tags, ...data } = await this.validateBody(PostPayloadSchema)
+    const coverFile = await this.file('cover')
+    const cover = coverFile ? await Post.inspectAttachment('cover', coverFile) : null
+    const images = []
+    for (const file of await this.files('images')) {
+      images.push(await Post.inspectAttachment('images', file))
+    }
     const post = await Post.create(data, { set: { authorId: author.id } })
     await syncTags(post.id, tags)
-    const cover = await this.file('cover')
     if (cover) {
       await Post.attach(post.id, 'cover', cover)
     }
-    for (const file of await this.files('images')) {
-      await Post.attach(post.id, 'images', file)
+    for (const image of images) {
+      await Post.attach(post.id, 'images', image)
     }
     return this.redirect(`/posts/${post.id}`)
   }
@@ -1421,10 +1475,10 @@ bun test
 The rubric:
 
 - `images` is declared with `hasManyAttached({ image: 'require' })`; the model's other declarations are unchanged.
-- `store` attaches every file from `this.files('images')`; `destroyImage` removes one with `detach(post.id, 'images', attachmentId)`, scoped to the post, after the same `authorize('update', ...)` as every other change to a post.
+- `store` passes every file from `this.files('images')` to `inspectAttachment` before `Post.create`, and attaches the results after it; `destroyImage` removes one with `detach(post.id, 'images', attachmentId)`, scoped to the post, after the same `authorize('update', ...)` as every other change to a post.
 - `show` loads `cover` and `images` in one `withAttachments` call, and the resource exposes the gallery as `AttachmentData[]`.
 - The delete route carries `bind` for the post and a `params` schema for the attachment id, and lives in the `auth` group.
-- All five attachment tests are green, and `guren check` still passes the four attachment rules.
+- All seven attachment tests are green, and `guren check` still passes the four attachment rules.
 
 **Checkpoint:** a post with three pictures, and a fourth you removed.
 
@@ -1462,9 +1516,9 @@ git commit -m "feat: add a gallery to posts"
 
 Look at how `Post` declares `cover` in `app/Models/Post.ts`.
 
-The text file named `cover.png` is refused with a validation error on `cover`: "The file must be an image." The deciding line is `cover: hasOneAttached({ image: 'require' })`. With `'require'`, `attach()` inspects the first bytes of the upload for an image signature, and the file name and the type the browser declared play no part. So the real PNG renamed `cover.txt` is accepted and recorded with the content type `image/png` and the name `cover.txt`, while the stored file takes the `.png` extension its bytes call for. In one sentence: the attachments layer decides what a file is from its bytes, not from its name.
+The text file named `cover.png` is refused with a validation error on `cover`: "The file must be an image." The deciding line is `cover: hasOneAttached({ image: 'require' })`. With `'require'`, `inspectAttachment()` reads the first bytes of the upload for an image signature (`attach()` does the same when it is handed a file directly), and the file name and the type the browser declared play no part. So the real PNG renamed `cover.txt` is accepted and recorded with the content type `image/png` and the name `cover.txt`, while the stored file takes the `.png` extension its bytes call for. In one sentence: the attachments layer decides what a file is from its bytes, not from its name.
 
-If you uploaded through the new-post form, notice that `store` had already saved the post before `attach()` refused the file, so the post exists without a cover.
+If you uploaded through the new-post form, look at the post list afterwards: no post was created. `store` calls `inspectAttachment()` before `Post.create()`, so the file is refused before any row is written.
 
 </details>
 
