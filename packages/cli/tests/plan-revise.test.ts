@@ -107,6 +107,43 @@ describe('plan:revise', () => {
     expect(formatPlanRevise(report, 'comments.plan.json')).toContain('Next: guren plan:render comments.plan.json')
   })
 
+  test('should move a version 1 draft to version 2 when ops add its first config entry, and write the plan', async () => {
+    const draft = loadCommentsPlan()
+    const plan = await writeJson('entries/comments.plan.json', draft)
+    const ops = await writeJson('entries/ops.json', { ops: [{ op: 'add', section: 'config', element: { id: 'config.queue', change: { kind: 'add' }, name: 'queue' }, reason: 'The queue needs its config.' }] })
+
+    const report = await revise(plan, { ops })
+
+    const written = await readJson(plan)
+    expect(written.planVersion).toBe(2)
+    expect(written.config).toEqual([{ id: 'config.queue', change: { kind: 'add' }, name: 'queue' }])
+    expect('providers' in written).toBe(false)
+    expect(planDigest(PlanDraftSchema.parse(written))).toBe(report.plan.hash)
+  })
+
+  test('should revise a version 1 draft by ops without writing the sections it does not hold', async () => {
+    const draft = loadCommentsPlan()
+    const plan = await writeJson('entries-none/comments.plan.json', draft)
+    const ops = await writeJson('entries-none/ops.json', { ops: [ADD_DELETED_AT] })
+
+    await revise(plan, { ops })
+
+    const written = await readJson(plan)
+    expect(written.planVersion).toBe(1)
+    expect('providers' in written || 'config' in written).toBe(false)
+  })
+
+  test('should refuse an edited copy whose planVersion no revision would give it', async () => {
+    const draft = loadCommentsPlan()
+    const plan = await writeJson('entries-version/comments.plan.json', draft)
+    const copy = await writeJson('entries-version/edited.json', edited(draft, (document) => {
+      document.planVersion = 2
+      document.title = 'Comments, revised'
+    }))
+
+    await expect(revise(plan, { edited: copy, message: 'retitle' })).rejects.toThrow('A revision moves planVersion only when it adds the first providers or config entry; leave it as 1.')
+  })
+
   test('should write an edited copy as its author wrote it, at the recorded result, with the baseline carried over', async () => {
     const plan = await approvedPlan('edited')
     const before = await readJson(plan)

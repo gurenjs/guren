@@ -8,7 +8,7 @@
 
 import { z } from 'zod'
 
-import { PLAN_VERSION, SUPPORTED_PLAN_VERSIONS } from './version'
+import { ENTRY_SECTIONS_VERSION, PLAN_VERSION, SUPPORTED_PLAN_VERSIONS } from './version'
 
 export { PLAN_VERSION, SUPPORTED_PLAN_VERSIONS }
 
@@ -244,11 +244,14 @@ export const PlanSideEffectSchema = z.strictObject({
   description: NonEmptySchema,
 })
 
+/** A file's stem and the binding it is imported under, which is spliced into its path: no separator, no extension. */
+const EntryNameSchema = z.string().regex(/^[A-Za-z_$][\w$]*$/u, { message: 'must be an identifier, the stem of its file' })
+
 /** A provider class at `app/Providers/<className>.ts`, a default export, in the `providers` of `createApp()` (RFC 0040 §5). */
 export const PlanProviderSchema = z.strictObject({
   id: IdSchema,
   change: EntryChangeSchema,
-  className: NonEmptySchema,
+  className: EntryNameSchema,
   purpose: NonEmptySchema,
 })
 
@@ -256,7 +259,7 @@ export const PlanProviderSchema = z.strictObject({
 export const PlanConfigSchema = z.strictObject({
   id: IdSchema,
   change: EntryChangeSchema,
-  name: NonEmptySchema,
+  name: EntryNameSchema,
 })
 
 export const PLAN_FLOW_NODE_KINDS = ['actor', 'page', 'route', 'action', 'job', 'store', 'external', 'decision'] as const
@@ -389,9 +392,9 @@ const draftShape = {
 
 /** The sections a version 1 plan cannot hold, since a CLI that reads only version 1 refuses them. */
 function holdsSectionsOfItsVersion(plan: { planVersion: number; providers?: unknown; config?: unknown }, context: z.core.$RefinementCtx): void {
-  if (plan.planVersion >= 2) return
+  if (plan.planVersion >= ENTRY_SECTIONS_VERSION) return
   for (const key of ['providers', 'config'] as const) {
-    if (plan[key] !== undefined) context.addIssue({ code: 'custom', path: [key], message: `needs planVersion ${PLAN_VERSION}` })
+    if (plan[key] !== undefined) context.addIssue({ code: 'custom', path: [key], message: `needs planVersion ${ENTRY_SECTIONS_VERSION}` })
   }
 }
 

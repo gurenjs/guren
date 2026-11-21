@@ -47,6 +47,11 @@ describe('the providers and config sections of a plan (RFC 0040 §5)', () => {
     for (const change of [{ kind: 'alter' }, { kind: 'drop', reason: 'gone' }, { kind: 'rename', from: 'Old' }]) {
       expect(PlanDraftSchema.safeParse({ ...draft(), providers: [{ ...PROVIDER, change }] }).success).toBe(false)
     }
+    // The name is a file's stem, spliced into its path.
+    for (const className of ['Queue/JobsProvider', 'JobsProvider.ts', '../Http/Controllers/PostController']) {
+      expect(PlanDraftSchema.safeParse({ ...draft(), providers: [{ ...PROVIDER, className }] }).success).toBe(false)
+    }
+    expect(PlanDraftSchema.safeParse({ ...draft(), config: [{ ...CONFIG, name: 'rate-limit' }] }).success).toBe(false)
     const schema = planDraftJsonSchema() as { properties: Record<string, unknown>; required: string[] }
     expect(Object.keys(schema.properties)).toEqual(expect.arrayContaining(['providers', 'config']))
     expect(schema.required).not.toContain('providers')

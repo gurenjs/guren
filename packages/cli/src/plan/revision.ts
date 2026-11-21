@@ -15,7 +15,7 @@ import { formatSchemaIssues } from '../cli-error'
 import type { PlanFeedback } from './feedback'
 import { canonicalJson, planDigest } from './identity'
 import { listPlanReferences } from './references'
-import { PLAN_VERSION } from './version'
+import { ENTRY_SECTIONS_VERSION } from './version'
 import {
   AcceptanceSchema,
   findDuplicatePlanIds,
@@ -448,8 +448,9 @@ function applyOps<P extends PlanDraft>(
 
   if (rejections.length > 0) return { ok: false, rejections }
 
-  // A section a version 1 plan cannot hold moves the plan to the version that reads it.
-  if (SECTIONS_ABSENT_WHEN_EMPTY.some((section) => (plan[section] ?? []).length > 0)) plan.planVersion = PLAN_VERSION
+  for (const section of SECTIONS_ABSENT_WHEN_EMPTY) if ((plan[section] as unknown[]).length === 0) delete plan[section]
+  // A section a version 1 plan cannot hold moves the plan to the version that reads it, and no further.
+  if (plan.planVersion < ENTRY_SECTIONS_VERSION && SECTIONS_ABSENT_WHEN_EMPTY.some((section) => plan[section] !== undefined)) plan.planVersion = ENTRY_SECTIONS_VERSION
   const parsed = planSchemaFor(parent).safeParse(plan)
   if (!parsed.success) return refuse('invalid-result', formatSchemaIssues(parsed.error))
 

@@ -103,9 +103,6 @@ export function richPlan(locale = 'en'): Plan {
     },
   ]
   plan.commands = [{ id: 'command.migrate', command: 'bun run db:migrate', reason: 'The comments table is new.' }]
-  plan.planVersion = 2
-  plan.providers = [{ id: 'provider.jobs', change: { kind: 'add' }, className: 'JobsProvider', purpose: 'Registers the queue jobs.' }]
-  plan.config = [{ id: 'config.queue', change: { kind: 'add' }, name: 'queue' }]
 
   const acceptance = plan.tasks[0].acceptance
   acceptance[0].expect.database.push({ table: 'comments', missing: [{ name: 'body', json: '"spam"' }] })
