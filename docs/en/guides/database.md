@@ -166,6 +166,24 @@ The adapter exposes the same runtime API as the other drivers, and migrations us
 > [!NOTE]
 > Authentication uses the standard AWS SDK credential chain (IAM role on Lambda, `AWS_PROFILE` locally). Pass `clientOptions` to override the region or credentials explicitly.
 
+#### A cluster that pauses when idle
+
+An Aurora Serverless v2 cluster with a minimum capacity of 0 ACUs pauses after its idle period. The Data API cancels the first call that reaches a paused cluster with `DatabaseResumingException` and starts resuming it. Resuming typically takes about 15 seconds, and longer after more than a day paused.
+
+The adapter retries that call until the cluster answers. It waits 1 second, then doubles the wait up to 5 seconds, and gives up 60 seconds after the first try by rethrowing the exception. This covers every call the adapter sends: model queries, `db:migrate`, `db:status`, seeding and the console handler. The cancelled call ran no SQL, so a retry cannot apply a statement twice. One warning is logged per pause.
+
+No other error is retried. A statement that timed out, for example, had already started running in the database.
+
+```ts
+const database = createAwsDataApiDatabase({
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  // Give up after 20 seconds instead of the default 60.
+  resumeRetry: { timeoutMs: 20_000 },
+})
+```
+
+The wait counts against the timeout of whatever is waiting on the call. A Lambda function whose timeout is shorter than the resume is ended before the retry finishes. Raise the timeout of a function that should ride out a pause. Where a request should fail fast instead, lower `timeoutMs`, or turn the retry off with `resumeRetry: false`.
+
 ## Schema and Migrations
 
 Tables are declared in `db/schema.ts` with Drizzle's builders for your driver. A fresh SQLite app starts with a `users` table:

@@ -8,6 +8,7 @@ import { runSeeders, type SeederRunSummary } from './seeder'
 import type { DestructiveMigrationMode } from './migration-guard'
 import { singleFlight } from './single-flight'
 import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
+import { createResumeRetry, type AwsDataApiResumeRetryOptions } from './aws-data-api-resume'
 
 type AwsDataApiDrizzle = typeof import('drizzle-orm/aws-data-api/pg')
 type AwsDataApiPgDatabase = import('drizzle-orm/aws-data-api/pg').AwsDataApiPgDatabase
@@ -51,6 +52,14 @@ export interface AwsDataApiDatabaseOptions {
   /** Extra RDSDataClient configuration (region, credentials, ...). */
   clientOptions?: RDSDataClientConfig
   /**
+   * A cluster with minimum capacity 0 pauses when idle, and the Data API cancels
+   * the call that wakes it with `DatabaseResumingException`. That call is retried
+   * until the cluster answers, for up to 60 s by default. `false` rethrows it at
+   * once; keep `timeoutMs` under the timeout of whatever is waiting on the call.
+   * A `timeoutMs` or `maxDelayMs` that is not a usable number throws here.
+   */
+  resumeRetry?: false | AwsDataApiResumeRetryOptions
+  /**
    * Run pending migrations on the first `getDatabase()` call. Off by default:
    * on Lambda it costs several serialized Data API round trips on every cold
    * start. Migrate out of band instead — `db:migrate`, or the console handler
@@ -83,6 +92,11 @@ export interface AwsDataApiDatabase {
   hasMigrations(): boolean
 }
 
+interface DataApiClient {
+  destroy?: () => void
+  send?: (...args: unknown[]) => unknown
+}
+
 interface ResolvedConnection {
   database: string
   resourceArn: string
@@ -90,14 +104,14 @@ interface ResolvedConnection {
 }
 
 export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): AwsDataApiDatabase {
-  const { migrationsFolder, destructiveMigrations, database, resourceArn, secretArn, clientOptions, migrateOnStart, seedersFolder, relations } = options
+  const { migrationsFolder, destructiveMigrations, database, resourceArn, secretArn, clientOptions, resumeRetry, migrateOnStart, seedersFolder, relations } = options
 
   const resolvedMigrationsFolder =
     migrationsFolder instanceof URL ? fileURLToPath(migrationsFolder) : resolve(String(migrationsFolder))
   const resolvedSeedersFolder =
     seedersFolder == null ? undefined : seedersFolder instanceof URL ? fileURLToPath(seedersFolder) : resolve(String(seedersFolder))
 
-  let client: { destroy?: () => void } | undefined
+  let client: DataApiClient | undefined
   let activeKey: string | undefined
   // Captured here, not in the connection factory, so the caller of this factory
   // is the frame that identifies the handle across hot reloads.
@@ -136,6 +150,19 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
       },
       ...(relations ? { relations } : {}),
     } as DrizzleConfig
+  }
+
+  const retryWhileResuming = resumeRetry === false ? undefined : createResumeRetry(resumeRetry)
+
+  async function connect(): Promise<{ db: AwsDataApiPgDatabase & { $client?: DataApiClient }; connection: ResolvedConnection }> {
+    const { drizzle } = await loadAwsDataApiModules()
+    // Resolved after the await: a context `configureOrm()` remembers while the driver loads must be the one used.
+    const connection = resolveConnection()
+    const db = drizzle(buildDrizzleConfig(connection)) as unknown as AwsDataApiPgDatabase & { $client?: DataApiClient }
+    if (db.$client) {
+      retryWhileResuming?.(db.$client)
+    }
+    return { db, connection }
   }
 
   // A reset drops the tracker along with everything else, so the re-apply that
@@ -177,10 +204,8 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     if (migrateOnStart) {
       await migrations.get()
     }
-    const { drizzle } = await loadAwsDataApiModules()
-    const connection = resolveConnection()
-    const db = drizzle(buildDrizzleConfig(connection)) as unknown as AwsDataApiPgDatabase
-    client = (db as { $client?: { destroy?: () => void } }).$client
+    const { db, connection } = await connect()
+    client = db.$client
 
     activeKey = hotReloadKey('aws-data-api', callSite, `${connection.resourceArn}/${connection.database}`)
     if (activeKey) {
@@ -228,10 +253,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   }
 
   async function withAdminDb<T>(callback: (db: AwsDataApiPgDatabase) => Promise<T>): Promise<T> {
-    const { drizzle } = await loadAwsDataApiModules()
-    const adminDb = drizzle(buildDrizzleConfig(resolveConnection())) as unknown as AwsDataApiPgDatabase & {
-      $client?: { destroy?: () => void }
-    }
+    const { db: adminDb } = await connect()
 
     try {
       return await callback(adminDb)
