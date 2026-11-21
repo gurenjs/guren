@@ -583,6 +583,14 @@ jobs:
       - name: Guren integrity check
         run: cd web && bun ../packages/cli/src/bin.ts check
 
+      # web/docs is published at guren.dev/_guren/docs: a spec view that no
+      # longer matches the code, or an ADR naming a file that moved, fails here.
+      - name: Spec drift and doc links
+        run: |
+          cd web
+          bun ../packages/cli/src/bin.ts check --spec
+          bun ../packages/cli/src/bin.ts check --docs
+
       - name: Introspection manifest
         run: cd web && bun ../packages/cli/src/bin.ts introspect
 
