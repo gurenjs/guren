@@ -280,10 +280,11 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     consola.info('')
     consola.info(`  Attachments: store() reads the multipart field(s) ${fieldNames} via this.file()/this.files().`)
     consola.info(`  Add matching <input type="file"> fields to the New page (Inertia's useForm posts multipart`)
-    consola.info(`  automatically when the form data contains a File). Uploads are validated as images and 422`)
-    consola.info(`  on anything else — drop image: 'require' in the model for opaque bytes like PDFs.`)
-    consola.info(`  update() does not touch attachments; to accept uploads from the Edit page, add the same`)
-    consola.info(`  this.file() + ${singular}.attach() lines there (hasOne replaces, hasMany appends).`)
+    consola.info(`  automatically when the form data contains a File). Uploads are validated as images before`)
+    consola.info(`  the row is created, and 422 on anything else — drop image: 'require' in the model for`)
+    consola.info(`  opaque bytes like PDFs. update() does not touch attachments; to accept uploads from the Edit`)
+    consola.info(`  page, add the same this.file(), ${singular}.inspectAttachment() and ${singular}.attach() lines there`)
+    consola.info(`  (hasOne replaces, hasMany appends).`)
     consola.info(`  destroy() calls ${singular}.purgeAttachments() before deleting the row — attachment rows`)
     consola.info(`  have no foreign key, so deletion stays explicit.`)
   }
@@ -469,17 +470,27 @@ function generateController(
   const destroyGuard = withPolicy
     ? `    await this.authorize('delete', [${singular}, ${variableName}])\n`
     : ''
-  // The RFC 0013 §8 store shape: create first, then one attach per collection
-  // — `this.file()` returns null for an absent multipart field, so a form
-  // that never uploads still stores the record.
+  // Inspected before the row is created: a rejected upload must not leave a
+  // record the user creates again by resubmitting. `this.file()` returns null
+  // for an absent multipart field, so a form that never uploads still stores.
+  const storeInspect = attachments
+    .map((attachment) =>
+      attachment.kind === 'one'
+        ? `    const ${attachment.name}File = await this.file('${attachment.name}')\n`
+          + `    const ${attachment.name} = ${attachment.name}File ? await ${singular}.inspectAttachment('${attachment.name}', ${attachment.name}File) : null\n`
+        // One at a time: each inspection may hold a decoded image in memory.
+        : `    const ${attachment.name} = []\n`
+          + `    for (const file of await this.files('${attachment.name}')) {\n`
+          + `      ${attachment.name}.push(await ${singular}.inspectAttachment('${attachment.name}', file))\n`
+          + `    }\n`)
+    .join('')
   const storeAttach = attachments
     .map((attachment) =>
       attachment.kind === 'one'
-        ? `    const ${attachment.name} = await this.file('${attachment.name}')\n`
-          + `    if (${attachment.name}) {\n`
+        ? `    if (${attachment.name}) {\n`
           + `      await ${singular}.attach(${variableName}.id, '${attachment.name}', ${attachment.name})\n`
           + `    }\n`
-        : `    for (const file of await this.files('${attachment.name}')) {\n`
+        : `    for (const file of ${attachment.name}) {\n`
           + `      await ${singular}.attach(${variableName}.id, '${attachment.name}', file)\n`
           + `    }\n`)
     .join('')
@@ -527,7 +538,7 @@ function generateController(
       {
         name: 'store',
         body: `${authGuard}${createGuard}    const { body: data } = this.validated('${routeName}.store')
-    const ${variableName} = await ${singular}.create(data)
+${storeInspect}    const ${variableName} = await ${singular}.create(data)
 ${storeAttach}    return this.redirect('${redirectPrefix}/${routeName}/' + ${variableName}?.id)`,
       },
       {

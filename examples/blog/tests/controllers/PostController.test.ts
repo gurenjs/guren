@@ -17,6 +17,7 @@ const {
   mockUpdate,
   mockDelete,
   mockAttach,
+  mockInspectAttachment,
   mockWithAttachments,
   mockPurgeAttachments,
   mockGetPaginatedPosts,
@@ -31,6 +32,7 @@ const {
   mockUpdate: vi.fn(),
   mockDelete: vi.fn(),
   mockAttach: vi.fn(),
+  mockInspectAttachment: vi.fn(),
   mockWithAttachments: vi.fn(),
   mockPurgeAttachments: vi.fn(),
   mockGetPaginatedPosts: vi.fn(),
@@ -54,6 +56,7 @@ vi.mock('../../app/Models/Post.js', () => ({
     update: mockUpdate,
     delete: mockDelete,
     attach: mockAttach,
+    inspectAttachment: mockInspectAttachment,
     withAttachments: mockWithAttachments,
     purgeAttachments: mockPurgeAttachments,
   },
@@ -188,6 +191,8 @@ describe('PostController', () => {
     mockWithAttachments.mockImplementation(async (records: Array<Record<string, unknown>>) =>
       records.map((record) => ({ ...record, cover: null })),
     )
+    // Stands in for the inspected file the real static hands to attach().
+    mockInspectAttachment.mockImplementation(async (collection: string, file: File) => ({ collection, file }))
   })
 
   describe('index()', () => {
@@ -410,11 +415,9 @@ describe('PostController', () => {
       expect(mockBroadcastEvent).toHaveBeenCalledWith(expect.any(PostsChanged), { except: ctx })
     })
 
-    it('still announces the created post when its cover is rejected', async () => {
-      const mockUser = { id: 1, name: 'John Doe' }
-      mockCreate.mockResolvedValue({ id: 42, title: 'New Post', excerpt: 'Excerpt', body: 'Body content', authorId: 1 })
-      mockAttach.mockRejectedValueOnce(Object.assign(new Error('The cover must be an image.'), { statusCode: 422 }))
-      const auth = createAuthStub(mockUser)
+    it('creates no post when its cover is rejected', async () => {
+      mockInspectAttachment.mockRejectedValueOnce(Object.assign(new Error('The cover must be an image.'), { statusCode: 422 }))
+      const auth = createAuthStub({ id: 1, name: 'John Doe' })
 
       const formData = new FormData()
       formData.append('title', 'New Post')
@@ -434,6 +437,35 @@ describe('PostController', () => {
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
       await expect(controller.store()).rejects.toMatchObject({ statusCode: 422 })
+      expect(mockCreate).not.toHaveBeenCalled()
+      expect(mockAttach).not.toHaveBeenCalled()
+      expect(broadcastsSent()).toEqual([])
+    })
+
+    it('still announces the created post when storing its cover fails', async () => {
+      const mockUser = { id: 1, name: 'John Doe' }
+      mockCreate.mockResolvedValue({ id: 42, title: 'New Post', excerpt: 'Excerpt', body: 'Body content', authorId: 1 })
+      mockAttach.mockRejectedValueOnce(Object.assign(new Error('The disk is unavailable.'), { statusCode: 500 }))
+      const auth = createAuthStub(mockUser)
+
+      const formData = new FormData()
+      formData.append('title', 'New Post')
+      formData.append('excerpt', 'Excerpt')
+      formData.append('body', 'Body content')
+      formData.append('cover', new File([new Uint8Array([137, 80, 78, 71])], 'cover.png', { type: 'image/png' }))
+
+      const ctx = createControllerContext('http://blog.test/posts', {
+        method: 'POST',
+        body: formData,
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+        broadcast: { broadcastEvent: mockBroadcastEvent },
+        ...storeInput,
+      }) as unknown as Context
+
+      const controller = createControllerWithAuth(PostController, auth, ctx)
+      await expect(controller.store()).rejects.toMatchObject({ statusCode: 500 })
       expect(broadcastsSent()).toEqual(['PostsChanged on posts'])
     })
 
@@ -464,9 +496,11 @@ describe('PostController', () => {
       const response = await controller.store()
 
       expect(response.status).toBe(303)
-      expect(mockAttach).toHaveBeenCalledWith(42, 'cover', expect.any(File))
-      const uploaded = mockAttach.mock.calls[0]?.[2] as File
+      expect(mockInspectAttachment).toHaveBeenCalledWith('cover', expect.any(File))
+      const uploaded = mockInspectAttachment.mock.calls[0]?.[1] as File
       expect(uploaded.name).toBe('cover.png')
+      expect(mockAttach).toHaveBeenCalledWith(42, 'cover', { collection: 'cover', file: uploaded })
+      expect(mockInspectAttachment.mock.invocationCallOrder[0]).toBeLessThan(mockCreate.mock.invocationCallOrder[0]!)
     })
 
     it('skips attach when no cover was uploaded', async () => {
@@ -632,7 +666,8 @@ describe('PostController', () => {
       const response = await controller.update()
 
       expect(response.status).toBe(303)
-      expect(mockAttach).toHaveBeenCalledWith(1, 'cover', expect.any(File))
+      expect(mockAttach).toHaveBeenCalledWith(1, 'cover', { collection: 'cover', file: expect.any(File) })
+      expect(mockInspectAttachment.mock.invocationCallOrder[0]).toBeLessThan(mockUpdate.mock.invocationCallOrder[0]!)
     })
 
     it('returns 403 when the requester is not the author, leaving the post and its cover untouched', async () => {

@@ -141,6 +141,7 @@ export const QUERY_METHOD_RESULTS = {
     'hasMany', 'hasManyThrough', 'hasOne', 'morphMany', 'morphTo', 'clearObservers', 'observe', 'filterFillable', 'getAdapter',
     'useAdapter', 'getRelationDefinition', 'inTransaction', 'transaction', 'loadRelationInto', 'loadRelationsInto',
     'prepareBulkPersistencePayload', 'resolveTable', 'serialize', 'serializeMany', 'attach', 'detach', 'attachmentUrl', 'purgeAttachments',
+    'inspectAttachment',
   ],
 } as const satisfies Record<string, readonly string[]>
 

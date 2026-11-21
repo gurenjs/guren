@@ -20,8 +20,9 @@ export class Post extends Attachable(defineModel(posts), {
 // コントローラでは1呼び出し:
 async store() {
   const data = await this.validateBody(CreatePostSchema)
+  const file = await this.file('cover')
+  const cover = file ? await Post.inspectAttachment('cover', file) : null // rejected here, before the row exists
   const post = await Post.create(data)
-  const cover = await this.file('cover')
   if (cover) {
     await Post.attach(post.id, 'cover', cover)
   }
@@ -169,13 +170,13 @@ export default class AttachmentsProvider extends ServiceProvider {
 bunx guren make:feature Post --fields "title:string,body:text" --attach "cover:one,images:many"
 ```
 
-`--attach` には、カンマで区切った `name:kind` の組を渡します(kind は `one` か `many` で、省略すると `one`)。生成されるモデルは `Attachable` ミックスインで包まれ、どのコレクションにも `image: 'require'` が付きます(画像以外のファイルを受け取るコレクションでは、このオプションを外してください)。store アクションは同じ名前の multipart フィールドを `this.file()` / `this.files()` で読んで `Post.attach()` を呼び、destroy アクションは行を削除する前に `Post.purgeAttachments()` を呼びます。
+`--attach` には、カンマで区切った `name:kind` の組を渡します(kind は `one` か `many` で、省略すると `one`)。生成されるモデルは `Attachable` ミックスインで包まれ、どのコレクションにも `image: 'require'` が付きます(画像以外のファイルを受け取るコレクションでは、このオプションを外してください)。store アクションは同じ名前の multipart フィールドを `this.file()` / `this.files()` で読み、行を作る前に `Post.inspectAttachment()` で検証してから、作成後に `Post.attach()` を呼びます。destroy アクションは行を削除する前に `Post.purgeAttachments()` を呼びます。
 
 アプリに `configureAttachments()` がないと、このコマンドは雛形を生成しません。先に `bunx guren add attachments` を実行してください。
 
 生成された New ページには、 `<input type="file">` を自分で追加します(Inertia の `useForm` は、フォームデータに `File` が含まれると自動で multipart の POST に切り替わります)。
 
-生成された `update()` はアタッチメントを扱いません。Edit ページからのアップロードも受け付けたい場合は、同じ `this.file()` と `Post.attach()` の行を `update()` にも追加してください(`hasOne` は置き換え、`hasMany` は追加になります)。
+生成された `update()` はアタッチメントを扱いません。Edit ページからのアップロードも受け付けたい場合は、同じ `this.file()`、`Post.inspectAttachment()`、`Post.attach()` の行を `update()` にも追加してください(`hasOne` は置き換え、`hasMany` は追加になります)。
 
 ## アタッチメントの操作
 
@@ -209,6 +210,25 @@ await Post.purgeAttachments(post.id)
 `hasOne` の置き換えが同時に起きた場合、1 つのプロセスの中では順番に処理されます。同じテーブルオブジェクトを使う別のエンジンがあっても同様です。
 
 複数のプロセスやサーバーレスのインスタンスで動かす場合は、共有のロックサービスを使って `configureAttachments({ withCollectionLock: (key, callback) => sharedLock.run(key, callback), ... })` を設定してください。このロックは、コールバックが終わるまで排他的に保持し、時間のかかるアップロードの間は延長し、失敗したときにも解放しなければなりません。同じアタッチメントテーブルに書き込むすべての箇所で、同じサービスとロックの名前空間を使ってください。
+
+### レコードを作る前に検証する
+
+`attach()` にはレコードの id が必要なので、`attach()` だけでは行を保存したあとでしかアップロードを拒否できません。拒否されたフォームを送り直すと投稿が重複しますし、更新の場合は、リクエストが失敗したと表示されているのに本文の変更だけが保存されます。
+
+`inspectAttachment()` は同じ検証をレコードなしで実行し、何も書き込みません。投げる例外は `attach()` と同じです(422、413、415)。戻り値を `attach()` に渡すと、もう一度デコードせずに保存されます。
+
+```ts
+const file = await this.file('cover')
+const cover = file ? await Post.inspectAttachment('cover', file) : null
+const post = await Post.create(data)
+if (cover) await Post.attach(post.id, 'cover', cover)
+```
+
+検証の範囲は、同じ呼び出しで `attach()` が行う検証と同じです。`{ queued: true }` を渡した場合の完全なデコードはワーカーで行われ、画像プロセッサのないランタイムではヘッダーだけで画像を受け入れます。どちらの場合も、`attach()` と同じく、壊れた画像が検証を通ることがあります。
+
+先に検証する場合、`name` と `queued` は `inspectAttachment()` のオプションとして渡し、`attach()` には `disk` だけを渡します。あるコレクション向けに検証したファイルを別のコレクションに渡すと、コンパイル時にも実行時にも拒否されます。
+
+行を保存したあとでも、ディスクが落ちているときなどは保存に失敗します。作成したレコードに対して必ず行う処理は、`attach()` の呼び出しより前に置いてください。
 
 ### リレーションで生の行を扱う
 

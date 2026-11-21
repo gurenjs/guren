@@ -134,6 +134,8 @@ export type {
   HeicPolicy,
   ImagePolicy,
   ImageProcessor,
+  InspectAttachmentOptions,
+  InspectedAttachment,
   PruneOptions,
   PruneReport,
   VariantSpec,

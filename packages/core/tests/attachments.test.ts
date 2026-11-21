@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
@@ -334,6 +334,107 @@ describe('attachments', () => {
 
       const text = await Post.attach(1, 'banner', new Uint8Array(Buffer.from('plain text')), { name: 'readme' })
       expect(text.path).toBe(`attachments/${text.id}/readme`)
+    })
+  })
+
+  describe('inspectAttachment', () => {
+    test('should run the gates with no record and write nothing', async () => {
+      const put = spyOn(storage.disk('media'), 'put')
+      const inspected = await Post.inspectAttachment('cover', new File([PNG_1X1], 'cover.png', { type: 'image/png' }))
+
+      expect(inspected.collection).toBe('cover')
+      expect(inspected.name).toBe('cover.png')
+      expect(inspected.contentType).toBe('image/png')
+      expect(inspected.size).toBe(PNG_1X1.byteLength)
+      expect(inspected.width).toBe(1)
+      expect(inspected.height).toBe(1)
+      expect(sqlite.query('SELECT count(*) AS n FROM attachments').get()).toEqual({ n: 0 })
+      expect(put).not.toHaveBeenCalled()
+    })
+
+    test('should throw what attach() throws for the same bytes', async () => {
+      const notAnImage = await Post.inspectAttachment('cover', new Uint8Array(Buffer.from('%PDF-1.7'))).catch((e) => e)
+      expect(notAnImage).toBeInstanceOf(ValidationException)
+      expect(notAnImage.errors.cover).toBeDefined()
+
+      const heic = await Post.inspectAttachment('cover', isoBmffHeader('heic')).catch((e) => e)
+      expect(heic).toBeInstanceOf(HttpException)
+      expect(heic.statusCode).toBe(415)
+
+      configure({ maxImageBytes: 10 })
+      const oversized = await Post.inspectAttachment('cover', PNG_1X1).catch((e) => e)
+      expect(oversized.statusCode).toBe(413)
+    })
+
+    test('should let attach() store the inspected file without inspecting it again', async () => {
+      const decoder = fakeProcessor()
+      let probes = 0
+      configure({
+        processor: fakeProcessor({
+          async probe(input, options) {
+            probes += 1
+            return decoder.probe(input, options)
+          },
+        }),
+      })
+      const inspected = await Post.inspectAttachment('cover', new File([PNG_1X1], 'cover.png'))
+      expect(probes).toBe(1)
+
+      const record = await Post.attach(1, 'cover', inspected)
+
+      expect(probes).toBe(1)
+      expect(record.name).toBe('cover.png')
+      expect(record.contentType).toBe('image/png')
+      expect(record.variants?.thumb?.status).toBe('ready')
+      expect(await storage.disk('media').exists(record.path)).toBe(true)
+    })
+
+    test('should store the converted bytes of an inspected HEIC', async () => {
+      configure({ processor: fakeProcessor() })
+      const inspected = await Post.inspectAttachment('photo', new File([isoBmffHeader('heic')], 'photo.heic'))
+      expect(inspected.name).toBe('photo.jpg')
+      expect(inspected.contentType).toBe('image/jpeg')
+
+      const record = await Post.attach(1, 'photo', inspected)
+      expect(record.path).toBe(`attachments/${record.id}/photo.jpg`)
+      expect(record.size).toBe(inspected.size)
+    })
+
+    test('should refuse a file inspected for another collection or model', async () => {
+      const inspected = await Post.inspectAttachment('cover', PNG_1X1)
+      await expect(
+        // @ts-expect-error inspected for 'cover'
+        Post.attach(1, 'images', inspected),
+      ).rejects.toThrow("inspected for 'cover' of Post")
+      expect(sqlite.query('SELECT count(*) AS n FROM attachments').get()).toEqual({ n: 0 })
+    })
+
+    test('should refuse name and queued on attach() for an inspected file', async () => {
+      const inspected = await Post.inspectAttachment('cover', PNG_1X1, { name: 'first.png' })
+      await expect(
+        // @ts-expect-error name belongs to inspectAttachment()
+        Post.attach(1, 'cover', inspected, { name: 'second.png' }),
+      ).rejects.toThrow('inspectAttachment()')
+      await expect(
+        // @ts-expect-error queued belongs to inspectAttachment()
+        Post.attach(1, 'cover', inspected, { queued: true }),
+      ).rejects.toThrow('inspectAttachment()')
+      expect((await Post.attach(1, 'cover', inspected, { disk: 'media' })).name).toBe('first.png')
+    })
+
+    test('should store the bytes it inspected when the caller reuses its array', async () => {
+      const bytes = new Uint8Array(PNG_1X1)
+      const inspected = await Post.inspectAttachment('cover', bytes)
+      bytes.fill(0)
+
+      const record = await Post.attach(1, 'cover', inspected)
+      expect(new Uint8Array((await storage.disk('media').get(record.path))!)).toEqual(PNG_1X1)
+    })
+
+    test('should not accept an object that only looks like an inspected file', async () => {
+      const inspected = await Post.inspectAttachment('cover', PNG_1X1)
+      const forged = Object.assign(Object.create(Object.getPrototypeOf(inspected)), inspected)
+      await expect(Post.attach(1, 'cover', forged)).rejects.toThrow(TypeError)
     })
   })
 

@@ -75,7 +75,7 @@ export function parseAttachString(attachStr: string): AttachmentDefinition[] {
   if (!attachStr.trim()) return []
 
   const seen = new Set<string>()
-  return attachStr.split(',').map((entry) => {
+  const attachments = attachStr.split(',').map((entry) => {
     const parts = entry.trim().split(':')
     const name = parts[0]?.trim()
     // The default applies only to a genuinely omitted kind: an empty or extra
@@ -110,4 +110,14 @@ export function parseAttachString(attachStr: string): AttachmentDefinition[] {
 
     return { name, kind: kind as AttachmentKind }
   })
+
+  // The generated store action binds a hasOne collection's upload as `<name>File`.
+  for (const { name, kind } of attachments) {
+    if (kind === 'one' && seen.has(`${name}File`)) {
+      throw new Error(
+        `Attachment collection "${name}File" collides with the variable the generated store action binds for "${name}". Rename one of them.`,
+      )
+    }
+  }
+  return attachments
 }

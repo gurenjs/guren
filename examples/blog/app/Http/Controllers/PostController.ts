@@ -86,20 +86,22 @@ export default class PostController extends Controller {
     const { body: data } = this.validated('posts.store')
     const authUser = await this.auth.userOrFail<UserRecord>()
 
+    // Before the post exists: a non-image answers 422 keyed on 'cover'
+    // (image: 'require'), and no row is left for a resubmit to duplicate.
+    const coverFile = await this.file('cover')
+    const cover = coverFile ? await Post.inspectAttachment('cover', coverFile) : null
+
     const post = await Post.create(data, { set: { authorId: authUser.id } })
 
     if (post) {
-      // Invalidate and announce before the attach: a rejected cover throws,
-      // and the created post must not be left uncached and unannounced.
+      // Invalidate and announce before the attach: storing the cover can still
+      // fail, and the created post must not be left uncached and unannounced.
       const cacheService = this.#cacheService()
       await cacheService.invalidatePost(post.id)
       await this.make('events').emit(new PostCreated(post, authUser))
 
       try {
-        const cover = await this.file('cover')
         if (cover) {
-          // Validation (image: 'require') and thumbnail generation happen here;
-          // a non-image answers 422 with the error keyed on 'cover'.
           await Post.attach(post.id, 'cover', cover)
         }
       } finally {
@@ -130,15 +132,18 @@ export default class PostController extends Controller {
     await this.#requireAuthor(post, 'You can only edit your own posts.')
     const { body: data } = this.validated(['posts.update', 'posts.patch'])
 
+    // Before the update: a rejected cover must not leave the text changes saved.
+    const coverFile = await this.file('cover')
+    const cover = coverFile ? await Post.inspectAttachment('cover', coverFile) : null
+
     await Post.update({ id: post.id }, data)
 
-    // Invalidate before the attach: a rejected cover throws after the row is
-    // already updated, and the cached list must not keep the old fields.
+    // Invalidate before the attach: storing the cover can still fail after the
+    // row is updated, and the cached list must not keep the old fields.
     const cacheService = this.#cacheService()
     await cacheService.invalidatePost(post.id)
 
     try {
-      const cover = await this.file('cover')
       if (cover) {
         // hasOne replaces: the previous cover row and its stored objects are
         // purged before the new one is written.

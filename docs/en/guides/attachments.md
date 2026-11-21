@@ -21,11 +21,12 @@ export class Post extends Attachable(defineModel(posts), {
 ```
 
 ```ts
-// In a controller — one call:
+// In a controller:
 async store() {
   const data = await this.validateBody(CreatePostSchema)
+  const file = await this.file('cover')
+  const cover = file ? await Post.inspectAttachment('cover', file) : null // rejected here, before the row exists
   const post = await Post.create(data)
-  const cover = await this.file('cover')
   if (cover) {
     await Post.attach(post.id, 'cover', cover)
   }
@@ -197,15 +198,16 @@ bunx guren make:feature Post --fields "title:string,body:text" --attach "cover:o
 defaults to `one`). The generated model is wrapped in the `Attachable` mixin
 with `image: 'require'` on every collection (drop that option per collection
 for non-image uploads), the store action reads matching multipart fields via
-`this.file()` / `this.files()` and calls `Post.attach()`, and the destroy
+`this.file()` / `this.files()`, checks them with `Post.inspectAttachment()`
+before it creates the row and calls `Post.attach()` after, and the destroy
 action calls `Post.purgeAttachments()` before deleting the row. The command
 refuses to scaffold when the app has no `configureAttachments()`; run
 `bunx guren add attachments` first. Add `<input type="file">` fields to the
 generated New page yourself. Inertia's `useForm` switches to a multipart
 POST automatically when the form data contains a `File`. The generated
 `update()` does not touch attachments; to accept uploads from the Edit page
-too, add the same `this.file()` + `Post.attach()` lines there (`hasOne`
-replaces, `hasMany` appends).
+too, add the same `this.file()`, `Post.inspectAttachment()` and
+`Post.attach()` lines there (`hasOne` replaces, `hasMany` appends).
 
 ## Working with attachments
 
@@ -243,6 +245,36 @@ props. `placeholder` is a ThumbHash LQIP data URL you can render while the
 real image loads.
 
 Concurrent `hasOne` replacements are serialized within a process, including engines sharing the same table object. For multiple processes or serverless instances, supply `configureAttachments({ withCollectionLock: (key, callback) => sharedLock.run(key, callback), ... })` using your shared lock service. It must hold exclusive ownership until the callback settles, renew ownership during long uploads, and release it on failure. Every writer to the same attachment table must use that service and lock namespace.
+
+### Validating before the record exists
+
+`attach()` needs the record's id, so on its own it can reject an upload only
+after the row is saved. The user resubmits the form and creates a second post,
+or an update keeps its text changes while the response says the request failed.
+
+`inspectAttachment()` runs the same checks with no record and writes nothing.
+It throws what `attach()` throws (422, 413, 415). Hand its result to `attach()`,
+which stores the file without decoding it a second time:
+
+```ts
+const file = await this.file('cover')
+const cover = file ? await Post.inspectAttachment('cover', file) : null
+const post = await Post.create(data)
+if (cover) await Post.attach(post.id, 'cover', cover)
+```
+
+It checks what `attach()` would check in the same call. With
+`{ queued: true }` the full decode still happens in the worker, and on a
+runtime with no image processor an image is accepted on its header, so a
+corrupt image can pass in both cases, as it does with `attach()`.
+
+When you inspect first, `name` and `queued` are options of
+`inspectAttachment()`, and `attach()` takes only `disk`. A file inspected for
+one collection is refused on another, at compile time and at runtime.
+
+Storing can still fail once the row is saved, for example when the disk is
+down. Keep whatever must happen for a created record ahead of the `attach()`
+call.
 
 ### Raw rows via relations
 
