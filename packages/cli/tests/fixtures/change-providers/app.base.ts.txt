@@ -1,0 +1,9 @@
+import { createApp } from '@guren/core'
+import { registerWebRoutes } from '../routes/web.js'
+
+const app = createApp({
+  routes: registerWebRoutes,
+  providers: [],
+})
+
+export default app

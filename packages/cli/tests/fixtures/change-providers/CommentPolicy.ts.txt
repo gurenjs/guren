@@ -1,0 +1,8 @@
+import { Policy, type AuthUser } from '@guren/core'
+
+export class CommentPolicy extends Policy {
+  // Denied until written. Planned: The signed-in user wrote the comment.
+  delete(_user: AuthUser | null): boolean {
+    return false
+  }
+}

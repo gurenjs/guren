@@ -1,0 +1,14 @@
+import { ServiceProvider } from '@guren/core'
+import { Comment } from '../Models/Comment.js'
+import { CommentPolicy } from '../Policies/CommentPolicy.js'
+
+/** Registers CommentPolicy with the gate for Comment records. */
+export default class CommentPolicyProvider extends ServiceProvider {
+  register(): void {}
+
+  // The framework's own provider binds the gate during registration, so this
+  // runs in boot(): make('gate') throws before that.
+  boot(): void {
+    this.container.make('gate').policy(Comment, CommentPolicy)
+  }
+}

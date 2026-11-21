@@ -32,7 +32,6 @@ export const FACT_CLASSES = {
   'dependency-advisory': { kind: 'always-high', lowest: 'high' },
   'authorization-removed': { kind: 'always-high', lowest: 'high' },
   'validation-removed': { kind: 'always-high', lowest: 'high' },
-  // Not emitted until the route graph ships; named so a policy can raise them now.
   'route-added': { kind: 'declarable', lowest: 'low' },
   'route-changed': { kind: 'declarable', lowest: 'low' },
   'route-removed': { kind: 'declarable', lowest: 'low' },
@@ -41,6 +40,9 @@ export const FACT_CLASSES = {
   'schema-changed': { kind: 'declarable', lowest: 'low' },
   'policy-added': { kind: 'declarable', lowest: 'low' },
   'file-added': { kind: 'declarable', lowest: 'low' },
+  // An entry added to the `providers` or `config` array of the `createApp()` literal, with its import and nothing else.
+  'provider-added': { kind: 'declarable', lowest: 'low' },
+  'config-added': { kind: 'declarable', lowest: 'low' },
   'policy-changed': { kind: 'declarable', lowest: 'medium' },
   'dependencies-changed': { kind: 'declarable', lowest: 'medium' },
   'ambient': { kind: 'ambient', lowest: 'low' },
