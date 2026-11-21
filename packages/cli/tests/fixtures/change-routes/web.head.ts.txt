@@ -1,0 +1,8 @@
+import type { Router } from '@guren/core'
+import { registerCommentRoutes } from './comments.js'
+
+export function registerWebRoutes(router: Router): void {
+  registerCommentRoutes(router)
+
+  router.get('/', (c) => c.text('ok')).name('home')
+}

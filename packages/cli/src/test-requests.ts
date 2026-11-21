@@ -581,6 +581,27 @@ function patternSegments(path: string): PatternSegment[] {
   })
 }
 
+/**
+ * Whether some request could match both paths: `false` only when, segment by segment, two literals differ, or the
+ * counts differ where neither ends in `*`, which matches any rest (none included). A `*` elsewhere, a constraint or an
+ * optional parameter may match anything.
+ */
+export function routePathsMayOverlap(a: string, b: string): boolean {
+  const split = (path: string): { fixed: PatternSegment[]; rest: boolean } | undefined => {
+    const segments = patternSegments(path)
+    const rest = segments.at(-1)?.source === null
+    const fixed = rest ? segments.slice(0, -1) : segments
+    // Hono reads a `*` inside a segment (`/downloads*`) as a wildcard too, across `/`.
+    return fixed.some((segment) => segment.source === null || segment.param?.constraint !== undefined || segment.param?.optional || segment.literal?.includes('*')) ? undefined : { fixed, rest }
+  }
+  const [left, right] = [split(a), split(b)]
+  if (!left || !right) return true
+  if (!left.rest && !right.rest && left.fixed.length !== right.fixed.length) return false
+  if ((!right.rest && right.fixed.length < left.fixed.length) || (!left.rest && left.fixed.length < right.fixed.length)) return false
+  const shared = Math.min(left.fixed.length, right.fixed.length)
+  return left.fixed.slice(0, shared).every((segment, index) => segment.literal === undefined || right.fixed[index]!.literal === undefined || segment.literal === right.fixed[index]!.literal)
+}
+
 export interface RoutePathMatchOptions {
   /**
    * Read a runtime segment at a constrained parameter as filling it, one segment. For a caller

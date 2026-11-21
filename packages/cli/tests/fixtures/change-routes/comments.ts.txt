@@ -1,0 +1,15 @@
+import { Router, requireAuthenticated } from '@guren/core'
+import CommentController from '../app/Http/Controllers/CommentController.js'
+import { CommentPayloadSchema } from '../app/Http/Validators/CommentValidator.js'
+import { Post } from '../app/Models/Post.js'
+import { Comment } from '../app/Models/Comment.js'
+
+/**
+ * Written by plan:scaffold and not mounted: the http step mounts it with `plan:scaffold --mount`,
+ * which calls it first in the entry registrar, so an auth alias the entry sets replaces the one here.
+ */
+export function registerCommentRoutes(router: Router): void {
+  const authRouter = router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  authRouter.post('/posts/:postId/comments', { name: 'comments.store', body: CommentPayloadSchema, bind: { postId: Post } }, [CommentController, 'store']).middleware('auth')
+  authRouter.delete('/comments/:id', { name: 'comments.destroy', bind: { id: Comment } }, [CommentController, 'destroy']).middleware('auth')
+}

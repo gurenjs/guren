@@ -9,7 +9,7 @@ import { Hono } from 'hono'
 
 import { extractClassDeclaration } from '../src/model-parser'
 import { ParseCache, parseSourceFile } from '../src/parse-cache'
-import { BUILDERS, REQUEST_METHODS, routePathCovers, routePathMatches, scanTestRequests, testCoverage, type TestRequestRoute, type TestRequestScan, type TestRequestSegment } from '../src/test-requests'
+import { BUILDERS, REQUEST_METHODS, routePathCovers, routePathMatches, routePathsMayOverlap, scanTestRequests, testCoverage, type TestRequestRoute, type TestRequestScan, type TestRequestSegment } from '../src/test-requests'
 import { writeWorkspaceFiles } from './helpers'
 
 let ROOT: string
@@ -395,6 +395,32 @@ describe('routePathMatches', () => {
 
   test('should answer unknown for a constraint it cannot compile', () => {
     expect(routePathMatches('/odd/:id{(}', literal('/odd/1'))).toBe('unknown')
+  })
+})
+
+describe('routePathsMayOverlap', () => {
+  test.each<[string, string, boolean]>([
+    ['/comments/:id', '/comments/archived', true],
+    ['/comments/:id', '/:resource/:id', true],
+    ['/comments/archived', '/:resource/:id', true],
+    ['/comments/:id', '/posts/:id', false],
+    ['/comments/:id', '/comments/:id/likes', false],
+    ['/comments', '/comments', true],
+    ['/comments/:id', '/api/*', false],
+    ['/comments/:id', '/comments/*', true],
+    ['/comments', '/comments/*', true],
+    ['/comments/:id/likes', '/:any/*', true],
+    ['/comments', '/api/v1/*', false],
+    ['/comments/*', '/api/*', false],
+    ['/*', '/api/:id', true],
+    ['/comments/:id', '/comments/:id{[0-9]+}', true],
+    ['/comments/:id?', '/comments', true],
+    ['/comments/:id', '/comments/v:version', true],
+    ['/comments/:id', '/comments/v:version/x', false],
+    ['/downloads/public', '/downloads*', true],
+  ])('should read %s and %s as %p', (a, b, expected) => {
+    expect(routePathsMayOverlap(a, b)).toBe(expected)
+    expect(routePathsMayOverlap(b, a)).toBe(expected)
   })
 })
 

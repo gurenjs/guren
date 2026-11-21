@@ -1,0 +1,122 @@
+{
+  "scaffold": {
+    "recordVersion": 2,
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/",
+        "name": "home",
+        "module": null,
+        "middleware": [],
+        "contracts": {},
+        "handler": {
+          "unread": "an inline handler, whose body the reader does not follow"
+        }
+      }
+    ]
+  },
+  "mount": {
+    "recordVersion": 2,
+    "routes": [
+      {
+        "method": "POST",
+        "path": "/posts/:postId/comments",
+        "name": "comments.store",
+        "module": null,
+        "action": "app/Http/Controllers/CommentController.ts#default.store",
+        "middleware": [
+          {
+            "kind": "alias",
+            "name": "auth",
+            "capabilities": {
+              "authentication": {
+                "mode": "required"
+              }
+            }
+          }
+        ],
+        "contracts": {
+          "body": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "body": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "body"
+              ]
+            },
+            "exports": [
+              "app/Http/Validators/CommentValidator.ts#CommentPayloadSchema"
+            ],
+            "declarations": {
+              "app/Http/Validators/CommentValidator.ts#CommentPayloadSchema": "031a2c65d71feee3"
+            }
+          }
+        },
+        "bindings": {
+          "postId": "app/Models/Post.ts#Post"
+        },
+        "handler": {
+          "authenticates": false,
+          "authorizes": [],
+          "validates": [
+            {
+              "member": "validateBody",
+              "schema": "app/Http/Validators/CommentValidator.ts#CommentPayloadSchema",
+              "declaration": "031a2c65d71feee3"
+            }
+          ]
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/comments/:id",
+        "name": "comments.destroy",
+        "module": null,
+        "action": "app/Http/Controllers/CommentController.ts#default.destroy",
+        "middleware": [
+          {
+            "kind": "alias",
+            "name": "auth",
+            "capabilities": {
+              "authentication": {
+                "mode": "required"
+              }
+            }
+          }
+        ],
+        "contracts": {},
+        "bindings": {
+          "id": "app/Models/Comment.ts#Comment"
+        },
+        "handler": {
+          "authenticates": false,
+          "authorizes": [
+            {
+              "member": "authorize",
+              "ability": "delete",
+              "subject": "[Comment, comment]"
+            }
+          ],
+          "validates": []
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/",
+        "name": "home",
+        "module": null,
+        "middleware": [],
+        "contracts": {},
+        "handler": {
+          "unread": "an inline handler, whose body the reader does not follow"
+        }
+      }
+    ]
+  }
+}
