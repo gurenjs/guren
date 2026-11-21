@@ -1,6 +1,6 @@
 {
   "name": "@guren/orm",
-  "version": "2.16.2",
+  "version": "2.17.0",
   "description": "Eloquent-style models for the Guren framework, on Drizzle ORM: PostgreSQL, MySQL, SQLite and Cloudflare D1.",
   "keywords": [
     "guren",

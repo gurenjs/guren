@@ -1,5 +1,36 @@
 # @guren/example-agents
 
+## 0.1.36
+
+### Patch Changes
+
+- Updated dependencies [06cefc4]
+- Updated dependencies [f31e3fa]
+- Updated dependencies [2f0a52f]
+- Updated dependencies [acf82b9]
+- Updated dependencies [dc672a6]
+- Updated dependencies [0d573c4]
+- Updated dependencies [09ab107]
+- Updated dependencies [1f1bb2a]
+- Updated dependencies [d8869f2]
+- Updated dependencies [ecc5afa]
+- Updated dependencies [ecc5afa]
+- Updated dependencies [bb20122]
+- Updated dependencies [95a07f2]
+- Updated dependencies [f2c2d69]
+- Updated dependencies [df919aa]
+- Updated dependencies [5b37c44]
+- Updated dependencies [a8a76ec]
+- Updated dependencies [022991b]
+- Updated dependencies [a5fe75c]
+- Updated dependencies [65c176e]
+- Updated dependencies [68ea179]
+  - @guren/cli@2.38.0
+  - @guren/core@1.28.0
+  - @guren/orm@2.17.0
+  - @guren/plugin-cloudflare@0.13.2
+  - @guren/plugin-agents@0.2.5
+
 ## 0.1.35
 
 ### Patch Changes

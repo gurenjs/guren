@@ -1,5 +1,16 @@
 # @guren/plugin-vercel
 
+## 0.7.3
+
+### Patch Changes
+
+- 65c176e: The Lambda and Vercel builds no longer fail on `import { createConnection } from 'mysql2'` in an app that declares another database: the stub for the root `mysql2` entry now declares that module's whole export surface, as the `mysql2/promise` one already did. When a bundle still fails on a name a database client's stub does not list, the build adds a line naming the dialects it detected and the `databaseDialects` value (`--database` for `lambda:build`) that keeps the real client. The message a stub throws now names every dialect to declare, not the missing one alone.
+- Updated dependencies [f31e3fa]
+- Updated dependencies [1f1bb2a]
+- Updated dependencies [bb20122]
+- Updated dependencies [65c176e]
+  - @guren/core@1.28.0
+
 ## 0.7.2
 
 ### Patch Changes
