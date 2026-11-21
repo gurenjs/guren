@@ -1757,19 +1757,27 @@ function warnMissingBuildOwnedKeys(
 /**
  * Kept out of `warnMissingBuildOwnedKeys`: that list's shared sentence ends "the
  * worker will fail to start or skip migrations", which is not true here — adding
- * this key *changes* how the app's own HTML is served, and needs saying. Warned
- * only when the key is absent: any other value is a decision an app typed, and a
- * config with no `assets` serves no static files for `_headers` to protect.
+ * this key *changes* how the app's own HTML is served, and needs saying. Another
+ * value is a decision an app typed, so it is told what follows from it and left
+ * alone; a config with no `assets` serves no static files for `_headers` to protect.
  */
 function warnMissingHtmlHandling(configPath: string, config: Record<string, unknown>): void {
   const assets = config.assets as Record<string, unknown> | undefined
 
-  if (!assets || assets.html_handling !== undefined) {
+  if (!assets || assets.html_handling === HTML_HANDLING) {
+    return
+  }
+
+  const consequence = 'a document staged from public/ is still served at its extensionless path — where the /*.html rule in _headers does not reach it, and where it shadows any route of that name in your app'
+  if (assets.html_handling !== undefined) {
+    console.warn(
+      `Cloudflare build: ${configPath} sets "html_handling": ${JSON.stringify(assets.html_handling)} under "assets". With that value ${consequence}. Only "html_handling": "${HTML_HANDLING}" closes both; the value is left as it is.`,
+    )
     return
   }
 
   console.warn(
-    `Cloudflare build: ${configPath} does not set "html_handling" under "assets", so a document staged from public/ is still served at its extensionless path — where the /*.html rule in _headers does not reach it, and where it shadows any route of that name in your app. Add "html_handling": "${HTML_HANDLING}" to close both. Note this changes how those files are served: public/about.html stops answering at /about.`,
+    `Cloudflare build: ${configPath} does not set "html_handling" under "assets", so ${consequence}. Add "html_handling": "${HTML_HANDLING}" to close both, or run \`guren upgrade\`, which adds it. Note this changes how those files are served: public/about.html stops answering at /about.`,
   )
 }
 

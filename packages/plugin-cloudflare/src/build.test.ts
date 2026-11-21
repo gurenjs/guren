@@ -491,24 +491,30 @@ describe('static document headers', () => {
     // how HTML is served.
     expect(warning).toContain('"html_handling": "none"')
     expect(warning).toContain('stops answering at /about')
+    expect(warning).toContain('guren upgrade')
     expect(warning).not.toContain('predates this plugin version')
   })
 
-  test('should leave an app that named another html_handling alone', async () => {
+  test('should say what another html_handling leads to, and leave the value alone', async () => {
     scaffoldApp(root)
-    writeJson(join(root, 'wrangler.jsonc'), {
+    const configPath = join(root, 'wrangler.jsonc')
+    writeJson(configPath, {
       name: 'legacy',
       main: '.cloudflare/worker.js',
-      // Typed by hand, so it is a decision rather than an omission — the
-      // /*.html rule is weaker for it, and that is the app's call to make.
+      // Typed by hand, so it is a decision rather than an omission: the build
+      // names the consequence and gives no instruction to undo it.
       assets: { directory: '.cloudflare/assets', html_handling: 'auto-trailing-slash' },
     })
+    const written = readFileSync(configPath, 'utf8')
 
     const warning = await captureWarnings(async () => {
       await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
     })
 
-    expect(warning).not.toContain('html_handling')
+    expect(warning).toContain('"html_handling": "auto-trailing-slash"')
+    expect(warning).toContain('extensionless path')
+    expect(warning).not.toContain('stops answering at /about')
+    expect(readFileSync(configPath, 'utf8')).toBe(written)
   })
 
   test('should serve staged HTML at its own path so the html rule is not vacuous', async () => {
