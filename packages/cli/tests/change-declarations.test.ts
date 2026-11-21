@@ -836,6 +836,21 @@ describe('applyPlanDeclarations on a provider registration', () => {
     expect(lanes(result)).toEqual([['provider-added', 'medium', undefined]])
   })
 
+  test('should declare a registration that reuses a default import of the provider the base already has', async () => {
+    const base = fixture('app.base').replace("import { createApp } from '@guren/core'\n", "import { createApp } from '@guren/core'\nimport PolicyProvider from '../app/Providers/CommentPolicyProvider.js'\n")
+    const head: Record<string, string> = { ...HEAD, [ENTRY]: base.replace('providers: []', 'providers: [PolicyProvider]') }
+    const { facts, subjects } = entryFacts([['providers', 'PolicyProvider']])
+    const result = await applyPlanDeclarations(facts, subjects, [{ file: PLAN_FILE, plan: commentsPlan() }], async (path) => head[path] ?? null, async (path) => (path === ENTRY ? base : null))
+    expect(lanes(result)).toEqual([['provider-added', 'low', `${PLAN_FILE}#policy.comment`]])
+  })
+
+  test('should not declare a provider or policy a .js twin would run in place of', async () => {
+    for (const twin of ['app/Providers/CommentPolicyProvider.js', 'app/Policies/CommentPolicy.js']) {
+      const head = { ...HEAD, [twin]: 'export default class {}\n' }
+      expect([twin, lanes(await judge([{ file: PLAN_FILE, plan: commentsPlan() }], head))]).toEqual([twin, [['provider-added', 'medium', undefined]]])
+    }
+  })
+
   test('should not declare a provider whose policy holds an ability the plan does not', async () => {
     const head = { ...HEAD, 'app/Policies/CommentPolicy.ts': HEAD['app/Policies/CommentPolicy.ts']!.replace(/\}\n$/u, '\n  update(_user: AuthUser | null): boolean {\n    return true\n  }\n}\n') }
     expect(head['app/Policies/CommentPolicy.ts']).toContain('update(')

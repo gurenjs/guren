@@ -627,6 +627,9 @@ async function declarationOf(
 
 /** Whether the head's file at `path` is what the plan declares there: its exports, and the check its kind takes. */
 async function holdsDeclared(plan: PlanDraft, declared: DeclaredFile, path: string, readHead: (path: string) => Promise<string | null>): Promise<boolean> {
+  // The scaffold imports `./P.js`, which Bun resolves to a `P.js` ahead of `P.ts`: a twin would run in the file's place.
+  const stem = path.replace(SOURCE_EXTENSION, '')
+  if (stem !== path) for (const extension of TWIN_EXTENSIONS) if (`${stem}${extension}` !== path && (await readHead(`${stem}${extension}`)) !== null) return false
   const text = await readHead(path)
   const ast = text === null ? null : parseSourceFile(text, path)
   const exports = ast ? declaredExports(ast) : undefined
@@ -659,11 +662,11 @@ async function declaredRegistrations(
     let content = base
     for (const provider of providers) {
       const { wiring, content: patched } = composeAppProviderRegistration(content, first.path, provider)
-      // A fresh import: an import line the composer reads as present may sit in a comment, the name bound elsewhere.
-      if (!wiring.registered || !wiring.entry.modified || !wiring.import.modified || patched === undefined) return []
+      if (!wiring.registered || !wiring.entry.modified || patched === undefined) return []
       content = patched
     }
-    if (content !== head || providers.some((provider) => defaultImportBinding(head, first.path, `${PROVIDERS_DIR}/${provider}`) !== provider)) return []
+    // Each entry names a real default import of its provider: an import line the composer reads as present may sit in a comment.
+    if (content !== head || providers.some((provider, index) => defaultImportBinding(head, first.path, `${PROVIDERS_DIR}/${provider}`) !== added[index]!.name)) return []
     return [{ open, files, providers }]
   }))
   if (candidates.length !== 1) return declared
@@ -678,7 +681,7 @@ async function declaredRegistrations(
       const file = files.get(path)
       if (!file || !(await holdsDeclared(open.plan, file, path, readHead))) return declared
     }
-    matched.set(provider, `${open.file}#${policy.id}`)
+    matched.set(added[providers.indexOf(provider)]!.name, `${open.file}#${policy.id}`)
   }
   return matched
 }
@@ -708,6 +711,8 @@ async function routesFileAtHead(plan: PlanDraft, step: PlanDerivedStep, path: st
   return file && !output.unwritten.some((entry) => file.elements.includes(entry.element)) ? file.contents : undefined
 }
 
+const SOURCE_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/u
+const TWIN_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'] as const
 const MIGRATION_DIALECTS: Record<SchemaDialect, MigrationDialect> = { pg: 'postgres', mysql: 'mysql', sqlite: 'sqlite' }
 const ROOT_SCHEMA = 'db/schema.ts'
 

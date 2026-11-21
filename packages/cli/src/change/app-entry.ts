@@ -21,19 +21,44 @@ export interface AppEntryAddition {
   name: string
 }
 
-/** The `createApp()` call's options object, when the file holds exactly one such call with an object literal. */
+const FACTORY_PACKAGES = new Set(['@guren/core', '@guren/server'])
+
+/** Whether the module binds `createApp` to the framework's factory, by a value import of that name. */
+function importsFactory(ast: File): boolean {
+  return ast.program.body.some((node) => node.type === 'ImportDeclaration' && node.importKind !== 'type' && FACTORY_PACKAGES.has(node.source.value)
+    && node.specifiers.some((specifier) => specifier.type === 'ImportSpecifier' && specifier.importKind !== 'type' && specifier.local.name === 'createApp'
+      && (specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value) === 'createApp'))
+}
+
+/** The call a top-level statement makes directly: `const app = createApp(…)`, `export default createApp(…)`, or a bare call. */
+function topLevelCall(statement: Statement): CallExpression | undefined {
+  const node = statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportDefaultDeclaration' ? statement.declaration : statement
+  if (!node) return undefined
+  if (node.type === 'CallExpression') return node
+  if (node.type === 'ExpressionStatement' && node.expression.type === 'CallExpression') return node.expression
+  if (node.type === 'VariableDeclaration' && node.declarations.length === 1) {
+    const init = node.declarations[0]!.init
+    return init?.type === 'CallExpression' ? init : undefined
+  }
+  return undefined
+}
+
+/**
+ * The `createApp()` call's options object, when the file holds exactly one such call, at its top level where no
+ * binding can shadow the framework's import, with an object literal.
+ */
 function createAppOptions(ast: File): ObjectExpression | undefined {
-  const found: ObjectExpression[] = []
-  let other = false
+  if (!importsFactory(ast)) return undefined
+  let calls = 0
   walk(ast.program, (node) => {
     if (node.type !== 'CallExpression') return
     const call = node as unknown as CallExpression
-    if (call.callee.type !== 'Identifier' || call.callee.name !== 'createApp') return
-    const [first] = call.arguments
-    if (first?.type === 'ObjectExpression' && call.arguments.length === 1) found.push(first)
-    else other = true
+    if (call.callee.type === 'Identifier' && call.callee.name === 'createApp') calls += 1
   })
-  return found.length === 1 && !other ? found[0] : undefined
+  if (calls !== 1) return undefined
+  const call = ast.program.body.map(topLevelCall).find((entry) => entry?.callee.type === 'Identifier' && entry.callee.name === 'createApp')
+  const [first] = call?.arguments ?? []
+  return call?.arguments.length === 1 && first?.type === 'ObjectExpression' ? first : undefined
 }
 
 /**

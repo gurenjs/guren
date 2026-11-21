@@ -59,8 +59,8 @@ describe('appEntryAdditions', () => {
   })
 
   test('should refuse options a spread, a computed key or an accessor could carry a list through', () => {
-    const head = (options: string): string => `import P from './P.js'\nconst app = createApp({ ${options} })\n`
-    const base = (options: string): string => `const app = createApp({ ${options} })\n`
+    const head = (options: string): string => `import { createApp } from '@guren/core'\nimport P from './P.js'\nconst app = createApp({ ${options} })\n`
+    const base = (options: string): string => `import { createApp } from '@guren/core'\nconst app = createApp({ ${options} })\n`
     expect(added(head('providers: [P], ...shared'), base('...shared'))).toBeUndefined()
     expect(added(head('...shared, providers: [P]'), base('...shared'))).toBeUndefined()
     expect(added(head("['providers']: [A], providers: [P]"), base("['providers']: [A]"))).toBeUndefined()
@@ -76,6 +76,19 @@ describe('appEntryAdditions', () => {
     expect(added(withProvider('process', reads).replace("'../app/Providers/process.js'", "'../app/Providers/Env.js'"), reads)).toBeUndefined()
     const typed = BASE.replace("import { createApp }", "import type { P } from './P.js'\nimport { createApp }")
     expect(added(typed.replace('[AuthProvider]', '[AuthProvider, P]'), typed)).toBeUndefined()
+  })
+
+  test('should read only the framework factory, called where no binding can shadow it', () => {
+    const local = (text: string): string => text.replace("import { createApp } from '@guren/core'", "import * as core from '@guren/core'\nfunction createApp(options: object) { return core.createApp(options) }")
+    expect(added(local(withProvider('P')), local(BASE))).toBeUndefined()
+    const other = (text: string): string => text.replace("'@guren/core'", "'./factory.js'")
+    expect(added(other(withProvider('P')), other(BASE))).toBeUndefined()
+    const aliased = (text: string): string => text.replace('import { createApp }', 'import { createApp as make, createApp as createApp2 }')
+    expect(added(aliased(withProvider('P')), aliased(BASE))).toBeUndefined()
+    const nested = (text: string): string => text.replace('const app = createApp({', 'const build = (createApp: (options: object) => unknown) => createApp({').replace('})\n\nexport default app', '})\n\nexport default build')
+    expect(added(nested(withProvider('P')), nested(BASE))).toBeUndefined()
+    const exported = (text: string): string => text.replace('const app = createApp({', 'export default createApp({').replace('\nexport default app\n', '')
+    expect(added(exported(withProvider('P')), exported(BASE))).toEqual([{ list: 'providers', name: 'P' }])
   })
 
   test('should refuse a file with no createApp() literal, or with two', () => {
