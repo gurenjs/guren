@@ -1,5 +1,36 @@
 # web
 
+## 0.1.68
+
+### Patch Changes
+
+- 90b49d2: Publish the site's own docs graph at `guren.dev/_guren/docs` instead of the blog example's. `web/docs/` now holds ADRs for the decisions behind the site (Workers with D1, docs rendered at build time, cookie-less analytics, the single allowlisted admin, sessions and OAuth state in D1, posts rendered when saved) and the generated spec views, which CI checks for drift with `check --spec` and `check --docs`. The docs store now skips a `docs/` directory with no locale directory, so `web/docs` is not taken for the site's guides.
+- Updated dependencies [06cefc4]
+- Updated dependencies [f31e3fa]
+- Updated dependencies [2f0a52f]
+- Updated dependencies [acf82b9]
+- Updated dependencies [dc672a6]
+- Updated dependencies [0d573c4]
+- Updated dependencies [09ab107]
+- Updated dependencies [1f1bb2a]
+- Updated dependencies [d8869f2]
+- Updated dependencies [ecc5afa]
+- Updated dependencies [ecc5afa]
+- Updated dependencies [bb20122]
+- Updated dependencies [95a07f2]
+- Updated dependencies [f2c2d69]
+- Updated dependencies [df919aa]
+- Updated dependencies [5b37c44]
+- Updated dependencies [a8a76ec]
+- Updated dependencies [022991b]
+- Updated dependencies [a5fe75c]
+- Updated dependencies [65c176e]
+- Updated dependencies [68ea179]
+  - @guren/cli@2.38.0
+  - @guren/core@1.28.0
+  - @guren/orm@2.17.0
+  - @guren/plugin-cloudflare@0.13.2
+
 ## 0.1.67
 
 ### Patch Changes

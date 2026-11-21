@@ -1,5 +1,67 @@
 # @guren/core
 
+## 1.28.0
+
+### Minor Changes
+
+- 1f1bb2a: `createAwsDataApiDatabase()` now retries a call the Data API cancelled because the Aurora Serverless v2 cluster was paused (`DatabaseResumingException`). A cluster with a minimum capacity of 0 ACUs pauses when idle, so the first `db:migrate`, `db:status`, seed, console command or query after a pause failed and passed on a second run. The adapter waits 1 second, doubles the wait up to 5 seconds, and rethrows the exception 60 seconds after the first try. It logs one warning per pause. No other error is retried.
+
+  The new `resumeRetry` option sets the limits or turns the retry off:
+
+  ```ts
+  createAwsDataApiDatabase({
+    migrationsFolder: new URL("../db/migrations", import.meta.url),
+    resumeRetry: { timeoutMs: 20_000, maxDelayMs: 2_000 }, // or false
+  });
+  ```
+
+  A `timeoutMs` that is not a finite number of 0 or more, or a `maxDelayMs` that is not a finite number above 0, throws when the factory is created.
+
+  A call that used to fail at once can now hold its caller for up to 60 seconds. Where the function timeout is shorter than that, lower `timeoutMs` or pass `resumeRetry: false` to keep the earlier behaviour. `AwsDataApiResumeRetryOptions` is exported from `@guren/core`.
+
+- bb20122: `Attachable` models gain `inspectAttachment(collection, source, options?)`, which runs the gates `attach()` would run in the same call (image policy, byte cap, header dimensions, HEIC policy, and the full decode unless it is queued or the runtime has no image processor) before the owning record exists, and writes nothing. It throws what `attach()` throws, so a controller can reject an upload ahead of `create()` or `update()` and no row is left for a resubmitted form to duplicate. Pass its result to `attach()`, which stores the file without inspecting it again.
+
+  ```ts
+  const file = await this.file("cover");
+  const cover = file ? await Post.inspectAttachment("cover", file) : null;
+  const post = await Post.create(data);
+  if (cover) await Post.attach(post.id, "cover", cover);
+  ```
+
+  `make:feature --attach` and `guren add resource --attach` now generate a `store()` of this shape. The generated code needs an `@guren/core` that has `inspectAttachment()`. `--attach` refuses a collection named `<name>File` beside a `one` collection `<name>`, since the generated action binds the upload under that name.
+
+- 65c176e: The Lambda and Vercel builds no longer fail on `import { createConnection } from 'mysql2'` in an app that declares another database: the stub for the root `mysql2` entry now declares that module's whole export surface, as the `mysql2/promise` one already did. When a bundle still fails on a name a database client's stub does not list, the build adds a line naming the dialects it detected and the `databaseDialects` value (`--database` for `lambda:build`) that keeps the real client. The message a stub throws now names every dialect to declare, not the missing one alone.
+
+### Patch Changes
+
+- f31e3fa: Store an attached image under the extension of the format its bytes were read as. A JPEG uploaded as `photo.jfif`, or with no extension at all, was stored under that name, so a disk served by file extension answered 404 or the wrong `Content-Type` for the original while its variants worked. The row's `name` still holds the uploaded filename (a converted HEIC upload is renamed to `.jpg`, as before), and existing rows keep their paths.
+- Updated dependencies [ecc5afa]
+- Updated dependencies [06cefc4]
+- Updated dependencies [2f0a52f]
+- Updated dependencies [ecc5afa]
+- Updated dependencies [acf82b9]
+- Updated dependencies [dc672a6]
+- Updated dependencies [0d573c4]
+- Updated dependencies [09ab107]
+- Updated dependencies [1f1bb2a]
+- Updated dependencies [d8869f2]
+- Updated dependencies [ecc5afa]
+- Updated dependencies [ecc5afa]
+- Updated dependencies [bb20122]
+- Updated dependencies [95a07f2]
+- Updated dependencies [f2c2d69]
+- Updated dependencies [df919aa]
+- Updated dependencies [5b37c44]
+- Updated dependencies [a8a76ec]
+- Updated dependencies [022991b]
+- Updated dependencies [a5fe75c]
+- Updated dependencies [ecc5afa]
+- Updated dependencies [95f43c0]
+- Updated dependencies [68ea179]
+  - @guren/server@2.38.0
+  - @guren/cli@2.38.0
+  - @guren/orm@2.17.0
+
 ## 1.27.0
 
 ### Minor Changes

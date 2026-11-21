@@ -1,5 +1,32 @@
 # @guren/orm
 
+## 2.17.0
+
+### Minor Changes
+
+- 1f1bb2a: `createAwsDataApiDatabase()` now retries a call the Data API cancelled because the Aurora Serverless v2 cluster was paused (`DatabaseResumingException`). A cluster with a minimum capacity of 0 ACUs pauses when idle, so the first `db:migrate`, `db:status`, seed, console command or query after a pause failed and passed on a second run. The adapter waits 1 second, doubles the wait up to 5 seconds, and rethrows the exception 60 seconds after the first try. It logs one warning per pause. No other error is retried.
+
+  The new `resumeRetry` option sets the limits or turns the retry off:
+
+  ```ts
+  createAwsDataApiDatabase({
+    migrationsFolder: new URL("../db/migrations", import.meta.url),
+    resumeRetry: { timeoutMs: 20_000, maxDelayMs: 2_000 }, // or false
+  });
+  ```
+
+  A `timeoutMs` that is not a finite number of 0 or more, or a `maxDelayMs` that is not a finite number above 0, throws when the factory is created.
+
+  A call that used to fail at once can now hold its caller for up to 60 seconds. Where the function timeout is shorter than that, lower `timeoutMs` or pass `resumeRetry: false` to keep the earlier behaviour. `AwsDataApiResumeRetryOptions` is exported from `@guren/core`.
+
+- 95a07f2: `@guren/orm/internal/migration-guard` exports `readCreationStatements()`, which reads a migration that does nothing but create tables, their indexes and their foreign keys in the statements drizzle-kit writes, and gives `undefined` for anything else, and `snapshotRecordsCreation()`, which holds a drizzle-kit snapshot to the previous one plus what those statements create. `guren change:lane` reads them to judge a migration an approved plan declares.
+
+### Patch Changes
+
+- f2c2d69: The destructive-migration guard now reads a migration the way drizzle's migrator runs it as well as the way the file reads. The migrator cuts the file at every `--> statement-breakpoint`, including one inside a comment or a string, and runs each piece on its own, so `-- x --> statement-breakpoint DROP TABLE "users";` drops a table the guard used to read as a comment. Findings from both readings count, at their lines in the file, for the boot guard, `guren db:migrate`, `guren check` and `guren change:lane`. On PostgreSQL a line comment now also ends at a bare carriage return, as the server ends it, so `-- x\rDROP TABLE "users";` is reported too.
+
+  A separator inside a comment or a string that only reads as harmless (`/* note --> statement-breakpoint */`) is now reported as `unreadable`, since the migrator runs the broken piece it leaves; under `destructiveMigrations: 'refuse'` that stops the boot until the separator is removed or the file carries the marker.
+
 ## 2.16.2
 
 ### Patch Changes

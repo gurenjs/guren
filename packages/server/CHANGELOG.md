@@ -1,5 +1,25 @@
 # @guren/server
 
+## 2.38.0
+
+### Minor Changes
+
+- a8a76ec: `trustProxy: true` on `createRateLimitMiddleware()` now keys on the last `X-Forwarded-For` entry, the one the nearest proxy appended, and no longer reads `CF-Connecting-IP`, `True-Client-IP`, `X-Real-IP` or the first `X-Forwarded-For` entry. An ALB or Nginx forwards those as the client sent them, so a client could pick a new value on every request and never hit the limit. `trustProxy` also takes `{ hops: n }` (the nth entry from the right, for a chain of proxies such as Cloudflare in front of an ALB) and `{ header: 'cf-connecting-ip' }` (one single-value header the proxy overwrites). `resolveClientIp(ctx, trustProxy?)` reads the same address for a custom `keyGenerator`. A port on the chosen value (`203.0.113.7:50001`, from an ALB that preserves the client port) is dropped, so a client no longer gets a new bucket per connection, and a `{ header }` that is not a valid header name is refused when the middleware is created instead of failing every request with a 500.
+
+  To upgrade: behind a single ALB or Nginx, nothing changes. Behind Cloudflare in front of a load balancer, set `trustProxy: { hops: 2 }` or `trustProxy: { header: 'cf-connecting-ip' }`, or every visitor coming through one Cloudflare edge shares that edge's bucket. Behind an Nginx that sets only `X-Real-IP`, set `trustProxy: { header: 'x-real-ip' }`. The limiter logs one warning the first time a request carries one of the headers it no longer reads.
+
+- ecc5afa: `SmtpTransport` defaults `requireTLS` to `true` when `auth` has a user or password, `secure` is off and `host` is not `localhost`, a `127.x` address or `::1`. An attacker on the network path who strips STARTTLS from the server's EHLO reply now makes the send fail, where the credentials and the mail used to go out in cleartext. A mail catcher on the same machine, a connection without credentials and an explicit `requireTLS` are unchanged. A relay that takes credentials without offering STARTTLS now refuses to send until its transport sets `requireTLS: false`.
+- 95f43c0: The Vite plugin takes a `manualChunks` option that runs ahead of the built-in vendor grouping, so an app can move one dependency out of the eagerly loaded `vendor` chunk without copying the framework's chunking rules. Return a chunk name, `null` to leave the module to the bundler, or `undefined` to keep the built-in grouping.
+
+### Patch Changes
+
+- ecc5afa: An agent tool call now runs only on the route its tool was derived from. When a path argument makes the request match another route first (`{ id: 'new' }` on `/posts/:id` reaching an earlier `/posts/new`), the call is refused with a 400 before any of that route runs, so a path value can no longer carry a scope-gated or approval-gated call to a route those gates never judged. This covers a route a `createApp({ boot })` callback adds straight to Hono with `hono.get()` and the like, which matches ahead of every router route; a `hono.all()` route is not told apart from `hono.use()` middleware and is not covered. A route whose method, path and name another route also has is no longer exposed as a tool, with a warning, since a call could not tell the two apart.
+- ecc5afa: A broadcast channel pattern such as `chat.{room}.{user}` or `chat\.{room}.{user}` now matches a channel name in linear time, so a long name a client sends no longer stalls `authorize()`. A pattern that uses other regular expression syntax (a group, a class, an alternation) is still matched with a regular expression.
+- Updated dependencies [1f1bb2a]
+- Updated dependencies [95a07f2]
+- Updated dependencies [f2c2d69]
+  - @guren/orm@2.17.0
+
 ## 2.37.1
 
 ### Patch Changes
