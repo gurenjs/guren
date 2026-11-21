@@ -16,6 +16,7 @@ import {
   PlanCommandSchema,
   PlanConfigSchema,
   PlanControllerSchema,
+  PlanEnvSchema,
   PlanModelSchema,
   PlanPolicySchema,
   PlanProviderSchema,
@@ -193,6 +194,7 @@ describe('plan:waive', () => {
       sideEffects: PlanSideEffectSchema,
       providers: PlanProviderSchema,
       config: PlanConfigSchema,
+      env: PlanEnvSchema,
       commands: PlanCommandSchema,
     }
     const document = loadApprovedCommentsPlan()
@@ -202,6 +204,7 @@ describe('plan:waive', () => {
     document.planVersion = 2
     document.providers = [{ id: 'provider.jobs', change: { kind: 'add' }, className: 'JobsProvider', purpose: 'registers the jobs' }]
     document.config = [{ id: 'config.queue', change: { kind: 'add' }, name: 'queue' }]
+    document.env = [{ id: 'env.queue', change: { kind: 'add' }, key: 'QUEUE_CONNECTION', default: 'sync' }]
     // Every `change` in the document, found by shape rather than by naming a section.
     const changed = new Set<string>()
     const markExisting = (value: unknown): void => {

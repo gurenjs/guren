@@ -30,6 +30,8 @@ import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
 import { planCommandTargets, type PlanCommandTargetHit } from './command-targets'
 import { elementsAtPlannedEnd, judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
+import { planEnvEntry } from '../env-declarations'
+import { envDeclarationProblem } from '../plugin-env'
 import { policyProviderName } from './scaffold-http'
 import { planMayPassNow, routeAnswersBefore } from './scaffold-tests'
 import { derivePlanTasks, type PlanTaskDerivation } from './tasks'
@@ -130,6 +132,7 @@ export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResul
   checkInternalReferences(plan, index, results)
   checkChangeConsistency(plan, results)
   checkEntryNames(plan, results)
+  checkEnvDeclarations(plan, results)
   checkAgainstApp(plan, app, results)
   checkInflectedNames(plan, results)
   checkRouteAuthorization(plan, index, results)
@@ -460,6 +463,7 @@ function checkEntryNames(plan: PlanDraft, results: PlanCheckResult[]): void {
   const lists = [
     { section: 'providers' as const, noun: 'provider class', entries: (plan.providers ?? []).map((entry) => ({ id: entry.id, name: entry.className })) },
     { section: 'config' as const, noun: 'config definition', entries: (plan.config ?? []).map((entry) => ({ id: entry.id, name: entry.name })) },
+    { section: 'env' as const, noun: 'environment key', entries: (plan.env ?? []).map((entry) => ({ id: entry.id, name: entry.key })) },
   ]
   for (const { section, noun, entries } of lists) {
     const seen = new Map<string, string>()
@@ -474,6 +478,15 @@ function checkEntryNames(plan: PlanDraft, results: PlanCheckResult[]): void {
       if (policy === undefined) continue
       results.push(finding('plan:provider-implied', 'fail', `The provider "${entry.name}" is the one the policy "${policy}" implies, which its scaffold writes and registers; leave it to the policy element.`, { elementId: entry.id, section }))
     }
+  }
+}
+
+/** A planned key is what `guren plugin` would declare for it, so it takes that command's rules (RFC 0027 §1). */
+function checkEnvDeclarations(plan: PlanDraft, results: PlanCheckResult[]): void {
+  for (const entry of plan.env ?? []) {
+    const problem = envDeclarationProblem(planEnvEntry(entry))
+    if (problem === undefined) continue
+    results.push(finding('plan:env-declaration', 'fail', `The environment key "${entry.key}" cannot be declared as planned: ${problem}`, { elementId: entry.id, section: 'env' }))
   }
 }
 

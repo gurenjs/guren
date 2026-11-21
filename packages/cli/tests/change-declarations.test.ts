@@ -917,3 +917,38 @@ describe('applyPlanDeclarations on an entry a providers or config element declar
       .toEqual([['provider-added', 'low', `${PLAN_FILE}#provider.jobs`], ['config-added', 'medium', undefined]])
   })
 })
+
+describe('applyPlanDeclarations on a key an env element declares', () => {
+  const ENV = 'config/env.ts'
+  const BASE = readFileSync(join(import.meta.dir, '../../create-app/templates/default/config/env.ts'), 'utf8')
+  const HEAD = BASE.replace("  HOST: Env.string().default('0.0.0.0'),\n", "  HOST: Env.string().default('0.0.0.0'),\n  QUEUE_CONNECTION: Env.string().default('sync'),\n")
+  const ELEMENT = { id: 'env.queue', change: { kind: 'add' }, key: 'QUEUE_CONNECTION', default: 'sync' }
+  const declaring = (element: Record<string, unknown> = ELEMENT): PlanDraft => commentsPlan((document) => {
+    document.planVersion = 2
+    document.env = [element]
+  })
+
+  const judge = async (plans: OpenPlan[], head = HEAD) => {
+    const fact: ChangeFact = { code: 'env-added', lane: 'medium', target: 'QUEUE_CONNECTION', files: [ENV], evidence: 'static', message: 'QUEUE_CONNECTION' }
+    const subjects = new Map<ChangeFact, DeclarationSubject>([[fact, { kind: 'env', path: ENV, key: 'QUEUE_CONNECTION' }]])
+    const result = await applyPlanDeclarations([fact], subjects, plans, async (path) => (path === ENV ? head : null), async (path) => (path === ENV ? BASE : null))
+    return result.map((entry) => [entry.lane, entry.declaredBy])
+  }
+
+  test('should declare a key added as the element states it, its prose aside', async () => {
+    expect(await judge([{ file: PLAN_FILE, plan: declaring() }])).toEqual([['low', `${PLAN_FILE}#env.queue`]])
+    const described = HEAD.replace("Env.string().default('sync')", "Env.string().describe('The queue driver.').default('sync')")
+    expect(await judge([{ file: PLAN_FILE, plan: declaring() }], described)).toEqual([['low', `${PLAN_FILE}#env.queue`]])
+  })
+
+  test('should not declare a key whose chain means another declaration', async () => {
+    for (const chain of ["Env.string().default('redis')", "Env.string().default('sync').optional()", "Env.string().default('sync').secret()", "Env.url().default('sync')"]) {
+      expect([chain, await judge([{ file: PLAN_FILE, plan: declaring() }], HEAD.replace("Env.string().default('sync')", chain))]).toEqual([chain, [['medium', undefined]]])
+    }
+  })
+
+  test('should not declare a key no added element names, or two open plans name', async () => {
+    expect(await judge([{ file: PLAN_FILE, plan: declaring({ ...ELEMENT, change: { kind: 'existing' } }) }])).toEqual([['medium', undefined]])
+    expect(await judge([{ file: PLAN_FILE, plan: declaring() }, { file: 'docs/plans/jobs/plan.json', plan: declaring() }])).toEqual([['medium', undefined]])
+  })
+})

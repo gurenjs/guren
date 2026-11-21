@@ -88,6 +88,7 @@ const SECTION_TITLES: Record<(typeof PLAN_STATUS_SECTIONS)[number], string> = {
   sideEffects: 'Side effects',
   providers: 'Providers',
   config: 'Config',
+  env: 'Environment',
   commands: 'Commands',
 }
 
