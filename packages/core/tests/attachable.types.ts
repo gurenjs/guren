@@ -37,6 +37,31 @@ export async function collectionNames() {
   await Post.attachmentUrl(1, 'covr')
 }
 
+export async function inspectFirst() {
+  const cover = await Post.inspectAttachment('cover', file, { name: 'cover.png', queued: true })
+  await Post.attach(1, 'cover', cover)
+  await Post.attach(1, 'cover', cover, { disk: 'archive' })
+  // @ts-expect-error name was settled by inspectAttachment()
+  await Post.attach(1, 'cover', cover, { name: 'other.png' })
+  // @ts-expect-error queued was settled by inspectAttachment()
+  await Post.attach(1, 'cover', cover, { queued: true })
+  // @ts-expect-error inspected for 'cover', not for 'images'
+  await Post.attach(1, 'images', cover)
+  // @ts-expect-error 'covr' is not a declared collection
+  await Post.inspectAttachment('covr', file)
+  // @ts-expect-error the disk is chosen at attach()
+  await Post.inspectAttachment('cover', file, { disk: 'archive' })
+  // @ts-expect-error path strings are not accepted anywhere in the API
+  await Post.inspectAttachment('cover', '/etc/passwd')
+}
+
+export async function inspectMany(uploads: File[]) {
+  // The shape make:feature --attach generates: an array typed by what is pushed.
+  const images = []
+  for (const upload of uploads) images.push(await Post.inspectAttachment('images', upload))
+  for (const image of images) await Post.attach(1, 'images', image)
+}
+
 export async function bytesOnly() {
   await Post.attach(1, 'cover', new Uint8Array([1, 2, 3]))
   await Post.attach(1, 'cover', new Blob(['x']))

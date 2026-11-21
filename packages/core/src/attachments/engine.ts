@@ -46,6 +46,27 @@ export interface AttachOptions {
   queued?: boolean
 }
 
+/** What `inspectAttachment()` takes; the disk is chosen at `attach()`. */
+export type InspectAttachmentOptions = Pick<AttachOptions, 'name' | 'queued'>
+
+/**
+ * A file that passed a collection's gates before the owning record exists (see
+ * `inspectAttachment()`). `attach()` stores it without inspecting it again. Only
+ * an instance the engine returned is accepted: the inspection is held apart.
+ */
+export class InspectedAttachment<TCollection extends string = string> {
+  constructor(
+    readonly collection: TCollection,
+    /** The filename that will be stored: a converted HEIC is renamed to `.jpg`. */
+    readonly name: string,
+    readonly contentType: string,
+    /** Size in bytes of what will be stored. */
+    readonly size: number,
+    readonly width: number | null,
+    readonly height: number | null,
+  ) {}
+}
+
 declare module '@guren/server' {
   interface ServiceBindings {
     /** Bound by `AttachmentEngine.bindTo()` (RFC 0023 §4); absent until then. The runtime spelling lives in `ATTACHMENTS_BINDING` — rename here and there together. */
@@ -314,6 +335,24 @@ interface ImageInspection {
   name: string
 }
 
+/** A source past `normalizeSource()` and `inspectImage()`: all `attach()` needs before it writes. */
+interface PreparedSource {
+  inspection: ImageInspection
+  declaredContentType: string | null
+}
+
+interface InspectedState extends PreparedSource {
+  engine: AttachmentEngine
+  model: typeof Model
+  collection: string
+}
+
+const INSPECTED = new WeakMap<object, InspectedState>()
+
+function storedContentType(prepared: PreparedSource): string {
+  return prepared.inspection.contentType ?? prepared.declaredContentType ?? 'application/octet-stream'
+}
+
 /**
  * What a storage factory receives when no Application exists at all: a
  * factory that ignores its argument (`() => storage`) keeps working, and one
@@ -419,7 +458,7 @@ export class AttachmentEngine {
     declaration: AttachmentsDeclaration,
     recordId: string | number,
     collection: string,
-    source: AttachmentSource,
+    source: AttachmentSource | InspectedAttachment,
     options: AttachOptions = {},
   ): Promise<AttachmentRecord> {
     const spec = this.specFor(model, declaration, collection)
@@ -427,14 +466,40 @@ export class AttachmentEngine {
     return spec.kind === 'one' ? this.withCollectionWrite(model, recordId, collection, write) : write()
   }
 
-  private async attachUnlocked(
+  /**
+   * The gates `attach()` runs, with no record and nothing written: the same
+   * exceptions, and a result `attach()` stores without inspecting it again.
+   */
+  async inspect(
     model: typeof Model,
-    spec: AttachmentCollectionSpec,
-    recordId: string | number,
+    declaration: AttachmentsDeclaration,
     collection: string,
     source: AttachmentSource,
-    options: AttachOptions,
-  ): Promise<AttachmentRecord> {
+    options: InspectAttachmentOptions = {},
+  ): Promise<InspectedAttachment> {
+    const spec = this.specFor(model, declaration, collection)
+    // A copy: the caller may reuse its array before attach(), and what is stored must be what passed.
+    const owned = source instanceof Uint8Array ? new Uint8Array(source) : source
+    const prepared = await this.prepare(spec, collection, owned, options)
+    const { inspection } = prepared
+    const inspected = new InspectedAttachment(
+      collection,
+      inspection.name,
+      storedContentType(prepared),
+      inspection.bytes.byteLength,
+      inspection.width,
+      inspection.height,
+    )
+    INSPECTED.set(inspected, { ...prepared, engine: this, model, collection })
+    return inspected
+  }
+
+  private async prepare(
+    spec: AttachmentCollectionSpec,
+    collection: string,
+    source: AttachmentSource,
+    options: InspectAttachmentOptions,
+  ): Promise<PreparedSource> {
     const normalized = await normalizeSource(source, options.name)
 
     const queued = options.queued === true
@@ -445,13 +510,51 @@ export class AttachmentEngine {
     }
 
     const inspection = await this.inspectImage(spec, collection, normalized, queued)
+    return { inspection, declaredContentType: normalized.declaredContentType }
+  }
+
+  private inspectedSource(
+    model: typeof Model,
+    collection: string,
+    source: AttachmentSource | InspectedAttachment,
+    options: AttachOptions,
+  ): PreparedSource | undefined {
+    const state = INSPECTED.get(source)
+    if (!state) return undefined
+    if (state.engine !== this) {
+      throw new Error(`${model.name}.attach(): the file was inspected by another attachment engine than the one configured now.`)
+    }
+    if (state.model !== model || state.collection !== collection) {
+      throw new Error(
+        `${model.name}.attach(): the file was inspected for '${state.collection}' of ${state.model.name}, not for '${collection}' of ${model.name}. Inspect it with ${model.name}.inspectAttachment('${collection}', file).`,
+      )
+    }
+    if (options.name !== undefined || options.queued !== undefined) {
+      throw new Error(
+        `${model.name}.attach(): 'name' and 'queued' were settled when the file was inspected. Pass them to ${model.name}.inspectAttachment(); attach() takes only 'disk' for an inspected file.`,
+      )
+    }
+    return state
+  }
+
+  private async attachUnlocked(
+    model: typeof Model,
+    spec: AttachmentCollectionSpec,
+    recordId: string | number,
+    collection: string,
+    source: AttachmentSource | InspectedAttachment,
+    options: AttachOptions,
+  ): Promise<AttachmentRecord> {
+    const prepared = this.inspectedSource(model, collection, source, options)
+      ?? (await this.prepare(spec, collection, source as AttachmentSource, options))
+    const { inspection } = prepared
 
     const id = ulid()
     const name = inspection.name
     const path = `${ATTACHMENT_OBJECT_PREFIX}/${id}/${objectName(name, inspection.format)}`
     const diskName = options.disk ?? this.defaultDisk
     const disk = this.storage().disk(diskName)
-    const contentType = inspection.contentType ?? normalized.declaredContentType ?? 'application/octet-stream'
+    const contentType = storedContentType(prepared)
 
     // Read the rows to purge *before* writing, purge them only *after* the new
     // row exists: a failed put must not leave the record without an attachment.

@@ -115,6 +115,12 @@ describe('parseAttachString', () => {
     expect(() => parseAttachString('cover:')).toThrow('Invalid attachment kind')
   })
 
+  // `cover` is bound as `coverFile` before it is inspected, so a collection of that name would be declared twice.
+  it('throws for a collection named after the variable of a hasOne upload', () => {
+    expect(() => parseAttachString('cover:one,coverFile:many')).toThrow('collides with the variable')
+    expect(parseAttachString('cover:many,coverFile:one')).toHaveLength(2)
+  })
+
   // A repeated collection is a duplicate object key in the generated
   // Attachable declaration — the second silently wins, so it is refused.
   it('throws for a duplicate collection', () => {
@@ -141,12 +147,16 @@ describe('makeFeature --attach', () => {
         'utf8',
       )
       const storeBody = controller.slice(controller.indexOf('async store'), controller.indexOf('async edit'))
-      expect(storeBody).toContain("const cover = await this.file('cover')")
+      expect(storeBody).toContain("const coverFile = await this.file('cover')")
+      expect(storeBody).toContain("const cover = coverFile ? await Post.inspectAttachment('cover', coverFile) : null")
       expect(storeBody).toContain("await Post.attach(post.id, 'cover', cover)")
       expect(storeBody).toContain("for (const file of await this.files('images'))")
+      expect(storeBody).toContain("images.push(await Post.inspectAttachment('images', file))")
+      expect(storeBody).toContain('for (const file of images)')
       expect(storeBody).toContain("await Post.attach(post.id, 'images', file)")
-      // Attach runs after create (it needs the id) and before the redirect.
-      expect(storeBody.indexOf('Post.create(data)')).toBeLessThan(storeBody.indexOf("this.file('cover')"))
+      // Inspected before create, so a rejected upload leaves no row; attached after it, which needs the id.
+      expect(storeBody.indexOf("Post.inspectAttachment('images'")).toBeLessThan(storeBody.indexOf('Post.create(data)'))
+      expect(storeBody.indexOf('Post.create(data)')).toBeLessThan(storeBody.indexOf("Post.attach(post.id, 'cover'"))
       expect(storeBody.indexOf("Post.attach(post.id, 'images'")).toBeLessThan(storeBody.indexOf('this.redirect'))
 
       // Deletion is explicit (RFC 0013 §8): purge before the row goes away.

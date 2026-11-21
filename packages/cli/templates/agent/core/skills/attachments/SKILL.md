@@ -47,9 +47,10 @@ A new entity scaffolds attachment-aware (it refuses before `add attachments`):
 bunx guren make:feature Post --fields "title:string,body:text" --attach "cover:one,images:many"
 ```
 
-`store()` attaches and `destroy()` purges. Add the `<input type="file">` fields
-to the New page yourself (Inertia's `useForm` posts multipart once the data
-holds a `File`), and the attach lines to `update()`.
+`store()` inspects each upload, creates the row, then attaches; `destroy()`
+purges. Add the `<input type="file">` fields to the New page yourself (Inertia's
+`useForm` posts multipart once the data holds a `File`), and the inspect and
+attach lines to `update()`.
 
 ## The controller
 
@@ -62,10 +63,14 @@ async store() {
   if (contract && contract.size > 10_000_000) {                  // check before anything is written
     throw new ValidationException({ contract: ['The contract may not exceed 10 MB.'] })
   }
+  const coverFile = await this.file('cover')
+  // Checked before the row exists: a rejected upload (422/413/415) must not leave a post behind.
+  const cover = coverFile ? await Post.inspectAttachment('cover', coverFile) : null
+  const images = []
+  for (const file of await this.files('images')) images.push(await Post.inspectAttachment('images', file))
   const post = await Post.create(data)
-  const cover = await this.file('cover')
   if (cover) await Post.attach(post.id, 'cover', cover)          // hasOne: replaces the old one
-  for (const file of await this.files('images')) await Post.attach(post.id, 'images', file)  // hasMany: appends
+  for (const file of images) await Post.attach(post.id, 'images', file)  // hasMany: appends
   if (contract) await Post.attach(post.id, 'contract', contract)
   return this.redirect(`/posts/${post.id}`)
 }
@@ -85,6 +90,10 @@ async destroy() {
 - Size caps are engine-wide and image-only (`maxImageBytes` 413, `maxPixels`
   422). No per-collection size or MIME option exists: cap other files by hand
   as above. HEIC answers 415 unless the collection sets `accepts: { heic: 'convert' }`.
+- `attach()` validates too, but it needs the record id, so alone it rejects
+  only after the row is saved. `inspectAttachment(collection, file)` runs the
+  same gates first; pass its result to `attach()`. In `update()`, inspect
+  before `Post.update()`.
 - `attach()` takes `File | Blob | Uint8Array`, never a path string. Remove with
   `Post.detach(id, 'cover')` or `Post.detach(id, 'images', attachmentId)`.
 - A soft delete keeps the attachments; purge on `forceDelete`.

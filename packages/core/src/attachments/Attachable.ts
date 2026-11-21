@@ -1,6 +1,12 @@
 import type { Model, PlainObject } from '@guren/orm'
 import type { AttachmentsDeclaration } from './declaration.js'
-import { resolveAttachmentEngine, type AttachOptions, type AttachmentUrlOptions } from './engine.js'
+import {
+  resolveAttachmentEngine,
+  type AttachOptions,
+  type AttachmentUrlOptions,
+  type InspectAttachmentOptions,
+  type InspectedAttachment,
+} from './engine.js'
 import type { AttachmentData, AttachmentRecord, AttachmentSource } from './types.js'
 
 /** A record id accepted by the attachment statics (int and uuid/text PKs). */
@@ -50,14 +56,36 @@ export interface AttachableStatic<TBase extends typeof Model, TDecl extends Decl
    * Store bytes as an attachment on `collection`. `source` is bytes only — path
    * strings are never accepted. `hasOne` replaces the previous attachment (row
    * and objects purged); `hasMany` appends. Validation and variant specs come
-   * from the declaration, not the call site.
+   * from the declaration, not the call site. A file `inspectAttachment()`
+   * returned for this collection is stored without being inspected again.
    */
+  attach<K extends keyof TDecl & string>(
+    recordId: AttachableRecordId,
+    collection: K,
+    // NoInfer: the collection argument picks K, so a file inspected for another
+    // collection is a compile error instead of widening K to admit it.
+    source: InspectedAttachment<NoInfer<K>>,
+    // `name` and `queued` were settled by `inspectAttachment()`; the engine throws on them here.
+    options?: Pick<AttachOptions, 'disk'>,
+  ): Promise<AttachmentRecord>
   attach<K extends keyof TDecl & string>(
     recordId: AttachableRecordId,
     collection: K,
     source: AttachmentSource,
     options?: AttachOptions,
   ): Promise<AttachmentRecord>
+
+  /**
+   * Run the gates `attach()` would run on `source` in the same call, before the
+   * owning record exists, so a rejected upload (422, 413, 415) leaves no row
+   * behind. Writes nothing. Pass the result to `attach()` once the record is saved.
+   * @example const cover = await Post.inspectAttachment('cover', file)
+   */
+  inspectAttachment<K extends keyof TDecl & string>(
+    collection: K,
+    source: AttachmentSource,
+    options?: InspectAttachmentOptions,
+  ): Promise<InspectedAttachment<K>>
 
   /**
    * Remove attachment rows and their stored objects. On a `hasMany`
@@ -133,11 +161,16 @@ export function Attachable<
       this: typeof Model,
       recordId: AttachableRecordId,
       collection: string,
-      source: AttachmentSource,
+      source: AttachmentSource | InspectedAttachment,
       options?: AttachOptions,
     ) {
       const engine = resolveAttachmentEngine(`${this.name}.attach()`)
       return engine.attach(this, decl, recordId, collection, source, options)
+    },
+
+    inspectAttachment(this: typeof Model, collection: string, source: AttachmentSource, options?: InspectAttachmentOptions) {
+      const engine = resolveAttachmentEngine(`${this.name}.inspectAttachment()`)
+      return engine.inspect(this, decl, collection, source, options)
     },
 
     detach(this: typeof Model, recordId: AttachableRecordId, collection: string, attachmentId?: string) {

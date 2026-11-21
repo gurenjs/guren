@@ -11,6 +11,8 @@ export type {
   DeliveryServeMode,
   DiskDeliveryConfig,
   GenerateVariantsPayload,
+  InspectAttachmentOptions,
+  InspectedAttachment,
   PruneOptions,
   PruneReport,
 } from './engine.js'
