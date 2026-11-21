@@ -6,12 +6,13 @@
 
 | フィールド | 中身 |
 |---|---|
-| `planVersion` | `2`。`providers` も `config` も持たない計画は `1` のままでかまいません |
+| `planVersion` | `2`。`providers`、`config`、`env` のどれも持たない計画は `1` のままでかまいません |
 | `title`、`summary`、`locale` | 計画の題と要約、本文の言語 (`en`、`ja`。ビューのラベルは除く) |
 | `scope` | `goals` と `nonGoals` |
 | `assumptions`、`questions` | 指示なしに決めたことと、決めきれなかったこと |
 | `models`、`validators`、`controllers`、`routes`、`views`、`resources`、`policies`、`sideEffects` | 設計の本体。要素の種類ごとに 1 セクション |
 | `providers`、`config` | 変更が `createApp()` に登録するもの([Provider と config](#provider-と-config) を参照) |
+| `env` | 変更が宣言する環境変数([環境変数](#環境変数) を参照) |
 | `flows` | 計画で足すものの中を、リクエストがどう流れるか。ノードとエッジで書く |
 | `commands` | 変更の前に実行しておく `guren add attachments` などのコマンド |
 | `tasks` | スライスごとに達成すべきことと、その受け入れ振る舞い |
@@ -167,6 +168,20 @@ Guren は、GET 以外のリクエストに対するリダイレクトを 303 �
 - 名前はクラス名と同じように照合します。ファイルが既にある `add` と、ファイルが見つからない `existing` は失敗します。同じ名前の要素が 2 つある場合も失敗します。
 - `plan:status` は、ファイルがあれば `present`(存在する)、エントリの `createApp()` がそのファイルの default export を並べていれば `wired`(登録済み)と判定します。登録には振る舞いのリクエストが届かないので、`plan:approve` はコマンドと同じく、追加する項目をステップの検証が通った時点で完了として受け入れます。
 - `guren change:lane` は、どちらかの配列に足した項目を `provider-added` か `config-added` として読みます。開いている計画のうち 1 つだけがその名前の要素を足していて、項目が決まった場所のファイルの default import なら、`low` に下げます。Provider や config のファイル自体は `medium` のままです。計画が決めるのはファイルの名前だけで、中身までは決めないからです。
+
+## 環境変数
+
+`env` には、変更が `config/env.ts` の `defineEnv({ … })` に足すキーを、プラグインのマニフェストと同じ書き方で並べます。
+
+```json
+{ "id": "env.queue", "change": { "kind": "add" }, "key": "QUEUE_CONNECTION", "type": "enum", "choices": ["sync", "redis"], "default": "sync", "description": "The queue driver." }
+```
+
+- `type` は `string`(省略時)、`url`、`number`、`port`、`boolean`、`choices` を伴う `enum` のどれかです。`default` を持つキーは未設定になりません。`default` も `required` も持たないキーは省略できるキーになります。`secret` を付けると値を表示しません。`description` は `.describe()` の文言です。
+- キーの宣言は、`guren plugin` がそのキーについて書く宣言と同じ意味で読みます。文字列の `default` を持つ `port` のように、このコマンドが受け付けないキーはチェックで失敗します。同じキーの要素が 2 つある場合と、`config/env.ts` が既に宣言しているキーを `add` にした場合も失敗します。
+- `plan:status` は `config/env.ts` をソースのまま読み、キーのビルダーの連なりを計画のものと比べます。`.describe()` は比べません。`type` を書かず `"default": "sync"` とだけ書いたキーなら、`Env.string().default('sync')` は一致し、`Env.string()` は一致しません。追加するキーは、コマンドと同じく、ステップの検証が通った時点で承認時に受け入れます。
+- `guren change:lane` は、`defineEnv()` に足したキーを `env-added` として読みます。開いている計画のうち 1 つだけがそのキーの要素を足していて、宣言が要素の書いたとおりなら `low` に下げます。キーを変えたり外したりした場合と、キーと一緒にコメントを足したり消したりした場合、ファイルは `source-edited` のままです。
+- ほかの 2 つのセクションと同じく、`env` を持つ計画は `planVersion` を `2` にします。
 
 ## コマンド
 

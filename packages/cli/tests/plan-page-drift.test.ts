@@ -101,6 +101,9 @@ function everyBranch(): Loose[] {
   plan.planVersion = 2
   plan.providers = [{ id: 'provider.jobs', change: { kind: 'add' }, className: 'JobsProvider', purpose: 'Registers the queue jobs.' }]
   plan.config = [{ id: 'config.queue', change: { kind: 'add' }, name: 'queue' }]
+  plan.env = [
+    { id: 'env.queue', change: { kind: 'add' }, key: 'QUEUE_CONNECTION', type: 'enum', choices: ['sync', 'redis'], default: 'sync', required: false, secret: false, description: 'The queue driver.' },
+  ]
   plan.flows = [
     {
       id: 'flow.comment',

@@ -37,7 +37,9 @@ describe('appEntryAdditions', () => {
   })
 
   test('should read an edit that changes no list as no addition', () => {
-    expect(added(BASE.replace('const app', '// The application.\nconst app'))).toEqual([])
+    // A comment may carry a directive (`// @ts-nocheck`) the structure comparison cannot see.
+    expect(added(BASE.replace('const app', '// The application.\nconst app'))).toBeUndefined()
+    expect(added(`// @ts-nocheck\n${withProvider('P')}`)).toBeUndefined()
   })
 
   test('should refuse an edit beyond added entries and their imports', () => {

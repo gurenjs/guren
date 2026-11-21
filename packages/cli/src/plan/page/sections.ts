@@ -19,6 +19,7 @@ type SectionKey =
   | 'sideEffects'
   | 'providers'
   | 'config'
+  | 'env'
   | 'flows'
   | 'commands'
   | 'tasks'
@@ -42,6 +43,7 @@ export const SECTIONS: readonly Section[] = [
   { key: 'sideEffects', label: 'sections.sideEffects', render: renderSideEffects },
   { key: 'providers', label: 'sections.providers', render: renderProviders },
   { key: 'config', label: 'sections.config', render: renderConfig },
+  { key: 'env', label: 'sections.env', render: renderEnv },
   { key: 'flows', label: 'sections.flows', render: renderFlows },
   { key: 'commands', label: 'sections.commands', render: renderCommands },
   { key: 'tasks', label: 'sections.tasks', render: renderTasks },
@@ -324,6 +326,20 @@ function renderConfig(host: HTMLElement, { plan }: PlanPagePayload): void {
   for (const entry of plan.config ?? []) {
     const body = kv([['config.file', 'config/' + entry.name + '.ts']])
     host.appendChild(card({ id: entry.id, title: entry.name, change: entry.change, body: body }))
+  }
+}
+
+function renderEnv(host: HTMLElement, { plan }: PlanPagePayload): void {
+  for (const entry of plan.env ?? []) {
+    const body = kv([
+      ['env.type', entry.type ?? 'string'],
+      ['env.choices', entry.choices?.join(', ')],
+      ['env.default', entry.default === undefined ? undefined : JSON.stringify(entry.default)],
+      ['env.required', entry.required === undefined ? undefined : String(entry.required)],
+      ['env.secret', entry.secret === undefined ? undefined : String(entry.secret)],
+      ['env.description', entry.description],
+    ])
+    host.appendChild(card({ id: entry.id, title: entry.key, change: entry.change, body: body }))
   }
 }
 

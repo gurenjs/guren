@@ -33,6 +33,8 @@ import { registeredBefore, routePathsMayOverlap } from '../test-requests'
 import { importSpecifier } from '../utils'
 import { composeAppProviderRegistration } from '../provider-registrar'
 import { appEntryListNames, type AppEntryList } from './app-entry'
+import { envKeyValue, importsFrameworkEnv } from './app-env'
+import { envBuilderSignature, planEnvEntry, plannedEnvSignature } from '../env-declarations'
 import { FACT_CLASSES } from './fact-classes'
 import type { ChangeFact } from './lane'
 import { sameRecordPart, type RouteSecurityRecord } from './security-records'
@@ -54,6 +56,8 @@ export type DeclarationSubject =
   | { kind: 'routes-entry'; path: string }
   /** An entry the application entry's `createApp()` list gains, with the import binding it and nothing else. */
   | { kind: 'app-entry'; path: string; list: AppEntryList; name: string }
+  /** A key the `defineEnv()` literal of `config/env.ts` gains, with the `Env` import and nothing else. */
+  | { kind: 'env'; path: string; key: string }
 
 /** Every route the head registers, in registration order, and those of them with no counterpart at the base. */
 export interface HeadRoutes {
@@ -330,6 +334,7 @@ export async function applyPlanDeclarations(
     const subject = subjects.get(fact)
     const declaredBy = subject?.kind === 'table-residue' || subject?.kind === 'routes-entry' ? undefined
       : subject?.kind === 'app-entry' ? registered.get(entryKey(subject.list, subject.name))
+      : subject?.kind === 'env' ? await declaredEnvKey(subject, owned, readHead)
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
       : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : undefined)
       : subject?.kind === 'agent' ? (subject.base === undefined ? await declaredAgentOf(subject.route, facts, subjects, plans, readHead) : undefined)
@@ -636,6 +641,25 @@ async function holdsDeclared(plan: PlanDraft, declared: DeclaredFile, path: stri
   if (!ast || !exports || !declared.exports.every((name) => exports.includes(name))) return false
   const contents = declared.check.kind === 'routes' ? await routesFileAtHead(plan, declared.check.step, path, readHead) : declared.contents
   return contents !== undefined && passesCheck(declared, ast, path, contents)
+}
+
+/**
+ * A key one open plan's `env` element adds (RFC 0040 §5), declared as that element states it: the builder chain means
+ * what `guren plugin` would write for the element (`envBuilderSignature()`, `.describe()` aside), on the framework's `Env`.
+ */
+async function declaredEnvKey(
+  subject: Extract<DeclarationSubject, { kind: 'env' }>,
+  owned: ReadonlyArray<{ open: OpenPlan }>,
+  readHead: (path: string) => Promise<string | null>,
+): Promise<string | undefined> {
+  const head = await readHead(subject.path)
+  const value = head === null ? undefined : envKeyValue(head, subject.path, subject.key)
+  if (head === null || value === undefined || !importsFrameworkEnv(head, subject.path)) return undefined
+  const claims = owned.flatMap(({ open }) => (open.plan.env ?? []).filter((element) => element.key === subject.key).map((element) => ({ open, element })))
+  if (claims.length !== 1 || claims[0]!.element.change.kind !== 'add') return undefined
+  const { open, element } = claims[0]!
+  const signature = envBuilderSignature(value)
+  return signature !== undefined && signature === plannedEnvSignature(planEnvEntry(element)) ? `${open.file}#${element.id}` : undefined
 }
 
 const entryKey = (list: AppEntryList, name: string): string => `${list}\u0000${name}`

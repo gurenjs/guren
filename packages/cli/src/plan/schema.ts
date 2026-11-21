@@ -8,6 +8,7 @@
 
 import { z } from 'zod'
 
+import type { GurenPluginEnvType } from '../plugin-env'
 import { ENTRY_SECTIONS_VERSION, PLAN_VERSION, SUPPORTED_PLAN_VERSIONS } from './version'
 
 export { PLAN_VERSION, SUPPORTED_PLAN_VERSIONS }
@@ -262,6 +263,26 @@ export const PlanConfigSchema = z.strictObject({
   name: EntryNameSchema,
 })
 
+/** The `Env` builders a planned key may name: the ones `guren plugin` declares a manifest's key with. */
+export const PLAN_ENV_TYPES = ['string', 'url', 'number', 'port', 'boolean', 'enum'] as const satisfies readonly GurenPluginEnvType[]
+
+/**
+ * A key of `defineEnv({ … })` in `config/env.ts` (RFC 0040 §5), stated as `guren plugin` states a manifest's key:
+ * the declaration it means is the one `envEntrySchemaSource()` writes for it, `description` its `.describe()`.
+ */
+export const PlanEnvSchema = z.strictObject({
+  id: IdSchema,
+  change: EntryChangeSchema,
+  // `defineEnv()`'s own pattern (ENV_KEY_PATTERN in packages/server/src/config/env.ts); keep the two alike.
+  key: z.string().regex(/^[A-Z_][A-Z0-9_]*$/u, { message: 'must be an environment variable name (A-Z, 0-9 and _)' }),
+  type: z.enum(PLAN_ENV_TYPES).optional(),
+  choices: z.array(NonEmptySchema).optional(),
+  default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  required: z.boolean().optional(),
+  secret: z.boolean().optional(),
+  description: NonEmptySchema.optional(),
+})
+
 export const PLAN_FLOW_NODE_KINDS = ['actor', 'page', 'route', 'action', 'job', 'store', 'external', 'decision'] as const
 
 /**
@@ -383,6 +404,7 @@ const draftShape = {
   // Absent when empty, not defaulted: a default would add `[]` to every version 1 plan and rename each one its hash names.
   providers: z.array(PlanProviderSchema).optional().transform(absentWhenEmpty),
   config: z.array(PlanConfigSchema).optional().transform(absentWhenEmpty),
+  env: z.array(PlanEnvSchema).optional().transform(absentWhenEmpty),
   flows: z.array(PlanFlowSchema).default([]),
   locale: LocaleSchema,
   commands: z.array(PlanCommandSchema).default([]),
@@ -391,9 +413,9 @@ const draftShape = {
 }
 
 /** The sections a version 1 plan cannot hold, since a CLI that reads only version 1 refuses them. */
-function holdsSectionsOfItsVersion(plan: { planVersion: number; providers?: unknown; config?: unknown }, context: z.core.$RefinementCtx): void {
+function holdsSectionsOfItsVersion(plan: { planVersion: number; providers?: unknown; config?: unknown; env?: unknown }, context: z.core.$RefinementCtx): void {
   if (plan.planVersion >= ENTRY_SECTIONS_VERSION) return
-  for (const key of ['providers', 'config'] as const) {
+  for (const key of ['providers', 'config', 'env'] as const) {
     if (plan[key] !== undefined) context.addIssue({ code: 'custom', path: [key], message: `needs planVersion ${ENTRY_SECTIONS_VERSION}` })
   }
 }
@@ -423,6 +445,7 @@ export type PlanPolicy = z.infer<typeof PlanPolicySchema>
 export type PlanSideEffect = z.infer<typeof PlanSideEffectSchema>
 export type PlanProvider = z.infer<typeof PlanProviderSchema>
 export type PlanConfig = z.infer<typeof PlanConfigSchema>
+export type PlanEnv = z.infer<typeof PlanEnvSchema>
 export type PlanFlow = z.infer<typeof PlanFlowSchema>
 export type PlanFlowNode = z.infer<typeof PlanFlowNodeSchema>
 export type PlanFlowEdge = z.infer<typeof PlanFlowEdgeSchema>
@@ -451,6 +474,7 @@ export type PlanElementSection =
   | 'sideEffects'
   | 'providers'
   | 'config'
+  | 'env'
   | 'flows'
   | 'commands'
   | 'tasks'
@@ -500,6 +524,7 @@ export function listPlanElementEntries(plan: PlanDraft): PlanElementEntry[] {
   push('sideEffects', plan.sideEffects)
   push('providers', plan.providers ?? [])
   push('config', plan.config ?? [])
+  push('env', plan.env ?? [])
   push('flows', plan.flows)
   push('commands', plan.commands)
   for (const task of plan.tasks) {

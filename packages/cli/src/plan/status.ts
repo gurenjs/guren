@@ -7,7 +7,10 @@
  */
 
 import { CONTRACT_SEGMENTS } from '../contract-segments'
+import { ENV_SCHEMA_FILE } from '../app-env'
 import { CONFIG_DIR, PROVIDERS_DIR, ROUTES_DIR } from '../discovery'
+import { planEnvEntry, plannedEnvSignature } from '../env-declarations'
+import { envEntrySchemaSource } from '../plugin-env'
 import type { SchemaColumnDefault, SchemaConstraint } from '../schema-parser'
 import type { RuntimeSchemaColumn, SourcedSchemaTable } from '../schema-runtime'
 import type {
@@ -36,6 +39,7 @@ import {
   type PlanConfig,
   type PlanController,
   type PlanDraft,
+  type PlanEnv,
   type PlanElementSection,
   type PlanModel,
   type PlanPolicy,
@@ -136,6 +140,7 @@ export const PLAN_STATUS_SECTIONS = [
   'sideEffects',
   'providers',
   'config',
+  'env',
   'commands',
 ] as const satisfies readonly PlanElementSection[]
 
@@ -340,6 +345,7 @@ const NOUNS = {
   policies: { plural: 'policies', singular: 'policy' },
   providers: { plural: 'providers', singular: 'provider' },
   config: { plural: 'config definitions', singular: 'config definition' },
+  env: { plural: 'environment keys', singular: 'environment key' },
 } as const satisfies Record<string, PlanNoun>
 
 function inSection(section: PlanAppNames, name: string, plural: string): Existence {
@@ -483,6 +489,7 @@ function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit, deri
     ...plan.sideEffects.map((effect) => context.sideEffect(effect)),
     ...(plan.providers ?? []).map((provider) => context.provider(provider)),
     ...(plan.config ?? []).map((entry) => context.config(entry)),
+    ...(plan.env ?? []).map((entry) => context.env(entry)),
     ...plan.commands.map((command) => context.command(command)),
   ]
   return { elements, summary: summarize(elements) }
@@ -1284,6 +1291,27 @@ class StatusContext {
   config(entry: PlanConfig): PlanElementStatus {
     return this.named('config', { id: entry.id, change: entry.change, name: entry.name }, this.app.config, NOUNS.config, this.detail?.config, {
       mount: { verdict: () => this.entryMount('config', `${CONFIG_DIR}/${entry.name}`), files: () => this.entryFiles() },
+    })
+  }
+
+  /**
+   * A key of `config/env.ts`, judged by what its builder chain declares against the one `guren plugin` writes for the
+   * plan's statement, `.describe()` aside. Nothing mounts a key: it is read wherever the application reads `env`.
+   */
+  env(entry: PlanEnv): PlanElementStatus {
+    const declarations = this.detail?.env ?? NO_DETAIL
+    const classes = isUnreadable(declarations) ? declarations : declarations.map((declaration) => ({ className: declaration.key, module: null, file: ENV_SCHEMA_FILE }))
+    const planned = envEntrySchemaSource(planEnvEntry(entry))
+    return this.named('env', { id: entry.id, change: entry.change, name: entry.key }, this.app.env, NOUNS.env, classes, {
+      properties: () => {
+        if (isUnreadable(declarations)) return [unknown('declaration', planned, declarations.unreadable)]
+        const found = declarations.find((declaration) => declaration.key === entry.key)
+        if (!found) return [unknown('declaration', planned, `${ENV_SCHEMA_FILE} does not declare it`)]
+        const expected = plannedEnvSignature(planEnvEntry(entry))
+        if (expected === undefined) return [unknown('declaration', planned, 'the plan states a declaration guren plugin would not write')]
+        if (found.signature === undefined) return [unknown('declaration', planned, `${found.source} holds a builder call no planned key states`)]
+        return [found.signature === expected ? match('declaration', planned, found.source) : differ('declaration', planned, found.source)]
+      },
     })
   }
 

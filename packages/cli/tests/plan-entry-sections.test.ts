@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import { parseExpression } from '@babel/parser'
+import { defineEnv, Env } from '@guren/server'
+
 import { createAppListedFiles } from '../src/app-entry'
+import { envBuilderSignature } from '../src/env-declarations'
 import { parseSourceFile } from '../src/parse-cache'
 import type { PlanAppDetail } from '../src/plan/app-detail'
 import { loadPlanAppState } from '../src/plan/app-state'
@@ -115,6 +119,60 @@ describe('the providers and config sections of a plan (RFC 0040 §5)', () => {
     if (!revised.ok) throw new Error(JSON.stringify(revised.rejections))
     expect(revised.plan.planVersion).toBe(2)
     expect(revised.plan.config).toEqual([CONFIG])
+  })
+})
+
+describe('the env section of a plan (RFC 0040 §5)', () => {
+  const ENV = { id: 'env.queue', change: ADD, key: 'QUEUE_CONNECTION', default: 'sync' }
+
+  test('should hold a key as guren plugin states a manifest key, on a version 2 plan', () => {
+    expect(PlanDraftSchema.safeParse({ ...loadCommentsPlan(), env: [ENV] }).success).toBe(false)
+    expect(PlanDraftSchema.safeParse({ ...draft(), env: [{ ...ENV, key: 'queue-connection' }] }).success).toBe(false)
+    expect(PlanDraftSchema.safeParse({ ...draft(), env: [{ ...ENV, type: 'json' }] }).success).toBe(false)
+    expect(canonicalJson(draft({ env: [] }))).toBe(canonicalJson(draft()))
+  })
+
+  test('should refuse a key guren plugin would refuse, two elements of one key, and an added key the application declares', () => {
+    expect(failures(draft({ env: [{ ...ENV, type: 'port', default: 'sync' }] }))).toEqual([['plan:env-declaration', 'fail']])
+    for (const key of ['GUREN_TESTING', 'NODE_ENV']) expect([key, failures(draft({ env: [{ ...ENV, key }] }))]).toEqual([key, [['plan:env-declaration', 'fail']]])
+    // The schema restates defineEnv()'s pattern, so the two answer alike.
+    for (const key of ['A', '_A', 'A1', 'a', 'apiKey', 'A-B', '1A', '']) {
+      const declares = (() => {
+        try {
+          defineEnv({ [key]: Env.string().optional() })
+          return true
+        } catch {
+          return false
+        }
+      })()
+      expect([key, PlanDraftSchema.safeParse({ ...draft(), env: [{ ...ENV, key }] }).success]).toEqual([key, declares])
+    }
+    expect(failures(draft({ env: [ENV, { ...ENV, id: 'env.queue.again' }] }))).toEqual([['plan:duplicate-entry', 'fail']])
+    expect(failures(draft({ env: [ENV] }), planAppState({ env: ['QUEUE_CONNECTION'] }))).toEqual([['plan:app-collision', 'fail']])
+  })
+
+  test('should warn of an unreadable config/env.ts only a plan stating a key', () => {
+    const app = planAppState({ env: { unreadable: 'config/env.ts spreads its keys' } })
+    expect(failures(draft(), app)).toEqual([])
+    expect(failures(draft({ env: [ENV] }), app)).toEqual([['plan:app-unreadable', 'warn']])
+  })
+
+  test('should judge a declared key by what its chain declares', () => {
+    const plan = draft({ env: [ENV] })
+    const state = (source: string, signature: string | undefined) => planAppState({ env: ['QUEUE_CONNECTION'], detail: { env: [{ key: 'QUEUE_CONNECTION', source, signature }] } as PlanAppDetail })
+    const verdicts = (source: string) => judgePlan(plan, state(source, envBuilderSignature(parseExpression(source) as never))).elements.map((element) => element.properties.map((property) => property.verdict))
+    expect(verdicts("Env.string().default('sync')")).toEqual([['match']])
+    expect(verdicts('Env.string()')).toEqual([['differ']])
+    expect(planElementsWithoutBehaviour(plan)).toEqual([{ id: 'env.queue', section: 'env' }])
+  })
+
+  test('should read the keys config/env.ts declares, and say when its literal cannot be read', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'plan-env-section-'))
+    await mkdir(join(root, 'config'), { recursive: true })
+    await writeFile(join(root, 'config/env.ts'), "import { defineEnv, Env } from '@guren/core'\nconst env = defineEnv({ PORT: Env.port().default(3333), APP_NAME: Env.string() })\nexport default env\n")
+    expect((await loadPlanAppState(root)).env).toEqual([{ name: 'APP_NAME', module: null }, { name: 'PORT', module: null }])
+    await writeFile(join(root, 'config/env.ts'), "import { defineEnv, Env } from '@guren/core'\nconst env = defineEnv({ ...shared })\nexport default env\n")
+    expect((await loadPlanAppState(root)).env).toEqual({ unreadable: expect.stringContaining('config/env.ts') })
   })
 })
 
