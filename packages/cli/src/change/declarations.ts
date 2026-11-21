@@ -20,7 +20,8 @@ import { validatorFieldProperties } from '../plan/field-status'
 import { readPolicyAbilities } from '../plan/policy-abilities'
 import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
 import { plannedSqlDefault, planScaffoldMounts, planScaffoldOutput, sqlNameOf, type PlanScaffoldApp } from '../plan/scaffold'
-import { MODELS_DIR } from '../discovery'
+import { MODELS_DIR, PROVIDERS_DIR } from '../discovery'
+import { defaultImportBinding } from '../patch-helpers'
 import { DIALECT_BARRELS, DRIZZLE_CORE_SUBPATHS } from '../drizzle-specifiers'
 import { isAutoIncrementPrimaryKey, migrationSqlType } from '../schema-columns'
 import { policyFilePath, policyProviderName, providerFilePath, resourceFilePath, validatorFilePath } from '../plan/scaffold-http'
@@ -658,10 +659,12 @@ async function declaredRegistrations(
     let content = base
     for (const provider of providers) {
       const { wiring, content: patched } = composeAppProviderRegistration(content, first.path, provider)
-      if (!wiring.registered || !wiring.entry.modified || patched === undefined) return []
+      // A fresh import: an import line the composer reads as present may sit in a comment, the name bound elsewhere.
+      if (!wiring.registered || !wiring.entry.modified || !wiring.import.modified || patched === undefined) return []
       content = patched
     }
-    return content === head ? [{ open, files, providers }] : []
+    if (content !== head || providers.some((provider) => defaultImportBinding(head, first.path, `${PROVIDERS_DIR}/${provider}`) !== provider)) return []
+    return [{ open, files, providers }]
   }))
   if (candidates.length !== 1) return declared
   const { open, files, providers } = candidates[0]!

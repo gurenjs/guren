@@ -6,7 +6,7 @@
 
 import type { ArrayExpression, CallExpression, File, ObjectExpression, ObjectProperty, Statement } from '@babel/types'
 
-import { canonicalSyntax, walk } from '../ast-walk'
+import { canonicalSyntax, referencedIdentifiers, walk } from '../ast-walk'
 import { parseSourceFile } from '../parse-cache'
 
 export const APP_ENTRY_LISTS = ['providers', 'config'] as const
@@ -34,6 +34,11 @@ function createAppOptions(ast: File): ObjectExpression | undefined {
   return found.length === 1 && !other ? found[0] : undefined
 }
 
+/** Whether every member is a plain keyed property: a spread, a computed key or an accessor can carry a list too. */
+function plainProperties(options: ObjectExpression): boolean {
+  return options.properties.every((property) => property.type === 'ObjectProperty' && !property.computed)
+}
+
 function listProperty(options: ObjectExpression, list: AppEntryList): ObjectProperty | undefined {
   const matches = options.properties.filter((property): property is ObjectProperty => {
     if (property.type !== 'ObjectProperty' || property.computed) return false
@@ -42,8 +47,12 @@ function listProperty(options: ObjectExpression, list: AppEntryList): ObjectProp
   return matches.length === 1 ? matches[0] : undefined
 }
 
+/** The value bindings the file imports: a type import binds no name a list can hold. */
 function importLocals(ast: File): Set<string> {
-  return new Set(ast.program.body.flatMap((node) => (node.type === 'ImportDeclaration' ? node.specifiers.map((specifier) => specifier.local.name) : [])))
+  return new Set(ast.program.body.flatMap((node) => {
+    if (node.type !== 'ImportDeclaration' || node.importKind === 'type') return []
+    return node.specifiers.filter((specifier) => specifier.type !== 'ImportSpecifier' || specifier.importKind !== 'type').map((specifier) => specifier.local.name)
+  }))
 }
 
 /**
@@ -55,7 +64,7 @@ export function appEntryAdditions(base: string, head: string, path: string): App
   const [before, after] = [parseSourceFile(base, path), parseSourceFile(head, path)]
   if (!before || !after) return undefined
   const [baseOptions, headOptions] = [createAppOptions(before), createAppOptions(after)]
-  if (!baseOptions || !headOptions) return undefined
+  if (!baseOptions || !headOptions || !plainProperties(baseOptions) || !plainProperties(headOptions)) return undefined
   const additions: AppEntryAddition[] = []
   for (const list of APP_ENTRY_LISTS) {
     const [old, now] = [listProperty(baseOptions, list), listProperty(headOptions, list)]
@@ -84,6 +93,9 @@ export function appEntryAdditions(base: string, head: string, path: string): App
   }
   const bound = importLocals(before)
   const added = new Set(additions.map((addition) => addition.name).filter((name) => !bound.has(name)))
+  // An added import of a name the base reads (a global such as `process`) would capture every such read.
+  const read = new Set(referencedIdentifiers(before.program))
+  if ([...added].some((name) => read.has(name))) return undefined
   const body: Statement[] = []
   for (const node of after.program.body) {
     const binds = node.type === 'ImportDeclaration' ? node.specifiers.filter((specifier) => added.has(specifier.local.name)) : []

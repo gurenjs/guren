@@ -824,6 +824,18 @@ describe('applyPlanDeclarations on a provider registration', () => {
     expect(lanes(result)).toEqual([['provider-added', 'medium', undefined], ['config-added', 'medium', undefined]])
   })
 
+  test('should not declare a provider imported from another module, or bound by the base where the scaffold would import it', async () => {
+    const elsewhere = { ...HEAD, [ENTRY]: HEAD[ENTRY]!.replace("'../app/Providers/CommentPolicyProvider.js'", "'../app/Support/other.js'") }
+    expect(lanes(await judge([{ file: PLAN_FILE, plan: commentsPlan() }], elsewhere))).toEqual([['provider-added', 'medium', undefined]])
+
+    // The composer finds the scaffold's import line in the comment and adds none; the name is legacy.js's export.
+    const base = fixture('app.base').replace("import { createApp } from '@guren/core'\n", "import { createApp } from '@guren/core'\nimport { CommentPolicyProvider } from '../app/Support/legacy.js'\n/*\nimport CommentPolicyProvider from '../app/Providers/CommentPolicyProvider.js'\n*/\nexport { CommentPolicyProvider }\n")
+    const head: Record<string, string> = { ...HEAD, [ENTRY]: base.replace('providers: []', 'providers: [CommentPolicyProvider]') }
+    const { facts, subjects } = entryFacts()
+    const result = await applyPlanDeclarations(facts, subjects, [{ file: PLAN_FILE, plan: commentsPlan() }], async (path) => head[path] ?? null, async (path) => (path === ENTRY ? base : null))
+    expect(lanes(result)).toEqual([['provider-added', 'medium', undefined]])
+  })
+
   test('should not declare a provider whose policy holds an ability the plan does not', async () => {
     const head = { ...HEAD, 'app/Policies/CommentPolicy.ts': HEAD['app/Policies/CommentPolicy.ts']!.replace(/\}\n$/u, '\n  update(_user: AuthUser | null): boolean {\n    return true\n  }\n}\n') }
     expect(head['app/Policies/CommentPolicy.ts']).toContain('update(')

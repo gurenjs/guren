@@ -148,7 +148,7 @@ export default defineReviewPolicy({
 ```
 
 - `paths` は、一致するパスに触れた変更の下限を決めます。パスはアプリケーションのルートからの相対で、`*` は 1 階層の中、`**` は何階層でも一致し、どちらも含まない glob は CODEOWNERS と同じくファイルかディレクトリを指します。それ以外の書き方(空の区切り、`.` や `..` の区切り、波かっこ、角かっこ、`?`、`@(a|b)` のような extglob)は、何にも一致しないまま受け入れるのではなく、ポリシーを読めないものとして扱います。一致した glob ごとに `review-path` の事実が 1 つ付きます。
-- `facts` は事実ごとのレーンを決めます。上げるのはどの事実でもできます。下げられるのは計画で宣言できる事実だけで、宣言したときと同じところまでです。`schema-changed`、`migration`、`file-added`(ソースファイルの追加)、`policy-added` は `low` まで、`policy-changed` と `dependencies-changed` は `medium` までしか下げられません。常に high の事実(gate の入力、破壊的なマイグレーション、受け入れテストの編集、audit の失敗など)、既存のソースの編集、ソースでないファイルの追加、スキーマのテーブルの中の関数とテーブル以外のコードの変更は下げられません。ポリシーで変えた事実には、レポートで `lowered by guren.review.ts` か `raised by guren.review.ts` と表示されます。
+- `facts` は事実ごとのレーンを決めます。上げるのはどの事実でもできます。下げられるのは計画で宣言できる事実だけで、宣言したときと同じところまでです。`schema-changed`、`migration`、`file-added`(ソースファイルの追加)、`policy-added`、ルートの事実(`route-added`、`route-changed`、`route-removed`、`agent-tool`)、アプリケーションのエントリの配列の事実(`provider-added`、`config-added`)は `low` まで、`policy-changed` と `dependencies-changed` は `medium` までしか下げられません。常に high の事実(gate の入力、破壊的なマイグレーション、受け入れテストの編集、audit の失敗など)、それ以外の既存のソースの編集、ソースでないファイルの追加、スキーマのテーブルの中の関数とテーブル以外のコードの変更は下げられません。ポリシーで変えた事実には、レポートで `lowered by guren.review.ts` か `raised by guren.review.ts` と表示されます。
 - `approvals`、`review`、`identities`、`merge` は、レーンごとの承認とマージの仕方を書く項目です。まだ強制はしません。`evidence.md` には、下限のレーンで必要になる承認の数が出ます。
 
 適用するのはマージベースにあるポリシーです。`guren.review.ts` を編集するプルリクエストは編集前のポリシーで判定され、編集した内容はマージした後から効きます(gate の入力なので、その変更自体は `high` です)。このファイルは実行せずにデータとして読むので、値はすべてその場に書きます。変数、スプレッド、関数の呼び出し、知らないキー、許されていない引き下げが 1 つでもあると、ファイル全体を読めないものとして扱います。読めないポリシーは一切適用されず、変更は `high` に保留され、理由が「Not judged」に出ます。ポリシーが上げているレーンを見落とさないためです。

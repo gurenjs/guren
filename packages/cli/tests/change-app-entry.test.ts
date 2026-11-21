@@ -58,6 +58,22 @@ describe('appEntryAdditions', () => {
     expect(added(two.replace('[AuthProvider, Other]', '[Other, AuthProvider]'), two)).toBeUndefined()
   })
 
+  test('should refuse options a spread, a computed key or an accessor could carry a list through', () => {
+    const head = (options: string): string => `import P from './P.js'\nconst app = createApp({ ${options} })\n`
+    const base = (options: string): string => `const app = createApp({ ${options} })\n`
+    expect(added(head('providers: [P], ...shared'), base('...shared'))).toBeUndefined()
+    expect(added(head('...shared, providers: [P]'), base('...shared'))).toBeUndefined()
+    expect(added(head("['providers']: [A], providers: [P]"), base("['providers']: [A]"))).toBeUndefined()
+    expect(added(head('get providers() { return [A] }, providers: [P]'), base('get providers() { return [A] }'))).toBeUndefined()
+  })
+
+  test('should refuse an added import of a name the base reads, and a name the base imports as a type', () => {
+    const reads = BASE.replace('routes: registerWebRoutes,', "routes: registerWebRoutes,\n  host: process.env.HOST,")
+    expect(added(withProvider('process', reads).replace("'../app/Providers/process.js'", "'../app/Providers/Env.js'"), reads)).toBeUndefined()
+    const typed = BASE.replace("import { createApp }", "import type { P } from './P.js'\nimport { createApp }")
+    expect(added(typed.replace('[AuthProvider]', '[AuthProvider, P]'), typed)).toBeUndefined()
+  })
+
   test('should refuse a file with no createApp() literal, or with two', () => {
     expect(appEntryAdditions('export default 1\n', 'export default 2\n', 'src/app.ts')).toBeUndefined()
     const twice = (text: string): string => `${text}createApp({ providers: [] })\n`
