@@ -1,12 +1,14 @@
 /**
  * The two lists of the application entry RFC 0040 §3 reads as facts: the `providers` and `config` arrays of the
  * `createApp({ … })` literal. An edit is those facts only when the entry differs from its base by entries added to
- * them and the imports that bind them; anything else in the file keeps it `source-edited`.
+ * them and the imports that bind them; anything else in the file keeps it `source-edited`, and so does a literal that
+ * could carry a list the reader does not see, or an added import of a name the base reads.
  */
 
 import type { ArrayExpression, CallExpression, File, ObjectExpression, ObjectProperty, Statement } from '@babel/types'
 
-import { canonicalSyntax, referencedIdentifiers, walk } from '../ast-walk'
+import { hidesKeys } from '../app-entry'
+import { canonicalSyntax, memberKeyName, referencedIdentifiers, walk } from '../ast-walk'
 import { parseSourceFile } from '../parse-cache'
 
 export const APP_ENTRY_LISTS = ['providers', 'config'] as const
@@ -34,9 +36,17 @@ function createAppOptions(ast: File): ObjectExpression | undefined {
   return found.length === 1 && !other ? found[0] : undefined
 }
 
-/** Whether every member is a plain keyed property: a spread, a computed key or an accessor can carry a list too. */
-function plainProperties(options: ObjectExpression): boolean {
-  return options.properties.every((property) => property.type === 'ObjectProperty' && !property.computed)
+/**
+ * Whether the literal spells each list only as a property the reader sees: a spread or a computed key may carry one,
+ * `__proto__` sets a prototype `createApp()` reads a list through, and a method or accessor may be keyed by a list.
+ */
+function listsReadable(options: ObjectExpression): boolean {
+  if (hidesKeys(options)) return false
+  return options.properties.every((property) => {
+    if (property.type === 'SpreadElement') return false
+    const name = memberKeyName(property)
+    return name !== '__proto__' && (property.type === 'ObjectProperty' || !APP_ENTRY_LISTS.includes(name as AppEntryList))
+  })
 }
 
 function listProperty(options: ObjectExpression, list: AppEntryList): ObjectProperty | undefined {
@@ -64,7 +74,7 @@ export function appEntryAdditions(base: string, head: string, path: string): App
   const [before, after] = [parseSourceFile(base, path), parseSourceFile(head, path)]
   if (!before || !after) return undefined
   const [baseOptions, headOptions] = [createAppOptions(before), createAppOptions(after)]
-  if (!baseOptions || !headOptions || !plainProperties(baseOptions) || !plainProperties(headOptions)) return undefined
+  if (!baseOptions || !headOptions || !listsReadable(baseOptions) || !listsReadable(headOptions)) return undefined
   const additions: AppEntryAddition[] = []
   for (const list of APP_ENTRY_LISTS) {
     const [old, now] = [listProperty(baseOptions, list), listProperty(headOptions, list)]

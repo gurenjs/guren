@@ -65,6 +65,10 @@ describe('appEntryAdditions', () => {
     expect(added(head('...shared, providers: [P]'), base('...shared'))).toBeUndefined()
     expect(added(head("['providers']: [A], providers: [P]"), base("['providers']: [A]"))).toBeUndefined()
     expect(added(head('get providers() { return [A] }, providers: [P]'), base('get providers() { return [A] }'))).toBeUndefined()
+    expect(added(head('__proto__: shared, providers: [P]'), base('__proto__: shared'))).toBeUndefined()
+    expect(added(head("'__proto__': shared, providers: [P]"), base("'__proto__': shared"))).toBeUndefined()
+    // A registrar written as a method is named, and carries no list.
+    expect(added(head('routes(router) {}, providers: [P]'), base('routes(router) {}'))).toEqual([{ list: 'providers', name: 'P' }])
   })
 
   test('should refuse an added import of a name the base reads, and a name the base imports as a type', () => {
