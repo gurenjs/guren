@@ -284,7 +284,7 @@ Recorded in .guren/plans/comments.state.json
 
 ### scaffold と tests のステップ
 
-`plan:next` は、`scaffold` と `tests` のステップを手で書かずに `plan:scaffold` で書くよう指示し、scaffold ステップが書いたルートは `http` ステップで `plan:scaffold --mount` を使ってマウントするよう指示します。どちらも、あえて手を付けずに残すものがあります。キーがまだないリレーション、例外を投げる Resource のフィールド、`false` を返す Policy のメソッド、501 を返すアクション、例外を投げる `given()` で書かれたテストの前提です。それぞれが書き出すものと残すものは[計画からコードとテストを生成する](./implementation-plan-scaffolding.md)にあります。
+`plan:next` は、`scaffold` と `tests` のステップを手で書かずに `plan:scaffold` で書くよう指示し、scaffold ステップが書いたルートは `http` ステップで `plan:scaffold --mount` を使ってマウントするよう指示します。計画が追加する Provider と環境変数のキーのうち、タスクのコマンドが書かなかったものは `plan:scaffold --entries` で書くよう指示します。いずれも、あえて手を付けずに残すものがあります。キーがまだないリレーション、例外を投げる Resource のフィールド、`false` を返す Policy のメソッド、501 を返すアクション、例外を投げる `given()` で書かれたテストの前提です。それぞれが書き出すものと残すものは[計画からコードとテストを生成する](./implementation-plan-scaffolding.md)にあります。
 
 ### 結果
 

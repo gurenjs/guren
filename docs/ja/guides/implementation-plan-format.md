@@ -166,7 +166,7 @@ Guren は、GET 以外のリクエストに対するリダイレクトを 303 �
 - どちらかのセクションを持つ計画は `planVersion` を `2` にします。version 1 しか読めないリリースは、その計画を受け付けません。`plan:revise` で項目を足すと、version 1 の計画は `2` に上がります。
 - 追加する Policy が必要とする Provider は書きません。`plan:scaffold` が `<Policy>Provider` を Policy と一緒に書いて登録するので、同じ名前の `providers` の要素はチェックで失敗します。
 - 名前はクラス名と同じように照合します。ファイルが既にある `add` と、ファイルが見つからない `existing` は失敗します。同じ名前の要素が 2 つある場合も失敗します。
-- 追加する Provider は、それを持つステップから `plan:scaffold --entries` が空のクラスとして書いて登録します。タスクのコマンドが先に書いていれば書きません。config の定義はインストールするコマンドが書き、scaffold は書きません ([Provider と環境変数](./implementation-plan-scaffolding.md#provider-と環境変数-planscaffold---entries))。
+- 追加する Provider を受け持つステップで `plan:scaffold --entries` を実行すると、空のクラスとして書かれ、登録されます。タスクのコマンドが先に書いていれば書きません。config の定義はインストールするコマンドが書き、scaffold は書きません ([Provider と環境変数](./implementation-plan-scaffolding.md#provider-と環境変数-planscaffold-entries))。
 - `plan:status` は、ファイルがあれば `present`(存在する)、エントリの `createApp()` がそのファイルの default export を並べていれば `wired`(登録済み)と判定します。登録には振る舞いのリクエストが届かないので、`plan:approve` はコマンドと同じく、追加する項目をステップの検証が通った時点で完了として受け入れます。
 - `guren change:lane` は、どちらかの配列に足した項目を `provider-added` か `config-added` として読みます。開いている計画のうち 1 つだけがその名前の要素を足していて、項目が決まった場所のファイルの default import なら、`low` に下げます。Provider や config のファイル自体は `medium` のままです。計画が決めるのはファイルの名前だけで、中身までは決めないからです。
 
@@ -182,7 +182,7 @@ Guren は、GET 以外のリクエストに対するリダイレクトを 303 �
 - キーの宣言は、`guren plugin` がそのキーについて書く宣言と同じ意味で読みます。文字列の `default` を持つ `port` のように、このコマンドが受け付けないキーはチェックで失敗します。改行を含む `description` も同じです。計画はコミットされてページにもなるので、`default` を持つ `secret` のキーも失敗します。同じキーの要素が 2 つある場合と、`config/env.ts` が既に宣言しているキーを `add` にした場合も失敗します。
 - `plan:status` は `config/env.ts` をソースのまま読み、キーのビルダーの連なりを計画のものと比べます。`.describe()` は比べず、`.secret()` を呼ぶ連なりは表示しません。`Env` がフレームワークから import したものでなければ、連なりは比べません。`type` を書かず `"default": "sync"` とだけ書いたキーなら、`Env.string().default('sync')` は一致し、`Env.string()` は一致しません。追加するキーは、コマンドと同じく、ステップの検証が通った時点で承認時に受け入れます。
 - `guren change:lane` は、`defineEnv()` に足したキーを `env-added` として読みます。開いている計画のうち 1 つだけがそのキーの要素を足していて、宣言が要素の書いたとおりなら `low` に下げます。キーを変えたり外したりした場合、ファイルは `source-edited` のままです。キーと一緒にコメントを足したり消したりした場合や、`// @ts-expect-error` のようなディレクティブを別のコードの上に動かした場合も同じです。
-- 追加するキーは、それを持つステップから `plan:scaffold --entries` が `config/env.ts` に宣言し、`.env.example` にも書きます。タスクのコマンドが先に宣言していれば書きません。
+- 追加するキーを受け持つステップで `plan:scaffold --entries` を実行すると、キーが `config/env.ts` に宣言され、`.env.example` にも書かれます。タスクのコマンドが先に宣言していれば書きません。
 - ほかの 2 つのセクションと同じく、`env` を持つ計画は `planVersion` を `2` にします。
 
 ## コマンド

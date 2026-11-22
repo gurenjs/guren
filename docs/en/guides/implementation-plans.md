@@ -260,7 +260,7 @@ Before it runs the tests, `plan:verify` checks that each behaviour's test reques
 
 ### Scaffold and tests steps
 
-`plan:next` tells you to write a `scaffold` or `tests` step with `plan:scaffold` rather than by hand, and to mount the routes a scaffold step wrote with `plan:scaffold --mount` from the `http` step. Both leave work for you on purpose: relationships whose keys are not there yet, resource fields that throw, policy methods that return `false`, actions that answer 501, and test setup written as `given()` calls that throw. What each writes and leaves is in [Generating Code and Tests from a Plan](./implementation-plan-scaffolding.md).
+`plan:next` tells you to write a `scaffold` or `tests` step with `plan:scaffold` rather than by hand, to mount the routes a scaffold step wrote with `plan:scaffold --mount` from the `http` step, and to write the providers and env keys the plan adds with `plan:scaffold --entries` when the task's commands did not. Each leaves work for you on purpose: relationships whose keys are not there yet, resource fields that throw, policy methods that return `false`, actions that answer 501, and test setup written as `given()` calls that throw. What each writes and leaves is in [Generating Code and Tests from a Plan](./implementation-plan-scaffolding.md).
 
 ### Outcomes
 

@@ -53,6 +53,7 @@ import {
   planScaffoldMounts,
   type PlanScaffoldMount,
   type PlanScaffoldOutput,
+  TWIN_EXTENSIONS,
 } from './plan/scaffold'
 import { emitPlanTests, planTestsFilePath, type PlanTestsOutput } from './plan/scaffold-tests'
 import type { Plan, PlanDraft, PlanEnv, PlanProvider } from './plan/schema'
@@ -478,15 +479,12 @@ export interface PlanScaffoldEntriesWork {
   providers: PlanProvider[]
   env: PlanEnv[]
   left: PlanScaffoldEntryLeft[]
-  /** Why `config/env.ts` cannot say which keys it declares; only set while the step owns a key. */
-  envUnreadable?: string
 }
-
-const PROVIDER_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'] as const
 
 /**
  * A provider whose file exists, or a key `config/env.ts` declares, was written by the task's commands or by hand and is
- * left as it is: `plan:status` compares it with the plan. A config definition depends on its key, so none is written.
+ * left as it is: `plan:status` compares it with the plan. A key with no `config/env.ts` to read is left to declare by
+ * hand, so plan:next never names a run that can only refuse. A config definition depends on its key, so none is written.
  */
 export async function planScaffoldEntriesWork(root: string, plan: PlanDraft, step: PlanDerivedStep): Promise<PlanScaffoldEntriesWork> {
   const owned = planScaffoldEntries(plan, step)
@@ -494,23 +492,22 @@ export async function planScaffoldEntriesWork(root: string, plan: PlanDraft, ste
   const providers: PlanProvider[] = []
   for (const provider of owned.providers) {
     const stem = plannedProviderFilePath(provider).replace(/\.ts$/u, '')
-    const present = await filesOnDisk(root, PROVIDER_EXTENSIONS.map((extension) => `${stem}${extension}`))
+    const present = await filesOnDisk(root, TWIN_EXTENSIONS.map((extension) => `${stem}${extension}`))
     if (present.length === 0) providers.push(provider)
     else left.push({ id: provider.id, section: 'providers', reason: `${present.join(', ')} exists, written by a command or by hand, so it is left as it is` })
   }
 
   const env: PlanEnv[] = []
-  let envUnreadable: string | undefined
   if (owned.env.length > 0) {
-    const declarations = await readEnvDeclarations(root)
-    if (isUnreadable(declarations)) {
-      envUnreadable = declarations.unreadable
-      env.push(...owned.env)
-    } else {
-      const declared = new Set(declarations.map((declaration) => declaration.key))
-      for (const entry of owned.env) {
-        if (!declared.has(entry.key)) env.push(entry)
-        else left.push({ id: entry.id, section: 'env', reason: `${ENV_SCHEMA_FILE} declares ${entry.key} already; plan:status compares that declaration with the plan` })
+    const absent = !(await pathExists(resolve(root, ENV_SCHEMA_FILE)))
+    const declarations = absent ? { unreadable: `${ENV_SCHEMA_FILE} does not exist` } : await readEnvDeclarations(root)
+    for (const entry of owned.env) {
+      if (isUnreadable(declarations)) {
+        left.push({ id: entry.id, section: 'env', reason: `${declarations.unreadable}, so plan:scaffold cannot add ${entry.key} to its defineEnv() literal: declare it there by hand` })
+      } else if (declarations.some((declaration) => declaration.key === entry.key)) {
+        left.push({ id: entry.id, section: 'env', reason: `${ENV_SCHEMA_FILE} declares ${entry.key} already; plan:status compares that declaration with the plan` })
+      } else {
+        env.push(entry)
       }
     }
   }
@@ -522,7 +519,7 @@ export async function planScaffoldEntriesWork(root: string, plan: PlanDraft, ste
       reason: `a config definition is written for its key, which plan:scaffold has no form for: the command installing it (add queue, add storage and the like) writes ${CONFIG_DIR}/${entry.name}.ts and registers it`,
     })
   }
-  return { providers, env, left, ...(envUnreadable === undefined ? {} : { envUnreadable }) }
+  return { providers, env, left }
 }
 
 export interface PlanScaffoldEntriesReport {
@@ -541,16 +538,12 @@ export interface PlanScaffoldEntriesReport {
 type EnvComposition = { file: string; content: string; keys: string[]; example: { file: string; content: string; keys: string[] } } | null
 
 /** The step's keys declared as `guren plugin` declares a manifest's, refused unless the lane reads the file as those keys and nothing else. */
-async function composeStepEnv(root: string, env: readonly PlanEnv[], unreadable: string | undefined, refusals: string[]): Promise<EnvComposition> {
+async function composeStepEnv(root: string, env: readonly PlanEnv[], refusals: string[]): Promise<EnvComposition> {
   if (env.length === 0) return null
   const keys = env.map((entry) => entry.key).join(', ')
-  if (unreadable !== undefined) {
-    refusals.push(`${keys} would be declared in ${ENV_SCHEMA_FILE}, which cannot be read: ${unreadable}.`)
-    return null
-  }
   const content = await readIfExists(root, ENV_SCHEMA_FILE)
   if (content === null) {
-    refusals.push(`${keys} would be declared in ${ENV_SCHEMA_FILE}, which this application does not have.`)
+    refusals.push(`${keys} would be declared in ${ENV_SCHEMA_FILE}, which this application does not have. Declare them there by hand.`)
     return null
   }
   const composed = composeEnvDeclarations(content, env.map(planEnvEntry))
@@ -590,7 +583,7 @@ export async function planScaffoldEntriesFile(planPath: string, options: PlanSca
     refuse([`Nothing left to write for ${found.step.id}:`, ...work.left.map((entry) => `  ${entry.id}: ${entry.reason}.`)], ENTRIES)
   }
   const refusals: string[] = []
-  const env = await composeStepEnv(root, work.env, work.envUnreadable, refusals)
+  const env = await composeStepEnv(root, work.env, refusals)
   const files = work.providers.map((provider) => ({ path: plannedProviderFilePath(provider), contents: providerTemplate(provider.className) }))
   const registration = await registerProviders(root, work.providers.map((provider) => provider.className))
   refusals.push(...registration.refusals)
@@ -628,7 +621,7 @@ export async function planScaffoldEntriesFile(planPath: string, options: PlanSca
     if (written.length === 0) throw error
     throw new CliError(
       `plan:scaffold stopped part way through the entries of ${found.step.id}: ${error instanceof Error ? error.message : String(error)}\n`
-        + `Already written: ${written.join(', ')}.${writing === undefined ? '' : ` ${writing} was left unchanged.`}\n`
+        + `Already written: ${written.join(', ')}.${entriesFailedWrite(writing, written, registration, files)}\n`
         + 'Fix the cause, restore them (git checkout / git clean on those paths), and run plan:scaffold --entries again.',
     )
   }
@@ -642,6 +635,16 @@ export async function planScaffoldEntriesFile(planPath: string, options: PlanSca
     registered: { file: registration.entry, providers: work.providers.map((provider) => provider.className) },
     left: work.left,
   }
+}
+
+/** What the write that threw left behind: a provider is written with `wx`, the env files and the entry atomically. */
+function entriesFailedWrite(writing: string | undefined, written: readonly string[], registration: ProviderRegistration, files: ReadonlyArray<{ path: string }>): string {
+  if (!writing || written.includes(writing)) return ''
+  if (files.some((file) => file.path === writing)) {
+    return ` ${writing} may be left behind, possibly empty: delete it, since a re-run leaves a provider file that exists unregistered.`
+  }
+  if (writing === registration.entry) return failedWrite(writing, written, registration, files.map((file) => basename(file.path, '.ts')))
+  return ` ${writing} was left unchanged.`
 }
 
 function describeEntrySteps(plan: PlanDraft, derivation: PlanTaskDerivation): string {

@@ -568,6 +568,9 @@ export function planScaffoldEntries(plan: PlanDraft, step: Pick<PlanDerivedStep,
   return { providers: added(plan.providers), env: added(plan.env), config: added(plan.config) }
 }
 
+/** Every extension Bun resolves an extensionless import to, so a file of any of them answers for a planned one. */
+export const TWIN_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'] as const
+
 /** Where a planned provider lives: the default export of `app/Providers/<className>.ts`, which `plan:status` judges it by. */
 export function plannedProviderFilePath(provider: PlanProvider): string {
   return `${PROVIDERS_DIR}/${provider.className}.ts`

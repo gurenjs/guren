@@ -143,19 +143,24 @@ describe('plan:scaffold --entries (RFC 0040 §5)', () => {
       `task/foundation/commands is no step of the plan: --entries runs from the http step owning them: ${STEP}.`,
     )
 
-    const noSchema = await createApp({ files: { 'config/env.ts': null } })
-    const missing = await refusal(() => planScaffoldEntriesFile(noSchema.plan, { appRoot: noSchema.dir, step: STEP }))
-    expect(missing).toContain('REPORTS_BUCKET would be declared in config/env.ts, which this application does not have.')
-    expect(await Bun.file(join(noSchema.dir, 'app/Providers/ReportsProvider.ts')).exists()).toBe(false)
-    expect(await read(noSchema.dir, 'src/app.ts')).toBe(APP_ENTRY)
-
-    const opaque = await createApp({ files: { 'config/env.ts': "import { defineEnv } from '@guren/core'\nimport { keys } from './keys'\n\nexport default defineEnv(keys)\n" } })
-    expect(await refusal(() => planScaffoldEntriesFile(opaque.plan, { appRoot: opaque.dir, step: STEP }))).toContain('REPORTS_BUCKET would be declared in config/env.ts, which cannot be read:')
-
     const noEntry = await createApp({ files: { 'src/app.ts': null } })
     const unregistered = await refusal(() => planScaffoldEntriesFile(noEntry.plan, { appRoot: noEntry.dir, step: STEP }))
     expect(unregistered).toContain('ReportsProvider would be registered in createApp(), and this application has neither src/app.ts nor app.ts.')
     expect(await read(noEntry.dir, 'config/env.ts')).toBe(ENV_SCHEMA)
+  })
+
+  test('should leave a key it cannot declare to write by hand, and still write the provider', async () => {
+    const noSchema = await createApp({ files: { 'config/env.ts': null } })
+    const report = await planScaffoldEntriesFile(noSchema.plan, { appRoot: noSchema.dir, step: STEP })
+    expect(report.created).toEqual(['app/Providers/ReportsProvider.ts'])
+    expect(report.declared).toBeNull()
+    expect(report.left[0]).toEqual({ id: 'env.reportsBucket', section: 'env', reason: 'config/env.ts does not exist, so plan:scaffold cannot add REPORTS_BUCKET to its defineEnv() literal: declare it there by hand' })
+
+    const opaque = await createApp({ files: { 'config/env.ts': "import { defineEnv } from '@guren/core'\nimport { keys } from './keys'\n\nexport default defineEnv(keys)\n", 'app/Providers/ReportsProvider.ts': providerTemplate('ReportsProvider') } })
+    const refused = await refusal(() => planScaffoldEntriesFile(opaque.plan, { appRoot: opaque.dir, step: STEP }))
+    expect(refused).toContain(`Nothing left to write for ${STEP}:`)
+    expect(refused).toContain("config/env.ts does not call the framework's defineEnv() once")
+    expect(refused).toContain('declare it there by hand')
   })
 
   test('should declare a key as guren plugin does, keeping one the literal holds', () => {
@@ -163,7 +168,7 @@ describe('plan:scaffold --entries (RFC 0040 §5)', () => {
     const composed = composeEnvDeclarations(base, [planEnvEntry(ENV), { key: 'APP_KEY', default: 'x' }])
     if (typeof composed === 'string') throw new Error(composed)
     expect(composed.inserted).toEqual(['REPORTS_BUCKET'])
-    expect(composed.content).toContain("import { defineEnv, Env } from '@guren/core'")
+    expect(composed.content).toContain("import { Env, defineEnv } from '@guren/core'")
     expect(composed.content).toContain('  APP_KEY: Env.string(),')
     const value = envKeyValue(composed.content, 'config/env.ts', 'REPORTS_BUCKET')
     expect(value && envBuilderSignature(value)).toBe(plannedEnvSignature(planEnvEntry(ENV)))
