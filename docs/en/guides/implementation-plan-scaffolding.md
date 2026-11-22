@@ -130,6 +130,25 @@ It imports `registerCommentRoutes` into `routes/web.ts` and calls it first in th
 
 It refuses, writing nothing, a draft or a plan no approval names, a step `plan:next` has not marked, a step that holds no scaffolded routes (it names the one that does), a routes file that does not exist or no longer exports its registrar, an application with no `routes/web.ts`, an entry that already imports another binding under the registrar's name, and a file already mounted, whether the entry calls it or another routes file does.
 
+## Providers and env keys: `plan:scaffold --entries`
+
+The plan's [providers and env keys](./implementation-plan-format.md#providers-and-config) belong to an `http` step, Foundation's unless an intent covers them. By then the task's commands have run, and a command such as `guren add queue` writes its own provider and declares its own keys. When that step owns an added provider or key that is still missing, `plan:next` names the command that writes it:
+
+```text
+Write the providers and env keys the plan adds that the task's commands did not, with `bunx guren plan:scaffold docs/plans/jobs/plan.json --step task/foundation/http --entries`, not by hand.
+  Each provider as an empty shell under app/Providers/, registered in createApp(): provider.reports. Write its register() and boot() after.
+  Each key declared in config/env.ts as the plan states it, and listed in .env.example: env.reportsBucket.
+```
+
+It writes only what is missing:
+
+- A provider whose file `app/Providers/<className>.ts` does not exist yet is written as the empty class `guren make:provider` writes, and added to `createApp({ providers })` in `src/app.ts`. `plan:status` reads it as `wired` at once, so writing its `register()` and `boot()` is what is left.
+- A key `config/env.ts` does not declare yet is added to its `defineEnv({ … })` literal as `guren plugin` declares a manifest key, with `Env` imported from `@guren/core`, and appended to `.env.example`. `.env` is left alone.
+- A provider whose file exists, or a key the file declares, was written by a command or by hand and is left as it is; `plan:status` compares it with the plan.
+- A config entry is never written: a config definition is written for its key, and the command that installs it (`add queue`, `add storage` and the like) writes `config/<name>.ts` and registers it.
+
+It refuses, writing nothing, a draft or a plan no approval names, a step `plan:next` has not marked, a step that owns no added provider, key or config entry (it names the ones that do), a `config/env.ts` that is missing or whose `defineEnv()` literal it cannot read whole, keys it cannot add to that literal alone, a provider it cannot register in `createApp()`, and a step with nothing left to write, which is also how a second run is refused. `guren change:lane` then reads the keys as `env-added` and the registrations as `provider-added`, each `low` when the plan declares it; the provider file stays `medium`.
+
 ## Test skeletons: `plan:scaffold` on a tests step
 
 The `tests` step is written by the same command. `plan:scaffold <plan> --step <task>/tests` writes one file, `tests/plans/<plan>/<collection>.test.ts` (for the comments plan, `tests/plans/comments/comments.test.ts`), with one `TestApp` test per behaviour of the step:

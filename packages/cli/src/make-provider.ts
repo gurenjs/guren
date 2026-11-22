@@ -2,7 +2,7 @@ import { PROVIDERS_DIR } from './discovery'
 import type { WriterOptions } from './utils'
 import { scaffoldFile } from './utils'
 
-function providerTemplate(className: string): string {
+export function providerTemplate(className: string): string {
   return `import { ServiceProvider } from '@guren/core'
 
 export default class ${className} extends ServiceProvider {

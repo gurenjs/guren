@@ -120,6 +120,10 @@ it, and do not edit the application back or the plan to make it pass.
   behaviours pass. After a scaffold step, first run the command `plan:next`
   names, `bunx guren plan:scaffold <plan> --step <id> --mount`, which calls the
   scaffolded routes file from the entry registrar; do not mount it by hand.
+  When `plan:next` names `plan:scaffold <plan> --step <id> --entries` for an
+  http step, run it before the rest of the step: it writes the providers and
+  env keys the plan adds that the task's commands did not, each provider as
+  an empty class registered in `createApp()` for you to fill in.
   Then replace each action's 501 with its body and planned response, write
   each policy ability's rule in place of its `return false`, map each resource
   field `plan:scaffold` stubbed, and add the validator rules and middleware it

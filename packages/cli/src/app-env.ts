@@ -71,7 +71,7 @@ function envFileValue(value: unknown): string {
   return ''
 }
 
-function envExampleEntries(vars: DeclaredEnvVars): GurenPluginEnvEntry[] {
+export function envExampleEntries(vars: DeclaredEnvVars): GurenPluginEnvEntry[] {
   return Object.entries(vars).map(([key, spec]) => {
     const choices = spec.choices?.join(', ')
     const comment = choices === undefined
@@ -135,11 +135,23 @@ export async function declareEnvEntries(entries: GurenPluginEnvEntry[]): Promise
   const content = await readIfExists(cwd, ENV_SCHEMA_FILE)
   if (content === null) return { updated: false, unpatched: [] }
 
-  const declarations = pluginEnvEntries(entries).map((entry) => ({ key: entry.key, source: envEntrySchemaSource(entry) }))
-  const patched = insertCallOptions(content, declarations, 'defineEnv')
-  if (typeof patched === 'string') return { updated: false, unpatched: declarations.map((declaration) => declaration.key) }
+  const valid = pluginEnvEntries(entries)
+  const patched = composeEnvDeclarations(content, valid)
+  if (typeof patched === 'string') return { updated: false, unpatched: valid.map((entry) => entry.key) }
   if (patched.inserted.length === 0) return { updated: false, unpatched: [] }
 
-  await writeFile(resolve(cwd, ENV_SCHEMA_FILE), ensureNamedImports(patched.content, '@guren/core', ['Env']), 'utf8')
+  await writeFile(resolve(cwd, ENV_SCHEMA_FILE), patched.content, 'utf8')
   return { updated: true, unpatched: [] }
+}
+
+/**
+ * `config/env.ts` with each entry's declaration added to its `defineEnv()` literal and `Env` imported from the
+ * framework, as `guren plugin` and `plan:scaffold --entries` write it, and the lane reads it back (`envKeyAdditions()`).
+ * A key the literal already holds is kept as written; a string is why no literal was found.
+ */
+export function composeEnvDeclarations(content: string, entries: readonly GurenPluginEnvEntry[]): { content: string; inserted: string[] } | string {
+  const patched = insertCallOptions(content, entries.map((entry) => ({ key: entry.key, source: envEntrySchemaSource(entry) })), 'defineEnv')
+  if (typeof patched === 'string') return patched
+  if (patched.inserted.length === 0) return { content, inserted: [] }
+  return { content: ensureNamedImports(patched.content, '@guren/core', ['Env']), inserted: patched.inserted }
 }

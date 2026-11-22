@@ -148,6 +148,25 @@ Mount the routes the scaffold step wrote first, with `bunx guren plan:scaffold d
 
 次の場合は、何も書かずに拒否します。下書きやどの承認にも記録されていない計画、`plan:next` が印を付けていないステップ、scaffold したルートを持たないステップ (持っているステップを示します)、存在しないルートのファイルや registrar を export しなくなったファイル、`routes/web.ts` のないアプリケーション、registrar と同じ名前で別のものを import しているエントリー、すでにマウントされたファイルです。エントリーが直接呼んでいる場合も、別のルートのファイルが呼んでいる場合も、マウント済みとみなします。
 
+## Provider と環境変数: `plan:scaffold --entries`
+
+計画の [Provider と環境変数](./implementation-plan-format.md#provider-と-config) は `http` ステップに属し、意図がどれも覆っていなければ Foundation のステップになります。そのステップに来た時点でタスクのコマンドは実行済みで、`guren add queue` のようなコマンドは自分の Provider を書き、自分のキーを宣言しています。追加する Provider やキーのうちまだないものをそのステップが持っていれば、`plan:next` が書き込むコマンドを示します。
+
+```text
+Write the providers and env keys the plan adds that the task's commands did not, with `bunx guren plan:scaffold docs/plans/jobs/plan.json --step task/foundation/http --entries`, not by hand.
+  Each provider as an empty shell under app/Providers/, registered in createApp(): provider.reports. Write its register() and boot() after.
+  Each key declared in config/env.ts as the plan states it, and listed in .env.example: env.reportsBucket.
+```
+
+書くのは足りないものだけです。
+
+- `app/Providers/<className>.ts` がまだない Provider は、`guren make:provider` が書くのと同じ空のクラスとして書き、`src/app.ts` の `createApp({ providers })` に足します。`plan:status` はすぐに `wired`(登録済み) と判定するので、残る作業は `register()` と `boot()` を書くことです。
+- `config/env.ts` がまだ宣言していないキーは、`guren plugin` がマニフェストのキーを宣言するのと同じ形で `defineEnv({ … })` のリテラルに足し、`Env` を `@guren/core` から import します。`.env.example` にも追記し、`.env` には触れません。
+- ファイルがある Provider と、ファイルが宣言しているキーは、コマンドか手で書かれたものとしてそのまま残します。計画との比較は `plan:status` が行います。
+- config の項目は書きません。config の定義は中身がキーごとに異なり、インストールするコマンド (`add queue` や `add storage` など) が `config/<name>.ts` を書いて登録するからです。
+
+次の場合は、何も書かずに拒否します。下書きやどの承認にも記録されていない計画、`plan:next` が印を付けていないステップ、追加する Provider・キー・config の項目を持たないステップ (持っているステップを示します)、`config/env.ts` がない場合や `defineEnv()` のリテラルを全体として読めない場合、そのリテラルだけを変えてキーを足せない場合、`createApp()` に登録できない Provider、書くものが残っていないステップです。最後の条件があるので、2 回目の実行も拒否されます。そのあと `guren change:lane` はキーを `env-added`、登録を `provider-added` として読み、計画が宣言していればそれぞれ `low` に下げます。Provider のファイル自体は `medium` のままです。
+
 ## テストの雛形: tests ステップの `plan:scaffold`
 
 `tests` ステップも同じコマンドで書きます。`plan:scaffold <plan> --step <task>/tests` を実行すると、`tests/plans/<plan>/<collection>.test.ts` が 1 つ書かれます (comments の計画なら `tests/plans/comments/comments.test.ts`)。中身は、ステップの振る舞いごとに 1 つずつの `TestApp` テストです。

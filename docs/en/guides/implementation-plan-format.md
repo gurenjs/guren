@@ -164,6 +164,7 @@ A plan with an open question cannot be approved. Answer it by editing the plan: 
 - A plan holding either section declares `planVersion` `2`, and a release that reads only version 1 refuses it. `plan:revise` moves a version 1 plan to `2` when it adds an entry.
 - Leave out the provider an added policy needs. `plan:scaffold` writes and registers `<Policy>Provider` with the policy, and a `providers` element of that name fails the check.
 - The checks treat each name like a class name: an `add` whose file already exists fails, and so does an `existing` whose file is missing. Two elements of one name fail too.
+- From the step that owns an added provider, `plan:scaffold --entries` writes it as an empty class and registers it, unless a command of the task wrote it first. A config definition is written by the command that installs it, never by the scaffold ([Providers and env keys](./implementation-plan-scaffolding.md#providers-and-env-keys-planscaffold---entries)).
 - `plan:status` calls an entry `present` once its file exists and `wired` once the entry's `createApp()` lists that file's default export. Nothing a behaviour requests reaches a registration, so `plan:approve` accepts an added entry on its step's verified run alone, as it does a command.
 - `guren change:lane` reads an entry added to either list as `provider-added` or `config-added`, and lowers it to `low` when one open plan adds an element of that name and the entry is a default import of its conventional file. The provider or config file itself stays `medium`, since the plan names it but does not determine what it holds.
 
@@ -179,6 +180,7 @@ A plan with an open question cannot be approved. Answer it by editing the plan: 
 - The declaration a key means is the one `guren plugin` writes for it. A key that command would refuse, such as a `port` whose `default` is a string, fails the check, as does a `description` with a line break. So do a `secret` key with a `default`, since the plan is committed and rendered, two elements of one key, and an `add` whose key `config/env.ts` already declares.
 - `plan:status` reads `config/env.ts` from source and compares the key's builder chain with the planned one, `.describe()` aside, and never prints a chain that calls `.secret()`. A chain counts only when `Env` is the framework's import. For a key stated as `"default": "sync"` with no `type`, `Env.string().default('sync')` matches and `Env.string()` differs. An added key is accepted at approval on its step's verified run, as a command is.
 - `guren change:lane` reads a key added to `defineEnv()` as `env-added`, and lowers it to `low` when one open plan adds an element of that key and the chain declares what the element states. A key changed or removed, a comment added or removed with it, or a directive such as `// @ts-expect-error` moved onto other code, keeps the file `source-edited`.
+- From the step that owns an added key, `plan:scaffold --entries` declares it in `config/env.ts` and lists it in `.env.example`, unless a command of the task declared it first.
 - Like the other two sections, `env` needs `planVersion` `2`.
 
 ## Commands

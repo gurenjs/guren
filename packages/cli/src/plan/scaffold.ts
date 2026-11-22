@@ -7,7 +7,7 @@
  * there, and the output is not bent around it. No pages, no action bodies, nothing the plan does not state.
  */
 
-import { MODELS_DIR } from '../discovery'
+import { MODELS_DIR, PROVIDERS_DIR } from '../discovery'
 import { schemaIdentifierFor } from '../inflect'
 import { buildModelSource, type ModelRelationshipSource } from '../make-model'
 import { autoIncrementPrimaryKey, COLUMN_BUILDERS, isAutoIncrementPrimaryKey, MYSQL_UNINDEXABLE_TYPES, quoteString, TABLE_FACTORY, type ColumnCode } from '../schema-columns'
@@ -44,11 +44,14 @@ import {
   listPlanElements,
   type PlanAction,
   type PlanColumn,
+  type PlanConfig,
   type PlanController,
   type PlanDraft,
   type PlanElementSection,
+  type PlanEnv,
   type PlanModel,
   type PlanPolicy,
+  type PlanProvider,
   type PlanResource,
   type PlanRoute,
   type PlanSideEffect,
@@ -543,6 +546,31 @@ class Emitter {
 /** The command `plan:next` names for a scaffold step. */
 export function planScaffoldCommandLine(planArgument: string, stepId: string): string {
   return `bunx guren plan:scaffold ${planArgument} --step ${stepId}`
+}
+
+/** The command `plan:next` names for an http step holding added providers or env keys. */
+export function planScaffoldEntriesCommandLine(planArgument: string, stepId: string): string {
+  return `${planScaffoldCommandLine(planArgument, stepId)} --entries`
+}
+
+/** The added providers, env keys and config entries an http step (or part) owns, which `plan:scaffold --entries` writes or reports. */
+export interface PlanScaffoldEntries {
+  providers: PlanProvider[]
+  env: PlanEnv[]
+  config: PlanConfig[]
+}
+
+export function planScaffoldEntries(plan: PlanDraft, step: Pick<PlanDerivedStep, 'kind' | 'elementIds'>): PlanScaffoldEntries {
+  if (step.kind !== 'http') return { providers: [], env: [], config: [] }
+  const owned = new Set(step.elementIds)
+  const added = <T extends { id: string; change: { kind: string } }>(elements: readonly T[] | undefined): T[] =>
+    (elements ?? []).filter((element) => owned.has(element.id) && element.change.kind === 'add')
+  return { providers: added(plan.providers), env: added(plan.env), config: added(plan.config) }
+}
+
+/** Where a planned provider lives: the default export of `app/Providers/<className>.ts`, which `plan:status` judges it by. */
+export function plannedProviderFilePath(provider: PlanProvider): string {
+  return `${PROVIDERS_DIR}/${provider.className}.ts`
 }
 
 /** The command `plan:next` and `guren check` name for the http step that mounts a scaffolded routes file. */
