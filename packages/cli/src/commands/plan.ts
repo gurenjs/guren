@@ -10,7 +10,7 @@ import { formatPlanApprove, planApproveFile } from '../plan-approve'
 import { formatPlanStatus, planStatusFile } from '../plan-status'
 import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from '../plan-verify'
 import { formatPlanNext, planNextFile } from '../plan-next'
-import { formatPlanScaffold, formatPlanScaffoldMount, planScaffoldFile, planScaffoldMountFile } from '../plan-scaffold'
+import { formatPlanScaffold, formatPlanScaffoldEntries, formatPlanScaffoldMount, planScaffoldEntriesFile, planScaffoldFile, planScaffoldMountFile } from '../plan-scaffold'
 import { formatPlanRevise, planReviseFile, withStdinDashes } from '../plan-revise'
 import { formatPlanWaive, planWaiveFile } from '../plan-waive'
 import { formatPlanClose, planCloseFile } from '../plan-close'
@@ -241,7 +241,7 @@ export const planScaffoldCommand = defineCommand({
   meta: {
     name: 'plan:scaffold',
     description:
-      "Write the scaffold step of an approved plan (RFC 0030 §5): each added model's table in db/schema.ts, with every column option and foreign key the plan states, and its model class with the plan's relationships and fillable; the step's validators; each resource and policy of the model, the policy's abilities denying until written, and a provider registering the policy with the gate, added to createApp(); each added controller with exactly the planned actions, which validate and authorize as planned and then answer 501; the routes to them in routes/<collection>.ts, not mounted; the side-effect classes. From a tests step, write tests/plans/<plan>/<collection>.test.ts with one TestApp test per behaviour, titled with its id, making its request and asserting what the plan expects, each failing at a given() placeholder until its setup is written. With --mount, from the http step holding those routes, call that file's registrar first in the entry registrar. Writes no pages or action bodies, and runs no codegen or migration. The step must be the one plan:next marked. Refuses, with nothing written, a draft, another step kind, a module element, an API-only application, a provider it cannot register, any target that already exists, a re-run included, and a mount with nothing to mount or already mounted.",
+      "Write the scaffold step of an approved plan (RFC 0030 §5): each added model's table in db/schema.ts, with every column option and foreign key the plan states, and its model class with the plan's relationships and fillable; the step's validators; each resource and policy of the model, the policy's abilities denying until written, and a provider registering the policy with the gate, added to createApp(); each added controller with exactly the planned actions, which validate and authorize as planned and then answer 501; the routes to them in routes/<collection>.ts, not mounted; the side-effect classes. From a tests step, write tests/plans/<plan>/<collection>.test.ts with one TestApp test per behaviour, titled with its id, making its request and asserting what the plan expects, each failing at a given() placeholder until its setup is written. With --mount, from the http step holding those routes, call that file's registrar first in the entry registrar. With --entries, from the http step owning the plan's added providers and env keys, write what the task's commands left missing: each provider as an empty shell under app/Providers/, registered in createApp(), and each key in config/env.ts and .env.example. Writes no pages or action bodies, and runs no codegen or migration. The step must be the one plan:next marked. A scaffold or tests step refuses, with nothing written, a draft, another step kind, a module element, an API-only application, a provider it cannot register and any target that already exists, a re-run included; --mount refuses a file with nothing to mount or already mounted. --entries runs in an API-only application too, leaves a provider or key that already exists or that it cannot write as plan:status reads it back, and refuses a draft, an unmarked step and a run with nothing left to write.",
   },
   args: {
     plan: {
@@ -252,13 +252,18 @@ export const planScaffoldCommand = defineCommand({
     },
     step: {
       type: 'string',
-      description: 'The scaffold or tests step id, as plan:next names it; with --mount, the http step holding the routes.',
+      description: 'The scaffold or tests step id, as plan:next names it; with --mount, the http step holding the routes; with --entries, the http step owning the providers and env keys.',
       required: true,
       valueHint: 'task/entity/model.comment/scaffold',
     },
     mount: {
       type: 'boolean',
       description: 'Mount the routes file the scaffold step wrote, from the http step plan:next marked.',
+      default: false,
+    },
+    entries: {
+      type: 'boolean',
+      description: 'Write the providers and env keys the plan adds that are still missing, from the http step plan:next marked.',
       default: false,
     },
     app: {
@@ -273,6 +278,12 @@ export const planScaffoldCommand = defineCommand({
   },
   async run({ args }) {
     const appRoot = resolve(args.app ?? process.cwd())
+    if (args.mount && args.entries) throw new CliError('--mount and --entries are run one at a time, each from the http step plan:next marked.')
+    if (args.entries) {
+      const report = await planScaffoldEntriesFile(args.plan, { appRoot, step: args.step })
+      console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanScaffoldEntries(report, args.plan))
+      return
+    }
     if (args.mount) {
       const report = await planScaffoldMountFile(args.plan, { appRoot, step: args.step })
       console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanScaffoldMount(report, args.plan))

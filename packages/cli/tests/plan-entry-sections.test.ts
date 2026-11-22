@@ -217,6 +217,8 @@ describe('the application entry lists plan:status reads', () => {
     })
     const read = (text: string) => createAppListedFiles(parseSourceFile(text, 'src/app.ts')!.program, '/app', '/app/src/app.ts')
     expect(read("import { createApp } from '@guren/core'\nconst app = createApp({ ...shared })")).toBeNull()
+    // Only the last of two `providers` keys registers, so neither is read as the list.
+    expect(read("import { createApp } from '@guren/core'\nimport A from '../app/Providers/A.js'\nconst app = createApp({ providers: [], 'providers': [A] })")).toBeNull()
     // Only the framework's factory, called once at the top level, is what the application registers.
     expect(read("import { createApp } from '@guren/core'\nimport queue from '../config/queue.js'\nfunction preview() { return createApp({ config: [queue] }) }\nconst app = createApp({ config: [] })")).toBeNull()
     expect(read("import * as core from '@guren/core'\nimport queue from '../config/queue.js'\nfunction createApp(options: object) { return core.createApp(options) }\nconst app = createApp({ config: [queue] })")).toBeNull()

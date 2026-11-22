@@ -217,7 +217,7 @@ export const PLAN_SECTION_STEP: Record<PlanElementSection, { step: WorkStep; sca
   resources: { step: 'http', scaffoldable: true },
   policies: { step: 'http', scaffoldable: true },
   sideEffects: { step: 'http', scaffoldable: true },
-  // The scaffold writes a policy's provider, an element of `policies`; a planned provider or config is written by hand or a command.
+  // A scaffold step writes a policy's provider, an element of `policies`. The task's commands run first, so `plan:scaffold --entries` writes what they left of these from the http step.
   providers: { step: 'http', scaffoldable: false },
   config: { step: 'http', scaffoldable: false },
   env: { step: 'http', scaffoldable: false },

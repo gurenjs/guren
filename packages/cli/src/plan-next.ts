@@ -18,7 +18,7 @@ import { devCenterPlanLine, planPagePath } from './dev-center-links'
 import { toPosixRelative } from './discovery'
 import { refuseSharedPlanSlug } from './plan-check'
 import { readPlanFile } from './plan-render'
-import { planScaffoldTargets, type PlanScaffoldTargets } from './plan-scaffold'
+import { planScaffoldEntriesWork, planScaffoldTargets, type PlanScaffoldTargets } from './plan-scaffold'
 import { planStatusFile } from './plan-status'
 import { loadPlanAppState, type PlanAppState } from './plan/app-state'
 import { approvedAcceptance, requirePlanApproval, type PlanApprovedStanding } from './plan/approvals'
@@ -31,7 +31,7 @@ import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall, type PlanStepRecord } from './plan/state'
-import { planScaffoldCommandLine, planScaffoldCoverage, planScaffoldMountCommandLine, planScaffoldMounts } from './plan/scaffold'
+import { planScaffoldCommandLine, planScaffoldCoverage, planScaffoldEntriesCommandLine, planScaffoldMountCommandLine, planScaffoldMounts } from './plan/scaffold'
 import { closesPlan } from './plan/status'
 import { derivePlanTasks, describePlanTask, listPlanSteps, planLaterRelationships, type PlanDerivedStep, type PlanLaterRelationship, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
@@ -95,6 +95,11 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
    * the step's elements that scaffold wrote as stubs, and those it left to write by hand.
    */
   mount?: { command: string; file: string; scaffolded: string[]; byHand: string[] }
+  /**
+   * An http step of an approved plan owning added providers or env keys still missing: the command that writes
+   * them (each provider an empty shell registered in `createApp()`, each key in `config/env.ts`), and what it writes.
+   */
+  entries?: { command: string; providers: string[]; env: string[] }
   /**
    * An http step's: the added or renamed views its actions render. `pages.gen.ts` names a page only once
    * its file exists, and the task's last http step typechecks, so each is written here as a stub the pages step completes.
@@ -409,6 +414,8 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   // Named only while there is something to mount: a slice an older CLI scaffolded has no routes file.
   const mount = mountOf(plan, derivation, task, step, planPath)
   const mountable = mount && (await pathExists(resolve(root, mount.file))) && !(await isRoutesFileMounted(root, mount.file)) ? { mount } : {}
+  // Named only while something is missing: a provider a command wrote, or a key it declared, is left to plan:status.
+  const entries = approval ? await entriesOf(root, plan, step, planPath) : undefined
 
   return {
     ...head,
@@ -429,6 +436,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       ...(verifiedAt === undefined ? {} : { verifiedAt }),
       ...(scaffolded ? { scaffolded } : step.kind === 'scaffold' || step.kind === 'tests' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
       ...mountable,
+      ...(entries ? { entries } : {}),
       ...pageStubsOf(plan, step),
     },
   }
@@ -467,6 +475,21 @@ function mountOf(plan: PlanDraft, derivation: PlanTaskDerivation, task: PlanDeri
     scaffolded: step.elementIds.filter((id) => written.has(id)),
     byHand: step.elementIds.filter((id) => !written.has(id)),
   }
+}
+
+async function entriesOf(root: string, plan: PlanDraft, step: PlanDerivedStep, planArgument: string): Promise<PlanNextStep['entries']> {
+  if (step.kind !== 'http') return undefined
+  const work = await planScaffoldEntriesWork(root, plan, step)
+  if (work.providers.length === 0 && work.env.length === 0) return undefined
+  return { command: planScaffoldEntriesCommandLine(planArgument, step.id), providers: work.providers.map((provider) => provider.id), env: work.env.map((entry) => entry.id) }
+}
+
+function entriesLines(step: PlanNextStep, entries: NonNullable<PlanNextStep['entries']>, planArgument: string): string[] {
+  return [
+    `Write the providers and env keys the plan adds that the task's commands did not, with \`${planScaffoldEntriesCommandLine(planArgument, step.id)}\`, not by hand.`,
+    ...(entries.providers.length > 0 ? [`  Each provider as an empty shell under app/Providers/, registered in createApp(): ${entries.providers.join(', ')}. Write its register() and boot() after.`] : []),
+    ...(entries.env.length > 0 ? [`  Each key declared in config/env.ts as the plan states it, and listed in .env.example: ${entries.env.join(', ')}.`] : []),
+  ]
 }
 
 /** The command is spelled with the plan argument the text is formatted for, as the scaffold step's is. */
@@ -587,6 +610,7 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     }
     // A draft is never scaffolded (plan:scaffold refuses it), so it has nothing to mount.
     if (step.mount && report.plan.hash !== null) lines.push('', ...mountLines(step, step.mount, planArgument))
+    if (step.entries) lines.push('', ...entriesLines(step, step.entries, planArgument))
     if (step.pageStubs) {
       lines.push(
         '',

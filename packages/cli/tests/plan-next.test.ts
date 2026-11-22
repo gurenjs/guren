@@ -270,6 +270,51 @@ describe('plan:next', () => {
     expect(formatPlanNext(mounted, 'comments.plan.json')).not.toContain('--mount')
   })
 
+  test('should name --entries for the http step owning providers and env keys still missing, and never for a draft', async () => {
+    const reports = {
+      planVersion: 2,
+      title: 'Reports',
+      summary: 'Weekly reports.',
+      scope: { goals: [], nonGoals: [] },
+      locale: 'en',
+      providers: [{ id: 'provider.reports', change: { kind: 'add' }, className: 'ReportsProvider', purpose: 'Schedules the reports' }],
+      env: [{ id: 'env.reportsBucket', change: { kind: 'add' }, key: 'REPORTS_BUCKET', default: 'reports' }],
+    }
+    const app = join(ROOT, 'entries')
+    const schema = "import { defineEnv, Env } from '@guren/core'\n\nexport default defineEnv({\n  APP_KEY: Env.string(),\n})\n"
+    await writeWorkspaceFiles(app, {
+      'package.json': JSON.stringify({ name: 'entries', type: 'module' }),
+      'src/app.ts': "import { createApp } from '@guren/core'\n\nexport default createApp({\n  providers: [],\n})\n",
+      'config/env.ts': schema,
+      'reports.plan.json': JSON.stringify(reports),
+    })
+    const plan = join(app, 'reports.plan.json')
+    const step = 'task/foundation/http'
+
+    const draft = await planNextFile(plan, { appRoot: app, now: NOW })
+    expect(draft.step!.id).toBe(step)
+    expect(draft.step!.entries).toBeUndefined()
+    expect(formatPlanNext(draft, 'reports.plan.json')).not.toContain('--entries')
+
+    await writeWorkspaceFiles(app, { 'reports.plan.json': JSON.stringify(approvedAgainst(reports)) })
+    await approvePlanFile(plan)
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    expect(report.step!.entries).toEqual({ command: `bunx guren plan:scaffold ${plan} --step ${step} --entries`, providers: ['provider.reports'], env: ['env.reportsBucket'] })
+    const text = formatPlanNext(report, 'reports.plan.json')
+    expect(text).toContain(`Write the providers and env keys the plan adds that the task's commands did not, with \`bunx guren plan:scaffold reports.plan.json --step ${step} --entries\`, not by hand.`)
+    expect(text).toContain('Each provider as an empty shell under app/Providers/, registered in createApp(): provider.reports.')
+    expect(text).toContain('Each key declared in config/env.ts as the plan states it, and listed in .env.example: env.reportsBucket.')
+
+    // What a command wrote first is left to it, so nothing is named once both are there.
+    await writeWorkspaceFiles(app, {
+      'app/Providers/ReportsProvider.ts': 'export default class ReportsProvider {}\n',
+      'config/env.ts': schema.replace('  APP_KEY: Env.string(),\n', "  APP_KEY: Env.string(),\n  REPORTS_BUCKET: Env.string().default('reports'),\n"),
+    })
+    const written = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    expect(written.step!.entries).toBeUndefined()
+    expect(formatPlanNext(written, 'reports.plan.json')).not.toContain('--entries')
+  })
+
   test('should tell a draft to approve before plan:scaffold, which refuses one', async () => {
     const { app, plan } = await createApp('scaffold-draft')
 

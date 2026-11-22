@@ -11,10 +11,14 @@ import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import type { File, Node } from '@babel/types'
 
+import { composeEnvDeclarations, ENV_EXAMPLE_FILE, ENV_SCHEMA_FILE, envExampleEntries } from './app-env'
+import { createAppListedFiles } from './app-entry'
 import { isConfirmedApiOnlyApp } from './app-surface'
+import { envKeyAdditions, importsFrameworkEnv } from './change/app-env'
 import { CliError } from './cli-error'
 import {
   classNameFromPath,
+  CONFIG_DIR,
   discoverControllerFiles,
   discoverPolicyFiles,
   discoverResourceFiles,
@@ -29,6 +33,8 @@ import {
 } from './discovery'
 import { readBracketedTokenFiles } from './docs-acceptance'
 import { DIALECT_BARRELS } from './drizzle-specifiers'
+import { planEnvEntry, readEnvDeclarations } from './env-declarations'
+import { providerTemplate } from './make-provider'
 import { discoverModelClasses } from './model-parser'
 import { parseSourceFile, ParseCache } from './parse-cache'
 import { appendTableToSchema, detectSchemaDialect, ensureNamedImports } from './patch-helpers'
@@ -38,17 +44,29 @@ import { exportedNames, readValidatorExports } from './plan/app-detail'
 import { requirePlanApproval } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
 import { entityDocPath } from './plan/close-docs'
-import { emitPlanScaffold, planScaffoldFilePaths, planScaffoldMountCommandLine, planScaffoldMounts, type PlanScaffoldMount, type PlanScaffoldOutput } from './plan/scaffold'
+import {
+  emitPlanScaffold,
+  plannedProviderFilePath,
+  planScaffoldEntries,
+  planScaffoldEntriesCommandLine,
+  planScaffoldFilePaths,
+  planScaffoldMountCommandLine,
+  planScaffoldMounts,
+  type PlanScaffoldMount,
+  type PlanScaffoldOutput,
+  TWIN_EXTENSIONS,
+} from './plan/scaffold'
 import { emitPlanTests, planTestsFilePath, type PlanTestsOutput } from './plan/scaffold-tests'
-import type { Plan, PlanDraft } from './plan/schema'
+import type { Plan, PlanDraft, PlanEnv, PlanProvider } from './plan/schema'
 import { planSlug, readPlanState } from './plan/state'
 import { derivePlanTasks, findPlanStep, listPlanSteps, planLaterRelationships, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation } from './plan/tasks'
 import { isUnreadable } from './plan/unreadable'
 import { composeAppProviderRegistration, resolveAppEntry } from './provider-registrar'
 import { composeRouteRegistrarCall, resolveRoutesEntry } from './route-registrar'
 import { isRoutesFileMounted } from './routes-check'
+import { appendEnvEntries } from './plugin-manifest'
 import { parseSchemaTables, schemaPathFor } from './schema-parser'
-import { importSpecifier, pathExists, writeScaffoldFiles } from './utils'
+import { importSpecifier, isBindingName, pathExists, writeScaffoldFiles } from './utils'
 
 export const PLAN_SCAFFOLD_REPORT_VERSION = 1
 
@@ -96,6 +114,7 @@ interface Outcome {
 
 const SCAFFOLD: Outcome = { refused: 'Nothing was scaffolded.', approval: 'nothing is scaffolded from it' }
 const MOUNT: Outcome = { refused: 'Nothing was mounted.', approval: 'nothing is mounted from it' }
+const ENTRIES: Outcome = { refused: 'Nothing was written.', approval: 'nothing is written from it' }
 
 function refuse(lines: string[], outcome: Outcome = SCAFFOLD): never {
   throw new CliError(`${lines.join('\n')}\n${outcome.refused}`)
@@ -136,6 +155,10 @@ async function requireMark(root: string, path: string, planPath: string, stepId:
 function scaffoldStepHint(plan: Plan, derivation: PlanTaskDerivation, planPath: string, stepId: string, found: ReturnType<typeof findPlanStep>): string {
   if (planScaffoldMounts(plan, derivation).some((mount) => mount.httpStep === stepId)) {
     return `To mount the routes its scaffold step wrote, run ${planScaffoldMountCommandLine(planPath, stepId)}.`
+  }
+  const owned = found ? planScaffoldEntries(plan, found.step) : undefined
+  if (owned && owned.providers.length + owned.env.length > 0) {
+    return `To write the providers and env keys it owns, run ${planScaffoldEntriesCommandLine(planPath, stepId)}.`
   }
   const own = found?.task.steps.find((step) => step.kind === 'scaffold')
   if (own) return `The scaffold step of ${found?.task.id} is ${own.id}.`
@@ -442,6 +465,252 @@ export function formatPlanScaffold(report: PlanScaffoldReport, planArgument: str
     lines.push('', `${file} is not mounted, so its routes answer nothing until the http step ${step} runs ${planScaffoldMountCommandLine(planArgument, step)}.`)
   }
   lines.push('', `No codegen or migration was run. Next: bunx guren plan:verify ${planArgument} --step ${report.step}, and commit once it is verified.`)
+  return lines.join('\n')
+}
+
+/** A provider, env key or config entry the step owns that `--entries` leaves, with why. */
+export interface PlanScaffoldEntryLeft {
+  id: string
+  section: 'providers' | 'env' | 'config'
+  reason: string
+}
+
+/** What `--entries` writes for an http step against the application as it reads now, and what it leaves. */
+export interface PlanScaffoldEntriesWork {
+  providers: PlanProvider[]
+  env: PlanEnv[]
+  left: PlanScaffoldEntryLeft[]
+  /** The edits that write them, composed against the application as it reads now. */
+  composed: { files: Array<{ path: string; contents: string }>; env: EnvComposition; entry: { file: string; content: string } | null }
+}
+
+type EnvComposition = { file: string; content: string; keys: string[]; example: { file: string; content: string; keys: string[] } } | null
+
+/**
+ * What `--entries` writes for an http step, composed in full, so plan:next names the command only for what it can
+ * write. A provider whose file exists, or a key `config/env.ts` declares, was written by the task's commands or by hand
+ * and is left as it is: `plan:status` compares it with the plan. A provider or key the composition cannot write as
+ * `plan:status` and the lane read it back is left to write by hand. A config definition depends on its key, so none is written.
+ */
+export async function planScaffoldEntriesWork(root: string, plan: PlanDraft, step: PlanDerivedStep): Promise<PlanScaffoldEntriesWork> {
+  const owned = planScaffoldEntries(plan, step)
+  const left: PlanScaffoldEntryLeft[] = []
+  const leave = (id: string, section: PlanScaffoldEntryLeft['section'], reason: string): void => {
+    left.push({ id, section, reason })
+  }
+
+  const candidates: PlanProvider[] = []
+  for (const provider of owned.providers) {
+    const stem = plannedProviderFilePath(provider).replace(/\.ts$/u, '')
+    const present = await filesOnDisk(root, TWIN_EXTENSIONS.map((extension) => `${stem}${extension}`))
+    if (present.length > 0) leave(provider.id, 'providers', `${present.join(', ')} exists, written by a command or by hand, so it is left as it is`)
+    else if (!isBindingName(provider.className)) leave(provider.id, 'providers', `${provider.className} cannot name a class: rename it through plan:revise`)
+    // One file holds both on a case-insensitive filesystem, so the second write would fail after the first.
+    else if (owned.providers.some((other) => other !== provider && other.className.toLowerCase() === provider.className.toLowerCase())) {
+      leave(provider.id, 'providers', `another provider of the step differs from ${provider.className} only by case, which one file holds on a case-insensitive filesystem: write them by hand`)
+    } else candidates.push(provider)
+  }
+  const { providers, entry } = await composeEntryRegistrations(root, candidates, leave)
+
+  const env: PlanEnv[] = []
+  if (owned.env.length > 0) {
+    const absent = !(await pathExists(resolve(root, ENV_SCHEMA_FILE)))
+    const declarations = absent ? { unreadable: `${ENV_SCHEMA_FILE} does not exist` } : await readEnvDeclarations(root)
+    for (const entry of owned.env) {
+      if (isUnreadable(declarations)) {
+        leave(entry.id, 'env', `${declarations.unreadable}, so plan:scaffold cannot add ${entry.key} to its defineEnv() literal: declare it there by hand`)
+      } else if (declarations.some((declaration) => declaration.key === entry.key)) {
+        leave(entry.id, 'env', `${ENV_SCHEMA_FILE} declares ${entry.key} already; plan:status compares that declaration with the plan`)
+      } else {
+        env.push(entry)
+      }
+    }
+  }
+  const composedEnv = await composeStepEnv(root, env)
+  if (typeof composedEnv === 'string') for (const entry of env.splice(0)) leave(entry.id, 'env', composedEnv)
+
+  for (const entry of owned.config) {
+    leave(
+      entry.id,
+      'config',
+      `a config definition is written for its key, which plan:scaffold has no form for: the command installing it (add queue, add storage and the like) writes ${CONFIG_DIR}/${entry.name}.ts and registers it`,
+    )
+  }
+  const files = providers.map((provider) => ({ path: plannedProviderFilePath(provider), contents: providerTemplate(provider.className) }))
+  return { providers, env, left, composed: { files, env: typeof composedEnv === 'string' ? null : composedEnv, entry } }
+}
+
+/**
+ * Each provider registered in the app entry, composed one at a time and held to the reader `plan:status` judges `wired`
+ * by (`createAppListedFiles()`): a list written under another key spelling, or a second list, would read as unregistered.
+ */
+async function composeEntryRegistrations(
+  root: string,
+  candidates: readonly PlanProvider[],
+  leave: (id: string, section: 'providers', reason: string) => void,
+): Promise<{ providers: PlanProvider[]; entry: { file: string; content: string } | null }> {
+  if (candidates.length === 0) return { providers: [], entry: null }
+  const file = await resolveAppEntry(root)
+  if (file === null) {
+    for (const provider of candidates) leave(provider.id, 'providers', 'this application has neither src/app.ts nor app.ts to register it in: write and register it by hand')
+    return { providers: [], entry: null }
+  }
+  let content = await readFile(resolve(root, file), 'utf8')
+  const providers: PlanProvider[] = []
+  for (const provider of candidates) {
+    const { wiring, content: patched } = composeAppProviderRegistration(content, file, provider.className)
+    const why = !wiring.registered ? wiring.entry.reason : !wiring.entry.modified ? `${file} already registers ${provider.className}` : undefined
+    const ast = patched === undefined ? null : parseSourceFile(patched, file)
+    const lists = ast ? createAppListedFiles(ast.program, root, resolve(root, file)) : null
+    const read = lists?.providers?.files.includes(resolve(root, plannedProviderFilePath(provider).replace(/\.ts$/u, ''))) === true
+    if (why !== undefined || patched === undefined || !read) {
+      leave(provider.id, 'providers', `${why ?? `${file} would not read as registering it once written`}: write and register it by hand`)
+      continue
+    }
+    content = patched
+    providers.push(provider)
+  }
+  return { providers, entry: providers.length > 0 ? { file, content } : null }
+}
+
+export interface PlanScaffoldEntriesReport {
+  reportVersion: typeof PLAN_SCAFFOLD_REPORT_VERSION
+  plan: { file: string; title: string; hash: string }
+  step: string
+  /** The provider files created, relative to the application root with POSIX separators. */
+  created: string[]
+  /** The keys added to `config/env.ts`'s `defineEnv()` literal, and to `.env.example`; null when the step adds none. */
+  declared: { file: string; keys: string[]; example: { file: string; keys: string[] } } | null
+  /** The app entry the providers were registered in; `file` is null when there was none to register. */
+  registered: { file: string | null; providers: string[] }
+  left: PlanScaffoldEntryLeft[]
+}
+
+/** The step's keys declared as `guren plugin` declares a manifest's, or why the lane would not read the file as those keys and nothing else. */
+async function composeStepEnv(root: string, env: readonly PlanEnv[]): Promise<EnvComposition | string> {
+  if (env.length === 0) return null
+  const content = await readIfExists(root, ENV_SCHEMA_FILE)
+  if (content === null) return `${ENV_SCHEMA_FILE} does not exist: declare it there by hand`
+  const composed = composeEnvDeclarations(content, env.map(planEnvEntry))
+  const added = typeof composed === 'string' ? undefined : envKeyAdditions(content, composed.content, ENV_SCHEMA_FILE)
+  const planned = env.map((entry) => entry.key)
+  if (typeof composed === 'string' || added === undefined || added.join('\n') !== planned.join('\n') || !importsFrameworkEnv(composed.content, ENV_SCHEMA_FILE)) {
+    return `plan:scaffold cannot add ${planned.join(', ')} to the defineEnv() literal of ${ENV_SCHEMA_FILE} alone${typeof composed === 'string' ? ` (${composed})` : ''}: declare it there by hand`
+  }
+  const vars = Object.fromEntries(
+    env.map((entry) => [entry.key, { defaultValue: entry.default, choices: entry.choices, isSecret: entry.secret === true, description: entry.description }]),
+  )
+  const example = appendEnvEntries((await readIfExists(root, ENV_EXAMPLE_FILE)) ?? '', envExampleEntries(vars))
+  return { file: ENV_SCHEMA_FILE, content: composed.content, keys: planned, example: { file: ENV_EXAMPLE_FILE, content: example.content, keys: example.added } }
+}
+
+/**
+ * `plan:scaffold --entries` from the http step owning the plan's added providers and env keys (RFC 0040 §5): by then
+ * the task's commands have run, so it writes only what is still missing. A provider is the `make:provider` shell,
+ * registered in `createApp()`; a key is declared in `config/env.ts` and listed in `.env.example`. Everything is composed
+ * before the first write, and a run with nothing left to write is refused, which is also what refuses a re-run.
+ */
+export async function planScaffoldEntriesFile(planPath: string, options: PlanScaffoldFileOptions): Promise<PlanScaffoldEntriesReport> {
+  const { path, plan, hash } = await approvedPlan(planPath, options, ENTRIES)
+  const root = options.appRoot
+  const derivation = derivePlanTasks(plan)
+  const found = findPlanStep(derivation, options.step)
+  const owned = found ? planScaffoldEntries(plan, found.step) : undefined
+  if (!found || !owned || owned.providers.length + owned.env.length + owned.config.length === 0) {
+    refuse([`${options.step} is ${found ? `a ${found.step.kind} step that owns no added provider, env key or config entry` : 'no step of the plan'}: ${describeEntrySteps(plan, derivation)}`], ENTRIES)
+  }
+  await requireMark(root, path, planPath, options.step, ENTRIES)
+
+  const work = await planScaffoldEntriesWork(root, plan, found.step)
+  if (work.providers.length === 0 && work.env.length === 0) {
+    refuse([`Nothing left to write for ${found.step.id}:`, ...work.left.map((entry) => `  ${entry.id}: ${entry.reason}.`)], ENTRIES)
+  }
+  const { files, env, entry } = work.composed
+  const registration: ProviderRegistration = entry === null ? { entry: null, refusals: [] } : { entry: entry.file, content: entry.content, refusals: [] }
+
+  // The providers first and the entry last, since it imports them.
+  const written: string[] = []
+  const created: string[] = []
+  let writing: string | undefined
+  try {
+    for (const file of files) {
+      writing = file.path
+      for (const createdPath of await writeScaffoldFiles([file], { cwd: root })) {
+        const relative = toPosixRelative(root, createdPath)
+        written.push(relative)
+        created.push(relative)
+      }
+    }
+    if (env) {
+      writing = env.file
+      await writeFileAtomic(resolve(root, env.file), env.content)
+      written.push(env.file)
+      if (env.example.keys.length > 0) {
+        writing = env.example.file
+        await writeFileAtomic(resolve(root, env.example.file), env.example.content)
+        written.push(env.example.file)
+      }
+    }
+    if (registration.entry !== null) {
+      writing = registration.entry
+      await writeFileAtomic(resolve(root, registration.entry), registration.content)
+      written.push(registration.entry)
+    }
+  } catch (error) {
+    if (written.length === 0) throw error
+    throw new CliError(
+      `plan:scaffold stopped part way through the entries of ${found.step.id}: ${error instanceof Error ? error.message : String(error)}\n`
+        + `Already written: ${written.join(', ')}.${entriesFailedWrite(writing, written, registration, files)}\n`
+        + 'Fix the cause, restore them (git checkout / git clean on those paths), and run plan:scaffold --entries again.',
+    )
+  }
+
+  return {
+    reportVersion: PLAN_SCAFFOLD_REPORT_VERSION,
+    plan: { file: basename(path), title: plan.title, hash },
+    step: found.step.id,
+    created,
+    declared: env ? { file: env.file, keys: env.keys, example: { file: env.example.file, keys: env.example.keys } } : null,
+    registered: { file: registration.entry, providers: work.providers.map((provider) => provider.className) },
+    left: work.left,
+  }
+}
+
+/** What the write that threw left behind: a provider is written with `wx`, the env files and the entry atomically. */
+function entriesFailedWrite(writing: string | undefined, written: readonly string[], registration: ProviderRegistration, files: ReadonlyArray<{ path: string }>): string {
+  if (!writing || written.includes(writing)) return ''
+  if (files.some((file) => file.path === writing)) {
+    return ` ${writing} may be left behind, possibly empty: delete it, since a re-run leaves a provider file that exists unregistered.`
+  }
+  if (writing === registration.entry) return failedWrite(writing, written, registration, files.map((file) => basename(file.path, '.ts')))
+  return ` ${writing} was left unchanged.`
+}
+
+function describeEntrySteps(plan: PlanDraft, derivation: PlanTaskDerivation): string {
+  const steps = listPlanSteps(derivation).filter(({ step }) => {
+    const owned = planScaffoldEntries(plan, step)
+    return owned.providers.length + owned.env.length + owned.config.length > 0
+  })
+  if (steps.length === 0) return 'the plan adds no provider, env key or config entry.'
+  return `--entries runs from the http step owning them: ${steps.map(({ step }) => step.id).join(', ')}.`
+}
+
+export function formatPlanScaffoldEntries(report: PlanScaffoldEntriesReport, planArgument: string): string {
+  const lines = [`${report.plan.title} (${report.plan.file}): wrote the entries of ${report.step}`, '']
+  if (report.created.length > 0) lines.push('Created:', ...report.created.map((file) => `  ${file}`))
+  if (report.registered.providers.length > 0) lines.push(`Registered in ${report.registered.file}: ${report.registered.providers.join(', ')}`)
+  if (report.declared) {
+    lines.push(`Declared in ${report.declared.file}: ${report.declared.keys.join(', ')}`)
+    if (report.declared.example.keys.length > 0) lines.push(`Listed in ${report.declared.example.file}: ${report.declared.example.keys.join(', ')}`)
+  }
+  if (report.left.length > 0) {
+    lines.push('', 'Left as they are:')
+    lines.push(...report.left.map((entry) => `  ${entry.id} (${entry.section}): ${entry.reason}`))
+  }
+  if (report.registered.providers.length > 0) {
+    lines.push('', 'Each provider is an empty shell that plan:status already reads as wired: write its register() and boot().')
+  }
+  lines.push('', `Next: finish the step, then bunx guren plan:verify ${planArgument} --step ${report.step}, and commit once it is verified.`)
   return lines.join('\n')
 }
 

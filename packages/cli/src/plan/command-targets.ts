@@ -221,8 +221,8 @@ export const PLAN_GENERATOR_TARGETS: Readonly<Record<string, PlanGeneratorRule |
   'add admin': { ...BLUEPRINT, targets: () => writes({ section: 'controllers', names: [declared({ path: ADMIN_DASHBOARD_CONTROLLER_PATH })] }) },
   // It prints a `db:make` hint rather than generating the migration.
   'add attachments': { ...BLUEPRINT, targets: () => writes({ section: 'tables', names: ['attachments'], migration: false }) },
-  'add broadcasting': 'broadcast channels and their provider, which no plan section declares',
-  'add cache': 'the cache config and a cache service, which no plan section declares',
+  'add broadcasting': 'broadcast channels, which no plan section declares, and their provider, which `plan:scaffold --entries` leaves once the command wrote it',
+  'add cache': 'a cache service, which no plan section declares, and the cache config, which `plan:scaffold --entries` never writes',
   'add events': {
     ...BLUEPRINT,
     targets: () => writes(sideEffect('event', declared(eventFile(BLUEPRINT_SAMPLES.event))), sideEffect('listener', declared(listenerFile(BLUEPRINT_SAMPLES.listener)))),
@@ -242,8 +242,8 @@ export const PLAN_GENERATOR_TARGETS: Readonly<Record<string, PlanGeneratorRule |
     },
   },
   'add prototype': 'the prototype fixture and its wiring, which no plan section declares',
-  'add schedule': 'the schedule kernel and its provider, which no plan section declares',
-  'add storage': 'the storage config and a storage service, which no plan section declares',
+  'add schedule': 'the schedule kernel, which no plan section declares, and its provider, which `plan:scaffold --entries` leaves once the command wrote it',
+  'add storage': 'a storage service, which no plan section declares, and the storage config, which `plan:scaffold --entries` never writes',
   'add ui': 'UI components, which no plan section declares',
   'make:auth': { valueFlags: ['oauth'], positional: false, targets: authTargets },
   'add auth': { ...BLUEPRINT, targets: authTargets },
