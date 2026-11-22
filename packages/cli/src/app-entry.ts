@@ -105,11 +105,14 @@ export function frameworkCreateAppOptions(program: Program): ObjectExpression | 
 }
 
 /**
- * Whether the literal spells each list only as a property the reader sees: a spread or a computed key may carry one,
- * `__proto__` sets a prototype `createApp()` reads a list through, and a method or accessor may be keyed by a list.
+ * Whether the literal spells each list only as a property the reader sees, once: a spread or a computed key may carry
+ * one, `__proto__` sets a prototype `createApp()` reads a list through, and a method or accessor may be keyed by a list.
  */
 export function spellsEntryLists(options: ObjectExpression): boolean {
   if (hidesKeys(options)) return false
+  // Held twice (`providers` and `'providers'`), only the last registers at runtime.
+  const names = options.properties.map((property) => (property.type === 'SpreadElement' ? undefined : memberKeyName(property)))
+  if ([...ENTRY_LIST_KEYS].some((key) => names.filter((name) => name === key).length > 1)) return false
   return options.properties.every((property) => {
     if (property.type === 'SpreadElement') return false
     const name = memberKeyName(property)

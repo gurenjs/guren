@@ -284,6 +284,7 @@ describe('plan:next', () => {
     const schema = "import { defineEnv, Env } from '@guren/core'\n\nexport default defineEnv({\n  APP_KEY: Env.string(),\n})\n"
     await writeWorkspaceFiles(app, {
       'package.json': JSON.stringify({ name: 'entries', type: 'module' }),
+      'src/app.ts': "import { createApp } from '@guren/core'\n\nexport default createApp({\n  providers: [],\n})\n",
       'config/env.ts': schema,
       'reports.plan.json': JSON.stringify(reports),
     })

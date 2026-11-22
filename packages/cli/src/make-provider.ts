@@ -3,9 +3,12 @@ import type { WriterOptions } from './utils'
 import { scaffoldFile } from './utils'
 
 export function providerTemplate(className: string): string {
-  return `import { ServiceProvider } from '@guren/core'
+  // A provider named after its base class would shadow the import it extends.
+  const base = className === 'ServiceProvider' ? 'BaseServiceProvider' : 'ServiceProvider'
+  const imported = base === 'ServiceProvider' ? 'ServiceProvider' : `ServiceProvider as ${base}`
+  return `import { ${imported} } from '@guren/core'
 
-export default class ${className} extends ServiceProvider {
+export default class ${className} extends ${base} {
   register(): void {
   }
 

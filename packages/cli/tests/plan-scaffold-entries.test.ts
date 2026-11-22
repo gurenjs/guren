@@ -134,7 +134,7 @@ describe('plan:scaffold --entries (RFC 0040 §5)', () => {
     expect(refused).toContain('config/env.ts declares REPORTS_BUCKET already')
   })
 
-  test('should refuse, writing nothing, what it cannot write whole', async () => {
+  test('should refuse a step plan:next has not marked, and one that owns no entry', async () => {
     const unmarked = await createApp({ mark: null })
     expect(await refusal(() => planScaffoldEntriesFile(unmarked.plan, { appRoot: unmarked.dir, step: STEP }))).toContain(`${STEP} is not the step plan:next marked.`)
 
@@ -142,11 +142,50 @@ describe('plan:scaffold --entries (RFC 0040 §5)', () => {
     expect(await refusal(() => planScaffoldEntriesFile(elsewhere.plan, { appRoot: elsewhere.dir, step: 'task/foundation/commands' }))).toContain(
       `task/foundation/commands is no step of the plan: --entries runs from the http step owning them: ${STEP}.`,
     )
+  })
 
+  test('should leave a provider it cannot register as plan:status reads it, and write the rest', async () => {
     const noEntry = await createApp({ files: { 'src/app.ts': null } })
-    const unregistered = await refusal(() => planScaffoldEntriesFile(noEntry.plan, { appRoot: noEntry.dir, step: STEP }))
-    expect(unregistered).toContain('ReportsProvider would be registered in createApp(), and this application has neither src/app.ts nor app.ts.')
-    expect(await read(noEntry.dir, 'config/env.ts')).toBe(ENV_SCHEMA)
+    const unregistered = await planScaffoldEntriesFile(noEntry.plan, { appRoot: noEntry.dir, step: STEP })
+    expect(unregistered.created).toEqual([])
+    expect(unregistered.declared?.keys).toEqual(['REPORTS_BUCKET'])
+    expect(unregistered.left[0]).toEqual({ id: 'provider.reports', section: 'providers', reason: 'this application has neither src/app.ts nor app.ts to register it in: write and register it by hand' })
+
+    // A second `providers` key would be prepended, and the list written last is the one createApp() reads.
+    const quoted = "import { createApp } from '@guren/core'\nimport A from '../app/Providers/A.js'\n\nexport default createApp({\n  'providers': [A],\n})\n"
+    const twice = await createApp({ files: { 'src/app.ts': quoted } })
+    const report = await planScaffoldEntriesFile(twice.plan, { appRoot: twice.dir, step: STEP })
+    expect(report.created).toEqual([])
+    expect(report.left[0]?.reason).toBe('src/app.ts would not read as registering it once written: write and register it by hand')
+    expect(await read(twice.dir, 'src/app.ts')).toBe(quoted)
+  })
+
+  test('should write a provider that shares its base class name, and leave one no class can be named', async () => {
+    const named = (providers: Array<Record<string, unknown>>) => createApp({ plan: document({ providers, env: [], config: [] }) })
+    const base = await named([{ ...PROVIDER, className: 'ServiceProvider' }])
+    await planScaffoldEntriesFile(base.plan, { appRoot: base.dir, step: STEP })
+    expect(await read(base.dir, 'app/Providers/ServiceProvider.ts')).toStartWith("import { ServiceProvider as BaseServiceProvider } from '@guren/core'\n\nexport default class ServiceProvider extends BaseServiceProvider {")
+
+    const keyword = await named([{ ...PROVIDER, className: 'class' }])
+    expect(await refusal(() => planScaffoldEntriesFile(keyword.plan, { appRoot: keyword.dir, step: STEP }))).toContain('provider.reports: class cannot name a class: rename it through plan:revise.')
+
+    // One file holds both on a case-insensitive filesystem, so neither is written.
+    const cased = await named([PROVIDER, { ...PROVIDER, id: 'provider.reports.again', className: 'Reportsprovider' }])
+    const refused = await refusal(() => planScaffoldEntriesFile(cased.plan, { appRoot: cased.dir, step: STEP }))
+    expect(refused).toContain('provider.reports: another provider of the step differs from ReportsProvider only by case')
+    expect(refused).toContain('provider.reports.again: another provider of the step differs from Reportsprovider only by case')
+  })
+
+  test('should leave a key the writer cannot place in the defineEnv() literal the reader reads', async () => {
+    const spaced = await createApp({ files: { 'config/env.ts': ENV_SCHEMA.replace('defineEnv({', 'defineEnv ({') } })
+    const report = await planScaffoldEntriesFile(spaced.plan, { appRoot: spaced.dir, step: STEP })
+    expect(report.created).toEqual(['app/Providers/ReportsProvider.ts'])
+    expect(report.declared).toBeNull()
+    expect(report.left[0]).toEqual({
+      id: 'env.reportsBucket',
+      section: 'env',
+      reason: 'plan:scaffold cannot add REPORTS_BUCKET to the defineEnv() literal of config/env.ts alone (Could not find a defineEnv({ ... }) call): declare it there by hand',
+    })
   })
 
   test('should leave a key it cannot declare to write by hand, and still write the provider', async () => {

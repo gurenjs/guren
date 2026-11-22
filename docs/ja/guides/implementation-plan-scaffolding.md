@@ -163,10 +163,10 @@ Write the providers and env keys the plan adds that the task's commands did not,
 - `app/Providers/<className>.ts` がまだない Provider は、`guren make:provider` が書くのと同じ空のクラスとして書き、`src/app.ts` の `createApp({ providers })` に足します。`plan:status` はすぐに `wired`(登録済み) と判定するので、残る作業は `register()` と `boot()` を書くことです。
 - `config/env.ts` がまだ宣言していないキーは、`guren plugin` がマニフェストのキーを宣言するのと同じ形で `defineEnv({ … })` のリテラルに足し、`Env` を `@guren/core` から import します。`.env.example` にも追記し、`.env` には触れません。
 - ファイルがある Provider と、ファイルが宣言しているキーは、コマンドか手で書かれたものとしてそのまま残します。計画との比較は `plan:status` が行います。
-- `config/env.ts` がない場合や、その `defineEnv()` のリテラルを全体として読めない場合は、キーを書かずに残し、手で宣言するよう報告します。
+- `plan:status` と `guren change:lane` が書いたとおりに読めないものは書かずに残し、手で書くよう報告します。`config/env.ts` がない場合、その `defineEnv()` のリテラルを全体として読めない場合やそこだけを変えて足せない場合のキーと、登録先のエントリーがない場合やエントリーが登録済みと読めない場合 (`providers` のキーが 2 つになる場合など) の Provider が対象です。クラス名にできない名前の Provider と、大文字と小文字だけが違う 2 つの Provider も残します。
 - config の項目は書きません。config の定義は中身がキーごとに異なり、インストールするコマンド (`add queue` や `add storage` など) が `config/<name>.ts` を書いて登録するからです。
 
-次の場合は、何も書かずに拒否します。下書きやどの承認にも記録されていない計画、`plan:next` が印を付けていないステップ、追加する Provider・キー・config の項目を持たないステップ (持っているステップを示します)、`defineEnv()` のリテラルだけを変えてキーを足せない場合、`createApp()` に登録できない Provider、書くものが残っていないステップです。最後の条件があるので、2 回目の実行も拒否されます。そのあと `guren change:lane` はキーを `env-added`、登録を `provider-added` として読み、計画が宣言していればそれぞれ `low` に下げます。Provider のファイル自体は `medium` のままです。
+次の場合は、何も書かずに拒否します。下書きやどの承認にも記録されていない計画、`plan:next` が印を付けていないステップ、追加する Provider・キー・config の項目を持たないステップ (持っているステップを示します)、書くものが残っていないステップです。最後の条件があるので、2 回目の実行も拒否されます。そのあと `guren change:lane` はキーを `env-added`、登録を `provider-added` として読み、計画が宣言していればそれぞれ `low` に下げます。Provider のファイル自体は `medium` のままです。
 
 ## テストの雛形: tests ステップの `plan:scaffold`
 

@@ -12,6 +12,7 @@ import { basename, resolve } from 'node:path'
 import type { File, Node } from '@babel/types'
 
 import { composeEnvDeclarations, ENV_EXAMPLE_FILE, ENV_SCHEMA_FILE, envExampleEntries } from './app-env'
+import { createAppListedFiles } from './app-entry'
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { envKeyAdditions, importsFrameworkEnv } from './change/app-env'
 import { CliError } from './cli-error'
@@ -65,7 +66,7 @@ import { composeRouteRegistrarCall, resolveRoutesEntry } from './route-registrar
 import { isRoutesFileMounted } from './routes-check'
 import { appendEnvEntries } from './plugin-manifest'
 import { parseSchemaTables, schemaPathFor } from './schema-parser'
-import { importSpecifier, pathExists, writeScaffoldFiles } from './utils'
+import { importSpecifier, isBindingName, pathExists, writeScaffoldFiles } from './utils'
 
 export const PLAN_SCAFFOLD_REPORT_VERSION = 1
 
@@ -479,23 +480,37 @@ export interface PlanScaffoldEntriesWork {
   providers: PlanProvider[]
   env: PlanEnv[]
   left: PlanScaffoldEntryLeft[]
+  /** The edits that write them, composed against the application as it reads now. */
+  composed: { files: Array<{ path: string; contents: string }>; env: EnvComposition; entry: { file: string; content: string } | null }
 }
 
+type EnvComposition = { file: string; content: string; keys: string[]; example: { file: string; content: string; keys: string[] } } | null
+
 /**
- * A provider whose file exists, or a key `config/env.ts` declares, was written by the task's commands or by hand and is
- * left as it is: `plan:status` compares it with the plan. A key with no `config/env.ts` to read is left to declare by
- * hand, so plan:next never names a run that can only refuse. A config definition depends on its key, so none is written.
+ * What `--entries` writes for an http step, composed in full, so plan:next names the command only for what it can
+ * write. A provider whose file exists, or a key `config/env.ts` declares, was written by the task's commands or by hand
+ * and is left as it is: `plan:status` compares it with the plan. A provider or key the composition cannot write as
+ * `plan:status` and the lane read it back is left to write by hand. A config definition depends on its key, so none is written.
  */
 export async function planScaffoldEntriesWork(root: string, plan: PlanDraft, step: PlanDerivedStep): Promise<PlanScaffoldEntriesWork> {
   const owned = planScaffoldEntries(plan, step)
   const left: PlanScaffoldEntryLeft[] = []
-  const providers: PlanProvider[] = []
+  const leave = (id: string, section: PlanScaffoldEntryLeft['section'], reason: string): void => {
+    left.push({ id, section, reason })
+  }
+
+  const candidates: PlanProvider[] = []
   for (const provider of owned.providers) {
     const stem = plannedProviderFilePath(provider).replace(/\.ts$/u, '')
     const present = await filesOnDisk(root, TWIN_EXTENSIONS.map((extension) => `${stem}${extension}`))
-    if (present.length === 0) providers.push(provider)
-    else left.push({ id: provider.id, section: 'providers', reason: `${present.join(', ')} exists, written by a command or by hand, so it is left as it is` })
+    if (present.length > 0) leave(provider.id, 'providers', `${present.join(', ')} exists, written by a command or by hand, so it is left as it is`)
+    else if (!isBindingName(provider.className)) leave(provider.id, 'providers', `${provider.className} cannot name a class: rename it through plan:revise`)
+    // One file holds both on a case-insensitive filesystem, so the second write would fail after the first.
+    else if (owned.providers.some((other) => other !== provider && other.className.toLowerCase() === provider.className.toLowerCase())) {
+      leave(provider.id, 'providers', `another provider of the step differs from ${provider.className} only by case, which one file holds on a case-insensitive filesystem: write them by hand`)
+    } else candidates.push(provider)
   }
+  const { providers, entry } = await composeEntryRegistrations(root, candidates, leave)
 
   const env: PlanEnv[] = []
   if (owned.env.length > 0) {
@@ -503,23 +518,59 @@ export async function planScaffoldEntriesWork(root: string, plan: PlanDraft, ste
     const declarations = absent ? { unreadable: `${ENV_SCHEMA_FILE} does not exist` } : await readEnvDeclarations(root)
     for (const entry of owned.env) {
       if (isUnreadable(declarations)) {
-        left.push({ id: entry.id, section: 'env', reason: `${declarations.unreadable}, so plan:scaffold cannot add ${entry.key} to its defineEnv() literal: declare it there by hand` })
+        leave(entry.id, 'env', `${declarations.unreadable}, so plan:scaffold cannot add ${entry.key} to its defineEnv() literal: declare it there by hand`)
       } else if (declarations.some((declaration) => declaration.key === entry.key)) {
-        left.push({ id: entry.id, section: 'env', reason: `${ENV_SCHEMA_FILE} declares ${entry.key} already; plan:status compares that declaration with the plan` })
+        leave(entry.id, 'env', `${ENV_SCHEMA_FILE} declares ${entry.key} already; plan:status compares that declaration with the plan`)
       } else {
         env.push(entry)
       }
     }
   }
+  const composedEnv = await composeStepEnv(root, env)
+  if (typeof composedEnv === 'string') for (const entry of env.splice(0)) leave(entry.id, 'env', composedEnv)
 
   for (const entry of owned.config) {
-    left.push({
-      id: entry.id,
-      section: 'config',
-      reason: `a config definition is written for its key, which plan:scaffold has no form for: the command installing it (add queue, add storage and the like) writes ${CONFIG_DIR}/${entry.name}.ts and registers it`,
-    })
+    leave(
+      entry.id,
+      'config',
+      `a config definition is written for its key, which plan:scaffold has no form for: the command installing it (add queue, add storage and the like) writes ${CONFIG_DIR}/${entry.name}.ts and registers it`,
+    )
   }
-  return { providers, env, left }
+  const files = providers.map((provider) => ({ path: plannedProviderFilePath(provider), contents: providerTemplate(provider.className) }))
+  return { providers, env, left, composed: { files, env: typeof composedEnv === 'string' ? null : composedEnv, entry } }
+}
+
+/**
+ * Each provider registered in the app entry, composed one at a time and held to the reader `plan:status` judges `wired`
+ * by (`createAppListedFiles()`): a list written under another key spelling, or a second list, would read as unregistered.
+ */
+async function composeEntryRegistrations(
+  root: string,
+  candidates: readonly PlanProvider[],
+  leave: (id: string, section: 'providers', reason: string) => void,
+): Promise<{ providers: PlanProvider[]; entry: { file: string; content: string } | null }> {
+  if (candidates.length === 0) return { providers: [], entry: null }
+  const file = await resolveAppEntry(root)
+  if (file === null) {
+    for (const provider of candidates) leave(provider.id, 'providers', 'this application has neither src/app.ts nor app.ts to register it in: write and register it by hand')
+    return { providers: [], entry: null }
+  }
+  let content = await readFile(resolve(root, file), 'utf8')
+  const providers: PlanProvider[] = []
+  for (const provider of candidates) {
+    const { wiring, content: patched } = composeAppProviderRegistration(content, file, provider.className)
+    const why = !wiring.registered ? wiring.entry.reason : !wiring.entry.modified ? `${file} already registers ${provider.className}` : undefined
+    const ast = patched === undefined ? null : parseSourceFile(patched, file)
+    const lists = ast ? createAppListedFiles(ast.program, root, resolve(root, file)) : null
+    const read = lists?.providers?.files.includes(resolve(root, plannedProviderFilePath(provider).replace(/\.ts$/u, ''))) === true
+    if (why !== undefined || patched === undefined || !read) {
+      leave(provider.id, 'providers', `${why ?? `${file} would not read as registering it once written`}: write and register it by hand`)
+      continue
+    }
+    content = patched
+    providers.push(provider)
+  }
+  return { providers, entry: providers.length > 0 ? { file, content } : null }
 }
 
 export interface PlanScaffoldEntriesReport {
@@ -535,25 +586,17 @@ export interface PlanScaffoldEntriesReport {
   left: PlanScaffoldEntryLeft[]
 }
 
-type EnvComposition = { file: string; content: string; keys: string[]; example: { file: string; content: string; keys: string[] } } | null
-
-/** The step's keys declared as `guren plugin` declares a manifest's, refused unless the lane reads the file as those keys and nothing else. */
-async function composeStepEnv(root: string, env: readonly PlanEnv[], refusals: string[]): Promise<EnvComposition> {
+/** The step's keys declared as `guren plugin` declares a manifest's, or why the lane would not read the file as those keys and nothing else. */
+async function composeStepEnv(root: string, env: readonly PlanEnv[]): Promise<EnvComposition | string> {
   if (env.length === 0) return null
-  const keys = env.map((entry) => entry.key).join(', ')
   const content = await readIfExists(root, ENV_SCHEMA_FILE)
-  if (content === null) {
-    refusals.push(`${keys} would be declared in ${ENV_SCHEMA_FILE}, which this application does not have. Declare them there by hand.`)
-    return null
-  }
+  if (content === null) return `${ENV_SCHEMA_FILE} does not exist: declare it there by hand`
   const composed = composeEnvDeclarations(content, env.map(planEnvEntry))
   const added = typeof composed === 'string' ? undefined : envKeyAdditions(content, composed.content, ENV_SCHEMA_FILE)
   const planned = env.map((entry) => entry.key)
   if (typeof composed === 'string' || added === undefined || added.join('\n') !== planned.join('\n') || !importsFrameworkEnv(composed.content, ENV_SCHEMA_FILE)) {
-    refusals.push(`${keys} cannot be added to the defineEnv() literal of ${ENV_SCHEMA_FILE} alone${typeof composed === 'string' ? `: ${composed}` : ''}. Declare them there by hand.`)
-    return null
+    return `plan:scaffold cannot add ${planned.join(', ')} to the defineEnv() literal of ${ENV_SCHEMA_FILE} alone${typeof composed === 'string' ? ` (${composed})` : ''}: declare it there by hand`
   }
-
   const vars = Object.fromEntries(
     env.map((entry) => [entry.key, { defaultValue: entry.default, choices: entry.choices, isSecret: entry.secret === true, description: entry.description }]),
   )
@@ -564,7 +607,7 @@ async function composeStepEnv(root: string, env: readonly PlanEnv[], refusals: s
 /**
  * `plan:scaffold --entries` from the http step owning the plan's added providers and env keys (RFC 0040 §5): by then
  * the task's commands have run, so it writes only what is still missing. A provider is the `make:provider` shell,
- * registered in `createApp()`; a key is declared in `config/env.ts` and listed in `.env.example`. Every refusal comes
+ * registered in `createApp()`; a key is declared in `config/env.ts` and listed in `.env.example`. Everything is composed
  * before the first write, and a run with nothing left to write is refused, which is also what refuses a re-run.
  */
 export async function planScaffoldEntriesFile(planPath: string, options: PlanScaffoldFileOptions): Promise<PlanScaffoldEntriesReport> {
@@ -582,12 +625,8 @@ export async function planScaffoldEntriesFile(planPath: string, options: PlanSca
   if (work.providers.length === 0 && work.env.length === 0) {
     refuse([`Nothing left to write for ${found.step.id}:`, ...work.left.map((entry) => `  ${entry.id}: ${entry.reason}.`)], ENTRIES)
   }
-  const refusals: string[] = []
-  const env = await composeStepEnv(root, work.env, refusals)
-  const files = work.providers.map((provider) => ({ path: plannedProviderFilePath(provider), contents: providerTemplate(provider.className) }))
-  const registration = await registerProviders(root, work.providers.map((provider) => provider.className))
-  refusals.push(...registration.refusals)
-  if (refusals.length > 0) refuse([`plan:scaffold cannot write the entries of ${found.step.id}:`, ...refusals.map((line) => `  ${line}`)], ENTRIES)
+  const { files, env, entry } = work.composed
+  const registration: ProviderRegistration = entry === null ? { entry: null, refusals: [] } : { entry: entry.file, content: entry.content, refusals: [] }
 
   // The providers first and the entry last, since it imports them.
   const written: string[] = []
