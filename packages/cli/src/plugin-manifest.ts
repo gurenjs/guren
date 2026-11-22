@@ -251,28 +251,25 @@ export function checkPluginCompatibility(
  */
 export function assertEnvEntriesAllowed(entries: GurenPluginEnvEntry[]): void {
   for (const entry of entries) {
-    if (entry.key?.startsWith(RESERVED_ENV_PREFIX)) {
-      throw new Error(
-        `Invalid env entry "${entry.key}": ${RESERVED_ENV_PREFIX}* is reserved by the framework and cannot be set by a plugin.`,
-      )
-    }
-
-    // A newline starts a line the key never names, so `{ key: 'ACME_KEY',
-    // value: '\nGUREN_TESTING=1' }` would write a second, reserved entry.
-    for (const field of ['value', 'comment'] as const) {
-      const text = entry[field]
-      if (text !== undefined && /[\r\n]/.test(text)) {
-        throw new Error(`Invalid env entry "${entry.key}": ${field} cannot contain a line break.`)
-      }
-    }
-
-    // `guren plugin` writes these into config/env.ts as source, so a shape the
-    // builder would reject is refused here, before anything is installed.
-    const problem = envDeclarationProblem(entry)
-    if (problem !== undefined) {
-      throw new Error(`Invalid env entry "${entry.key}": ${problem}`)
-    }
+    const problem = envEntryProblem(entry)
+    if (problem !== undefined) throw new Error(`Invalid env entry "${entry.key}": ${problem}`)
   }
+}
+
+/** Why `guren plugin` would refuse to write `entry`, or undefined; the one rule a planned key is held to as well. */
+export function envEntryProblem(entry: GurenPluginEnvEntry): string | undefined {
+  if (entry.key?.startsWith(RESERVED_ENV_PREFIX)) {
+    return `${RESERVED_ENV_PREFIX}* is reserved by the framework and cannot be set by a plugin.`
+  }
+  // A newline starts a line the key never names, so `{ key: 'ACME_KEY',
+  // value: '\nGUREN_TESTING=1' }` would write a second, reserved entry.
+  for (const field of ['value', 'comment'] as const) {
+    const text = entry[field]
+    if (text !== undefined && /[\r\n]/.test(text)) return `${field} cannot contain a line break.`
+  }
+  // `guren plugin` writes these into config/env.ts as source, so a shape the
+  // builder would reject is refused here, before anything is installed.
+  return envDeclarationProblem(entry)
 }
 
 /** The entries a plugin install acts on: a malformed key name is skipped, a refused entry throws. */

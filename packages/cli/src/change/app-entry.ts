@@ -59,7 +59,7 @@ function importLocals(ast: File): Set<string> {
  */
 export function appEntryAdditions(base: string, head: string, path: string): AppEntryAddition[] | undefined {
   const [before, after] = [parseSourceFile(base, path), parseSourceFile(head, path)]
-  if (!before || !after || !sameComments(before, after)) return undefined
+  if (!before || !after || !sameComments(before, base, after, head)) return undefined
   const [baseOptions, headOptions] = [frameworkCreateAppOptions(before.program), frameworkCreateAppOptions(after.program)]
   if (!baseOptions || !headOptions || !spellsEntryLists(baseOptions) || !spellsEntryLists(headOptions)) return undefined
   const additions: AppEntryAddition[] = []

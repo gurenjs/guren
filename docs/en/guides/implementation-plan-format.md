@@ -176,9 +176,9 @@ A plan with an open question cannot be approved. Answer it by editing the plan: 
 ```
 
 - `type` is `string` (the default), `url`, `number`, `port`, `boolean` or `enum` with `choices`. A key with a `default` is never unset; one with neither `default` nor `required` is optional; `secret` keeps its value out of every printed schema; `description` is its `.describe()`.
-- The declaration a key means is the one `guren plugin` writes for it. A key that command would refuse, such as a `port` whose `default` is a string, fails the check, and so do two elements of one key and an `add` whose key `config/env.ts` already declares.
-- `plan:status` reads `config/env.ts` from source and compares the key's builder chain with the planned one, `.describe()` aside. For a key stated as `"default": "sync"` with no `type`, `Env.string().default('sync')` matches and `Env.string()` differs. An added key is accepted at approval on its step's verified run, as a command is.
-- `guren change:lane` reads a key added to `defineEnv()` as `env-added`, and lowers it to `low` when one open plan adds an element of that key and the chain declares what the element states. A key changed or removed, or a comment added or removed with it, keeps the file `source-edited`.
+- The declaration a key means is the one `guren plugin` writes for it. A key that command would refuse, such as a `port` whose `default` is a string, fails the check, as does a `description` with a line break. So do a `secret` key with a `default`, since the plan is committed and rendered, two elements of one key, and an `add` whose key `config/env.ts` already declares.
+- `plan:status` reads `config/env.ts` from source and compares the key's builder chain with the planned one, `.describe()` aside, and never prints a chain that calls `.secret()`. A chain counts only when `Env` is the framework's import. For a key stated as `"default": "sync"` with no `type`, `Env.string().default('sync')` matches and `Env.string()` differs. An added key is accepted at approval on its step's verified run, as a command is.
+- `guren change:lane` reads a key added to `defineEnv()` as `env-added`, and lowers it to `low` when one open plan adds an element of that key and the chain declares what the element states. A key changed or removed, a comment added or removed with it, or a directive such as `// @ts-expect-error` moved onto other code, keeps the file `source-edited`.
 - Like the other two sections, `env` needs `planVersion` `2`.
 
 ## Commands

@@ -334,7 +334,7 @@ function renderEnv(host: HTMLElement, { plan }: PlanPagePayload): void {
     const body = kv([
       ['env.type', entry.type ?? 'string'],
       ['env.choices', entry.choices?.join(', ')],
-      ['env.default', entry.default === undefined ? undefined : JSON.stringify(entry.default)],
+      ['env.default', entry.default === undefined || entry.secret === true ? undefined : JSON.stringify(entry.default)],
       ['env.required', entry.required === undefined ? undefined : String(entry.required)],
       ['env.secret', entry.secret === undefined ? undefined : String(entry.secret)],
       ['env.description', entry.description],

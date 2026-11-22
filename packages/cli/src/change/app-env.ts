@@ -7,25 +7,23 @@
 import type { ImportDeclaration, ObjectProperty, Program } from '@babel/types'
 
 import { canonicalSyntax, memberKeyName, sameComments } from '../ast-walk'
-import { declaredEnvKeys, defineEnvOptions } from '../env-declarations'
+import { declaredEnvKeys, defineEnvOptions, frameworkEnvImports } from '../env-declarations'
 import { parseSourceFile } from '../parse-cache'
 
 const FRAMEWORK = new Set(['@guren/core', '@guren/server'])
 
-/** The framework imports' value specifiers named `Env`, which a declaration's builder chain needs. */
-function envImports(program: Program): Array<{ declaration: ImportDeclaration; index: number }> {
-  return program.body.flatMap((node) => {
-    if (node.type !== 'ImportDeclaration' || node.importKind === 'type' || !FRAMEWORK.has(node.source.value)) return []
-    return node.specifiers.flatMap((specifier, index) =>
-      specifier.type === 'ImportSpecifier' && specifier.importKind !== 'type' && specifier.local.name === 'Env'
-        && (specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value) === 'Env' ? [{ declaration: node, index }] : [])
-  })
-}
-
-/** The framework imports with `Env` taken out and their specifiers in name order, as `ensureNamedImports()` rewrites them. */
+/**
+ * The framework imports with `Env` taken out and their specifiers in name order, as `ensureNamedImports()` rewrites
+ * them. Only a declaration that held nothing but `Env` goes; any other import, a bare `import '@guren/core'`
+ * included, stays in the comparison.
+ */
 function normalizeImports(program: Program): void {
-  for (const { declaration, index } of envImports(program).reverse()) declaration.specifiers.splice(index, 1)
-  program.body = program.body.filter((node) => node.type !== 'ImportDeclaration' || node.specifiers.length > 0 || !FRAMEWORK.has(node.source.value))
+  const emptied = new Set<ImportDeclaration>()
+  for (const { declaration, index } of frameworkEnvImports(program).reverse()) {
+    declaration.specifiers.splice(index, 1)
+    if (declaration.specifiers.length === 0) emptied.add(declaration)
+  }
+  program.body = program.body.filter((node) => node.type !== 'ImportDeclaration' || !emptied.has(node))
   for (const node of program.body) {
     if (node.type === 'ImportDeclaration' && FRAMEWORK.has(node.source.value)) node.specifiers.sort((a, b) => (a.local.name < b.local.name ? -1 : a.local.name > b.local.name ? 1 : 0))
   }
@@ -38,10 +36,10 @@ function normalizeImports(program: Program): void {
  */
 export function envKeyAdditions(base: string, head: string, path: string): string[] | undefined {
   const [before, after] = [parseSourceFile(base, path), parseSourceFile(head, path)]
-  if (!before || !after || !sameComments(before, after)) return undefined
+  if (!before || !after || !sameComments(before, base, after, head)) return undefined
   const [baseOptions, headOptions] = [defineEnvOptions(before.program), defineEnvOptions(after.program)]
   if (!baseOptions || !headOptions) return undefined
-  if (envImports(before.program).length > 0 && envImports(after.program).length === 0) return undefined
+  if (frameworkEnvImports(before.program).length > 0 && frameworkEnvImports(after.program).length === 0) return undefined
 
   const kept = baseOptions.properties as ObjectProperty[]
   const baseKeys = new Set(declaredEnvKeys(baseOptions).map((entry) => entry.key))
@@ -77,5 +75,5 @@ export function envKeyValue(source: string, path: string, key: string): ObjectPr
 /** Whether `source` imports `Env` from the framework, which a planned declaration's `Env.<type>()` is read as. */
 export function importsFrameworkEnv(source: string, path: string): boolean {
   const ast = parseSourceFile(source, path)
-  return ast !== null && envImports(ast.program).length > 0
+  return ast !== null && frameworkEnvImports(ast.program).length > 0
 }

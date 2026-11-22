@@ -33,6 +33,21 @@ describe('envKeyAdditions', () => {
     expect(envKeyAdditions(BASE, `// @ts-nocheck\n${declared(BASE, [QUEUE])}`, PATH)).toBeUndefined()
   })
 
+  test('should refuse a directive moved onto other code, and keep one that stays on its line', () => {
+    const base = BASE.replace('export default env', '// @ts-expect-error\nexport default env')
+    const head = declared(base, [QUEUE])
+    expect(envKeyAdditions(base, head, PATH)).toEqual(['QUEUE_CONNECTION'])
+    const moved = head.replace('// @ts-expect-error\nexport default env', 'export default env').replace("declare module '@guren/core'", "// @ts-expect-error\ndeclare module '@guren/core'")
+    expect(envKeyAdditions(base, moved, PATH)).toBeUndefined()
+  })
+
+  test('should keep a framework import that binds no Env in the comparison', () => {
+    const base = "import { defineEnv, Env } from '@guren/server'\nimport '@guren/core'\n\nconst env = defineEnv({})\n\nexport default env\n"
+    const head = declared(base, [QUEUE]).replace("import '@guren/core'\n", '')
+    expect(envKeyAdditions(base, declared(base, [QUEUE]), PATH)).toEqual(['QUEUE_CONNECTION'])
+    expect(envKeyAdditions(base, head, PATH)).toBeUndefined()
+  })
+
   test('should refuse a change to a key the base declares, and anything beyond the keys it adds', () => {
     const head = declared(BASE, [QUEUE])
     const refused = {

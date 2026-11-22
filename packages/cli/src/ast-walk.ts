@@ -316,12 +316,43 @@ export function referencedIdentifiers(node: unknown): string[] {
   return [...found]
 }
 
+interface CommentedFile {
+  comments?: ReadonlyArray<{ value: string; loc?: { end: { line: number; column: number } } | null }> | null
+}
+
+/** A comment a compiler, linter or bundler reads, whose meaning is the code it sits on or above. */
+const DIRECTIVE = /@ts-|@jsx|eslint-|oxlint-|biome-ignore|prettier-ignore|@vite-ignore|guren-audit-ignore|^\/\s*<reference/u
+
+/** The code a directive applies to: what follows it on its line, then the next line holding anything. */
+function directivePlacement(comment: NonNullable<CommentedFile['comments']>[number], lines: string[]): string | undefined {
+  const end = comment.loc?.end
+  if (!end) return undefined
+  const rest = (lines[end.line - 1] ?? '').slice(end.column).trim()
+  const next = lines.slice(end.line).find((line) => line.trim() !== '')?.trim() ?? ''
+  return `${rest}\n${next}`
+}
+
 /**
- * Whether two files hold the same comments, as a multiset. `canonicalSyntax` drops comments, and a reader that lets an
- * edit through on it must not let one carry a directive (`// @ts-nocheck`) the structure comparison cannot see.
+ * Whether two files hold the same comments, as a multiset, and each directive (`@ts-expect-error`, `eslint-disable`)
+ * on the same code. `canonicalSyntax` drops comments, and a reader that lets an edit through on it must not let one
+ * add a directive or move one onto other code. A directive whose place cannot be read makes the files differ.
  */
-export function sameComments(before: { comments?: ReadonlyArray<{ value: string }> | null }, after: { comments?: ReadonlyArray<{ value: string }> | null }): boolean {
-  const values = (file: typeof before): string[] => (file.comments ?? []).map((comment) => comment.value.trim()).sort()
-  const [a, b] = [values(before), values(after)]
-  return a.length === b.length && a.every((value, index) => value === b[index])
+export function sameComments(before: CommentedFile, beforeSource: string, after: CommentedFile, afterSource: string): boolean {
+  const values = (file: CommentedFile, source: string): string[] | undefined => {
+    const lines = source.split(/\r?\n/u)
+    const out: string[] = []
+    for (const comment of file.comments ?? []) {
+      const value = comment.value.trim()
+      if (!DIRECTIVE.test(value)) {
+        out.push(value)
+        continue
+      }
+      const placement = directivePlacement(comment, lines)
+      if (placement === undefined) return undefined
+      out.push(`${value}\u0000${placement}`)
+    }
+    return out.sort()
+  }
+  const [a, b] = [values(before, beforeSource), values(after, afterSource)]
+  return a !== undefined && b !== undefined && a.length === b.length && a.every((value, index) => value === b[index])
 }

@@ -1301,14 +1301,17 @@ class StatusContext {
   env(entry: PlanEnv): PlanElementStatus {
     const declarations = this.detail?.env ?? NO_DETAIL
     const classes = isUnreadable(declarations) ? declarations : declarations.map((declaration) => ({ className: declaration.key, module: null, file: ENV_SCHEMA_FILE }))
-    const planned = envEntrySchemaSource(planEnvEntry(entry))
+    // A secret's default is never echoed (RFC 0027 §1); the plan check refuses one, and the display drops it too.
+    const planned = envEntrySchemaSource(planEnvEntry(entry.secret === true ? { ...entry, default: undefined } : entry))
     return this.named('env', { id: entry.id, change: entry.change, name: entry.key }, this.app.env, NOUNS.env, classes, {
       properties: () => {
+        if (entry.secret === true && entry.default !== undefined) return [unknown('declaration', planned, 'the plan states a default for a secret key, which it never echoes')]
         if (isUnreadable(declarations)) return [unknown('declaration', planned, declarations.unreadable)]
         const found = declarations.find((declaration) => declaration.key === entry.key)
         if (!found) return [unknown('declaration', planned, `${ENV_SCHEMA_FILE} does not declare it`)]
         const expected = plannedEnvSignature(planEnvEntry(entry))
         if (expected === undefined) return [unknown('declaration', planned, 'the plan states a declaration guren plugin would not write')]
+        if (found.unverified !== undefined) return [unknown('declaration', planned, found.unverified)]
         if (found.signature === undefined) return [unknown('declaration', planned, `${found.source} holds a builder call no planned key states`)]
         return [found.signature === expected ? match('declaration', planned, found.source) : differ('declaration', planned, found.source)]
       },

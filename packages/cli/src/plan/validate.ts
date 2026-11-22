@@ -32,7 +32,7 @@ import { elementsAtPlannedEnd, judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
 import { planEnvEntry } from '../env-declarations'
 import { isRawEnvKey } from '@guren/server'
-import { envDeclarationProblem } from '../plugin-env'
+import { envEntryProblem } from '../plugin-manifest'
 import { policyProviderName } from './scaffold-http'
 import { planMayPassNow, routeAnswersBefore } from './scaffold-tests'
 import { derivePlanTasks, type PlanTaskDerivation } from './tasks'
@@ -487,7 +487,9 @@ function checkEnvDeclarations(plan: PlanDraft, results: PlanCheckResult[]): void
   for (const entry of plan.env ?? []) {
     const problem = isRawEnvKey(entry.key)
       ? 'defineEnv() refuses NODE_ENV and GUREN_* keys, which are framework gates, not app settings.'
-      : envDeclarationProblem(planEnvEntry(entry))
+      : entry.secret === true && entry.default !== undefined
+        ? 'a secret key states no default, since the plan is committed and rendered and a secret is never echoed.'
+        : envEntryProblem(planEnvEntry(entry))
     if (problem === undefined) continue
     results.push(finding('plan:env-declaration', 'fail', `The environment key "${entry.key}" cannot be declared as planned: ${problem}`, { elementId: entry.id, section: 'env' }))
   }

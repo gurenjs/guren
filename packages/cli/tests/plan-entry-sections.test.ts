@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -7,7 +7,7 @@ import { parseExpression } from '@babel/parser'
 import { defineEnv, Env } from '@guren/server'
 
 import { createAppListedFiles } from '../src/app-entry'
-import { envBuilderSignature } from '../src/env-declarations'
+import { envBuilderSignature, readEnvDeclarations } from '../src/env-declarations'
 import { parseSourceFile } from '../src/parse-cache'
 import type { PlanAppDetail } from '../src/plan/app-detail'
 import { loadPlanAppState } from '../src/plan/app-state'
@@ -147,6 +147,9 @@ describe('the env section of a plan (RFC 0040 §5)', () => {
       })()
       expect([key, PlanDraftSchema.safeParse({ ...draft(), env: [{ ...ENV, key }] }).success]).toEqual([key, declares])
     }
+    // The plan is committed and rendered, and a description is written as the manifest's one-line comment.
+    expect(failures(draft({ env: [{ ...ENV, secret: true }] }))).toEqual([['plan:env-declaration', 'fail']])
+    expect(failures(draft({ env: [{ ...ENV, description: 'The driver.\nGUREN_TESTING=1' }] }))).toEqual([['plan:env-declaration', 'fail']])
     expect(failures(draft({ env: [ENV, { ...ENV, id: 'env.queue.again' }] }))).toEqual([['plan:duplicate-entry', 'fail']])
     expect(failures(draft({ env: [ENV] }), planAppState({ env: ['QUEUE_CONNECTION'] }))).toEqual([['plan:app-collision', 'fail']])
   })
@@ -163,6 +166,10 @@ describe('the env section of a plan (RFC 0040 §5)', () => {
     const verdicts = (source: string) => judgePlan(plan, state(source, envBuilderSignature(parseExpression(source) as never))).elements.map((element) => element.properties.map((property) => property.verdict))
     expect(verdicts("Env.string().default('sync')")).toEqual([['match']])
     expect(verdicts('Env.string()')).toEqual([['differ']])
+    const unverified = planAppState({ env: ['QUEUE_CONNECTION'], detail: { env: [{ key: 'QUEUE_CONNECTION', source: "Env.string().default('sync')", signature: undefined, unverified: 'not the framework Env' }] } as PlanAppDetail })
+    expect(judgePlan(plan, unverified).elements[0]!.properties).toEqual([expect.objectContaining({ verdict: 'unknown', reason: 'not the framework Env' })])
+    const secret = judgePlan(draft({ env: [{ ...ENV, secret: true }] }), state('Env.string().optional().secret()', undefined)).elements[0]!.properties[0]!
+    expect(JSON.stringify(secret)).not.toContain('sync')
     expect(planElementsWithoutBehaviour(plan)).toEqual([{ id: 'env.queue', section: 'env' }])
   })
 
@@ -173,6 +180,22 @@ describe('the env section of a plan (RFC 0040 §5)', () => {
     expect((await loadPlanAppState(root)).env).toEqual([{ name: 'APP_NAME', module: null }, { name: 'PORT', module: null }])
     await writeFile(join(root, 'config/env.ts'), "import { defineEnv, Env } from '@guren/core'\nconst env = defineEnv({ ...shared })\nexport default env\n")
     expect((await loadPlanAppState(root)).env).toEqual({ unreadable: expect.stringContaining('config/env.ts') })
+  })
+
+  test('should redact a secret chain, leave a local Env unread, and tell a dangling schema link from none', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'plan-env-declarations-'))
+    await mkdir(join(root, 'config'), { recursive: true })
+    expect(await readEnvDeclarations(root)).toEqual([])
+    await writeFile(join(root, 'config/env.ts'), "import { defineEnv, Env } from '@guren/core'\nconst env = defineEnv({ TOKEN: Env.string().default('s3cret').secret() })\nexport default env\n")
+    const [token] = (await readEnvDeclarations(root)) as Array<{ source: string; signature?: string }>
+    expect(token!.source).not.toContain('s3cret')
+    expect(token!.signature).toBeDefined()
+    await writeFile(join(root, 'config/env.ts'), "import { defineEnv } from '@guren/core'\nimport { Env } from './builders'\nconst env = defineEnv({ QUEUE_CONNECTION: Env.string().default('sync') })\nexport default env\n")
+    expect(await readEnvDeclarations(root)).toEqual([expect.objectContaining({ key: 'QUEUE_CONNECTION', signature: undefined, unverified: expect.stringContaining('Env') })])
+    const linked = await mkdtemp(join(tmpdir(), 'plan-env-link-'))
+    await mkdir(join(linked, 'config'), { recursive: true })
+    await symlink(join(linked, 'generated/env.ts'), join(linked, 'config/env.ts'))
+    expect(await readEnvDeclarations(linked)).toEqual({ unreadable: expect.stringContaining('config/env.ts') })
   })
 })
 
