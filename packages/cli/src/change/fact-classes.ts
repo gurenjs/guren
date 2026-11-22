@@ -43,6 +43,7 @@ export const FACT_CLASSES = {
   // An entry added to the `providers` or `config` array of the `createApp()` literal, with its import and nothing else.
   'provider-added': { kind: 'declarable', lowest: 'low' },
   'config-added': { kind: 'declarable', lowest: 'low' },
+  'env-added': { kind: 'declarable', lowest: 'low' },
   'policy-changed': { kind: 'declarable', lowest: 'medium' },
   'dependencies-changed': { kind: 'declarable', lowest: 'medium' },
   'ambient': { kind: 'ambient', lowest: 'low' },

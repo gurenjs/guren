@@ -8,7 +8,7 @@
 import type { ArrayExpression, File, ObjectExpression, ObjectProperty, Statement } from '@babel/types'
 
 import { frameworkCreateAppOptions, spellsEntryLists } from '../app-entry'
-import { canonicalSyntax, referencedIdentifiers } from '../ast-walk'
+import { canonicalSyntax, referencedIdentifiers, sameComments } from '../ast-walk'
 import { parseSourceFile } from '../parse-cache'
 
 export const APP_ENTRY_LISTS = ['providers', 'config'] as const
@@ -59,7 +59,7 @@ function importLocals(ast: File): Set<string> {
  */
 export function appEntryAdditions(base: string, head: string, path: string): AppEntryAddition[] | undefined {
   const [before, after] = [parseSourceFile(base, path), parseSourceFile(head, path)]
-  if (!before || !after) return undefined
+  if (!before || !after || !sameComments(before, base, after, head)) return undefined
   const [baseOptions, headOptions] = [frameworkCreateAppOptions(before.program), frameworkCreateAppOptions(after.program)]
   if (!baseOptions || !headOptions || !spellsEntryLists(baseOptions) || !spellsEntryLists(headOptions)) return undefined
   const additions: AppEntryAddition[] = []

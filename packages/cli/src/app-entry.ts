@@ -60,11 +60,11 @@ const ENTRY_LIST_KEYS = new Set(['providers', 'config'])
 
 const FACTORY_PACKAGES = new Set(['@guren/core', '@guren/server'])
 
-/** Whether the module binds `createApp` to the framework's factory, by a value import of that name. */
-function importsFactory(program: Program): boolean {
+/** Whether the module binds `name` to the framework's export of that name, by a value import. */
+function importsFrameworkExport(program: Program, name: string): boolean {
   return program.body.some((node) => node.type === 'ImportDeclaration' && node.importKind !== 'type' && FACTORY_PACKAGES.has(node.source.value)
-    && node.specifiers.some((specifier) => specifier.type === 'ImportSpecifier' && specifier.importKind !== 'type' && specifier.local.name === 'createApp'
-      && (specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value) === 'createApp'))
+    && node.specifiers.some((specifier) => specifier.type === 'ImportSpecifier' && specifier.importKind !== 'type' && specifier.local.name === name
+      && (specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value) === name))
 }
 
 /** The call a top-level statement makes directly: `const app = createApp(…)`, `export default createApp(…)`, or a bare call. */
@@ -81,22 +81,27 @@ function topLevelCall(statement: Statement): CallExpression | undefined {
 }
 
 /**
- * The framework's `createApp()` call's options object, when the file holds exactly one such call, at its top level
- * where no binding can shadow the factory's import, with an object literal. Stricter than {@link createAppOptions}:
- * what it reads is what the application registers, which the RFC 0040 §5 entry lists are judged by.
+ * The options object of a call to the framework's `name` export (`createApp`, `defineEnv`), when the file holds
+ * exactly one such call, at its top level where no binding can shadow the import, with one object literal.
+ * Stricter than {@link createAppOptions}: what it reads is what the application declares (RFC 0040 §5).
  */
-export function frameworkCreateAppOptions(program: Program): ObjectExpression | undefined {
-  if (!importsFactory(program)) return undefined
+export function frameworkCallOptions(program: Program, name: string): ObjectExpression | undefined {
+  if (!importsFrameworkExport(program, name)) return undefined
   let calls = 0
   walk(program, (node) => {
     if (node.type !== 'CallExpression') return
     const target = node.callee as BabelNode | undefined
-    if (target?.type === 'Identifier' && target.name === 'createApp') calls += 1
+    if (target?.type === 'Identifier' && target.name === name) calls += 1
   })
   if (calls !== 1) return undefined
-  const call = program.body.map(topLevelCall).find((entry) => entry?.callee.type === 'Identifier' && entry.callee.name === 'createApp')
+  const call = program.body.map(topLevelCall).find((entry) => entry?.callee.type === 'Identifier' && entry.callee.name === name)
   const [first] = call?.arguments ?? []
   return call?.arguments.length === 1 && first?.type === 'ObjectExpression' ? first : undefined
+}
+
+/** {@link frameworkCallOptions} of `createApp`: what the application registers. */
+export function frameworkCreateAppOptions(program: Program): ObjectExpression | undefined {
+  return frameworkCallOptions(program, 'createApp')
 }
 
 /**

@@ -12,6 +12,7 @@ import type { RouteDefinition } from '@guren/server'
 import type { File, Node, Statement } from '@babel/types'
 
 import { memberKeyName, unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
+import { readEnvDeclarations, type EnvDeclaration } from '../env-declarations'
 import { createAppListedFiles, createAppOptions, findModuleDescriptor, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
@@ -209,6 +210,8 @@ export interface PlanAppDetail {
   providers?: PlanAppClassDetail[] | PlanAppUnreadable
   /** Config definitions under `config/`, as provider classes are read. */
   config?: PlanAppClassDetail[] | PlanAppUnreadable
+  /** The keys the project root's `config/env.ts` declares, each with what its builder chain means (RFC 0040 §5). */
+  env?: EnvDeclaration[] | PlanAppUnreadable
   /** What the application entry's `providers` and `config` lists register (RFC 0040 §5): what a provider or config is wired by. */
   entryLists?: PlanAppEntryLists | PlanAppUnreadable
   /** Per kind, why an absent use proves nothing: a source file that did not parse, a scan that failed, `AutoDiscovery`. */
@@ -254,7 +257,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
   const { root } = input
   const cache = new ParseCache()
 
-  const [tables, models, pages, validatorRead, resources, resourcePayloads, policies, routeFiles, sideEffects, mounts, providers, config, entryLists] = await Promise.all([
+  const [tables, models, pages, validatorRead, resources, resourcePayloads, policies, routeFiles, sideEffects, mounts, providers, config, entryLists, env] = await Promise.all([
     tableDetail(root),
     modelDetail(root, input.models, input.modelReading),
     pageDetail(root, input.pages, input.pageReading),
@@ -268,6 +271,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     classDetail(root, (appRoot) => discoverEntryFiles(appRoot, PROVIDERS_DIR)),
     classDetail(root, (appRoot) => discoverEntryFiles(appRoot, CONFIG_DIR)),
     entryListDetail(root, cache),
+    readEnvDeclarations(root),
   ])
 
   return {
@@ -287,6 +291,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     providers,
     config,
     entryLists,
+    env,
   }
 }
 

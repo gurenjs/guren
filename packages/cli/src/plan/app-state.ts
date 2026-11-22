@@ -41,6 +41,7 @@ import { loadPlanImpactSources } from './impact-sources'
 import { ParseCache } from '../parse-cache'
 import { readSourceClassIdentities } from '../source-class-identities'
 import { isUnreadable, type PlanAppUnreadable } from './unreadable'
+import { readEnvDeclarations } from '../env-declarations'
 
 const CONTROLLERS_DIR = 'app/Http/Controllers'
 
@@ -126,6 +127,8 @@ export interface PlanAppState {
   providers: PlanAppNames
   /** Config definitions, by the file `config/<name>.ts` that holds each. */
   config: PlanAppNames
+  /** The keys the project root's `config/env.ts` declares, read from source. */
+  env: PlanAppNames
   /**
    * Inertia page ids, e.g. `posts/Show`. Every page sits in the project's own
    * `resources/js/pages`, a module's under its name, so the id carries the scope and
@@ -167,13 +170,14 @@ export async function loadPlanAppState(
 
   // One cache keeps the shared graph readers and Impact scans on the same source readings.
   const cache = new ParseCache()
-  const [apiOnly, models, resources, policies, providers, config, pages, validators, routes, controllers, tables] = await Promise.all([
+  const [apiOnly, models, resources, policies, providers, config, env, pages, validators, routes, controllers, tables] = await Promise.all([
     isConfirmedApiOnlyApp(root).catch(() => false),
     modelSection(root, cache),
     classSection(root, discoverResourceFiles),
     classSection(root, discoverPolicyFiles),
     classSection(root, (appRoot) => discoverEntryFiles(appRoot, PROVIDERS_DIR)),
     classSection(root, (appRoot) => discoverEntryFiles(appRoot, CONFIG_DIR)),
+    envSection(root),
     pageSection(root, cache),
     validatorSections(root, roots, cache),
     readRoutesFileGraph(root, options.routesFile),
@@ -189,6 +193,7 @@ export async function loadPlanAppState(
     policies,
     providers,
     config,
+    env,
     pages,
     validators: validators.names,
     routes: isUnreadable(routes.routes)
@@ -271,6 +276,12 @@ async function modelSection(cwd: string, cache: ParseCache): Promise<PlanAppName
 function byName(a: PlanAppName, b: PlanAppName): number {
   if (a.name === b.name) return 0
   return a.name < b.name ? -1 : 1
+}
+
+/** The project root's `config/env.ts`: the keys of a module are its own, and the application entry reads the root's. */
+async function envSection(root: string): Promise<PlanAppNames> {
+  const declarations = await readEnvDeclarations(root)
+  return isUnreadable(declarations) ? declarations : declarations.map(({ key }) => ({ name: key, module: null })).sort(byName)
 }
 
 /** A section named after the class each discovered file declares, as `guren context` names them. */

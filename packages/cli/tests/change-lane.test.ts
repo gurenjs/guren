@@ -858,6 +858,30 @@ export class CommentPolicy extends Policy {
     expect(entryFacts(used)).toEqual([['source-edited', 'medium', undefined, undefined]])
   })
 
+  test('should read a key added to defineEnv() as env-added, lowered where the plan states it', async () => {
+    const { repo } = await createRepo()
+    const path = join(repo, 'docs/plans/comments/plan.json')
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, JSON.stringify({ ...loadApprovedCommentsPlan(), planVersion: 2, env: [{ id: 'env.queue', change: { kind: 'add' }, key: 'QUEUE_CONNECTION', default: 'sync' }] }), 'utf8')
+    await approvePlanFile(path)
+    const ENV = "import { defineEnv, Env } from '@guren/core'\n\nconst env = defineEnv({\n  APP_NAME: Env.string().default('Guren'),\n})\n\nexport default env\n"
+    const base = await commit(repo, { 'config/env.ts': ENV })
+    const envFacts = (report: ChangeLaneReport) => report.facts.filter((fact) => fact.files.includes('config/env.ts')).map((fact) => [fact.code, fact.lane, fact.target, fact.declaredBy])
+    const withKey = (chain: string): string => ENV.replace("  APP_NAME: Env.string().default('Guren'),\n", `  APP_NAME: Env.string().default('Guren'),\n  QUEUE_CONNECTION: ${chain},\n`)
+
+    expect(envFacts(await laneOf(repo, base, await commit(repo, { 'config/env.ts': withKey("Env.string().default('sync')") }))))
+      .toEqual([['env-added', 'low', 'QUEUE_CONNECTION', 'docs/plans/comments/plan.json#env.queue']])
+    expect(envFacts(await laneOf(repo, base, await commit(repo, { 'config/env.ts': withKey("Env.string().default('redis')") }))))
+      .toEqual([['env-added', 'medium', 'QUEUE_CONNECTION', undefined]])
+    // An argument the comparison would leave out is code the import runs.
+    expect(envFacts(await laneOf(repo, base, await commit(repo, { 'config/env.ts': withKey("Env.string().default('sync').describe(process.env.GUREN_TESTING = '1')") }))))
+      .toEqual([['env-added', 'medium', 'QUEUE_CONNECTION', undefined]])
+    expect(envFacts(await laneOf(repo, base, await commit(repo, { 'config/env.ts': `// @ts-nocheck\n${withKey("Env.string().default('sync')")}` }))))
+      .toEqual([['source-edited', 'medium', undefined, undefined]])
+    expect(envFacts(await laneOf(repo, base, await commit(repo, { 'config/env.ts': withKey("Env.string().default('sync')").replace("APP_NAME: Env.string().default('Guren')", "APP_NAME: Env.string()") }))))
+      .toEqual([['source-edited', 'medium', undefined, undefined]])
+  })
+
   test('should declare nothing from a plan nobody approved', async () => {
     const { repo, base } = await planRepo(false)
     const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL, 'db/schema.ts': SCHEMA }))

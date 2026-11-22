@@ -28,7 +28,9 @@ import type { DeclarationSubject, OpenPlan } from './declarations'
 import type { ChangeAudits, HeadRecords } from './revision-audit'
 import { ROUTES_ENTRY_CANDIDATES } from '../route-registrar'
 import { APP_ENTRY_CANDIDATES } from '../provider-registrar'
+import { ENV_SCHEMA_FILE } from '../app-env'
 import { appEntryAdditions } from './app-entry'
+import { envKeyAdditions } from './app-env'
 import { compareSecurityRecords, sameRecordPart, type RouteSecurityRecord, type SecurityRecords } from './security-records'
 
 export type { FactCode, Lane } from './fact-classes'
@@ -549,6 +551,18 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     for (const { list, name } of additions) {
       const subject: DeclarationSubject = { kind: 'app-entry', path: entry.path, list, name }
       fact([entry], { code: list === 'providers' ? 'provider-added' : 'config-added', lane: 'medium', target: name, evidence: 'static', message: `${entry.path}: ${name} added to the createApp() ${list}` }, subject)
+    }
+  }
+
+  // The environment schema: keys added to its `defineEnv()` literal are facts of their own, a key changed or removed is not.
+  for (const entry of inApp) {
+    if (claimed.has(entry) || entry.status !== 'modified' || entry.path !== ENV_SCHEMA_FILE) continue
+    const [base, head] = [await reader.read('base', entry.path), await reader.read('head', entry.path)]
+    const keys = base === null || head === null ? undefined : envKeyAdditions(base, head, entry.path)
+    if (!keys || keys.length === 0) continue
+    for (const key of keys) {
+      const subject: DeclarationSubject = { kind: 'env', path: entry.path, key }
+      fact([entry], { code: 'env-added', lane: 'medium', target: key, evidence: 'static', message: `${entry.path}: ${key} added to defineEnv()` }, subject)
     }
   }
 

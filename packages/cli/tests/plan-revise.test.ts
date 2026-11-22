@@ -141,7 +141,7 @@ describe('plan:revise', () => {
       document.title = 'Comments, revised'
     }))
 
-    await expect(revise(plan, { edited: copy, message: 'retitle' })).rejects.toThrow('A revision moves planVersion only when it adds the first providers or config entry; leave it as 1.')
+    await expect(revise(plan, { edited: copy, message: 'retitle' })).rejects.toThrow('A revision moves planVersion only when it adds the first providers, config or env entry; leave it as 1.')
   })
 
   test('should write an edited copy as its author wrote it, at the recorded result, with the baseline carried over', async () => {

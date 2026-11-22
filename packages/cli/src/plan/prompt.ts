@@ -115,11 +115,12 @@ const COMMANDS = `## Commands
 
 The commands run before every other step. Keep \`commands\` for what the plan does not declare: a generator for an element the plan adds or renames fails the check where running it first breaks a later step. In an app that is not API-only, \`plan:scaffold\` writes each model the plan adds in the project root, with its table, validators, resources, policies, controllers, routes and side effects, and refuses a target that already exists (\`make:model\`, \`make:feature\`). A blueprint that declares an added model's table in \`db/schema.ts\` declares it a second time beside the data step's, some with a migration as well (\`add session\` beside an added \`sessions\` table). Output that imports what no step has written yet fails the commands step's typecheck (\`make:factory\` or \`make:resource\` for an added model).`
 
-const ENTRY = `## Providers and config
+const ENTRY = `## Providers, config and environment keys
 
 - \`providers\` lists the service providers the change registers in \`createApp({ providers })\`, each a default export of \`app/Providers/<className>.ts\` with a one-sentence \`purpose\`. \`config\` lists the config definitions it registers in \`createApp({ config })\`, each the default export of \`config/<name>.ts\`, named by \`name\`.
 - \`change.kind\` is \`add\` or \`existing\` there: changing or removing a registration is left to the person.
-- Leave out the provider an added policy needs: \`plan:scaffold\` writes and registers \`<Policy>Provider\` with the policy.`
+- Leave out the provider an added policy needs: \`plan:scaffold\` writes and registers \`<Policy>Provider\` with the policy.
+- \`env\` lists the keys the change adds to \`defineEnv({ ... })\` in \`config/env.ts\`: \`key\`, its \`type\` (\`string\`, \`url\`, \`number\`, \`port\`, \`boolean\` or \`enum\` with \`choices\`; \`string\` when left out), and \`default\`, \`required\`, \`secret\` and \`description\` where they apply. A key with no \`default\` that is not \`required\` is optional.`
 
 const CHECK = `## Check the plan
 
