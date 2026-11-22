@@ -166,7 +166,7 @@ Write the providers and env keys the plan adds that the task's commands did not,
 - `config/env.ts` がない場合や、その `defineEnv()` のリテラルを全体として読めない場合は、キーを書かずに残し、手で宣言するよう報告します。
 - config の項目は書きません。config の定義は中身がキーごとに異なり、インストールするコマンド (`add queue` や `add storage` など) が `config/<name>.ts` を書いて登録するからです。
 
-次の場合は、何も書かずに拒否します。下書きやどの承認にも記録されていない計画、`plan:next` が印を付けていないステップ、追加する Provider・キー・config の項目を持たないステップ (持っているステップを示します)、そのリテラルだけを変えてキーを足せない場合、`createApp()` に登録できない Provider、書くものが残っていないステップです。最後の条件があるので、2 回目の実行も拒否されます。そのあと `guren change:lane` はキーを `env-added`、登録を `provider-added` として読み、計画が宣言していればそれぞれ `low` に下げます。Provider のファイル自体は `medium` のままです。
+次の場合は、何も書かずに拒否します。下書きやどの承認にも記録されていない計画、`plan:next` が印を付けていないステップ、追加する Provider・キー・config の項目を持たないステップ (持っているステップを示します)、`defineEnv()` のリテラルだけを変えてキーを足せない場合、`createApp()` に登録できない Provider、書くものが残っていないステップです。最後の条件があるので、2 回目の実行も拒否されます。そのあと `guren change:lane` はキーを `env-added`、登録を `provider-added` として読み、計画が宣言していればそれぞれ `low` に下げます。Provider のファイル自体は `medium` のままです。
 
 ## テストの雛形: tests ステップの `plan:scaffold`
 

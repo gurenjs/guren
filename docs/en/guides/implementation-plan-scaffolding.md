@@ -148,7 +148,7 @@ It writes only what is missing:
 - With no `config/env.ts`, or one whose `defineEnv()` literal it cannot read whole, a key is left and reported, to declare by hand.
 - A config entry is never written: a config definition is written for its key, and the command that installs it (`add queue`, `add storage` and the like) writes `config/<name>.ts` and registers it.
 
-It refuses, writing nothing, a draft or a plan no approval names, a step `plan:next` has not marked, a step that owns no added provider, key or config entry (it names the ones that do), keys it cannot add to that literal alone, a provider it cannot register in `createApp()`, and a step with nothing left to write, which is also how a second run is refused. `guren change:lane` then reads the keys as `env-added` and the registrations as `provider-added`, each `low` when the plan declares it; the provider file stays `medium`.
+It refuses, writing nothing, a draft or a plan no approval names, a step `plan:next` has not marked, a step that owns no added provider, key or config entry (it names the ones that do), keys it cannot add to the `defineEnv()` literal alone, a provider it cannot register in `createApp()`, and a step with nothing left to write, which is also how a second run is refused. `guren change:lane` then reads the keys as `env-added` and the registrations as `provider-added`, each `low` when the plan declares it; the provider file stays `medium`.
 
 ## Test skeletons: `plan:scaffold` on a tests step
 
