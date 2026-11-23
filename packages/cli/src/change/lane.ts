@@ -577,6 +577,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
       : code === 'source-edited' && entry.status === 'modified' && entry.path === routesEntry ? { kind: 'routes-entry', path: entry.path }
       // A file an earlier task of the plan added is in this base too, and stays that plan's addition (RFC 0040 §3).
       : code === 'source-edited' && entry.status === 'modified' && !entry.kind ? { kind: 'file', path: entry.path, edited: true }
+      : code === 'source-removed' && !entry.kind && SOURCE_FILE.test(entry.path) ? { kind: 'removed-file', path: entry.path }
       : undefined
     fact([entry], { code, lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}${entry.oldPath ? ` from ${entry.oldPath}` : ''}` }, subject)
   }
@@ -708,7 +709,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   const plans = await readChangePlans(reader, trees.head)
   // A change that writes a plan record is high already, and must not cite what it wrote.
   const declared = plans.open.length > 0 && subjects.size > 0 && !facts.some((entry) => entry.code === 'plan-record')
-    ? await (await import('./declarations')).applyPlanDeclarations(facts, subjects, plans.open, (path) => reader.read('head', path), (path) => reader.read('base', path), (record, path) => reader.presentWhenAdded(record, path), recordsCoverRoutes)
+    ? await (await import('./declarations')).applyPlanDeclarations(facts, subjects, plans.open, (path) => reader.read('head', path), (path) => reader.read('base', path), (record, path) => reader.presentWhenAdded(record, path), recordsCoverRoutes, (needle) => reader.containing('head', needle))
     : facts
   const policy = await loadBaseReviewPolicy(reader)
   const judged = policy.state === 'read' ? applyReviewPolicy(declared, change.paths, policy.policy) : declared
