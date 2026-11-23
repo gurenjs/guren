@@ -201,6 +201,19 @@ describe('openChange', () => {
     expect(await reader.presentWhenAdded('none.approvals.json', 'app/Models/Comment.ts')).toBeUndefined()
   })
 
+  test('should give no cut-off at a shallow boundary, where every inherited file reads as added', async () => {
+    const { repo } = await createRepo(SUBDIRECTORY_APP)
+    await commit(repo, { 'apps/web/docs/plans/comments/approvals.json': '{}\n' })
+    const added = await commit(repo, { 'apps/web/app/Models/Comment.ts': 'export class Comment {}\n' })
+    const head = await commit(repo, { 'apps/web/app/Models/Comment.ts': 'export class Comment { body = 1 }\n' })
+    const shallow = join(ROOT, `repo-${repos++}`)
+    await git(ROOT, ['clone', '-q', '--depth', '2', `file://${repo}`, shallow])
+    const cwd = join(shallow, 'apps/web')
+    const { reader } = openChange(cwd, await resolveChange(cwd, added, head))
+
+    expect(await reader.presentWhenAdded('docs/plans/comments/approvals.json', 'app/Models/Comment.ts')).toBeUndefined()
+  })
+
   test('should throw on a file the commit has and git cannot read, rather than read it as absent', async () => {
     const { repo, base } = await createRepo()
     const blob = await git(repo, ['rev-parse', `${base}:package.json`])
@@ -813,6 +826,14 @@ export class CommentPolicy extends Policy {
       expect.objectContaining({ code: 'file-added', lane: 'low', files: ['app/Models/Comment.ts'], declaredBy: 'docs/plans/comments/plan.json#model.comment', planAddition: true, message: "app/Models/Comment.ts modified: absent when the plan's approval was recorded, so its addition" }),
     ])
     expect(renderChangeLane(report)).toContain("whose change added the file since was not checked")
+  })
+
+  test("should hold an edit read as the plan's addition to a raise guren.review.ts sets for source-edited", async () => {
+    const { repo } = await stampedPlanRepo()
+    const base = await commit(repo, { 'app/Models/Comment.ts': MODEL, 'guren.review.ts': "export default { facts: { 'source-edited': 'high' } }\n" })
+    const report = await laneRecorded(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL.replace('{}', '{\n  static fillable = [\'body\']\n}') }))
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane, fact.policyFrom, fact.planAddition])).toEqual([['file-added', 'high', 'low', true]])
   })
 
   test("should read an edit to a controller the plan added as its addition, and keep a validator's edit at medium", async () => {

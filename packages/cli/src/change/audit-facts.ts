@@ -81,7 +81,8 @@ export async function auditFacts(change: ResolvedChange, reader: ChangeReader, b
   for (const finding of added(startsWith('security-toggle:'), startsWith('security-toggle:'))) fact('audit-warn-changed', finding)
   // A column a model edit newly lets a request write, or newly serializes, is new even where the base warned on another;
   // one the edit takes out of a warning is not. Only for a file the change edits: a model it adds keeps its warnings.
-  const edited = new Set(change.paths.filter((entry) => !entry.outsideApp && entry.status === 'modified').map((entry) => entry.path))
+  // A model moved and edited is compared at its head path, which `identities()` maps the base's findings to.
+  const edited = new Set(change.paths.filter((entry) => !entry.outsideApp && (entry.status === 'modified' || entry.status === 'renamed')).map((entry) => entry.path))
   const modelRule = (finding: AuditFinding): boolean => reported(finding) && MODEL_RULES.some((rule) => finding.key.startsWith(`${rule}:`))
   const baseRules = new Map<string, AuditFinding>()
   baseIds.forEach((identity, index) => { if (modelRule(base.findings[index]!)) baseRules.set(identity, base.findings[index]!) })

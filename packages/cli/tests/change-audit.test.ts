@@ -310,6 +310,14 @@ describe('auditFacts', () => {
     expect(await codes(report([]), report([owner('authorId')]), fakeChange([{ path: model, status: 'added' }]))).toEqual([])
   })
 
+  test('should compare a model moved and edited at its head path', async () => {
+    const moved = fakeChange([{ path: 'app/Models/Blog/Comment.ts', status: 'renamed', oldPath: 'app/Models/Comment.ts' }])
+    const assignment = (filePath: string, status: AuditFinding['status'] = 'warn') => ({ key: 'mass-assignment:Comment', filePath, status })
+
+    expect(await codes(report([assignment('app/Models/Comment.ts')]), report([assignment('app/Models/Blog/Comment.ts')]), moved)).toEqual([])
+    expect(await codes(report([assignment('app/Models/Comment.ts', 'pass')]), report([assignment('app/Models/Blog/Comment.ts')]), moved)).toEqual(['audit-warn-changed mass-assignment:Comment'])
+  })
+
   test('should call a sensitive column, a CSRF exemption and a suppression the base did not have by their own facts', async () => {
     const head = report([
       { key: 'exposure-sensitive-column:User.passwordHash:app/Http/Resources/UserResource.ts:toArray', filePath: 'app/Http/Resources/UserResource.ts', line: 5 },

@@ -3,7 +3,7 @@
  * `openChange()` reads both of its sides from git objects, never from the working tree.
  */
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -127,6 +127,14 @@ function gitResult(cwd: string, args: string[]): Promise<{ code: number | null; 
   })
 }
 
+/** The commits a shallow clone's history stops at, from `git rev-parse --git-path shallow`; none in a full clone. */
+async function shallowCommits(cwd: string): Promise<ReadonlySet<string>> {
+  const file = (await runGitRaw(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'shallow']))?.trim()
+  if (!file) throw new CliError('git could not name the shallow file of this clone.')
+  const text = await readFile(file, 'utf-8').catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? '' : Promise.reject(error)))
+  return new Set(text.split('\n').map((line) => line.trim()).filter((line) => line.length > 0))
+}
+
 /** Reads the two sides of `change` from git objects. `dispose()` removes what `materialize()` wrote. */
 export function openChange(cwd: string, change: Pick<ResolvedChange, 'mergeBase' | 'head' | 'appPrefix'>): { reader: ChangeReader; dispose: () => Promise<void> } {
   const rev = (side: ChangeSide): string => (side === 'base' ? change.mergeBase : change.head)
@@ -191,6 +199,8 @@ export function openChange(cwd: string, change: Pick<ResolvedChange, 'mergeBase'
           if (code !== 0) throw new CliError(`git could not search the history of ${change.mergeBase} for ${record}.`)
           const sha = stdout.trim()
           if (sha.length === 0) return undefined
+          // At a shallow boundary every inherited file reads as added there: the history that would place the cut-off is missing.
+          if ((await shallowCommits(cwd)).has(sha)) return undefined
           const output = await runGitRaw(cwd, ['ls-tree', '-r', '-z', '--full-tree', sha])
           if (output === null) throw new CliError(`git could not list the files of ${sha}.`)
           return new Set(output.split('\0').filter((entry) => entry.length > 0).map((entry) => entry.slice(entry.indexOf('\t') + 1)))
