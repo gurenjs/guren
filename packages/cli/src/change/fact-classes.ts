@@ -44,8 +44,8 @@ export const FACT_CLASSES = {
   'provider-added': { kind: 'declarable', lowest: 'low' },
   'config-added': { kind: 'declarable', lowest: 'low' },
   'env-added': { kind: 'declarable', lowest: 'low' },
-  // A source file deleted, at the path a `drop` element of the plan owns.
-  'source-removed': { kind: 'declarable', lowest: 'low' },
+  // A source file the change deletes at the path one open plan's `drop` element owns: `source-removed`, declared.
+  'file-removed': { kind: 'declarable', lowest: 'low' },
   'policy-changed': { kind: 'declarable', lowest: 'medium' },
   'dependencies-changed': { kind: 'declarable', lowest: 'medium' },
   'ambient': { kind: 'ambient', lowest: 'low' },
@@ -54,8 +54,7 @@ export const FACT_CLASSES = {
   // An added file that is not source (a nested tsconfig.json, an .npmrc, a manifest): no plan element owns one.
   'non-source-added': { kind: 'fixed', lowest: 'medium' },
   'source-edited': { kind: 'fixed', lowest: 'medium' },
-  // A deleted file that is not source: no plan element owns one.
-  'non-source-removed': { kind: 'fixed', lowest: 'medium' },
+  'source-removed': { kind: 'fixed', lowest: 'medium' },
   'source-renamed': { kind: 'fixed', lowest: 'medium' },
   'outside-app': { kind: 'fixed', lowest: 'medium' },
   'lesson': { kind: 'fixed', lowest: 'medium' },

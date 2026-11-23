@@ -322,7 +322,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     }
   }
 
-  const fallbackCode = (entry: ChangedPath): FactCode => (entry.outsideApp ? 'outside-app' : entry.status === 'added' ? (SOURCE_FILE.test(entry.path) ? 'file-added' : 'non-source-added') : entry.status === 'deleted' ? (SOURCE_FILE.test(entry.path) ? 'source-removed' : 'non-source-removed') : entry.status === 'renamed' ? 'source-renamed' : 'source-edited')
+  const fallbackCode = (entry: ChangedPath): FactCode => (entry.outsideApp ? 'outside-app' : entry.status === 'added' ? (SOURCE_FILE.test(entry.path) ? 'file-added' : 'non-source-added') : entry.status === 'deleted' ? 'source-removed' : entry.status === 'renamed' ? 'source-renamed' : 'source-edited')
   for (const entry of change.paths) {
     if (claimed.has(entry) || !touches(entry, (path) => posix.basename(path) === 'package.json')) continue
     const located = Object.values(sides(entry)).map((path) => fromRoot(entry, path))
@@ -577,7 +577,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
       : code === 'source-edited' && entry.status === 'modified' && entry.path === routesEntry ? { kind: 'routes-entry', path: entry.path }
       // A file an earlier task of the plan added is in this base too, and stays that plan's addition (RFC 0040 §3).
       : code === 'source-edited' && entry.status === 'modified' && !entry.kind ? { kind: 'file', path: entry.path, edited: true }
-      : code === 'source-removed' && !entry.kind ? { kind: 'removed-file', path: entry.path }
+      : code === 'source-removed' && !entry.kind && SOURCE_FILE.test(entry.path) ? { kind: 'removed-file', path: entry.path }
       : undefined
     fact([entry], { code, lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}${entry.oldPath ? ` from ${entry.oldPath}` : ''}` }, subject)
   }

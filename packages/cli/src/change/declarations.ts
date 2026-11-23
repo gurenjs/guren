@@ -3,7 +3,7 @@
  * declares it. Matched so far: an added file of added elements and an added table of an added model, both
  * against what `plan:scaffold` writes (a declared table taking its own residue with it), an added file a plan's
  * command writes (`plan/command-files.ts`), an added migration that only creates such tables, an added route,
- * a route a plan alters or drops, the routes entry edited by `--mount` alone, and a provider a planned policy implies, registered as
+ * a route a plan alters or drops, a file a `drop` element owns deleted, the routes entry edited by `--mount` alone, and a provider a planned policy implies, registered as
  * `plan:scaffold` registers it. A subject two open plans claim, or one the plan does not determine, stays.
  */
 
@@ -382,7 +382,7 @@ export async function applyPlanDeclarations(
     const declaredBy = subject?.kind === 'table-residue' || subject?.kind === 'routes-entry' ? undefined
       : subject?.kind === 'app-entry' ? registered.get(entryKey(subject.list, subject.name))
       : subject?.kind === 'env' ? await declaredEnvKey(subject, owned, readHead)
-      : subject?.kind === 'removed-file' ? await declaredRemovedFile(subject.path, owned, readBase)
+      : subject?.kind === 'removed-file' ? await declaredRemovedFile(subject.path, owned, readHead, readBase)
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
       : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : subject.change === 'alter' ? declaredRouteChange(subject, plans) : declaredRouteRemoval(subject, plans))
       : subject?.kind === 'agent' ? await declaredAgentOf(subject.route, subject.base, facts, subjects, plans, readHead)
@@ -391,8 +391,8 @@ export async function applyPlanDeclarations(
       : subject ? await declarationOf(subject, owned, readHead, presentWhenAdded) : undefined
     if (declaredBy && subject?.kind === 'table') declaredTables.add(`${subject.file}\u0000${subject.table.identifier}`)
     // An edit to a file the plan added is that element's addition in every task that touches it.
-    const code = declaredBy && subject?.kind === 'file' && subject.edited ? 'file-added' : fact.code
-    const judged = declaredBy ? { ...fact, code, lane: FACT_CLASSES[code].lowest, declaredBy, ...(code !== fact.code ? { message: `${fact.message}: absent when the plan's approval was recorded, so its addition`, planAddition: true as const } : {}) } : fact
+    const code = declaredBy && subject?.kind === 'file' && subject.edited ? 'file-added' : declaredBy && subject?.kind === 'removed-file' ? 'file-removed' : fact.code
+    const judged = declaredBy ? { ...fact, code, lane: FACT_CLASSES[code].lowest, declaredBy, ...(code === 'file-added' && code !== fact.code ? { message: `${fact.message}: absent when the plan's approval was recorded, so its addition`, planAddition: true as const } : {}) } : fact
     result.push(judged)
     if (subject) resultSubjects.set(judged, subject)
   }
@@ -825,12 +825,29 @@ function planDroppedFiles(plan: PlanDraft): Map<string, { id: string; name: stri
 }
 
 /**
+ * Whether the file is the class `name` and nothing else a reader would miss once it is gone: imports with names, type
+ * declarations, and the class exported as itself. A second class, a top-level call (`registerJob()`) or another value
+ * export leaves with the file, and an auto-discovered listener or job is imported by nothing that would fail.
+ */
+function holdsOnlyClass(ast: File, name: string): boolean {
+  const declaration = exportedClass(ast, name)
+  if (!declaration) return false
+  return ast.program.body.every((node) => {
+    if (node.type === 'ImportDeclaration') return node.specifiers.length > 0 || node.importKind === 'type'
+    if (node.type === 'TSTypeAliasDeclaration' || node.type === 'TSInterfaceDeclaration') return true
+    if ((node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration') && extractClassDeclaration(node) === declaration) return true
+    return node.type === 'ExportNamedDeclaration' && !node.source && (node.declaration?.type === 'TSTypeAliasDeclaration' || node.declaration?.type === 'TSInterfaceDeclaration')
+  })
+}
+
+/**
  * A source file the change deletes, declared by the one open plan whose `drop` element owns its path, when the base's
  * file declared that element's class or export. What still imports the file fails the gate; what it guarded is a route fact.
  */
 async function declaredRemovedFile(
   path: string,
   owned: ReadonlyArray<{ open: OpenPlan; files: Map<string, DeclaredFile>; paths: Set<string> }>,
+  readHead: (path: string) => Promise<string | null>,
   readBase: (path: string) => Promise<string | null>,
 ): Promise<string | undefined> {
   const claims = owned.filter(({ paths }) => paths.has(path))
@@ -838,10 +855,15 @@ async function declaredRemovedFile(
   const { open, files } = claims[0]!
   const dropped = planDroppedFiles(open.plan).get(path)
   // The plan's scaffold or one of its commands writing the path is another claim on it.
-  if (!dropped || files.has(path) || [...planCommandClaims(open.plan).values()].some((paths) => paths === 'all' || paths.has(path))) return undefined
+  if (!dropped || files.has(path) || [...planCommandClaims(open.plan).values()].some((paths) => paths !== 'all' && paths.has(path))) return undefined
   const text = await readBase(path)
   const ast = text === null ? null : parseSourceFile(text, path)
-  if (!ast || (!declaredExports(ast)?.includes(dropped.name) && !exportedClass(ast, dropped.name))) return undefined
+  if (!ast || !holdsOnlyClass(ast, dropped.name)) return undefined
+  // An importer of the module resolves to a twin or a directory index the change leaves behind, which nothing judged.
+  const stem = path.replace(SOURCE_EXTENSION, '')
+  for (const extension of TWIN_EXTENSIONS) {
+    if ((await readHead(`${stem}${extension}`)) !== null || (await readHead(`${stem}/index${extension}`)) !== null) return undefined
+  }
   return `${open.file}#${dropped.id}`
 }
 
