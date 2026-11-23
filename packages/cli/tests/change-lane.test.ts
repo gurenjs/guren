@@ -815,6 +815,24 @@ export class CommentPolicy extends Policy {
     expect(renderChangeLane(report)).toContain("whose change added the file since was not checked")
   })
 
+  test("should read an edit to a controller the plan added as its addition, and keep a validator's edit at medium", async () => {
+    const controller = readFileSync(join(import.meta.dir, 'fixtures/change-routes/CommentController.ts.txt'), 'utf8')
+    const validator = "import { z } from 'zod'\n\nexport const CommentPayloadSchema = z.object({ body: z.string().min(1) })\n"
+    const { repo } = await stampedPlanRepo()
+    const base = await commit(repo, { 'app/Http/Controllers/CommentController.ts': controller, 'app/Http/Validators/CommentValidator.ts': validator })
+    const head = await commit(repo, {
+      'app/Http/Controllers/CommentController.ts': controller.replace("throw HttpException.notImplemented('CommentController.destroy is planned and not written yet')", 'await comment.delete()\n    return this.redirect(`/posts/${comment.postId}`)'),
+      // A route may parse with it by hand, which no record names.
+      'app/Http/Validators/CommentValidator.ts': validator.replace('z.string().min(1)', 'z.any()'),
+    })
+    const report = await laneRecorded(repo, base, head)
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane, fact.files[0], fact.declaredBy])).toEqual([
+      ['file-added', 'low', 'app/Http/Controllers/CommentController.ts', 'docs/plans/comments/plan.json#controller.comments,action.comments.store,action.comments.destroy'],
+      ['source-edited', 'medium', 'app/Http/Validators/CommentValidator.ts', undefined],
+    ])
+  })
+
   test("should keep an edit at medium where the commit recording the plan's approval had the file, or the head is not what the plan declares", async () => {
     const edit = { 'app/Models/Comment.ts': MODEL.replace('{}', '{\n  static fillable = [\'body\']\n}') }
     const edited = (report: ChangeLaneReport) => report.facts.map((fact) => [fact.code, fact.lane, fact.declaredBy])

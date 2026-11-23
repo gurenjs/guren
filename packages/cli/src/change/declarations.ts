@@ -673,9 +673,19 @@ async function declarationOf(
     return id ? `${open.file}#${id}` : undefined
   }
   const declared = files.get(subject.path)!
+  if (subject.kind === 'file' && subject.edited && !editLowers(declared, subject.path)) return undefined
   // A command of another plan that no reading places may write any declared path, the scaffold's included.
   if (owned.some((entry) => entry.open !== open && claimsEveryCommandPath(entry.open.plan))) return undefined
   return (await holdsDeclared(open.plan, declared, subject.path, readHead)) ? `${open.file}#${declared.elements.join(',')}` : undefined
+}
+
+/**
+ * The files whose edit may read as the plan's addition: a controller, whose actions the records read, and a model, whose
+ * writes the audit reads. A validator a route parses by hand, a resource or a side effect has no reader of its edit.
+ */
+function editLowers(declared: DeclaredFile, path: string): boolean {
+  if (declared.check.kind === 'controller') return true
+  return declared.check.kind === 'exports' && path.startsWith(`${MODELS_DIR}/`) && declared.elements.some((id) => id.startsWith('model.'))
 }
 
 /** Whether the head's file at `path` is what the plan declares there: its exports, and the check its kind takes. */
