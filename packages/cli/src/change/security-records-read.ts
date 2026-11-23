@@ -172,21 +172,23 @@ class Declarations {
   /**
    * What `name` in `file` is, followed through imports, re-exports and `export *` to the module declaring it:
    * `file#name` for a class (a model), else that with the digest of the declaration, since `const Subject = Post`
-   * names another class once its right side changes. A hop it cannot follow is its leaf.
+   * names another class once its right side changes. `undefined` for a hop it cannot follow, which the caller digests:
+   * a leaf names a file or a specifier without the class, so both sides could read alike.
    */
-  async identity(file: string, name: string): Promise<string> {
+  async identity(file: string, name: string): Promise<string | undefined> {
     const found = await this.locate(file, name)
-    if ('leaf' in found) return found.leaf
+    if ('leaf' in found) return undefined
     const at = `${this.relative(found.module.path)}#${found.name}`
     return declaresClass(found.module.statements.get(found.name)) ? at : `${at}:${await this.of(found.module.path, found.name)}`
   }
 
   /** `ns.member` where `file` imports `ns` as a namespace: the member as the module it names exports it. */
-  async memberIdentity(file: string, namespace: string, member: string): Promise<string> {
+  async memberIdentity(file: string, namespace: string, member: string): Promise<string | undefined> {
     const module = await this.module(file)
     const target = module && !('unparsed' in module) ? this.target(module, namespace) : undefined
-    if (!target || 'leaf' in target || target.name !== '*') return `namespace:${namespace}.${member}`
-    return this.identity(target.file, member)
+    // A package or an alias the reader does not follow: its specifier and the member.
+    if (target && 'leaf' in target) return `${target.leaf}#${member}`
+    return target?.name === '*' ? this.identity(target.file, member) : undefined
   }
 
   /** The module that declares `name` as reached from `file`, following re-exports and `export *`; a leaf where it stops. */
@@ -319,11 +321,18 @@ class Declarations {
     const starred: string[] = []
     for (const statement of body) {
       const slice = text.slice(statement.start ?? 0, statement.end ?? text.length)
-      if (statement.type === 'ExportAllDeclaration') { starred.push(statement.source.value); continue }
+      // `export * as Models from` binds one name to the whole module, which a reader follows as a namespace.
+      if (statement.type === 'ExportAllDeclaration') {
+        const exported = (statement as { exported?: { type: string; name?: string; value?: string } | null }).exported
+        if (exported) reexported.set(exported.type === 'Identifier' ? exported.name! : exported.value!, { source: statement.source.value, name: '*' })
+        else starred.push(statement.source.value)
+        continue
+      }
       if (statement.type === 'ExportNamedDeclaration' && statement.source) {
         for (const specifier of statement.specifiers) {
-          if (specifier.type !== 'ExportSpecifier') continue
           const exported = specifier.exported.type === 'Identifier' ? specifier.exported.name : specifier.exported.value
+          if (specifier.type === 'ExportNamespaceSpecifier') reexported.set(exported, { source: statement.source.value, name: '*' })
+          if (specifier.type !== 'ExportSpecifier') continue
           reexported.set(exported, { source: statement.source.value, name: specifier.local.name })
         }
         continue
@@ -482,7 +491,9 @@ async function actionRecord(
     const members = namespaceMembers(parsed?.program, (name) => imports.get(name)?.kind === 'namespace' && !hidden(name))
     for (const { namespace, member } of members) {
       const resolved = await declarations.memberIdentity(controllerFile, namespace, member)
-      if (!classes.includes(resolved)) classes.push(resolved)
+      // An answer the reader cannot vouch for is digested, so an unknown shape reads as a change rather than as the same.
+      if (resolved === undefined) unfollowed.push(`${namespace}.${member}`)
+      else if (!classes.includes(resolved)) classes.push(resolved)
     }
     const viaNamespace = new Set(members.map((entry) => entry.namespace))
     for (const name of (parsed?.names ?? []).filter((entry) => !viaNamespace.has(entry))) {
@@ -492,13 +503,14 @@ async function actionRecord(
       if (binds(name) && (bodyBindings === undefined || bodyBindings.has(name))) unfollowed.push(name)
       else if (binds(name)) {
         const resolved = await subjectClass(cwd, controllerFile, imports, name, declarations)
-        if (!classes.includes(resolved)) classes.push(resolved)
+        if (resolved === undefined) unfollowed.push(name)
+        else if (!classes.includes(resolved)) classes.push(resolved)
       }
     }
     // A tuple's class position is read only as a name or a namespace member the file binds; anything else is the body's.
     const first = tupleClass(parsed?.program)
     if (first !== undefined && !classPosition(first, (name) => binds(name) && !hidden(name))) unfollowed.push(nodeText(`__args__(${subject})`, first as { start?: number; end?: number }))
-    // How a call that is not unconditional is reached: the statements up to the one holding it, or the whole body.
+    // How a call that is not unconditional is reached: the whole action, as syntax.
     const reach = member === 'authorize' && !unconditional.has(index) ? reachDigest(block, rawBody) : undefined
     authorizes.push({ member, ability, subject, ...(classes.length > 0 ? { classes } : {}), ...(member === 'authorize' && unconditional.has(index) ? { unconditional: true as const } : {}), ...(reach ? { reach } : {}) })
   }
@@ -565,7 +577,7 @@ function declaredNames(block: unknown): Set<string> {
 }
 
 /** What a name the controller file binds is, followed to the module declaring it (`Declarations.identity()`); a package import by its specifier and name. */
-async function subjectClass(cwd: string, file: string, imports: Map<string, ImportEntry>, name: string, declarations: Declarations): Promise<string> {
+async function subjectClass(cwd: string, file: string, imports: Map<string, ImportEntry>, name: string, declarations: Declarations): Promise<string | undefined> {
   const entry = imports.get(name)
   if (entry && specifierBase(cwd, file, entry.source) === null) return `${entry.source}#${entry.kind === 'named' ? entry.imported : entry.kind === 'default' ? 'default' : '*'}`
   return declarations.identity(file, name)

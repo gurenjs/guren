@@ -465,6 +465,10 @@ ${body}
     const namespaced = (target: string) => withController("import * as M from '../../Models/index.js'", '', "    await this.authorize('update', [M.Post, post])", { 'app/Models/index.ts': `export { Post } from '${target}'\n` })
     expect(await read('namespace-model', namespaced('./Post.js'))).toMatchObject({ authorizes: [{ classes: ['app/Models/Post.ts#Post'] }] })
     expect(await read('namespace-other', namespaced('../Other/Post.js'))).toMatchObject({ authorizes: [{ classes: ['app/Other/Post.ts#Post'] }] })
+    // A namespace the reader does not follow keeps its specifier; a hop that ends in a file without the class is digested.
+    expect(await read('namespace-package', withController("import * as M from 'zod'", '', "    await this.authorize('update', [M.ZodString, post])"))).toMatchObject({ authorizes: [{ classes: ['package:zod#ZodString'] }] })
+    const starAs = withController("import { Models } from '../../Models/barrel.js'", '', "    await this.authorize('update', [Models.Post, post])", { 'app/Models/barrel.ts': "export * as Models from './index.js'\n", 'app/Models/index.ts': "export { Post } from './Post.js'\n" })
+    expect(await read('namespace-star-as', starAs)).toMatchObject({ unseen: expect.any(String) })
   })
 
   test('digests the whole action for a call that is not unconditional, so a later statement acting on it counts', async () => {
