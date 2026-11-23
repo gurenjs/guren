@@ -1028,6 +1028,35 @@ describe('applyPlanDeclarations on a file a command writes', () => {
     expect(planDeclaredFiles(scaffolded).has(policyPath)).toBe(false)
   })
 
+  test('should keep a path a command of the plan may also write, though its call does not read', async () => {
+    const plan = withCommands(['guren make:job SendDigest', 'guren make:job SendDigest --force --verbose'])
+    expect((await judge([{ file: PLAN_FILE, plan }], job.path, { [job.path]: job.contents })).lane).toBe('medium')
+  })
+
+  test("should keep a module path a second open plan's element claims, and a provider a second plan's providers element names", async () => {
+    const path = jobFile('SendDigest', { root: 'billing' }).path
+    const effect = (document: Record<string, any>) => {
+      document.sideEffects = [{ id: 'job.digest', change: { kind: 'add' }, kind: 'job', name: 'SendDigestJob', module: 'billing', trigger: 'nightly', description: 'd' }]
+    }
+    const provider = providerFile('Queue')
+    const providers = commentsPlan((document) => {
+      document.planVersion = 2
+      document.providers = [{ id: 'provider.queue', change: { kind: 'add' }, className: 'QueueProvider', purpose: 'binds the queue' }]
+    })
+
+    expect((await judge([{ file: PLAN_FILE, plan: withCommands(['guren make:job SendDigest --module billing'], effect) }, { file: 'other.plan.json', plan: commentsPlan(effect) }], path, { [path]: jobFile('SendDigest', { root: 'billing' }).contents })).lane).toBe('medium')
+    expect((await judge([{ file: PLAN_FILE, plan: withCommands(['guren make:provider Queue']) }, { file: 'other.plan.json', plan: providers }], provider.path, { [provider.path]: provider.contents })).lane).toBe('medium')
+  })
+
+  test('should give a command no element the scaffold writes elsewhere, as a validator named after another entity than its model', () => {
+    const plan = withCommands(['guren make:validator Reply'], (document) => {
+      const validator = document.validators.find((entry: { name: string }) => entry.name === 'CommentPayloadSchema')
+      validator.name = 'ReplyPayloadSchema'
+    })
+
+    expect(planDeclaredFiles(plan).has('app/Http/Validators/ReplyValidator.ts')).toBe(false)
+  })
+
   test('should keep a file with a twin of another extension beside it', async () => {
     const twin = job.path.replace(/\.ts$/, '.js')
     expect((await judge([{ file: PLAN_FILE, plan: withCommands(['guren make:job SendDigest']) }], job.path, { [job.path]: job.contents, [twin]: 'export {}\n' })).lane).toBe('medium')

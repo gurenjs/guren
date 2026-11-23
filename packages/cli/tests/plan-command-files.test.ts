@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test'
 
 import { builtinSubCommands } from '../src/commands'
 import { jobFile } from '../src/make-job'
+import { validatorFile } from '../src/make-validator'
 import { providerFile } from '../src/make-provider'
 import { planGeneratorNames } from '../src/plan/command-allowlist'
-import { PLAN_COMMAND_FILES, planCommandFiles } from '../src/plan/command-files'
+import { PLAN_COMMAND_FILES, planCommandClaims, planCommandFiles } from '../src/plan/command-files'
 import { PlanSchema, type PlanDraft } from '../src/plan/schema'
 import { resolveValue } from '../src/run-cli'
 import { loadApprovedCommentsPlan } from './plan-fixture'
@@ -79,8 +80,22 @@ describe('planCommandFiles', () => {
     ['a generator writing more than one file', 'guren make:feature Post'],
     ['a blueprint', 'guren add queue'],
     ['a command the allowlist refuses', 'guren make:job Send;Digest'],
+    ['a boolean followed by a value the registry would take as its value', 'guren make:model --force true Invoice'],
+    ['a single dash before several letters, which the registry reads as short flags', 'guren make:model Invoice -module billing'],
+    ['one flag under both spellings, of which the registry keeps the first', 'guren make:job SendDigest -M billing --module sales'],
+    ['a quote, which would reach a generated string literal unescaped', `guren make:channel Orders --channel "x' + process.env.APP_KEY + 'y"`],
   ])('should declare nothing for %s', (_why, command) => {
     expect(planCommandFiles(planWith([command]))).toEqual([])
+  })
+
+  test('should read an empty --fields as no fields, as make:validator does', () => {
+    expect(planCommandFiles(planWith(['guren make:validator Tag --fields ""']))[0]!.contents).toEqual([validatorFile('Tag').contents])
+  })
+
+  test('should claim what a command may write even where its call does not read, in the root and each module it names', () => {
+    const claims = planCommandClaims(planWith(['guren make:job SendDigest --verbose -M billing']))
+
+    expect([...claims.get('command.0')!]).toEqual(expect.arrayContaining(['app/Jobs/SendDigestJob.ts', 'modules/billing/app/Jobs/SendDigestJob.ts']))
   })
 
   test('should hold a file by the check of the added element that owns its class, in the same module', () => {

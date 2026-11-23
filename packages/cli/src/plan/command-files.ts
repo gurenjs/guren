@@ -88,7 +88,8 @@ export const PLAN_COMMAND_FILES: Readonly<Record<string, PlanCommandFileRule>> =
     files: (name, flags, options) => {
       const fields = flags.string('fields', 'F')
       try {
-        return [validatorFile(name, { ...options, fields: fields === undefined ? undefined : parseFieldsString(fields) })]
+        // As `make:validator` reads it: an empty `--fields` is no fields, where `parseFieldsString('')` gives the defaults.
+        return [validatorFile(name, { ...options, fields: fields ? parseFieldsString(fields) : undefined })]
       } catch {
         return undefined
       }
@@ -118,8 +119,25 @@ export interface PlanCommandFile {
   check: PlanCommandFileCheck
 }
 
+/** A flag's long name for each alias the registry gives it: citty keeps whichever spelling comes first, the reader the long one. */
+const ALIASES: Readonly<Record<string, string>> = { M: 'module', f: 'force', e: 'event', m: 'model', F: 'fields', p: 'private' }
+
+/**
+ * Whether the words read as the registry's parser reads them: a boolean followed by `true` or `false` takes
+ * it as its value there, and a single dash before several letters is a cluster of short flags. A quote inside
+ * an argument would reach a generated string literal unescaped.
+ */
+function readsAsCitty(rule: PlanCommandFileRule, args: readonly string[]): boolean {
+  return args.every((word, index) => {
+    if (/['"`]/u.test(word) || /^-[^-]{2,}/u.test(word.split('=')[0]!)) return false
+    const flag = word.replace(/^--?/u, '')
+    return !(word.startsWith('-') && rule.booleanFlags.includes(flag) && /^(?:true|false)$/u.test(args[index + 1] ?? ''))
+  })
+}
+
 /** The flags as the generator's command reads them, or `undefined` when the call sets one the rule does not list. */
 function readFlags(rule: PlanCommandFileRule, call: PlanGeneratorCall): CommandFlags | undefined {
+  for (const [alias, long] of Object.entries(ALIASES)) if (call.flags.has(alias) && call.flags.has(long)) return undefined
   for (const [flag, value] of call.flags) {
     if (rule.valueFlags.includes(flag) ? typeof value !== 'string' : !rule.booleanFlags.includes(flag) || (value !== true && value !== 'true')) return undefined
   }
@@ -161,7 +179,7 @@ export function planCommandFiles(plan: PlanDraft): PlanCommandFile[] {
   return plan.commands.flatMap((command) => {
     const verdict = judgePlanCommand(command.command)
     const rule = verdict.allowed ? PLAN_COMMAND_FILES[verdict.subcommand] : undefined
-    if (!verdict.allowed || rule === undefined) return []
+    if (!verdict.allowed || rule === undefined || !readsAsCitty(rule, verdict.args)) return []
     const call = readPlanGeneratorCall({ valueFlags: rule.valueFlags, positional: true, targets: () => ({ writes: [], imports: [] }) }, verdict.args)
     const flags = call && readFlags(rule, call)
     if (!call?.name || !flags) return []
@@ -181,4 +199,38 @@ export function planCommandFiles(plan: PlanDraft): PlanCommandFile[] {
     const { ids, check } = owningElements(plan, targets, moduleFlag === undefined ? undefined : kebabCase(moduleFlag))
     return [{ commandId: command.id, elements: ids, path: first.path, contents: written!.map((entry) => entry.contents), check }]
   })
+}
+
+/**
+ * Every path a command of the plan may write, read loosely: each word that is no flag as the name, the
+ * project root and each value given after a module flag as the root. A second command or plan naming one
+ * of these is a claim, whether or not its own call reads.
+ */
+export function planCommandClaims(plan: PlanDraft): Map<string, Set<string>> {
+  const claims = new Map<string, Set<string>>()
+  for (const command of plan.commands) {
+    const verdict = judgePlanCommand(command.command)
+    const rule = verdict.allowed ? PLAN_COMMAND_FILES[verdict.subcommand] : undefined
+    if (!verdict.allowed || rule === undefined) continue
+    const words = verdict.args
+    const roots = new Set<string | undefined>([undefined])
+    words.forEach((word, index) => {
+      const [flag, value] = word.split(/=(.*)/su)
+      if (!/^--?(?:module|M)$/u.test(flag!)) return
+      const root = value ?? words[index + 1]
+      if (root) roots.add(root)
+    })
+    const paths = new Set<string>()
+    for (const name of words.filter((word) => !word.startsWith('-'))) {
+      for (const root of roots) {
+        try {
+          for (const entry of rule.files(name, { string: () => undefined, on: () => false }, root === undefined ? {} : { root }) ?? []) paths.add(entry.path)
+        } catch {
+          // A name or root the generator refuses writes nothing there.
+        }
+      }
+    }
+    claims.set(command.id, paths)
+  }
+  return claims
 }
