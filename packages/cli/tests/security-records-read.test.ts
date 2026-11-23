@@ -104,9 +104,11 @@ import { Post } from '../app/Models/Post.js'
 
 export function registerWebRoutes(router: Router): void {
   router.bind('token', async (value: string) => ({ value }))
+  router.bind('author', [Post, 'slug'])
   router.get('/posts/:post', { name: 'posts.show', bind: { post: [Post, 'slug'] } }, (c) => c.text('ok'))
   router.get('/posts/by-id/:id', { name: 'posts.byId', bind: { id: Post } }, (c) => c.text('ok'))
   router.get('/tokens/:token', { name: 'tokens.show' }, (c) => c.text('ok'))
+  router.get('/authors/:author', { name: 'authors.show', bind: { author: Post } }, (c) => c.text('ok'))
 }
 `,
     })
@@ -118,6 +120,8 @@ export function registerWebRoutes(router: Router): void {
       ['/posts/:post', { post: 'app/Models/Post.ts#Post@slug' }, undefined],
       ['/posts/by-id/:id', { id: 'app/Models/Post.ts#Post' }, undefined],
       ['/tokens/:token', { token: 'resolver' }, 'unread'],
+      // Bound at both levels: the router's model is found by its export in the child, like the route's.
+      ['/authors/:author', { author: 'app/Models/Post.ts#Post+router:app/Models/Post.ts#Post@slug' }, undefined],
     ])
   })
 
