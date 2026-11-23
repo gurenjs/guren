@@ -93,6 +93,8 @@ export interface DeclaredFile {
   check: DeclaredFileCheck
   /** What a plan's command writes there, when no planned element owns it: the file holds only as one of these, as syntax. */
   generated?: string[]
+  /** Written by a command of the plan rather than the scaffold. */
+  fromCommand?: true
 }
 
 /**
@@ -167,10 +169,10 @@ export function planDeclaredFiles(plan: PlanDraft): Map<string, DeclaredFile> {
     const exports = ast ? declaredExports(ast) : undefined
     // A path the scaffold or another command may also write is not one command's, and an element is held to one file:
     // the scaffold's where it writes the element (a validator's file is named after its model, not after it).
-    const shared = [...claims].some(([id, paths]) => id !== file.commandId && paths.has(file.path))
+    const shared = [...claims].some(([id, paths]) => id !== file.commandId && (paths === 'all' || paths.has(file.path)))
     const owned = file.elements.some((id) => scaffolded.has(id) || owners.get(id)! > 1)
     if (files.has(file.path) || shared || owned || !exports || exports.length === 0) files.set(file.path, null)
-    else files.set(file.path, { elements: [file.commandId, ...file.elements], exports, contents: file.contents[0]!, check: file.check, ...(file.check.kind === 'whole' ? { generated: file.contents } : {}) })
+    else files.set(file.path, { elements: [file.commandId, ...file.elements], exports, contents: file.contents[0]!, check: file.check, fromCommand: true, ...(file.check.kind === 'whole' ? { generated: file.contents } : {}) })
   }
   return new Map([...files].filter((entry): entry is [string, DeclaredFile] => entry[1] !== null))
 }
@@ -297,8 +299,13 @@ export function planClaimedPaths(plan: PlanDraft): Set<string> {
     ...plan.sideEffects.flatMap((effect) => inRoot(effect, [sideEffectFilePath(effect)])),
     ...(plan.providers ?? []).map((provider) => `${PROVIDERS_DIR}/${provider.className}.ts`),
     ...(plan.config ?? []).map((entry) => `config/${entry.name}.ts`),
-    ...[...planCommandClaims(plan).values()].flatMap((paths) => [...paths]),
+    ...[...planCommandClaims(plan).values()].flatMap((paths) => (paths === 'all' ? [] : [...paths])),
   ])
+}
+
+/** Whether a command of the plan may write files no reading places, which claims every path a command declares. */
+function claimsEveryCommandPath(plan: PlanDraft): boolean {
+  return [...planCommandClaims(plan).values()].includes('all')
 }
 
 /** Whether any model of the plan, whatever its change, names this table by SQL name in its module. */
@@ -651,6 +658,8 @@ async function declarationOf(
     return id ? `${open.file}#${id}` : undefined
   }
   const declared = files.get(subject.path)!
+  // A command of another plan that no reading places may write any path a command declares.
+  if (declared.fromCommand && owned.some((entry) => entry.open !== open && claimsEveryCommandPath(entry.open.plan))) return undefined
   return (await holdsDeclared(open.plan, declared, subject.path, readHead)) ? `${open.file}#${declared.elements.join(',')}` : undefined
 }
 

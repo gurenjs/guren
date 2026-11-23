@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 
+import { parseArgs, type ArgsDef } from 'citty'
+
 import { builtinSubCommands } from '../src/commands'
 import { jobFile } from '../src/make-job'
+import { listenerFile } from '../src/make-listener'
 import { validatorFile } from '../src/make-validator'
 import { providerFile } from '../src/make-provider'
-import { planGeneratorNames } from '../src/plan/command-allowlist'
-import { PLAN_COMMAND_FILES, planCommandClaims, planCommandFiles } from '../src/plan/command-files'
+import { judgePlanCommand, planGeneratorNames } from '../src/plan/command-allowlist'
+import { PLAN_COMMAND_FILES, PLAN_COMMAND_FLAG_ALIASES, planCommandClaims, planCommandFiles } from '../src/plan/command-files'
 import { PlanSchema, type PlanDraft } from '../src/plan/schema'
 import { resolveValue } from '../src/run-cli'
 import { loadApprovedCommentsPlan } from './plan-fixture'
@@ -41,6 +44,17 @@ describe('PLAN_COMMAND_FILES', () => {
       for (const flag of rule.booleanFlags) if (!registry.boolean.includes(flag)) mismatches.push(`${name}: --${flag} is no boolean flag of the registry`)
     }
     expect(mismatches).toEqual([])
+  })
+
+  test("should name each alias the registry gives a flag the table reads, with its long name", async () => {
+    const expected: Record<string, string> = {}
+    for (const name of Object.keys(PLAN_COMMAND_FILES)) {
+      const command = (await resolveValue(builtinSubCommands[name as keyof typeof builtinSubCommands])) as { args?: unknown }
+      for (const [key, definition] of Object.entries(((await resolveValue(command.args as never)) ?? {}) as Record<string, ArgDefinition>)) {
+        for (const alias of [definition.alias ?? []].flat()) expected[alias] = key
+      }
+    }
+    expect(PLAN_COMMAND_FLAG_ALIASES).toEqual(expected)
   })
 })
 
@@ -84,6 +98,10 @@ describe('planCommandFiles', () => {
     ['a single dash before several letters, which the registry reads as short flags', 'guren make:model Invoice -module billing'],
     ['one flag under both spellings, of which the registry keeps the first', 'guren make:job SendDigest -M billing --module sales'],
     ['a quote, which would reach a generated string literal unescaped', `guren make:channel Orders --channel "x' + process.env.APP_KEY + 'y"`],
+    ['an empty `=` value, after which the registry takes the next word', 'guren make:job SendDigest --module= billing'],
+    ['a value flag followed by a flag, which the registry leaves empty', 'guren make:listener NotifyAuthor --event --force'],
+    ['a cluster of short flags', 'guren make:job SendDigest -fM billing'],
+    ['`--`, after which every word is a name', 'guren make:model Invoice -- --force'],
   ])('should declare nothing for %s', (_why, command) => {
     expect(planCommandFiles(planWith([command]))).toEqual([])
   })
@@ -93,9 +111,52 @@ describe('planCommandFiles', () => {
   })
 
   test('should claim what a command may write even where its call does not read, in the root and each module it names', () => {
-    const claims = planCommandClaims(planWith(['guren make:job SendDigest --verbose -M billing']))
+    const claims = planCommandClaims(planWith(['guren make:job SendDigest --verbose -M billing', 'guren make:job Other --module= sales', 'guren make:model -- --force']))
 
-    expect([...claims.get('command.0')!]).toEqual(expect.arrayContaining(['app/Jobs/SendDigestJob.ts', 'modules/billing/app/Jobs/SendDigestJob.ts']))
+    expect([...(claims.get('command.0') as Set<string>)]).toEqual(expect.arrayContaining(['app/Jobs/SendDigestJob.ts', 'modules/billing/app/Jobs/SendDigestJob.ts']))
+    expect([...(claims.get('command.1') as Set<string>)]).toContain('modules/sales/app/Jobs/OtherJob.ts')
+    expect([...(claims.get('command.2') as Set<string>)]).toContain('app/Models/Force.ts')
+  })
+
+  test('should claim every path for a generator writing more than its file, and for a command the allowlist refuses', () => {
+    const claims = planCommandClaims(planWith(['guren make:feature Post', 'guren add cache', 'bun run seed', 'guren make:adr "A decision"']))
+
+    expect([...claims]).toEqual([['command.0', 'all'], ['command.1', 'all'], ['command.2', 'all']])
+  })
+
+  test('should declare only what the registry would parse the same way, over every short call', async () => {
+    const definitions = async (name: string): Promise<ArgsDef> => {
+      const command = (await resolveValue(builtinSubCommands[name as keyof typeof builtinSubCommands])) as { args?: unknown }
+      return ((await resolveValue(command.args as never)) ?? {}) as ArgsDef
+    }
+    const words = ['SendDigest', 'billing', 'true', '--force', '-f', '--module', '-M', '--module=', '--module=billing', '--', '-fM', '--event', '-e', '--event=Posted', 'Posted']
+    const mismatches: string[] = []
+    for (const name of ['make:job', 'make:listener']) {
+      const args = await definitions(name)
+      const calls: string[][] = []
+      const grow = (call: string[]): void => {
+        if (call.includes('SendDigest')) calls.push(call)
+        if (call.length < 3) for (const word of words) grow([...call, word])
+      }
+      grow([])
+      for (const call of calls) {
+        const command = `guren ${name} ${call.join(' ')}`
+        if (!judgePlanCommand(command).allowed) continue
+        const [read] = planCommandFiles(planWith([command]))
+        if (!read) continue
+        const parsed = parseArgs(call, args) as Record<string, unknown>
+        // As `defineCommand()` normalizes it: the last of a repeated flag.
+        const value = (key: string): string | undefined => {
+          const raw = parsed[key]
+          const last = Array.isArray(raw) ? raw.at(-1) : raw
+          return typeof last === 'string' && last !== '' ? last : undefined
+        }
+        const options = { root: value('module') }
+        const real = name === 'make:job' ? jobFile(String(parsed.name), options) : listenerFile(String(parsed.name), { ...options, event: value('event') })
+        if (real.path !== read.path || !read.contents.includes(real.contents)) mismatches.push(`${command}: writes ${real.path}, declared ${read.path}`)
+      }
+    }
+    expect(mismatches).toEqual([])
   })
 
   test('should hold a file by the check of the added element that owns its class, in the same module', () => {

@@ -1048,6 +1048,15 @@ describe('applyPlanDeclarations on a file a command writes', () => {
     expect((await judge([{ file: PLAN_FILE, plan: withCommands(['guren make:provider Queue']) }, { file: 'other.plan.json', plan: providers }], provider.path, { [provider.path]: provider.contents })).lane).toBe('medium')
   })
 
+  test('should keep a file while any open plan carries a command that may write more than one reading places', async () => {
+    const plan = withCommands(['guren make:job SendDigest'])
+    const files = { [job.path]: job.contents }
+
+    expect((await judge([{ file: PLAN_FILE, plan: withCommands(['guren make:job SendDigest', 'guren add cache']) }], job.path, files)).lane).toBe('medium')
+    expect((await judge([{ file: PLAN_FILE, plan }, { file: 'other.plan.json', plan: withCommands(['guren make:feature Post --module billing']) }], job.path, files)).lane).toBe('medium')
+    expect((await judge([{ file: PLAN_FILE, plan }, { file: 'other.plan.json', plan: withCommands(['guren make:adr "A decision"']) }], job.path, files)).lane).toBe('low')
+  })
+
   test('should give a command no element the scaffold writes elsewhere, as a validator named after another entity than its model', () => {
     const plan = withCommands(['guren make:validator Reply'], (document) => {
       const validator = document.validators.find((entry: { name: string }) => entry.name === 'CommentPayloadSchema')
