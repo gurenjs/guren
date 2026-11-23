@@ -105,6 +105,7 @@ async function buildDocsSitemapEntries(): Promise<string> {
   const entries: string[] = [
     sitemapEntry('/'),
     sitemapEntry('/start'),
+    sitemapEntry('/wallpapers'),
     sitemapEntry('/docs', { en: '/docs', ja: '/docs/ja' }),
     sitemapEntry('/docs/ja', { en: '/docs', ja: '/docs/ja' }),
   ]

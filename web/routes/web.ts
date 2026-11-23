@@ -5,10 +5,12 @@ import DocsSearchController, { DocSearchQuerySchema } from '../app/Http/Controll
 import HomeController from '../app/Http/Controllers/HomeController.js'
 import MetaController from '../app/Http/Controllers/MetaController.js'
 import StartController, { StartQuerySchema } from '../app/Http/Controllers/StartController.js'
+import WallpapersController from '../app/Http/Controllers/WallpapersController.js'
 
 export function registerWebRoutes(router: Router): void {
   router.get('/', [HomeController, 'index'])
   router.get('/start', { name: 'start', query: StartQuerySchema }, [StartController, 'index'])
+  router.get('/wallpapers', { name: 'wallpapers' }, [WallpapersController, 'index'])
 
   router.get('/sitemap.xml', [MetaController, 'sitemap'])
   router.get('/llms.txt', [MetaController, 'llms'])

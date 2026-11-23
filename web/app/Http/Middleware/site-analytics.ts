@@ -50,6 +50,7 @@ export function classifyContent(pathname: string): string {
   if (pathname.endsWith('.md')) return 'markdown'
   if (pathname === '/' || pathname === '') return 'home'
   if (pathname === '/start') return 'start'
+  if (pathname === '/wallpapers') return 'wallpapers'
   if (pathname === '/docs' || pathname.startsWith('/docs/')) return 'docs'
   if (pathname === '/blog' || pathname.startsWith('/blog/')) return 'blog'
   return 'other'
