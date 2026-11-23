@@ -63,6 +63,8 @@ export type DeclarationSubject =
   | { kind: 'app-entry'; path: string; list: AppEntryList; name: string }
   /** A key the `defineEnv()` literal of `config/env.ts` gains, with the `Env` import and nothing else. */
   | { kind: 'env'; path: string; key: string }
+  /** A source file the change deletes. */
+  | { kind: 'removed-file'; path: string }
 
 /** Every route the head registers, in registration order, and those of them with no counterpart at the base. */
 export interface HeadRoutes {
@@ -380,6 +382,7 @@ export async function applyPlanDeclarations(
     const declaredBy = subject?.kind === 'table-residue' || subject?.kind === 'routes-entry' ? undefined
       : subject?.kind === 'app-entry' ? registered.get(entryKey(subject.list, subject.name))
       : subject?.kind === 'env' ? await declaredEnvKey(subject, owned, readHead)
+      : subject?.kind === 'removed-file' ? await declaredRemovedFile(subject.path, owned, readBase)
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
       : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : subject.change === 'alter' ? declaredRouteChange(subject, plans) : declaredRouteRemoval(subject, plans))
       : subject?.kind === 'agent' ? await declaredAgentOf(subject.route, subject.base, facts, subjects, plans, readHead)
@@ -805,6 +808,42 @@ function editLowers(declared: DeclaredFile, path: string): boolean {
 }
 
 const MODEL_FILE = new RegExp(`^(?:modules/[^/]+/)?${MODELS_DIR}/`)
+
+/** The root files a plan's `drop` elements own, each with the name its file exports: the path `plan:scaffold` would write it at. */
+function planDroppedFiles(plan: PlanDraft): Map<string, { id: string; name: string } | null> {
+  const files = new Map<string, { id: string; name: string } | null>()
+  // An element of any other change at the path (an `add` of the same name) leaves it to no one.
+  const own = (element: { id: string; module?: string; change: { kind: string } }, path: string, name: string): void => {
+    const dropped = element.change.kind === 'drop' && element.module === undefined
+    files.set(path, files.has(path) || !dropped ? null : { id: element.id, name })
+  }
+  for (const model of plan.models) own(model, `${MODELS_DIR}/${model.name}.ts`, model.name)
+  for (const resource of plan.resources) own(resource, resourceFilePath(resource), resource.name)
+  for (const controller of plan.controllers) own(controller, controllerFilePath(controller), controller.className)
+  for (const effect of plan.sideEffects) own(effect, sideEffectFilePath(effect), effect.name)
+  return files
+}
+
+/**
+ * A source file the change deletes, declared by the one open plan whose `drop` element owns its path, when the base's
+ * file declared that element's class or export. What still imports the file fails the gate; what it guarded is a route fact.
+ */
+async function declaredRemovedFile(
+  path: string,
+  owned: ReadonlyArray<{ open: OpenPlan; files: Map<string, DeclaredFile>; paths: Set<string> }>,
+  readBase: (path: string) => Promise<string | null>,
+): Promise<string | undefined> {
+  const claims = owned.filter(({ paths }) => paths.has(path))
+  if (claims.length !== 1 || owned.some((entry) => claimsEveryCommandPath(entry.open.plan))) return undefined
+  const { open, files } = claims[0]!
+  const dropped = planDroppedFiles(open.plan).get(path)
+  // The plan's scaffold or one of its commands writing the path is another claim on it.
+  if (!dropped || files.has(path) || [...planCommandClaims(open.plan).values()].some((paths) => paths === 'all' || paths.has(path))) return undefined
+  const text = await readBase(path)
+  const ast = text === null ? null : parseSourceFile(text, path)
+  if (!ast || (!declaredExports(ast)?.includes(dropped.name) && !exportedClass(ast, dropped.name))) return undefined
+  return `${open.file}#${dropped.id}`
+}
 
 /** Whether the head's file at `path` is what the plan declares there: its exports, and the check its kind takes. */
 async function holdsDeclared(plan: PlanDraft, declared: DeclaredFile, path: string, readHead: (path: string) => Promise<string | null>): Promise<boolean> {

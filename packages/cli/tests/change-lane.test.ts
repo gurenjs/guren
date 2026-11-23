@@ -1071,6 +1071,40 @@ export class CommentPolicy extends Policy {
     expect(open.facts.map((fact) => [fact.code, fact.lane])).toEqual([['source-edited', 'medium'], ['route-added', 'low'], ['route-added', 'medium']])
   })
 
+  /** The comments plan, approved, also dropping a `Note` model and the `NoteController` that served it. */
+  async function dropPlanRepo(files: Record<string, string>): Promise<{ repo: string; base: string }> {
+    const { repo } = await createRepo({ ...BASE_FILES, ...files })
+    const plan = loadApprovedCommentsPlan() as { models: Array<Record<string, unknown>>; controllers: unknown[] }
+    plan.models.push({ ...plan.models[0], id: 'model.note', name: 'Note', table: 'notes', change: { kind: 'drop', reason: 'comments replace notes' }, dataMigration: { kind: 'none', reason: 'no rows kept' }, columns: [], relationships: [], fillable: [] })
+    plan.controllers.push({ id: 'controller.notes', change: { kind: 'drop', reason: 'comments replace notes' }, className: 'NoteController', actions: [] })
+    const path = join(repo, 'docs/plans/comments/plan.json')
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, JSON.stringify(plan), 'utf8')
+    await approvePlanFile(path)
+    return { repo, base: await commit(repo, {}) }
+  }
+
+  test('should lower a deleted file a drop element of the plan owns, and keep any other deletion at medium', async () => {
+    const note = "import { defineModel } from '@guren/core'\nimport { notes } from '@/db/schema'\n\nexport class Note extends defineModel(notes) {}\n"
+    const controller = "import { Controller } from '@guren/core'\n\nexport default class NoteController extends Controller {}\n"
+    const { repo, base } = await dropPlanRepo({ 'app/Models/Note.ts': note, 'app/Http/Controllers/NoteController.ts': controller, 'app/Models/Other.ts': 'export class Other {}\n', 'app/data/list.json': '[]\n' })
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Note.ts': null, 'app/Http/Controllers/NoteController.ts': null, 'app/Models/Other.ts': null, 'app/data/list.json': null }))
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane, fact.files[0], fact.declaredBy])).toEqual([
+      ['source-removed', 'low', 'app/Http/Controllers/NoteController.ts', 'docs/plans/comments/plan.json#controller.notes'],
+      ['source-removed', 'low', 'app/Models/Note.ts', 'docs/plans/comments/plan.json#model.note'],
+      ['source-removed', 'medium', 'app/Models/Other.ts', undefined],
+      ['non-source-removed', 'medium', 'app/data/list.json', undefined],
+    ])
+  })
+
+  test("should keep a deleted file at medium where the base's file did not declare the dropped element", async () => {
+    const { repo, base } = await dropPlanRepo({ 'app/Models/Note.ts': 'export class Memo {}\n' })
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Note.ts': null }))
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane, fact.declaredBy])).toEqual([['source-removed', 'medium', undefined]])
+  })
+
   test('should declare nothing in a change that writes a plan record', async () => {
     const { repo, base } = await planRepo()
     const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL, 'docs/plans/comments/decisions.json': '{"waivers":[]}' }))
