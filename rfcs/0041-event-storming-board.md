@@ -396,14 +396,15 @@ branches in `createDevCenterHandler()` and the harness skill. No new
 dependency.
 
 M2 also changes `@guren/server`, which owns the mount: the board paths in
-`McpServiceProvider.ts`, the POST route with its `Origin` check, and the CSRF
+`McpServiceProvider.ts` (the status path M3's overlay reads among them, so
+the server changes once), the POST route with its `Origin` check, and the CSRF
 exemption in `packages/server/src/mcp/endpoint.ts`. That is an additive minor
 of `@guren/server`. The two packages version apart, so both pairings have to
 behave. An older CLI under a newer server answers the board paths with 404
 from its own handler. A newer CLI under an older server has no board routes
 mounted, so the Dev Center home reads `/_guren/boards.json` before it shows
-the link, and on a 404 says which `@guren/server` the canvas needs. M1 and M3
-need no server at all.
+the link, and on a 404 says which `@guren/server` the canvas needs. M1 and
+the commands of M3 need no server at all.
 
 ### Phasing
 
