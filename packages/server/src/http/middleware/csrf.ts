@@ -7,7 +7,7 @@ import { defaultCookieSecure, getSessionFromContext, type Session } from './sess
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key'
 import { MessageSigner } from '../../encryption/MessageSigner'
 import { secureCompare } from '../../encryption/Hash'
-import { isDevCenterFeedbackRequest, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '../../mcp/endpoint'
+import { isDevCenterWriteRequest, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '../../mcp/endpoint'
 import { hasBearerHeader } from '../../auth/api-token'
 import { readAgentPrincipal } from '../../internal/agent-principal'
 
@@ -376,7 +376,7 @@ export function createCsrfMiddleware(
       isExcluded(path, exclude)
       || isMcpEndpointRequest(path)
       // Exempt on the MCP endpoint's terms; the route requires the request's own `Origin` instead.
-      || isDevCenterFeedbackRequest(path)
+      || isDevCenterWriteRequest(path)
       || isCookielessAuthEndpoint(path, cookielessAuthEndpoints)
       || isBearerRequestWithoutCookies(ctx)
       || isSeamPrincipalRequest(ctx)

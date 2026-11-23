@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto'
 import { freshApplicationGraph } from './application-graph-fresh'
 import type { GraphResult } from './application-graph'
+import type { BoardOverview } from './board/store'
+import { handleBoardListRequest, handleBoardRequest } from './dev-center-board'
 import { handleEvidenceRequest, serveBrowserScreenshot } from './dev-center-evidence'
-import { browserScreenshotRoute, MCP_APPS_PAGE_PATH, MCP_APPS_SANDBOX_PATH, mcpAppsSandboxOrigin, planEvidenceSlug, planReadinessRoute, planSlugFromPath, reviewRoute, UI_CATALOG_JSON_PATH, UI_CATALOG_PAGE_PATH } from './dev-center-links'
+import { boardRoute, BOARDS_JSON_PATH, BOARDS_PAGE_PATH, boardSlugFromPath, browserScreenshotRoute, MCP_APPS_PAGE_PATH, MCP_APPS_SANDBOX_PATH, mcpAppsSandboxOrigin, planEvidenceSlug, planReadinessRoute, planSlugFromPath, reviewRoute, UI_CATALOG_JSON_PATH, UI_CATALOG_PAGE_PATH } from './dev-center-links'
 import { handleReadinessRequest, type ReadinessRunner } from './dev-center-readiness'
 import { handleReviewRequest } from './dev-center-review'
 import { devCenterShell } from './dev-center-shell'
@@ -15,6 +17,7 @@ export function createDevCenterHandler(options: {
   cwd: string
   graph?: (cwd: string) => Promise<GraphResult>
   plans?: (cwd: string) => Promise<PlanOverview>
+  boards?: (cwd: string) => Promise<BoardOverview>
   readiness?: ReadinessRunner
   uiCatalog?: (cwd: string, viteUrl: string | undefined) => Promise<UiCatalog>
   /** The app's Vite dev server, which renders the catalog's preview. */
@@ -53,6 +56,8 @@ export function createDevCenterHandler(options: {
       if (review) return handleReviewRequest(options.cwd, request, review)
       const readiness = planReadinessRoute(path)
       if (readiness) return handleReadinessRequest(options.cwd, request, readiness, options.readiness)
+      const board = boardRoute(path)
+      if (board) return handleBoardRequest(options.cwd, request, board)
       if (request.method !== 'GET') return new Response('Method not allowed', { status: 405, headers: { ...headers, Allow: 'GET' } })
       if (path === MCP_APPS_SANDBOX_PATH) return serveMcpAppsSandbox(request)
       if (path === '/_guren/graph.json') {
@@ -67,12 +72,14 @@ export function createDevCenterHandler(options: {
         try { return Response.json(await loadPlans(options.cwd), { headers }) }
         catch { return Response.json({ schemaVersion: 1, error: { code: 'read-failed', message: 'Plans could not be read.' } }, { headers, status: 503 }) }
       }
+      if (path === BOARDS_JSON_PATH) return handleBoardListRequest(options.cwd, options.boards)
       if (path === UI_CATALOG_JSON_PATH) {
         try { return Response.json(await loadUiCatalog(options.cwd, viteUrl()), { headers }) }
         catch { return Response.json({ schemaVersion: 1, error: { code: 'read-failed', message: 'The copied components could not be read.' } }, { headers, status: 503 }) }
       }
       // A plan page is the same shell; the page looks its slug up in plans.json and never reads a path from it.
       const page = path === '/_guren' || path === '/_guren/' || path === UI_CATALOG_PAGE_PATH || path === MCP_APPS_PAGE_PATH || planSlugFromPath(path) !== undefined
+        || path === BOARDS_PAGE_PATH || boardSlugFromPath(path) !== undefined
       if (!page) return new Response('Not found', { status: 404, headers })
       const html = devCenterShell()
       const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)]

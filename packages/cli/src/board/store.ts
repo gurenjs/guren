@@ -22,6 +22,17 @@ export const BOARD_LOCK_DIR = '.guren/boards'
 const LOCK_WAIT_MS = 5000
 const LOCK_RETRY_MS = 50
 
+/** Why a board could not be read or written, for a caller that answers each with its own status. */
+export class BoardError extends CliError {
+  constructor(
+    readonly code: 'missing' | 'unreadable' | 'locked' | 'invalid',
+    message: string,
+  ) {
+    super(message)
+    this.name = 'BoardError'
+  }
+}
+
 export function boardPath(appRoot: string, slug: string): string {
   return join(appRoot, boardFile(slug))
 }
@@ -50,8 +61,8 @@ async function loadBoard(appRoot: string, slug: string): Promise<BoardReading> {
 
 async function requireBoard(appRoot: string, slug: string): Promise<{ board: Board }> {
   const reading = await loadBoard(appRoot, slug)
-  if ('missing' in reading) throw new CliError(`No board at ${boardFile(slug)}. Create it with: guren board:new "<title>" --slug ${slug}`)
-  if ('unreadable' in reading) throw new CliError(reading.unreadable)
+  if ('missing' in reading) throw new BoardError('missing', `No board at ${boardFile(slug)}. Create it with: guren board:new "<title>" --slug ${slug}`)
+  if ('unreadable' in reading) throw new BoardError('unreadable', reading.unreadable)
   return reading
 }
 
@@ -148,7 +159,7 @@ async function withBoardLock<T>(appRoot: string, slug: string, waitMs: number, r
     if (Date.now() >= deadline) {
       const who = holder === undefined ? 'another process' : `process ${holder}`
       const lock = `${BOARD_LOCK_DIR}/${slug}.lock`
-      throw new CliError(`${boardFile(slug)} is being written by ${who} (${lock}). Try again once it has finished; if nothing is writing the board, delete ${lock}.`)
+      throw new BoardError('locked', `${boardFile(slug)} is being written by ${who} (${lock}). Try again once it has finished; if nothing is writing the board, delete ${lock}.`)
     }
     await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS))
   }
@@ -180,7 +191,7 @@ export async function applyBoardOpsFile(
     const { board } = await requireBoard(appRoot, slug)
     const result = applyBoardOps(board, ops)
     const checked = BoardSchema.safeParse(result.board)
-    if (!checked.success) throw new CliError(`The operations would leave ${file} invalid, so nothing was written:\n${formatSchemaIssues(checked.error)}`)
+    if (!checked.success) throw new BoardError('invalid', `The operations would leave ${file} invalid, so nothing was written:\n${formatSchemaIssues(checked.error)}`)
     const next = serializeBoard(checked.data)
     // Against the board as read, not its bytes: a list that changes nothing never reformats a hand-edited file.
     const changed = next !== serializeBoard(board)

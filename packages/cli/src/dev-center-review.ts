@@ -1,6 +1,6 @@
 /**
  * The plan review in the Dev Center (RFC 0030 §8, served mode): the page `plan:render` wrote, served
- * at `/_guren/plans/<slug>/review`, and `/_guren/plans/<slug>/feedback`, the Dev Center's one write.
+ * at `/_guren/plans/<slug>/review`, and `/_guren/plans/<slug>/feedback`, the one write that records a decision.
  * A slug is looked up among the discovered plans, never joined into a path.
  */
 
