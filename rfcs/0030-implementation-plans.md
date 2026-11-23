@@ -1495,7 +1495,7 @@ controllers, routes, their mount, and side effects.
   route files would change route existence, and with it every approved plan's
   freshness stamps. So before `--mount` the actions read `present` and the
   routes `planned`; after it the routes, their actions and the validators they
-  use read `wired`. A binding's lookup column is unread.
+  use read `wired`. A binding's lookup column is unread (read since, see the `plan:status` amendment to §6).
 - `guren check` warns on an unmounted `routes/*.ts`, and that warning fails
   `guren gate`, which the `Stop` hook runs on every stop between the scaffold
   and the `http` step. An unmounted file the scaffold of an approved, unclosed
