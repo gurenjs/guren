@@ -3207,9 +3207,13 @@ back, and differs from the text above in four places:
   says which file it used; an explicit `--feedback` still wins. The `plan-write`
   skill reads the comments from the same file.
 
-The route is the Dev Center's first write, and the only one: it accepts the
+The route is the Dev Center's first write, ~~and the only one~~: it accepts the
 feedback document and nothing else, runs no command, and writes under
 `.guren/` only. Approval stays `plan:approve`.
+
+**Amended by RFC 0041 §2 (2026-11-23):** a second write saves an edit to an
+event-storming board in `docs/boards/`, under the same guards. The feedback
+route stays the only write that records a person's decision.
 
 **Amended in design (2026-11-01), the person's decisions in the Dev Center.**
 The plan page offers approve, waive and close where it says a person has to
@@ -3217,7 +3221,8 @@ act. None of them runs the command. A button asks the server whether the
 command would go through now, shows the answer, and copies the command for the
 person to run in their own terminal. The rule above holds: approving, waiving
 and closing stay CLI acts, the feedback route stays the Dev Center's only
-write, and nothing the page sends reaches a command that writes.
+write ~~.~~ that records a decision (amended by RFC 0041 §2), and nothing the
+page sends reaches a command that writes.
 
 The buttons do not execute because nothing here can tell the person from the
 agent. The Dev Center is mounted under `GUREN_MCP=1`, and `browser:serve`

@@ -191,8 +191,9 @@ the next decision is yours.
 `plan:render` wrote, served so that each verdict, comment and answer is saved to
 `.guren/plans/<slug>.feedback.json` as you make it. The plan page then counts
 the saved review and gives you the message to send the agent; `plan:revise`
-applies the file when it is run without `--feedback`. That route is the Dev
-Center's one write: it takes the review document from the page's own origin,
+applies the file when it is run without `--feedback`. That route is one of the
+Dev Center's two writes; the other saves an edit to an event-storming board
+under `docs/boards/`. It takes the review document from the page's own origin,
 for the plan as it stands, and runs no command. Approving stays `plan:approve`.
 
 Where a decision is yours, the plan page offers a check for it: **Check

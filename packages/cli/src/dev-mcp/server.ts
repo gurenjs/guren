@@ -10,6 +10,7 @@ import { type ProjectContext } from '../context'
 import { type ResourceDefinition } from '../data-types'
 import { type DocsGraphReport, type DocsGraphReportOptions } from '../docs-graph'
 import { type PlanOverview } from '../docs-viewer-plans'
+import type { BoardOutline, BoardOverview } from '../board/store'
 import { type DoctorReport } from '../doctor'
 import { type EntityContext, type EntityContextOptions } from '../entity-context'
 import { type GateReport } from '../gate'
@@ -75,6 +76,8 @@ export interface DevMcpApi {
   buildDocsGraphReport(options: DocsGraphReportOptions): Promise<DocsGraphReport>
   renderDocsGraphMarkdown(report: DocsGraphReport): string
   readPlanOverview(appRoot: string): Promise<PlanOverview>
+  listBoards(appRoot: string): Promise<BoardOverview>
+  readBoardOutline(appRoot: string, slug: string): Promise<BoardOutline>
 }
 
 export interface CreateDevMcpServerOptions {
@@ -300,6 +303,19 @@ export function createDevMcpServer(options: CreateDevMcpServerOptions): McpServe
       annotations: { readOnlyHint: true },
     },
     async () => ({ content: [json(await api.readPlanOverview(cwd))] }),
+  )
+
+  server.registerTool(
+    'guren_get_boards',
+    {
+      description:
+        'Event-storming boards under docs/boards/ (RFC 0041). With no argument: each board with its title and counts of notes, questions, arrows and sections. With `board` (a slug): that board as the outline `guren board:show` prints, every arrow on the note it leaves and questions under the note they are about. Reads the board files only; edit one with `guren board:apply`.',
+      inputSchema: z.object({
+        board: z.string().optional().describe('A board slug; omit to list the boards'),
+      }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ board }) => ({ content: [json(board === undefined ? await api.listBoards(cwd) : await api.readBoardOutline(cwd, board))] }),
   )
 
   server.registerTool(

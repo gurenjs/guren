@@ -10,17 +10,27 @@ export { isLoopbackAddress, isLoopbackOrigin } from '../http/middleware/loopback
 
 export const MCP_ENDPOINT_PATH = '/_guren/mcp'
 
-/** Where the Dev Center saves a plan review's feedback (RFC 0030 §8), its one write route. */
+/** Where the Dev Center saves a plan review's feedback (RFC 0030 §8). */
 export const DEV_CENTER_FEEDBACK_ROUTE = '/_guren/plans/:slug/feedback'
 const DEV_CENTER_FEEDBACK_PATH = /^\/_guren\/plans\/[^/]+\/feedback$/
 
+/** Where the Dev Center's board canvas posts its operations (RFC 0041 §2), the second write route. */
+export const DEV_CENTER_BOARD_OPS_ROUTE = '/_guren/boards/:slug/ops'
+const DEV_CENTER_BOARD_OPS_PATH = /^\/_guren\/boards\/[^/]+\/ops$/
+
+/** The Dev Center's write routes with what each refuses another origin with. No other Dev Center page route takes a POST without a token. */
+export const DEV_CENTER_WRITE_ROUTES = [
+  { route: DEV_CENTER_FEEDBACK_ROUTE, refusal: 'Feedback is accepted from the Dev Center page only.' },
+  { route: DEV_CENTER_BOARD_OPS_ROUTE, refusal: 'Board edits are accepted from the Dev Center page only.' },
+] as const
+
 /**
- * The page posts without an `XSRF-TOKEN`: an app with no auth issues none. The CLI handler
- * requires the request's own `Origin` instead, behind the loopback guard, and the route
- * exists only while {@link isMcpEndpointEnabled} holds.
+ * What the CSRF middleware exempts. The page posts without an `XSRF-TOKEN`: an app with no auth
+ * issues none. The CLI handler requires the request's own `Origin` instead, behind the loopback
+ * guard, and the routes exist only while {@link isMcpEndpointEnabled} holds.
  */
-export function isDevCenterFeedbackRequest(path: string): boolean {
-  return DEV_CENTER_FEEDBACK_PATH.test(path) && isMcpEndpointEnabled()
+export function isDevCenterWriteRequest(path: string): boolean {
+  return (DEV_CENTER_FEEDBACK_PATH.test(path) || DEV_CENTER_BOARD_OPS_PATH.test(path)) && isMcpEndpointEnabled()
 }
 
 /**
