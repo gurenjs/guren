@@ -1075,8 +1075,9 @@ export class CommentPolicy extends Policy {
 
   /** The comments plan, approved, also dropping a `Note` model and the `NoteController` that served it. */
   type DropPlan = { models: Array<Record<string, unknown>>; controllers: unknown[]; commands?: Array<{ id: string; command: string; reason: string }> }
-  async function dropPlanRepo(files: Record<string, string>, edit: (plan: DropPlan) => void = () => {}): Promise<{ repo: string; base: string }> {
+  async function dropPlanRepo(files: Record<string, string>, edit: (plan: DropPlan) => void = () => {}, prepare?: (repo: string) => Promise<void>): Promise<{ repo: string; base: string }> {
     const { repo } = await createRepo({ ...BASE_FILES, ...files })
+    await prepare?.(repo)
     const plan = loadApprovedCommentsPlan() as DropPlan
     plan.models.push({ ...plan.models[0], id: 'model.note', name: 'Note', table: 'notes', change: { kind: 'drop', reason: 'comments replace notes' }, dataMigration: { kind: 'none', reason: 'no rows kept' }, columns: [], relationships: [], fillable: [] })
     plan.controllers.push({ id: 'controller.notes', change: { kind: 'drop', reason: 'comments replace notes' }, className: 'NoteController', actions: [] })
@@ -1114,6 +1115,9 @@ export class CommentPolicy extends Policy {
     expect(await deleted({ 'app/Models/Note.ts': `${NOTE}\nclass Revoke {}\nregisterJob(Revoke)\n` })).toEqual(medium)
     // A directory index left behind answers `@/app/Models/Note`.
     expect(await deleted({ 'app/Models/Note.ts': NOTE }, { 'app/Models/Note/index.ts': 'export class Note {}\n' })).toEqual(medium)
+    expect(await deleted({ 'app/Models/Note.ts': NOTE }, { 'app/Models/Note/package.json': '{"main":"impl.ts"}\n', 'app/Models/Note/impl.ts': 'export class Note {}\n' })).toEqual(medium)
+    // A static block runs when the class loads.
+    expect(await deleted({ 'app/Models/Note.ts': NOTE.replace('{}\n', '{\n  static { registerJob(Revoke) }\n}\n') })).toEqual(medium)
     // The element is in a module, or a command of the plan writes the path.
     expect(await deleted({ 'app/Models/Note.ts': NOTE }, {}, (plan) => { plan.models.at(-1)!.module = 'billing' })).toEqual(medium)
     expect(await deleted({ 'app/Models/Note.ts': NOTE }, {}, (plan) => { plan.commands = [{ id: 'command.note', command: 'guren make:model Note', reason: 'a fresh Note' }] })).toEqual(medium)
@@ -1134,10 +1138,20 @@ export class CommentPolicy extends Policy {
     const claimed = await commit(second.repo, {})
     expect((await laneOf(second.repo, claimed, await commit(second.repo, { 'app/Models/Note.ts': null }))).facts.map((fact) => [fact.code, fact.lane])).toEqual([['source-removed', 'medium']])
 
-    const linked = await dropPlanRepo({ 'app/Models/Real.ts': NOTE })
-    await symlink('Real.ts', join(linked.repo, 'app/Models/Note.ts'))
-    const withLink = await commit(linked.repo, {})
-    expect((await laneOf(linked.repo, withLink, await commit(linked.repo, { 'app/Models/Note.ts': null }))).facts.map((fact) => [fact.code, fact.lane])).toEqual([['source-removed', 'medium']])
+    // A link's blob is its target text, here one that would read as the class, committed with the approval.
+    const linked = await dropPlanRepo({}, undefined, async (repo) => {
+      await mkdir(join(repo, 'app/Models'), { recursive: true })
+      await symlink('export class Note {}', join(repo, 'app/Models/Note.ts'))
+    })
+    expect((await laneOf(linked.repo, linked.base, await commit(linked.repo, { 'app/Models/Note.ts': null }))).facts.map((fact) => [fact.code, fact.lane])).toEqual([['source-removed', 'medium']])
+  })
+
+  test('should keep at medium a file written after the approval was recorded', async () => {
+    const { repo } = await dropPlanRepo({})
+    const base = await commit(repo, { 'app/Models/Note.ts': NOTE })
+    const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Note.ts': null }))
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane])).toEqual([['source-removed', 'medium']])
   })
 
   test('should hold a declared deletion to a raise guren.review.ts sets for source-removed', async () => {

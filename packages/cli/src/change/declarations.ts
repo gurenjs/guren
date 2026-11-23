@@ -382,7 +382,7 @@ export async function applyPlanDeclarations(
     const declaredBy = subject?.kind === 'table-residue' || subject?.kind === 'routes-entry' ? undefined
       : subject?.kind === 'app-entry' ? registered.get(entryKey(subject.list, subject.name))
       : subject?.kind === 'env' ? await declaredEnvKey(subject, owned, readHead)
-      : subject?.kind === 'removed-file' ? await declaredRemovedFile(subject.path, owned, readHead, readBase)
+      : subject?.kind === 'removed-file' ? await declaredRemovedFile(subject.path, owned, readHead, readBase, presentWhenAdded)
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
       : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : subject.change === 'alter' ? declaredRouteChange(subject, plans) : declaredRouteRemoval(subject, plans))
       : subject?.kind === 'agent' ? await declaredAgentOf(subject.route, subject.base, facts, subjects, plans, readHead)
@@ -831,7 +831,16 @@ function planDroppedFiles(plan: PlanDraft): Map<string, { id: string; name: stri
  */
 function holdsOnlyClass(ast: File, name: string): boolean {
   const declaration = exportedClass(ast, name)
-  if (!declaration) return false
+  if (!declaration || (declaration.decorators?.length ?? 0) > 0) return false
+  // A static block or a static initializer that calls runs when the class loads, as a top-level statement would.
+  for (const member of declaration.body.body) {
+    if (member.type === 'StaticBlock' || ('decorators' in member && (member.decorators?.length ?? 0) > 0)) return false
+    if ('static' in member && member.static && 'value' in member && member.value) {
+      let calls = false
+      walk([member.value], (node) => { if (node.type === 'CallExpression' || node.type === 'NewExpression' || node.type === 'TaggedTemplateExpression') calls = true })
+      if (calls) return false
+    }
+  }
   return ast.program.body.every((node) => {
     if (node.type === 'ImportDeclaration') return node.specifiers.length > 0 || node.importKind === 'type'
     if (node.type === 'TSTypeAliasDeclaration' || node.type === 'TSInterfaceDeclaration') return true
@@ -841,14 +850,15 @@ function holdsOnlyClass(ast: File, name: string): boolean {
 }
 
 /**
- * A source file the change deletes, declared by the one open plan whose `drop` element owns its path, when the base's
- * file declared that element's class or export. What still imports the file fails the gate; what it guarded is a route fact.
+ * A source file the change deletes, declared by the one open plan whose `drop` element owns its path, when the base's file
+ * was that class alone and was there when the approval was recorded. What still imports it fails the gate; what it guarded is a route fact.
  */
 async function declaredRemovedFile(
   path: string,
   owned: ReadonlyArray<{ open: OpenPlan; files: Map<string, DeclaredFile>; paths: Set<string> }>,
   readHead: (path: string) => Promise<string | null>,
   readBase: (path: string) => Promise<string | null>,
+  presentWhenAdded: (record: string, path: string) => Promise<boolean | undefined>,
 ): Promise<string | undefined> {
   const claims = owned.filter(({ paths }) => paths.has(path))
   if (claims.length !== 1 || owned.some((entry) => claimsEveryCommandPath(entry.open.plan))) return undefined
@@ -861,9 +871,12 @@ async function declaredRemovedFile(
   if (!ast || !holdsOnlyClass(ast, dropped.name)) return undefined
   // An importer of the module resolves to a twin or a directory index the change leaves behind, which nothing judged.
   const stem = path.replace(SOURCE_EXTENSION, '')
+  if ((await readHead(`${stem}/package.json`)) !== null) return undefined
   for (const extension of TWIN_EXTENSIONS) {
     if ((await readHead(`${stem}${extension}`)) !== null || (await readHead(`${stem}/index${extension}`)) !== null) return undefined
   }
+  // The file the plan was approved against: one a later change wrote after the approval is not the element it drops.
+  if ((await presentWhenAdded(planApprovalsPath(open.file), path)) !== true) return undefined
   return `${open.file}#${dropped.id}`
 }
 
