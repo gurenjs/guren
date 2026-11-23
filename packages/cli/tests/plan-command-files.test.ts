@@ -4,6 +4,7 @@ import { parseArgs, type ArgsDef } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
 import { jobFile } from '../src/make-job'
+import { channelFile } from '../src/make-channel'
 import { listenerFile } from '../src/make-listener'
 import { validatorFile } from '../src/make-validator'
 import { providerFile } from '../src/make-provider'
@@ -94,7 +95,7 @@ describe('planCommandFiles', () => {
     ['a generator writing more than one file', 'guren make:feature Post'],
     ['a blueprint', 'guren add queue'],
     ['a command the allowlist refuses', 'guren make:job Send;Digest'],
-    ['a boolean followed by a value the registry would take as its value', 'guren make:model --force true Invoice'],
+    ['a boolean followed by a value the registry would take as its value', 'guren make:model Invoice --force true'],
     ['a single dash before several letters, which the registry reads as short flags', 'guren make:model Invoice -module billing'],
     ['one flag under both spellings, of which the registry keeps the first', 'guren make:job SendDigest -M billing --module sales'],
     ['a quote, which would reach a generated string literal unescaped', `guren make:channel Orders --channel "x' + process.env.APP_KEY + 'y"`],
@@ -102,6 +103,9 @@ describe('planCommandFiles', () => {
     ['a value flag followed by a flag, which the registry leaves empty', 'guren make:listener NotifyAuthor --event --force'],
     ['a cluster of short flags', 'guren make:job SendDigest -fM billing'],
     ['`--`, after which every word is a name', 'guren make:model Invoice -- --force'],
+    ['an empty word after a boolean, which the registry takes as its value', 'guren make:channel Orders --private ""'],
+    ['a blank word, which the registry reads as a number', 'guren make:job --force " " Invoice'],
+    ['a flag before the name', 'guren make:job --force SendDigest'],
   ])('should declare nothing for %s', (_why, command) => {
     expect(planCommandFiles(planWith([command]))).toEqual([])
   })
@@ -129,30 +133,35 @@ describe('planCommandFiles', () => {
       const command = (await resolveValue(builtinSubCommands[name as keyof typeof builtinSubCommands])) as { args?: unknown }
       return ((await resolveValue(command.args as never)) ?? {}) as ArgsDef
     }
-    const words = ['SendDigest', 'billing', 'true', '--force', '-f', '--module', '-M', '--module=', '--module=billing', '--', '-fM', '--event', '-e', '--event=Posted', 'Posted']
+    const words = ['Orders', 'billing', 'true', '""', '" "', '--force', '-f', '--module', '-M', '--module=', '--module=billing', '--', '-fM', '--event', '-e', '--event=Posted', '--private', '-p', '--channel', 'orders']
     const mismatches: string[] = []
-    for (const name of ['make:job', 'make:listener']) {
+    for (const name of ['make:job', 'make:listener', 'make:channel']) {
       const args = await definitions(name)
       const calls: string[][] = []
       const grow = (call: string[]): void => {
-        if (call.includes('SendDigest')) calls.push(call)
+        if (call.includes('Orders')) calls.push(call)
         if (call.length < 3) for (const word of words) grow([...call, word])
       }
       grow([])
       for (const call of calls) {
         const command = `guren ${name} ${call.join(' ')}`
-        if (!judgePlanCommand(command).allowed) continue
+        const verdict = judgePlanCommand(command)
+        if (!verdict.allowed) continue
         const [read] = planCommandFiles(planWith([command]))
         if (!read) continue
-        const parsed = parseArgs(call, args) as Record<string, unknown>
-        // As `defineCommand()` normalizes it: the last of a repeated flag.
-        const value = (key: string): string | undefined => {
-          const raw = parsed[key]
-          const last = Array.isArray(raw) ? raw.at(-1) : raw
-          return typeof last === 'string' && last !== '' ? last : undefined
+        const parsed = parseArgs(verdict.args, args) as Record<string, unknown>
+        // As `defineCommand()` normalizes it, and as `commands/make.ts` hands it to the generator.
+        const last = (key: string): unknown => (Array.isArray(parsed[key]) ? (parsed[key] as unknown[]).at(-1) : parsed[key])
+        const text = (key: string): string | undefined => (typeof last(key) === 'string' && last(key) !== '' ? (last(key) as string) : undefined)
+        const on = (key: string): boolean => last(key) === true || last(key) === 'true'
+        if (typeof parsed.name !== 'string') {
+          mismatches.push(`${command}: writes nothing, declared ${read.path}`)
+          continue
         }
-        const options = { root: value('module') }
-        const real = name === 'make:job' ? jobFile(String(parsed.name), options) : listenerFile(String(parsed.name), { ...options, event: value('event') })
+        const options = { root: text('module') }
+        const real = name === 'make:job' ? jobFile(parsed.name, options)
+          : name === 'make:listener' ? listenerFile(parsed.name, { ...options, event: text('event') })
+          : channelFile(parsed.name, { ...options, channel: text('channel'), private: on('private'), presence: on('presence') })
         if (real.path !== read.path || !read.contents.includes(real.contents)) mismatches.push(`${command}: writes ${real.path}, declared ${read.path}`)
       }
     }

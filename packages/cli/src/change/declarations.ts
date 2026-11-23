@@ -93,8 +93,6 @@ export interface DeclaredFile {
   check: DeclaredFileCheck
   /** What a plan's command writes there, when no planned element owns it: the file holds only as one of these, as syntax. */
   generated?: string[]
-  /** Written by a command of the plan rather than the scaffold. */
-  fromCommand?: true
 }
 
 /**
@@ -172,7 +170,7 @@ export function planDeclaredFiles(plan: PlanDraft): Map<string, DeclaredFile> {
     const shared = [...claims].some(([id, paths]) => id !== file.commandId && (paths === 'all' || paths.has(file.path)))
     const owned = file.elements.some((id) => scaffolded.has(id) || owners.get(id)! > 1)
     if (files.has(file.path) || shared || owned || !exports || exports.length === 0) files.set(file.path, null)
-    else files.set(file.path, { elements: [file.commandId, ...file.elements], exports, contents: file.contents[0]!, check: file.check, fromCommand: true, ...(file.check.kind === 'whole' ? { generated: file.contents } : {}) })
+    else files.set(file.path, { elements: [file.commandId, ...file.elements], exports, contents: file.contents[0]!, check: file.check, ...(file.check.kind === 'whole' ? { generated: file.contents } : {}) })
   }
   return new Map([...files].filter((entry): entry is [string, DeclaredFile] => entry[1] !== null))
 }
@@ -658,8 +656,8 @@ async function declarationOf(
     return id ? `${open.file}#${id}` : undefined
   }
   const declared = files.get(subject.path)!
-  // A command of another plan that no reading places may write any path a command declares.
-  if (declared.fromCommand && owned.some((entry) => entry.open !== open && claimsEveryCommandPath(entry.open.plan))) return undefined
+  // A command of another plan that no reading places may write any declared path, the scaffold's included.
+  if (owned.some((entry) => entry.open !== open && claimsEveryCommandPath(entry.open.plan))) return undefined
   return (await holdsDeclared(open.plan, declared, subject.path, readHead)) ? `${open.file}#${declared.elements.join(',')}` : undefined
 }
 

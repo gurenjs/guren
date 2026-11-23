@@ -122,28 +122,31 @@ export interface PlanCommandFile {
 /** A flag's long name for each alias the registry gives it: citty keeps whichever spelling comes first, the reader the long one. */
 export const PLAN_COMMAND_FLAG_ALIASES: Readonly<Record<string, string>> = { M: 'module', f: 'force', e: 'event', m: 'model', F: 'fields', p: 'private' }
 
-const FLAG_WORD = /^(?:--[a-z][a-z-]*|-[A-Za-z])(?:=(.+))?$/su
+const NAME_WORD = /^[A-Za-z][A-Za-z0-9_-]*$/u
+const FLAG_WORD = /^(?:--([a-z][a-z-]*)|-([A-Za-z]))(?:=(.*))?$/su
+const VALUE_WORD = /^[^\s'"`-][^\s'"`]*$/u
 
 /**
- * Whether every word has one shape the registry's parser reads as the reader does: a name; `--flag` or `-f`,
- * with a non-empty `=value` or none; a value flag's value in the next word, which is no flag; a boolean not
- * followed by `true` or `false`, which the parser takes as its value. Anything else (`--`, a cluster, an empty
- * `=`) is refused, and so is a quote, which would reach a generated string literal unescaped.
+ * Whether the call has the one form the reader and the registry's parser read alike: the name first, then
+ * flags the generator takes, a value flag's value in the same word after `=` or in the next word, a boolean
+ * followed by another flag or by nothing. A second parser cannot follow every spelling the first accepts
+ * (an empty word after a boolean is its value there), so any other form declares nothing.
  */
-function readsAsCitty(rule: PlanCommandFileRule, args: readonly string[]): boolean {
-  for (let index = 0; index < args.length; index += 1) {
-    const word = args[index]!
-    if (/['"`]/u.test(word)) return false
-    if (!word.startsWith('-')) continue
-    const shape = FLAG_WORD.exec(word)
+function canonicalCall(rule: PlanCommandFileRule, args: readonly string[]): boolean {
+  if (args.length === 0 || !NAME_WORD.test(args[0]!)) return false
+  for (let index = 1; index < args.length; index += 1) {
+    const shape = FLAG_WORD.exec(args[index]!)
     if (!shape) return false
-    if (shape[1] !== undefined) continue
-    const flag = word.replace(/^--?/u, '')
-    const next = args[index + 1]
+    const flag = shape[1] ?? shape[2]!
+    const inline = shape[3]
     if (rule.valueFlags.includes(flag)) {
-      if (next === undefined || next.startsWith('-')) return false
+      if (inline !== undefined) {
+        if (!VALUE_WORD.test(inline)) return false
+        continue
+      }
+      if (!VALUE_WORD.test(args[index + 1] ?? '')) return false
       index += 1
-    } else if (next !== undefined && /^(?:true|false)$/u.test(next)) {
+    } else if (!rule.booleanFlags.includes(flag) || inline !== undefined || (index + 1 < args.length && !FLAG_WORD.test(args[index + 1]!))) {
       return false
     }
   }
@@ -194,7 +197,7 @@ export function planCommandFiles(plan: PlanDraft): PlanCommandFile[] {
   return plan.commands.flatMap((command) => {
     const verdict = judgePlanCommand(command.command)
     const rule = verdict.allowed ? PLAN_COMMAND_FILES[verdict.subcommand] : undefined
-    if (!verdict.allowed || rule === undefined || !readsAsCitty(rule, verdict.args)) return []
+    if (!verdict.allowed || rule === undefined || !canonicalCall(rule, verdict.args)) return []
     const call = readPlanGeneratorCall({ valueFlags: rule.valueFlags, positional: true, targets: () => ({ writes: [], imports: [] }) }, verdict.args)
     const flags = call && readFlags(rule, call)
     if (!call?.name || !flags) return []
@@ -216,8 +219,8 @@ export function planCommandFiles(plan: PlanDraft): PlanCommandFile[] {
   })
 }
 
-/** Generators whose writes cannot coincide with a file the table above gives: docs, tests, pages, catalogs, UI components. */
-const WRITES_ELSEWHERE = new Set(['make:adr', 'make:lesson', 'make:test', 'make:lang', 'lang:publish', 'make:view', 'add lint', 'add ui'])
+/** Generators whose writes cannot coincide with a file the table above gives: docs, tests, pages, catalogs, UI components, a module's skeleton, seeders, exceptions, console commands. */
+const WRITES_ELSEWHERE = new Set(['make:adr', 'make:lesson', 'make:test', 'make:lang', 'lang:publish', 'make:view', 'add lint', 'add ui', 'make:module', 'make:seeder', 'make:exception', 'make:command'])
 
 /**
  * Every path a command of the plan may write, read loosely: each word, and each part of a `flag=value`, as a
