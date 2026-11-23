@@ -206,3 +206,9 @@ Guren は、GET 以外のリクエストに対するリダイレクトを 303 �
 - まだどのステップも書いていないものを import する出力は、`commands` ステップの型チェックを失敗させます。`guren make:factory CommentFactory` は、計画が追加する `Comment` モデルを import します。
 
 どの scaffold も書かず、何からも import されない雛形は通ります。追加するモデルのないタスクに計画が追加するジョブがその例で、雛形はそのステップで書き直します。指摘には要素とそれを書くステップが示され、この検査が失敗している間も `plan:approve` は承認を拒否します。
+
+1 つのファイルだけを書くジェネレーターなら、`guren change:lane` はそのコマンドが書いたファイルを、コマンドが宣言したものとして読みます。対象は `make:model`、`make:controller`、`make:resource`、`make:validator`、`make:policy`、`make:provider`、`make:middleware`、`make:route`、`make:factory`、`make:channel` と、副作用の 5 つのジェネレーターです。追加したファイルは、コマンドの名前、フラグ、`--module` からジェネレーターが書く内容のままなら `low` になります。
+
+そのモジュールで計画が追加する要素がファイルのクラスを受け持つときは、`plan:scaffold` が書くファイルと同じく、その要素の検査で判定します。モデル、Resource、バリデーター、副作用は名前を export していれば通り、Policy とコントローラーは計画した ability やアクションのほかに何も持たなければ通ります。Provider は起動時に実行され、ルートファイルはルートを登録するので、この 2 つはいつもジェネレーターが書いたままであることを求めます。
+
+ジェネレーターが受け付けないフラグがあるとき、`plan:scaffold` や別のコマンドも同じパスに書くとき、開いている別の計画が同じパスを主張するときは、何も宣言しません。ブループリント、`make:auth`、`make:feature` が書くものは `medium` のままです。

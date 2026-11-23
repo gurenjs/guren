@@ -1,10 +1,10 @@
 /**
  * The declaration matcher of RFC 0040 §3: a fact takes its declarable lane only when an approved, open plan
  * declares it. Matched so far: an added file of added elements and an added table of an added model, both
- * against what `plan:scaffold` writes (a declared table taking its own residue with it), and an added migration
- * that only creates such tables; an added route, the routes entry edited by `--mount` alone, and a provider a planned
- * policy implies, registered in the application entry as `plan:scaffold` registers it. A subject
- * two open plans claim, or one the plan does not determine, stays.
+ * against what `plan:scaffold` writes (a declared table taking its own residue with it), an added file a plan's
+ * command writes (`plan/command-files.ts`), an added migration that only creates such tables, an added route,
+ * the routes entry edited by `--mount` alone, and a provider a planned policy implies, registered as
+ * `plan:scaffold` registers it. A subject two open plans claim, or one the plan does not determine, stays.
  */
 
 import type { CallExpression, ClassDeclaration, File, Statement } from '@babel/types'
@@ -18,6 +18,7 @@ import { extractClassDeclaration } from '../model-parser'
 import { parseSourceFile } from '../parse-cache'
 import { validatorFieldProperties } from '../plan/field-status'
 import { readPolicyAbilities } from '../plan/policy-abilities'
+import { planCommandFiles } from '../plan/command-files'
 import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
 import { plannedSqlDefault, type PlanScaffoldApp, planScaffoldMounts, planScaffoldOutput, sqlNameOf, TWIN_EXTENSIONS } from '../plan/scaffold'
 import { CONFIG_DIR, MODELS_DIR, PROVIDERS_DIR } from '../discovery'
@@ -90,6 +91,8 @@ export interface DeclaredFile {
   /** What the scaffold writes there. */
   contents: string
   check: DeclaredFileCheck
+  /** What a plan's command writes there, when no planned element owns it: the file holds only as one of these, as syntax. */
+  generated?: string[]
 }
 
 /**
@@ -153,6 +156,13 @@ export function planDeclaredFiles(plan: PlanDraft): Map<string, DeclaredFile> {
       if (files.has(file.path) || !exports || exports.length === 0) files.set(file.path, null)
       else files.set(file.path, { elements: file.elements, exports, contents: file.contents, check: checkOf(file.path, owners as PlanElementEntry[], step) })
     }
+  }
+  for (const file of planCommandFiles(plan)) {
+    const ast = parseSourceFile(file.contents[0]!, file.path)
+    const exports = ast ? declaredExports(ast) : undefined
+    // A path the scaffold or another command also writes is not one command's.
+    if (files.has(file.path) || !exports || exports.length === 0) files.set(file.path, null)
+    else files.set(file.path, { elements: [file.commandId, ...file.elements], exports, contents: file.contents[0]!, check: file.check, ...(file.check.kind === 'whole' ? { generated: file.contents } : {}) })
   }
   return new Map([...files].filter((entry): entry is [string, DeclaredFile] => entry[1] !== null))
 }
@@ -274,6 +284,7 @@ export function planClaimedPaths(plan: PlanDraft): Set<string> {
     ...plan.policies.flatMap((policy) => [policyFilePath(policy), providerFilePath(policy)]),
     ...plan.controllers.map(controllerFilePath),
     ...plan.sideEffects.map(sideEffectFilePath),
+    ...planCommandFiles(plan).map((file) => file.path),
   ])
 }
 
@@ -639,6 +650,8 @@ async function holdsDeclared(plan: PlanDraft, declared: DeclaredFile, path: stri
   const ast = text === null ? null : parseSourceFile(text, path)
   const exports = ast ? declaredExports(ast) : undefined
   if (!ast || !exports || !declared.exports.every((name) => exports.includes(name))) return false
+  const body = canonicalSyntax(ast.program.body)
+  if (declared.generated?.some((text) => { const written = parseSourceFile(text, path); return written !== null && canonicalSyntax(written.program.body) === body })) return true
   const contents = declared.check.kind === 'routes' ? await routesFileAtHead(plan, declared.check.step, path, readHead) : declared.contents
   return contents !== undefined && passesCheck(declared, ast, path, contents)
 }

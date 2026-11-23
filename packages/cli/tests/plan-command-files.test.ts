@@ -1,0 +1,104 @@
+import { describe, expect, test } from 'bun:test'
+
+import { builtinSubCommands } from '../src/commands'
+import { jobFile } from '../src/make-job'
+import { providerFile } from '../src/make-provider'
+import { planGeneratorNames } from '../src/plan/command-allowlist'
+import { PLAN_COMMAND_FILES, planCommandFiles } from '../src/plan/command-files'
+import { PlanSchema, type PlanDraft } from '../src/plan/schema'
+import { resolveValue } from '../src/run-cli'
+import { loadApprovedCommentsPlan } from './plan-fixture'
+
+type ArgDefinition = { type?: string; alias?: string | string[] }
+
+/** The registry's flags for a generator, by type, aliases included. */
+async function registryFlags(name: string): Promise<{ string: string[]; boolean: string[] }> {
+  const command = (await resolveValue(builtinSubCommands[name as keyof typeof builtinSubCommands])) as { args?: unknown }
+  const args = Object.entries(((await resolveValue(command.args as never)) ?? {}) as Record<string, ArgDefinition>)
+  const of = (type: string): string[] => args.filter(([, definition]) => definition.type === type).flatMap(([key, definition]) => [key, ...[definition.alias ?? []].flat()]).sort()
+  return { string: of('string'), boolean: of('boolean') }
+}
+
+function planWith(commands: string[], edit?: (document: Record<string, any>) => void): PlanDraft {
+  const document = loadApprovedCommentsPlan() as Record<string, any>
+  document.commands = commands.map((command, index) => ({ id: `command.${index}`, command, reason: 'needed' }))
+  edit?.(document)
+  return PlanSchema.parse(document)
+}
+
+describe('PLAN_COMMAND_FILES', () => {
+  test('should name only generators a plan may run', () => {
+    const allowed = new Set(planGeneratorNames())
+    expect(Object.keys(PLAN_COMMAND_FILES).filter((name) => !allowed.has(name))).toEqual([])
+  })
+
+  test('should read each generator with the value flags the registry declares, and a subset of its boolean flags', async () => {
+    const mismatches: string[] = []
+    for (const [name, rule] of Object.entries(PLAN_COMMAND_FILES)) {
+      const registry = await registryFlags(name)
+      if (JSON.stringify([...rule.valueFlags].sort()) !== JSON.stringify(registry.string)) mismatches.push(`${name}: value flags ${[...rule.valueFlags].sort().join(',')}, registry ${registry.string.join(',')}`)
+      for (const flag of rule.booleanFlags) if (!registry.boolean.includes(flag)) mismatches.push(`${name}: --${flag} is no boolean flag of the registry`)
+    }
+    expect(mismatches).toEqual([])
+  })
+})
+
+describe('planCommandFiles', () => {
+  test('should give the path and contents the generator writes, in command order', () => {
+    const files = planCommandFiles(planWith(['bunx guren make:job SendDigest', 'guren make:provider Queue --module billing']))
+
+    expect(files).toEqual([
+      { commandId: 'command.0', elements: [], path: jobFile('SendDigest').path, contents: [jobFile('SendDigest').contents], check: { kind: 'whole' } },
+      { commandId: 'command.1', elements: [], path: providerFile('Queue', { root: 'billing' }).path, contents: [providerFile('Queue', { root: 'billing' }).contents], check: { kind: 'whole' } },
+    ])
+    expect(files[1]!.path).toBe('modules/billing/app/Providers/QueueProvider.ts')
+  })
+
+  test('should give both controllers make:controller may write, since the plan does not say whether the app renders pages', () => {
+    const [file] = planCommandFiles(planWith(['guren make:controller Report']))
+
+    expect(file!.path).toBe('app/Http/Controllers/ReportController.ts')
+    expect(file!.contents).toHaveLength(2)
+    expect(file!.contents[0]).toContain('this.inertia(')
+    expect(file!.contents[1]).toContain('this.json(')
+  })
+
+  test('should read value flags and boolean flags as the command does', () => {
+    const [listener, channel] = planCommandFiles(planWith(['guren make:listener NotifyAuthor --event CommentPosted', 'guren make:channel Orders --private']))
+
+    expect(listener!.contents[0]).toContain('CommentPosted')
+    expect(channel!.contents[0]).not.toEqual(planCommandFiles(planWith(['guren make:channel Orders']))[0]!.contents[0])
+  })
+
+  test.each([
+    ['a flag the generator does not take', 'guren make:job SendDigest --queue high'],
+    ['a boolean flag given a value', 'guren make:channel Orders --private=false'],
+    ['a value flag with no value', 'guren make:listener NotifyAuthor --event'],
+    ['no name', 'guren make:job'],
+    ['fields the generator refuses', 'guren make:validator Comment --fields "body:nonsense"'],
+    ['a generator writing more than one file', 'guren make:feature Post'],
+    ['a blueprint', 'guren add queue'],
+    ['a command the allowlist refuses', 'guren make:job Send;Digest'],
+  ])('should declare nothing for %s', (_why, command) => {
+    expect(planCommandFiles(planWith([command]))).toEqual([])
+  })
+
+  test('should hold a file by the check of the added element that owns its class, in the same module', () => {
+    const effect = (module?: string) => (document: Record<string, any>) => {
+      document.sideEffects = [{ id: 'job.digest', change: { kind: 'add' }, kind: 'job', name: 'SendDigestJob', ...(module ? { module } : {}), trigger: 'nightly', description: 'd' }]
+    }
+
+    expect(planCommandFiles(planWith(['guren make:job SendDigest --module Billing'], effect('billing')))).toMatchObject([{ elements: ['job.digest'], check: { kind: 'exports' } }])
+    expect(planCommandFiles(planWith(['guren make:job SendDigest'], effect('billing')))).toMatchObject([{ elements: [], check: { kind: 'whole' } }])
+  })
+
+  test("should hold a policy by the planned abilities, and a policy's provider whole whatever the plan names", () => {
+    const [policy] = planCommandFiles(planWith(['guren make:policy Comment --module billing'], (document) => {
+      document.policies[0].module = 'billing'
+    }))
+    const [provider] = planCommandFiles(planWith(['guren make:provider CommentPolicy']))
+
+    expect(policy).toMatchObject({ elements: ['policy.comment'], check: { kind: 'policy' } })
+    expect(provider).toMatchObject({ elements: [], check: { kind: 'whole' } })
+  })
+})

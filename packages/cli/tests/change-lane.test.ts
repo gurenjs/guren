@@ -12,6 +12,7 @@ import type { ChangeAudits } from '../src/change/revision-audit'
 import { SECURITY_RECORD_VERSION, type RouteSecurityRecord, type SecurityRecordPair } from '../src/change/security-records'
 import { builtinSubCommands } from '../src/commands'
 import { renderChangeLane } from '../src/commands/change'
+import { providerFile } from '../src/make-provider'
 import { createTempRoot, PG_SCHEMA_FIXTURE } from './helpers'
 import { approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan } from './plan-fixture'
 
@@ -880,6 +881,22 @@ export class CommentPolicy extends Policy {
       .toEqual([['source-edited', 'medium', undefined, undefined]])
     expect(envFacts(await laneOf(repo, base, await commit(repo, { 'config/env.ts': withKey("Env.string().default('sync')").replace("APP_NAME: Env.string().default('Guren')", "APP_NAME: Env.string()") }))))
       .toEqual([['source-edited', 'medium', undefined, undefined]])
+  })
+
+  test('should lower a file a command of the plan writes, while it is what the generator writes', async () => {
+    const { repo } = await createRepo()
+    const path = join(repo, 'docs/plans/comments/plan.json')
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, JSON.stringify({ ...loadApprovedCommentsPlan(), commands: [{ id: 'command.provider', command: 'guren make:provider Queue', reason: 'binds the queue' }] }), 'utf8')
+    await approvePlanFile(path)
+    const base = await commit(repo, {})
+    const provider = providerFile('Queue')
+    const providerFact = (report: ChangeLaneReport) => report.facts.filter((fact) => fact.files.includes(provider.path)).map((fact) => [fact.code, fact.lane, fact.declaredBy])
+
+    expect(providerFact(await laneOf(repo, base, await commit(repo, { [provider.path]: provider.contents }))))
+      .toEqual([['file-added', 'low', 'docs/plans/comments/plan.json#command.provider']])
+    expect(providerFact(await laneOf(repo, base, await commit(repo, { [provider.path]: provider.contents.replace('boot(): void {\n', "boot(): void {\n    console.log('booted')\n") }))))
+      .toEqual([['file-added', 'medium', undefined]])
   })
 
   test('should declare nothing from a plan nobody approved', async () => {
