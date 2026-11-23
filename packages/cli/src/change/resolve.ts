@@ -46,6 +46,11 @@ export interface ChangeReader {
   containing(side: ChangeSide, needle: string): Promise<string[]>
   /** A directory holding those files of a side at their own paths, for a reader that takes a directory. */
   materialize(side: ChangeSide, paths: readonly string[]): Promise<string>
+  /**
+   * Whether `rev` holds the application path `path`, for a commit the merge base descends from (a plan's baseline);
+   * `undefined` when `rev` is no such commit of this clone.
+   */
+  existedAt(rev: string, path: string): Promise<boolean | undefined>
 }
 
 const SHA_PATTERN = /^[0-9a-f]{7,64}$/
@@ -129,6 +134,7 @@ export function openChange(cwd: string, change: Pick<ResolvedChange, 'mergeBase'
   const fullTrees = new Map<ChangeSide, Promise<ReadonlySet<string>>>()
   const appTrees = new Map<ChangeSide, Promise<ReadonlySet<string>>>()
   const texts = new Map<string, Promise<string | null>>()
+  const earlierTrees = new Map<string, Promise<ReadonlySet<string> | undefined>>()
   let scratch: Promise<string> | undefined
 
   const fullTree = (side: ChangeSide): Promise<ReadonlySet<string>> => {
@@ -174,6 +180,23 @@ export function openChange(cwd: string, change: Pick<ResolvedChange, 'mergeBase'
       if (code !== 0 && code !== 1) throw new CliError(`git could not search the files of ${rev(side)} for ${needle}.`)
       const marker = `${rev(side)}:`
       return stdout.split('\0').filter((entry) => entry.length > 0).map((entry) => (entry.startsWith(marker) ? entry.slice(marker.length) : entry))
+    },
+    existedAt(earlier, path) {
+      let tree = earlierTrees.get(earlier)
+      if (!tree) {
+        tree = (async () => {
+          if (!SHA_PATTERN.test(earlier)) return undefined
+          const sha = (await runGitRaw(cwd, ['rev-parse', '--verify', '--quiet', `${earlier}^{commit}`]))?.trim()
+          if (!sha?.startsWith(earlier)) return undefined
+          // A commit off the change's history would let any tree stand in for the plan's starting point.
+          if ((await gitResult(cwd, ['merge-base', '--is-ancestor', sha, change.mergeBase])).code !== 0) return undefined
+          const output = await runGitRaw(cwd, ['ls-tree', '-r', '-z', '--full-tree', sha])
+          if (output === null) throw new CliError(`git could not list the files of ${sha}.`)
+          return new Set(output.split('\0').filter((entry) => entry.length > 0).map((entry) => entry.slice(entry.indexOf('\t') + 1)))
+        })()
+        earlierTrees.set(earlier, tree)
+      }
+      return tree.then((files) => (files === undefined ? undefined : files.has(`${prefix}${path}`)))
     },
     async materialize(side, paths) {
       const dir = join(await (scratch ??= mkdtemp(join(tmpdir(), 'guren-change-'))), side)

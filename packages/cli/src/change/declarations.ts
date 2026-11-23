@@ -19,7 +19,7 @@ import { parseSourceFile } from '../parse-cache'
 import { validatorFieldProperties } from '../plan/field-status'
 import { readPolicyAbilities } from '../plan/policy-abilities'
 import { planCommandClaims, planCommandFiles } from '../plan/command-files'
-import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
+import { listPlanElementEntries, planBaseline, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
 import { plannedSqlDefault, type PlanScaffoldApp, planScaffoldMounts, planScaffoldOutput, sqlNameOf, TWIN_EXTENSIONS } from '../plan/scaffold'
 import { CONFIG_DIR, MODELS_DIR, PROVIDERS_DIR } from '../discovery'
 import { defaultImportBinding } from '../patch-helpers'
@@ -36,7 +36,7 @@ import { composeAppProviderRegistration } from '../provider-registrar'
 import { appEntryListNames, type AppEntryList } from './app-entry'
 import { envKeyValue, importsFrameworkEnv } from './app-env'
 import { envBuilderSignature, planEnvEntry, plannedEnvSignature } from '../env-declarations'
-import { FACT_CLASSES } from './fact-classes'
+import { FACT_CLASSES, PLAN_ADDITION_NOTE } from './fact-classes'
 import type { ChangeFact } from './lane'
 import { sameRecordPart, type RouteSecurityRecord } from './security-records'
 
@@ -46,7 +46,8 @@ import { sameRecordPart, type RouteSecurityRecord } from './security-records'
  * A table's residue is the code inside an added table the column reader does not state.
  */
 export type DeclarationSubject =
-  | { kind: 'file'; path: string }
+  /** A source file the change adds, or with `edited` one it edits that the plan's baseline did not have. */
+  | { kind: 'file'; path: string; edited?: true }
   | { kind: 'table'; table: SchemaTable; file: string; tables: readonly SchemaTable[] }
   | { kind: 'migration'; dir: string; files: string[]; previous?: string }
   | { kind: 'table-residue'; file: string; identifier: string }
@@ -360,6 +361,7 @@ export async function applyPlanDeclarations(
   plans: readonly OpenPlan[],
   readHead: (path: string) => Promise<string | null>,
   readBase: (path: string) => Promise<string | null> = async () => null,
+  existedAt: (rev: string, path: string) => Promise<boolean | undefined> = async () => undefined,
 ): Promise<ChangeFact[]> {
   const owned = plans.map((open) => ({ open, files: planDeclaredFiles(open.plan), paths: planClaimedPaths(open.plan) }))
   const result: ChangeFact[] = []
@@ -375,9 +377,11 @@ export async function applyPlanDeclarations(
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
       : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : undefined)
       : subject?.kind === 'agent' ? (subject.base === undefined ? await declaredAgentOf(subject.route, facts, subjects, plans, readHead) : undefined)
-      : subject ? await declarationOf(subject, owned, readHead) : undefined
+      : subject ? await declarationOf(subject, owned, readHead, existedAt) : undefined
     if (declaredBy && subject?.kind === 'table') declaredTables.add(`${subject.file}\u0000${subject.table.identifier}`)
-    const judged = declaredBy ? { ...fact, lane: FACT_CLASSES[fact.code].lowest, declaredBy } : fact
+    // An edit to a file the plan added is that element's addition in every task that touches it.
+    const code = declaredBy && subject?.kind === 'file' && subject.edited ? 'file-added' : fact.code
+    const judged = declaredBy ? { ...fact, code, lane: FACT_CLASSES[code].lowest, declaredBy, ...(code !== fact.code ? { message: `${fact.message}: ${PLAN_ADDITION_NOTE}` } : {}) } : fact
     result.push(judged)
     if (subject) resultSubjects.set(judged, subject)
   }
@@ -650,12 +654,18 @@ async function declarationOf(
   subject: Extract<DeclarationSubject, { kind: 'file' | 'table' }>,
   owned: ReadonlyArray<{ open: OpenPlan; files: Map<string, DeclaredFile>; paths: Set<string> }>,
   readHead: (path: string) => Promise<string | null>,
+  existedAt: (rev: string, path: string) => Promise<boolean | undefined>,
 ): Promise<string | undefined> {
   // Claimed by identity first: two approved plans about one file or table are a question for a person.
   const claims = owned.filter(({ open, files, paths }) => (subject.kind === 'table' ? claimsTable(open.plan, subject.table) : files.has(subject.path) || paths.has(subject.path)))
   if (claims.length !== 1) return undefined
   const { open, files } = claims[0]!
   if (subject.kind === 'file' && !files.has(subject.path)) return undefined
+  // Only a baseline the change descends from tells the plan's own work from a file the application already had.
+  if (subject.kind === 'file' && subject.edited) {
+    const rev = planBaseline(open.plan)?.rev
+    if (rev === undefined || (await existedAt(rev, subject.path)) !== false) return undefined
+  }
   if (subject.kind === 'table') {
     const id = declaredTable(open.plan, subject, await readHead(subject.file))
     return id ? `${open.file}#${id}` : undefined

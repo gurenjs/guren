@@ -5,6 +5,7 @@ import { declarationNote, judgeChangeLane, type ChangeFact, type ChangeLaneRepor
 import { openChange, resolveChange } from '../change/resolve'
 import { REVIEW_DOC_FILE, syncReviewDoc } from '../change/review-doc'
 import { policyNote, REVIEW_POLICY_FILE } from '../change/review-policy'
+import { PLAN_ADDITION_NOTE } from '../change/fact-classes'
 import { changeAdvisories } from '../change/revision-advisories'
 import { loadBaseRecord } from '../change/base-record'
 import { auditChangeRevisions, readHeadRecords } from '../change/revision-audit'
@@ -46,6 +47,7 @@ function trustBoundary(report: ChangeLaneReport): string[] {
     'Facts are lower bounds: a fact that did not appear has not proved the code unchanged.',
     ...(report.policy.state === 'read' ? [`${REVIEW_POLICY_FILE} was read from the merge base, where a person merged it; an edit to it in this change applies only once merged.`] : []),
     ...(report.facts.some((fact) => fact.declaredBy) ? ['An approved plan declares targets, not their implementation: a fact lowered by a declaration was matched by name, path and what the scaffold or a command of the plan writes, and its body was not read.'] : []),
+    ...(report.facts.some((fact) => fact.declaredBy && fact.message.endsWith(PLAN_ADDITION_NOTE)) ? ["An edit to a file the plan's baseline commit did not have is read as the plan's addition: whose change added it since was not checked."] : []),
     ...(report.facts.some((fact) => fact.declaredBy && fact.code === 'route-added') ? ["A declared route was read off its security record, its action's authorize() call and the routes entry as written: an entry whose alias does not run as written reads the same."] : []),
     ...(report.records.compared ? ["An authorize() read as unconditional runs whenever the action does, not before what the action writes, and a controller's own authorize() member, or an authorize() inside another method the action calls, is not read."] : []),
     ...(report.audit.loadedCode ? ["The audit loaded the application's code at the commits it exported, under this shell's environment, so it is no evidence about a change that attacks the runner."] : []),
