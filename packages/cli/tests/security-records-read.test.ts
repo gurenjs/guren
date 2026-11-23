@@ -415,10 +415,9 @@ ${body}
       expect(handler).toMatchObject({ authorizes: [{ ...call, reach: expect.any(String) }] })
       expect('authorizes' in handler && handler.authorizes[0]).not.toHaveProperty('unconditional')
     }
-    // A local of the action naming the imported class hides which class it is: the body is digested instead.
+    // A local of the action naming the imported class hides which class it is: read by its initializer, never as the import, and the body is digested.
     const shadowed = await read('subject-shadow', withBody("    const Post = class {}\n    const post = { id: 1 }\n    await this.authorize('update', [Post, post])"))
-    expect(shadowed).toMatchObject({ authorizes: [{ member: 'authorize', ability: 'update', subject: '[Post, post]', unconditional: true }], unseen: expect.any(String) })
-    expect('authorizes' in shadowed && shadowed.authorizes[0]).not.toHaveProperty('classes')
+    expect(shadowed).toMatchObject({ authorizes: [{ member: 'authorize', ability: 'update', subject: '[Post, post]', classes: [expect.stringMatching(/^local:Post=/)], unconditional: true }], unseen: expect.any(String) })
   })
 
   test("follows a subject's class to the module declaring it, digests an alias, and hides it behind a parameter or a local", async () => {
