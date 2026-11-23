@@ -404,7 +404,8 @@ export async function applyPlanDeclarations(
 
 /** The plan routes naming this route by name or by endpoint, in any change: a claim, before anything is compared. */
 function claimsRoute(plan: PlanDraft, route: RouteSecurityRecord): boolean {
-  return plan.routes.some((planned) => planned.name === route.name || (planned.method === route.method && planned.path === route.path))
+  return plan.routes.some((planned) => planned.name === route.name || (planned.change.kind === 'rename' && planned.change.from === route.name)
+    || (planned.method === route.method && planned.path === route.path))
 }
 
 /**
@@ -494,8 +495,9 @@ function plannedBindings(plan: PlanDraft, planned: PlanRoute): Record<string, st
 }
 
 /** The one root plan route of `name` with change `kind`, claimed by one open plan alone, its action a root controller's. */
-function plannedRouteOf(plans: readonly OpenPlan[], route: RouteSecurityRecord, kind: 'alter' | 'drop'): { file: string; plan: PlanDraft; planned: PlanRoute } | undefined {
-  const claims = plans.filter((open) => claimsRoute(open.plan, route))
+function plannedRouteOf(plans: readonly OpenPlan[], route: RouteSecurityRecord, kind: 'alter' | 'drop', base?: RouteSecurityRecord): { file: string; plan: PlanDraft; planned: PlanRoute } | undefined {
+  // A changed route is claimed by what names either side: a plan renaming it, or one naming the endpoint it left.
+  const claims = plans.filter((open) => claimsRoute(open.plan, route) || (base !== undefined && claimsRoute(open.plan, base)))
   if (claims.length !== 1 || route.module !== null || route.name === undefined) return undefined
   const { file, plan } = claims[0]!
   const planned = plan.routes.filter((candidate) => candidate.name === route.name)
@@ -549,7 +551,7 @@ function declaredRouteRemoval(subject: Extract<DeclarationSubject, { kind: 'rout
 function declaredRouteChange(subject: Extract<DeclarationSubject, { kind: 'route' }>, plans: readonly OpenPlan[]): string | undefined {
   const { route, base, baseRoutes } = subject
   if (!base || !baseRoutes || base.name !== route.name || base.module !== route.module || base.action !== route.action) return undefined
-  const found = plannedRouteOf(plans, route, 'alter')
+  const found = plannedRouteOf(plans, route, 'alter', base)
   if (!found) return undefined
   const { file, plan, planned } = found
   if (subject.routes.some((other) => other !== route && other.name === route.name)) return undefined
