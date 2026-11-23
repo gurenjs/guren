@@ -118,6 +118,8 @@ function createMockApi(overrides: Partial<DevMcpApi> = {}): DevMcpApi {
     buildDocsGraphReport: async () => ({ nodes: [], edges: [], focus: [] }),
     renderDocsGraphMarkdown: () => '# Docs graph',
     readPlanOverview: async () => ({ schemaVersion: 1, plans: [], active: [], unreadable: [] }),
+    listBoards: async () => ({ schemaVersion: 1, boards: [] }),
+    readBoardOutline: async (_appRoot, slug) => ({ slug, file: `docs/boards/${slug}.board.json`, outline: `Board: ${slug}\n` }),
     ...overrides,
   }
 }
@@ -157,6 +159,7 @@ describe('createDevMcpHandler', () => {
             'guren_check',
             'guren_gate',
             'guren_get_plans',
+            'guren_get_boards',
             'guren_codegen',
           ]),
         )
@@ -209,6 +212,23 @@ describe('createDevMcpHandler', () => {
         expect(tools.find((tool) => tool.name === 'guren_get_plans')?.annotations?.readOnlyHint).toBe(true)
         expect(seen).toEqual(['/projects/blog'])
         expect(JSON.parse(toolText(result))).toEqual(overview)
+
+        await client.close()
+        await handler.close()
+      })
+
+      test('lists the boards, or prints one as its outline, through guren_get_boards', async () => {
+        const overview = { schemaVersion: 1 as const, boards: [{ slug: 'demo', file: 'docs/boards/demo.board.json', title: 'Demo', notes: 2 }] }
+        const handler = handlerWith({ listBoards: async () => overview }, '/projects/blog')
+        const client = await connect(handler, era)
+
+        const { tools } = await client.listTools()
+        const list = await client.callTool({ name: 'guren_get_boards', arguments: {} })
+        const one = await client.callTool({ name: 'guren_get_boards', arguments: { board: 'demo' } })
+
+        expect(tools.find((tool) => tool.name === 'guren_get_boards')?.annotations?.readOnlyHint).toBe(true)
+        expect(JSON.parse(toolText(list))).toEqual(overview)
+        expect(JSON.parse(toolText(one))).toEqual({ slug: 'demo', file: 'docs/boards/demo.board.json', outline: 'Board: demo\n' })
 
         await client.close()
         await handler.close()

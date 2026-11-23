@@ -220,8 +220,11 @@ these are its rules.
 - Operations in one list apply in order, so a list can add a note and then
   connect it.
 - An `add` whose id is present, and any operation naming a note or section
-  that is absent, is dropped and reported; the rest apply. Applying a list a
-  second time therefore changes nothing.
+  that is absent, is dropped and reported; the rest apply. ~~Applying a list a
+  second time therefore changes nothing.~~
+  **Amended in implementation (M1):** that holds for a list that does not
+  remove a note it also adds. `[remove a, add a]` applied twice removes the
+  note the first run added, with its arrows, and adds it again without them.
 - `remove` also removes the arrows that touch the note and takes its id out of
   every `about`. A question left with an empty `about` stays, unattached.
   `unsection` clears `section` on the notes that named it and leaves them
@@ -229,6 +232,11 @@ these are its rules.
 - A `section` with no `at` is placed below the last section at a default
   size, and grows as notes are placed in it. An agent names a section; it
   never sizes one.
+  **Amended in implementation (M1):** a section that grows downwards pushes
+  the sections below it, their notes, and the notes below it that belong to
+  no section down by the same amount, so two sections an agent fills never
+  overlap. A `section` given a rectangle moves its notes with it and is kept
+  around them, with the inset a placed note gets.
 - `edit`, `move` and `link` on different notes commute. An `add` with no `at`
   is placed against what is already there, so the order of two such adds
   decides where they sit and nothing else: the ids, kinds, arrows, `section`
@@ -252,24 +260,34 @@ bunx guren board:apply post-notifications --ops ops.json   # `-` reads standard 
 ```
 
 `board:show` prints the board as an outline: each section, then its notes,
-questions under the note they are about, unconnected notes last. Notes are
+questions under the note they are about, ~~unconnected notes last~~. Notes are
 ordered by the layering `packages/cli/src/plan/flow.ts` computes for a flow:
-by distance from a note with no incoming arrow, then by id. A note with two
+by distance from a note with no incoming arrow, then by id. ~~A note with two
 successors prints both, indented, and an arrow that closes a cycle prints as a
-reference to the earlier note, as that module already marks a back edge.
+reference to the earlier note, as that module already marks a back edge.~~
+
+**Amended in implementation (M1):** the chain form first drawn here, a `->`
+in front of each next note, cannot say which note a line follows once a note
+has two successors. Every arrow is spelled on the note it leaves instead, so
+the outline is one flat list per section whatever the graph: `->`, `~>` for
+an async arrow, and `(back)` on the arrow that closes a loop. The walk that
+finds that arrow starts from the notes nothing points at, so it is the last
+arrow of the loop that is marked. A section is headed by its title and id, a
+question prints under the first note it is about, and notes in no section
+come last under `(no section)`.
 
 ```
 Board: Post notifications  (docs/boards/post-notifications.board.json)
 
-Publishing
-  [actor author] Author
-  -> [command publish_post] Publish a post
-  -> [aggregate post] Post                             = model Post
-  -> [event post_published] Post was published         = event PostCreated
-       ? [draft_too] Notify for a saved draft too?
-  -> [reaction tell_subscribers] When published, tell subscribers
-  ~> [command send_mail] Send the notification mail
-Unsorted
+Publishing [publishing]
+  [actor author] Author  -> publish_post
+  [command publish_post] Publish a post  -> post
+  [aggregate post] Post  = model Post  -> post_published
+  [event post_published] Post was published  ~> audit, -> tell_subscribers
+      ? [draft_too] Notify for a saved draft too?
+  [reaction audit] Record it  -> publish_post (back)
+  [reaction tell_subscribers] When published, tell subscribers
+Unsorted [unsorted]
   [event post_updated] Post was updated
 ```
 
@@ -279,6 +297,13 @@ function and the same lock. An `add` with no `at` is placed by
 named by `after`, else in the first free cell of `section`, else in an
 `Unsorted` section created on first use. `placeNote()` is a pure function of
 the board and the operation, with no clock and no random number in it.
+
+**Amended in implementation (M1):** `after` places a note inside the section
+`after` belongs to, so an `add` naming both `after` and another `section`
+takes the first free cell of that section. A question with no `after` and no
+`section` is placed as if `after` were the first note it is about. An `add`
+or `section` the board has no room for is dropped, like any other operation
+that cannot apply.
 
 The development MCP server gains `guren_get_boards`, read-only, returning the
 list and one board's text form, as `guren_get_plans` does for plans.
