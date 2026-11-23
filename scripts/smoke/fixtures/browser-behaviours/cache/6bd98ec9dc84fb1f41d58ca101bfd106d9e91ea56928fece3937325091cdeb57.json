@@ -1,23 +1,23 @@
 {
   "schemaVersion": "trace-1",
-  "createdAt": "2026-11-15T10:47:43.530Z",
+  "createdAt": "2026-11-23T13:56:08.255Z",
   "payload": {
     "actions": [
       {
         "name": "type",
-        "summary": "type \"Measured post\" into textbox \"Title\"",
+        "summary": "type \"Retitled post\" into textbox \"Title\"",
         "target": {
           "role": "textbox",
           "name": "Title"
         },
-        "value": "Measured post"
+        "value": "Retitled post"
       },
       {
         "name": "tap",
-        "summary": "tap button \"Create\"",
+        "summary": "tap button \"Save\"",
         "target": {
           "role": "button",
-          "name": "Create"
+          "name": "Save"
         }
       }
     ],
@@ -26,23 +26,23 @@
       "version": "1"
     },
     "recordedFor": {
-      "testId": "tests/browser/behaviours/generated/browser-measure.e2e.ts::AC-posts-store-1%20%28efecb8%29%3A%20a%20signed-in%20user%20creates%20a%20post",
+      "testId": "tests/browser/behaviours/generated/browser-measure.e2e.ts::AC-posts-update-1%20%2887ff8a%29%3A%20a%20signed-in%20user%20retitles%20a%20post",
       "targetId": "web",
       "instructionDigest": "f8db843a4f335dc763a25ee82e6ef1a6903d6a86e5592a2a60991fb56de7d004",
-      "paramsDigest": "bdaacd560fc98e3c803c9cd09f0ca51450d3471f901ecf6af8cf9024ab463650",
+      "paramsDigest": "5a9048dc6d605b747172b299f48eac7c6c9f5013d42d478ef99229b32e786849",
       "callIndex": 0,
       "agent": "default"
     },
-    "summary": "Typed \"Measured post\" into Title and tapped Create. App navigated to /posts/2 showing \"title: Measured post\".",
-    "startPath": "/posts/create",
-    "endPath": "/posts/2",
+    "summary": "Set Title to \"Retitled post\" on /posts/3/edit and tapped Save. The app went to /posts/3, which shows \"title: Retitled post\".",
+    "startPath": "/posts/3/edit",
+    "endPath": "/posts/3",
     "endAnchors": [
       {
         "role": "link",
         "name": "Back"
       },
       {
-        "text": "title: Measured post"
+        "text": "title: Retitled post"
       },
       {
         "text": "body:"
@@ -66,7 +66,8 @@
       },
       {
         "role": "textbox",
-        "name": "Title"
+        "name": "Title",
+        "value": "Given post"
       },
       {
         "text": "Body"
@@ -77,14 +78,14 @@
       },
       {
         "role": "button",
-        "name": "Create"
+        "name": "Save"
       },
       {
         "role": "document",
-        "name": "New Post"
+        "name": "Edit Post"
       }
     ],
-    "endWaitMs": 16351,
+    "endWaitMs": 17759,
     "keyedBy": {
       "cacheSchema": "trace-1",
       "policyVersion": "conservative/6",
