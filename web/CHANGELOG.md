@@ -1,5 +1,20 @@
 # web
 
+## 0.1.69
+
+### Patch Changes
+
+- Updated dependencies [077ca52]
+- Updated dependencies [d292c03]
+- Updated dependencies [58611ff]
+- Updated dependencies [ee94bf9]
+- Updated dependencies [23cdcb4]
+- Updated dependencies [39b60cb]
+- Updated dependencies [7e4d88a]
+- Updated dependencies [8816376]
+- Updated dependencies [3454aae]
+  - @guren/cli@2.39.0
+
 ## 0.1.68
 
 ### Patch Changes

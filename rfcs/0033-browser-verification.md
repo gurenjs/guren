@@ -1256,7 +1256,7 @@ step):
 ```ts
 test('AC-posts-update-1 (6a2991): a signed-in user retitles a post', { session: 'browser' }, async ({ app, agent, screen, browser }) => {
   const start = await begin('AC-posts-update-1', 'its start page /posts/:id/edit takes a path parameter', { app, browser })
-  await app.open(`/posts/${start.value('id')}/edit`)
+  await browser.goto(`/posts/${start.value('id')}/edit`, { waitUntil: 'networkidle' })
   await expectDefaultLocale(browser)
   const off = await browser.onDialog('accept')
   await agent.act('set "Title" to {title}, then use "Save"', { params: { title: 'Retitled post' } })
@@ -1271,7 +1271,12 @@ test('AC-posts-update-1 (6a2991): a signed-in user retitles a post', { session: 
   use. Where every such route takes a parameter, it is the first of them, with
   its parameters filled from `given.ts`; the view specs stop there with a
   `fixme`. No instruction carries a URL, which is what keeps a record's id out
-  of a recording (§13.1).
+  of a recording (§13.1). **Amended in implementation:** the page is opened
+  with `browser.goto(…, { waitUntil: 'networkidle' })`, where the example first
+  given here called `app.open()`. That call returns at `load`, and the client
+  mounts after it: a step taken in between submits the form natively, with no
+  CSRF token, and lands on the 419 page. A recorded step replays with no model
+  call, so the replay is what meets it. The sign-in setup waits the same way.
 - **`begin()`** is in the generated file, not in a file written once. It calls
   the behaviour's entry in `given.ts` and returns the parameter values. A
   behaviour with `given` text or a path parameter and no entry is skipped from
