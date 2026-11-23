@@ -186,8 +186,8 @@ export function openChange(cwd: string, change: Pick<ResolvedChange, 'mergeBase'
       if (!tree) {
         tree = (async () => {
           // The mainline only, merges against their first parent: the cut-off is the tree the record reached the mainline in,
-          // whatever `log.follow`/`log.showRoot` say. `--no-renames`: a record moved into place is added there too.
-          const { code, stdout } = await gitResult(cwd, ['--literal-pathspecs', 'log', '-1', '--no-follow', '--root', '--first-parent', '--diff-merges=first-parent', '--no-patch', '--no-renames', '--diff-filter=A', '--format=%H', change.mergeBase, '--', record])
+          // whatever `log.follow`/`log.showRoot`/`log.showSignature` say. `--no-renames`: a record moved into place is added there too.
+          const { code, stdout } = await gitResult(cwd, ['--literal-pathspecs', 'log', '-1', '--no-show-signature', '--no-follow', '--root', '--first-parent', '--diff-merges=first-parent', '--no-patch', '--no-renames', '--diff-filter=A', '--format=%H', change.mergeBase, '--', record])
           if (code !== 0) throw new CliError(`git could not search the history of ${change.mergeBase} for ${record}.`)
           const sha = stdout.trim()
           if (sha.length === 0) return undefined
