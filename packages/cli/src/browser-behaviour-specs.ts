@@ -377,7 +377,8 @@ function behaviourCase(file: string, plan: Plan, behaviour: PlanAcceptance, app:
     ? quoteString(start.path)
     : `\`${startParts.map((part) => typeof part === 'string' ? escapeTemplateLiteral(part) : `\${start.value(${quoteString(part.name)})}`).join('')}\``
   const steps = [
-    `await app.open(${opened})`,
+    // `app.open()` returns at `load`, before the client mounts: a submit made then is a native POST with no CSRF token.
+    `await browser.goto(${opened}, { waitUntil: 'networkidle' })`,
     'await expectDefaultLocale(browser)',
     "const off = await browser.onDialog('accept')",
     ...(instruction ? [`await agent.act(${quoteString(instruction.text)}${params})`] : located!),

@@ -120,7 +120,7 @@ describe('the behaviour specs', () => {
     expect(contents.startsWith(GENERATED_HEADER)).toBe(true)
     expect(contents).toMatch(/test\('AC-posts-store-1 \([0-9a-f]{6}\): a signed-in user creates a post', \{ session: 'browser' \}, async \(\{ app, screen, browser \}\) => \{/u)
     expect(contents).toContain("const start = await begin('AC-posts-store-1', undefined, { app, browser })")
-    expect(contents).toContain("await app.open('/posts/create')")
+    expect(contents).toContain("await browser.goto('/posts/create', { waitUntil: 'networkidle' })")
     expect(contents).toContain("await screen.getByLabel('Title', { exact: true }).fill('First')")
     expect(contents).toContain("await screen.getByRole('button', 'Create').or(screen.getByRole('link', 'Create')).tap()")
     expect(contents).not.toContain('agent.act')
@@ -153,7 +153,7 @@ describe('the behaviour specs', () => {
   test('fill a path parameter of the start page from given.ts, and reuse its value in the redirect', () => {
     const contents = contentsOf([behaviour('AC-posts-update-1', 'update', { input: input({ title: 'Again' }), expect: { redirect: '/posts/:id' } })])
     expect(contents).toContain("const start = await begin('AC-posts-update-1', 'its start page /posts/:id/edit takes a path parameter', { app, browser })")
-    expect(contents).toContain("await app.open(`/posts/${start.value('id')}/edit`)")
+    expect(contents).toContain("await browser.goto(`/posts/${start.value('id')}/edit`, { waitUntil: 'networkidle' })")
     // The edit view names no action for the route, so the step ends "submit the form" and is the agent's.
     expect(contents).toContain(`await agent.act('set "Title" to {title}, then submit the form', { params: { title: 'Again' } })`)
     expect(contents).toMatch(/async \(\{ app, agent, browser \}\)/u)
@@ -163,7 +163,7 @@ describe('the behaviour specs', () => {
   test('lex a path as the route generators do: a dash in a name, a constraint, and no optional or wildcard start page', () => {
     const update = behaviour('AC-posts-update-1', 'update', { input: input({ title: 'Again' }), expect: { redirect: '/posts/:post-id{[0-9]+}' } })
     const contents = contentsOf([update], { routes: withRoute(ROUTES.edit, { path: '/posts/:post-id{[0-9]+}/edit' }) })
-    expect(contents).toContain("await app.open(`/posts/${start.value('post-id')}/edit`)")
+    expect(contents).toContain("await browser.goto(`/posts/${start.value('post-id')}/edit`, { waitUntil: 'networkidle' })")
     expect(contents).toContain("landed(['/posts/', { known: 'post-id' }], start)")
     expect(contentsOf([update], { routes: withRoute(ROUTES.edit, { path: '/posts/:id?/edit' }) })).toContain('has an optional or wildcard segment, which given.ts cannot fill')
     expect(() => transpiler.transformSync(contents)).not.toThrow()
@@ -173,7 +173,7 @@ describe('the behaviour specs', () => {
     const contents = contentsOf([behaviour('AC-posts-destroy-1', 'destroy', { given: ['a post exists'], expect: { redirect: '/posts' } })], { routes: Object.values(ROUTES).filter((entry) => entry !== ROUTES.show).concat(route('GET', '/posts/latest', 'posts.latest', ['posts/Show'])) })
     expect(contents).toContain("  await begin('AC-posts-destroy-1', 'the plan gives it a starting state', { app, browser })")
     expect(contents).not.toContain('const start =')
-    expect(contents).toContain("await app.open('/posts/latest')")
+    expect(contents).toContain("await browser.goto('/posts/latest', { waitUntil: 'networkidle' })")
     expect(contents).toContain("await screen.getByRole('button', 'Delete').or(screen.getByRole('link', 'Delete')).tap()")
     expect(contents).toContain("await expect(browser).toHaveURL('/posts')")
   })
