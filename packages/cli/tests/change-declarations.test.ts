@@ -1066,6 +1066,27 @@ describe('applyPlanDeclarations on a file a command writes', () => {
     expect(planDeclaredFiles(plan).has('app/Http/Validators/ReplyValidator.ts')).toBe(false)
   })
 
+  test('should keep a file the generator writes with a directive added, which the syntax alone does not show', async () => {
+    const plan = withCommands(['guren make:job SendDigest'])
+    expect((await judge([{ file: PLAN_FILE, plan }], job.path, { [job.path]: `// @ts-nocheck\n${job.contents}` })).lane).toBe('medium')
+  })
+
+  test('should declare each of two commands writing one name to different roots', async () => {
+    const plan = withCommands(['guren make:job SendDigest', 'guren make:job SendDigest --module billing'])
+    const inModule = jobFile('SendDigest', { root: 'billing' })
+
+    expect((await judge([{ file: PLAN_FILE, plan }], job.path, { [job.path]: job.contents })).lane).toBe('low')
+    expect((await judge([{ file: PLAN_FILE, plan }], inModule.path, { [inModule.path]: inModule.contents })).lane).toBe('low')
+  })
+
+  test('should give a scaffold path to no one when a command of the plan may write it, though its call does not read', () => {
+    const path = 'app/Policies/CommentPolicy.ts'
+
+    expect(planDeclaredFiles(withCommands([])).has(path)).toBe(true)
+    expect(planDeclaredFiles(withCommands(['guren make:policy Comment --module='])).has(path)).toBe(false)
+    expect(planDeclaredFiles(withCommands(['guren add attachments'])).has(path)).toBe(true)
+  })
+
   test('should keep a file with a twin of another extension beside it', async () => {
     const twin = job.path.replace(/\.ts$/, '.js')
     expect((await judge([{ file: PLAN_FILE, plan: withCommands(['guren make:job SendDigest']) }], job.path, { [job.path]: job.contents, [twin]: 'export {}\n' })).lane).toBe('medium')

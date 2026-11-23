@@ -222,14 +222,21 @@ export function planCommandFiles(plan: PlanDraft): PlanCommandFile[] {
 const WRITES_ELSEWHERE = new Set(['make:adr', 'make:lesson', 'make:test', 'make:lang', 'lang:publish', 'make:view', 'add lint', 'add ui', 'make:module', 'make:seeder', 'make:exception', 'make:command'])
 
 /**
- * Every path a command of the plan may write, read loosely: each word, and each part of a `flag=value`, as a
- * name and as a module root, beside the project root. A refused command or any other generator is `'all'`: a blueprint or a
+ * Every path a command of the plan may write: the one path of a call `planCommandFiles()` places, else read
+ * loosely, each word and each part of a `flag=value` as a name and as a module root, beside the project root. A refused command or any other generator is `'all'`: a blueprint or a
  * multi-file generator writes more than its §2 targets name (`make:feature --factory`, a blueprint's provider).
  * A second command or plan naming a path here is a claim, whether or not its own call reads.
  */
 export function planCommandClaims(plan: PlanDraft): Map<string, Set<string> | 'all'> {
   const claims = new Map<string, Set<string> | 'all'>()
+  const read = new Map(planCommandFiles(plan).map((file) => [file.commandId, file.path]))
   for (const command of plan.commands) {
+    // A call the reader places writes that one path.
+    const path = read.get(command.id)
+    if (path !== undefined) {
+      claims.set(command.id, new Set([path]))
+      continue
+    }
     const verdict = judgePlanCommand(command.command)
     if (verdict.allowed && WRITES_ELSEWHERE.has(verdict.subcommand)) continue
     // A command the allowlist refuses (in a plan approved before it) may write anything.

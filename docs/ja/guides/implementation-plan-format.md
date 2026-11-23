@@ -207,7 +207,7 @@ Guren は、GET 以外のリクエストに対するリダイレクトを 303 �
 
 どの scaffold も書かず、何からも import されない雛形は通ります。追加するモデルのないタスクに計画が追加するジョブがその例で、雛形はそのステップで書き直します。指摘には要素とそれを書くステップが示され、この検査が失敗している間も `plan:approve` は承認を拒否します。
 
-1 つのファイルだけを書くジェネレーターなら、`guren change:lane` はそのコマンドが書いたファイルを、コマンドが宣言したものとして読みます。対象は `make:model`、`make:controller`、`make:resource`、`make:validator`、`make:policy`、`make:provider`、`make:middleware`、`make:route`、`make:factory`、`make:channel` と、副作用の 5 つのジェネレーターです。追加したファイルは、コマンドの名前、フラグ、`--module` からジェネレーターが書く内容のままなら `low` になります。
+1 つのファイルだけを書くジェネレーターなら、`guren change:lane` はそのコマンドが書いたファイルを、コマンドが宣言したものとして読みます。対象は `make:model`、`make:controller`、`make:resource`、`make:validator`、`make:policy`、`make:provider`、`make:middleware`、`make:route`、`make:factory`、`make:channel` と、副作用の 5 つのジェネレーターです。追加したファイルは、コマンドの名前、フラグ、`--module` からジェネレーターが書く内容のままなら `low` になります。コメントも比べるので、`// @ts-nocheck` を足すと `medium` のままです。
 
 そのモジュールで計画が追加する要素がファイルのクラスを受け持つときは、`plan:scaffold` が書くファイルと同じく、その要素の検査で判定します。モデル、Resource、バリデーター、副作用は名前を export していれば通り、Policy とコントローラーは計画した ability やアクションのほかに何も持たなければ通ります。Provider は起動時に実行され、ルートファイルはルートを登録するので、この 2 つはいつもジェネレーターが書いたままであることを求めます。
 

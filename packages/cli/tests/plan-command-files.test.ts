@@ -118,6 +118,11 @@ describe('planCommandFiles', () => {
     expect([...(claims.get('command.2') as Set<string>)]).toContain('app/Models/Force.ts')
   })
 
+  test('should claim only the path a call the reader places writes', () => {
+    const claims = planCommandClaims(planWith(['guren make:job SendDigest --module billing']))
+    expect([...(claims.get('command.0') as Set<string>)]).toEqual(['modules/billing/app/Jobs/SendDigestJob.ts'])
+  })
+
   test('should claim every path for a generator writing more than its file, and for a command the allowlist refuses', () => {
     const claims = planCommandClaims(planWith(['guren make:feature Post', 'guren add cache', 'bun run seed', 'guren make:adr "A decision"']))
 
