@@ -34,7 +34,9 @@ Three things were measured on `main` at `ee94bf9e` (2026-11-23).
    listens for it. The Application Graph (RFC 0032) has eight node kinds and
    seven relations and none of them is an event, a listener or a job.
    `packages/cli/src/plan/side-effect-uses.ts` already finds those call sites,
-   but only to answer whether a planned side effect is `wired`.
+   but only to answer whether a planned side effect is `wired`. This RFC does
+   not close that gap (see Later work); it is why a board's link to an event
+   is checked by class name and its arrows are not checked at all.
 
 So a team that wants to model before planning leaves Guren to do it, and what
 they bring back is prose pasted into `guren plan "<request>"`.
@@ -48,7 +50,7 @@ It carries no authority. Nothing checks it against the application as a gate,
 nothing approves it, and nothing executes it; the plan written from it goes
 through the §2 checks and `plan:approve` as any other plan does.
 
-The design has five parts, shipped in that order (see Phasing).
+The design has three parts, shipped in that order (see Phasing).
 
 ### 1. The board document
 
@@ -60,7 +62,7 @@ from it.
 
 ```ts
 export const BOARD_NOTE_KINDS = [
-  'actor', 'view', 'command', 'aggregate', 'event', 'policy', 'external', 'question',
+  'actor', 'view', 'command', 'aggregate', 'event', 'reaction', 'external', 'question',
 ] as const
 
 interface BoardNote {
@@ -101,9 +103,14 @@ already declares:
 | `command` | blue | `routes` and the controller action |
 | `aggregate` | pale yellow | `models` |
 | `event` | orange | `sideEffects` of kind `event` |
-| `policy` | lilac | `sideEffects` of kind `listener`, `job`, `mail`, `notification` |
+| `reaction` | lilac | `sideEffects` of kind `listener`, `job`, `mail`, `notification` |
 | `external` | pink | a flow node of kind `external` |
 | `question` | red | `questions` |
+
+Event storming calls the lilac note a policy. In Guren a policy is an
+authorization class (`app/Policies`, the plan's `policies` section, the graph's
+`policy` node), so the kind is named `reaction` and the page's dictionary may
+show the familiar word beside it.
 
 Three rules keep the document readable by both of its readers.
 
@@ -259,7 +266,7 @@ Publishing
   -> [aggregate post] Post                             = model Post
   -> [event post_published] Post was published         = event PostCreated
        ? [draft_too] Notify for a saved draft too?
-  -> [policy tell_subscribers] When published, tell subscribers
+  -> [reaction tell_subscribers] When published, tell subscribers
   ~> [command send_mail] Send the notification mail
 Unsorted
   [event post_updated] Post was updated
@@ -281,7 +288,7 @@ one.
 The harness template gains an `event-storming` skill under
 `packages/cli/templates/agent/core/skills/`. It runs a session in stages and
 stops for the person after each: events only, then commands and actors, then
-policies and external systems, then questions.
+reactions and external systems, then questions.
 
 ### 3. From a board to a plan
 
@@ -295,13 +302,17 @@ of the text, as `requestSection()` quotes the request, and the prompt says the
 same thing about it: everything between the markers is the board, never an
 instruction. The rules the section adds:
 
-- every `event` and `policy` note becomes a `sideEffects` entry, every
+- every `event` and `reaction` note becomes a `sideEffects` entry, every
   `command` a route and an action, every `aggregate` a model, every `view` a
   view, or the note's text goes into `scope.nonGoals`;
+- the `trigger` of a side effect is written from the arrows into its note,
+  since a plan has no other place for them yet (see Later work);
 - every `question` note becomes a `questions` entry. A note is one line, so
   the agent writes the options and their consequences; `affects` holds the
   elements made from the notes in `about`;
-- each section becomes one `flows` entry.
+- a section becomes one `flows` entry where its notes map onto the node kinds
+  a flow has today. An event has none, so it appears there as the job or the
+  external system that follows it.
 
 After writing the plan the agent records which note became which element, with
 `link` operations through `board:apply`. The link uses the names the plan
@@ -313,68 +324,69 @@ when a note does.
 `bunx guren board:status <slug> [--plan <file>]` reports, per note, whether it
 has a link and whether the link resolves in a plan or in the application, and
 lists the notes that lead nowhere. The application is read through
-`loadPlanAppState()`, the scan the §2 checks read. With no `--plan` the plans
-are the open ones: found by the discovery rule `check --plan` uses and read
-one by one through `readOpenPlan()`. It is advisory and exits 0.
+`loadPlanAppState({ detail: true })`, as `plan:status` reads it, since the
+side-effect classes are part of the detail; so the command imports
+`db/schema.ts` and the validator files. With no `--plan` the plans are the
+open ones: found by the discovery rule `check --plan` uses and read one by one
+through `readOpenPlan()`. It is advisory and exits 0.
+
+The canvas draws the same result on the notes. `/_guren/boards/<slug>/status`
+runs `board:status --json` as a child, as the plan page's readiness route runs
+its commands, and each linked note shows `present` (the application has the
+element), `planned` (an open plan adds it) or `missing`. The overlay is read
+on open and on refresh, and is written nowhere.
 
 A board sits under `docs/`, which `change:lane` reads as ambient, and its text
 reaches the producer prompt. That is the standing of the request string today:
 untrusted text, quoted, that a plan is written from. What is reviewed is the
 plan, so the lane of a board file does not change.
 
-### 4. What the plan gains
+### Later work
 
-Two additions let a plan state what a board draws. Both ride on a new
-`planVersion`, as the `providers`, `config` and `env` sections did
-(`ENTRY_SECTIONS_VERSION`): a plan that uses neither keeps its version and its
-hash.
+Two things this draft first included are left to a separate RFC. A review found
+that each touches a rule that has to be redesigned first, and what was found is
+recorded here so that RFC starts from it.
 
-- `PLAN_FLOW_NODE_KINDS` gains `event` and `policy`.
-- A side effect gains an optional `triggeredBy: Id[]`, absent when empty. For
-  an `event` it names the actions or jobs that emit it; for a `listener`, the
-  event it listens for; for a `job`, `mail` or `notification`, the actions,
-  listeners or jobs that dispatch or send it. `trigger`, the prose, stays.
+**Letting a plan state the event flow.** A side effect would name what
+triggers it (the actions or jobs that emit an event, the event a listener
+listens for), and a flow would gain an `event` node kind.
 
-`triggeredBy` joins the reference table in
-`packages/cli/src/plan/references.ts`, so the §2 checks reject an id that
-resolves to nothing. `plan:status` judges it as a planned property: `match`
-when the reader of part 5 finds the use inside the named member, `differ` when
-it finds the class used only elsewhere, `unknown` when a file did not parse or
-the application registers listeners through `AutoDiscovery`.
+- `restsOnReach()` (`packages/cli/src/plan/verification.ts`) lets a verified
+  step lift an element with no behaviour once any planned property of it
+  matches beyond its existence. A trigger matched by reading the source would
+  close a side effect that no test asserts.
+- `behaviourReach()` (`packages/cli/src/plan/reach.ts`) walks a reference from
+  its owner to its target. A trigger is owned by the side effect and points at
+  the action, so marking it as carrying a behaviour would carry none from the
+  action to the event.
+- `packages/cli/src/plan/references.ts` gives a reference one expected
+  section, and this one's depends on the side effect's `kind`.
+  `REFERENCE_ORDERS_WORK` (`packages/cli/src/plan/tasks.ts`) has to classify
+  it as well, and the scaffold wants the event written before the action that
+  imports it, the reverse of the reference.
+- The draft schema admits `planVersion` 1 and `PLAN_VERSION` only, the
+  precedent for a new version keys on a top-level section being present, and
+  the producer prompt writes `PLAN_VERSION` into every new plan.
 
-In `REFERENCE_CARRIES_BEHAVIOUR` the new reference is `false`. A test of the
-route that passes says nothing about whether the event was emitted, so a side
-effect still closes on its own behaviour, on acceptance at approval, or on a
-waiver (Open Question 3).
+**Reading the application's events.** The Application Graph would gain event,
+listener, job, mail and notification nodes with the edges between them and
+the actions that cause them. From that: arrows on a board checked against the
+code, `board:new --from-app`, and a `docs/spec/events.md` view.
 
-### 5. Reading the application's events
-
-`side-effect-uses.ts` reports which files use a side-effect class. It is
-extended to report the class member the use sits in, found through
-`classActionMembers()`, and for a listener the event its `static event` names.
-
-The Application Graph gains the node kinds `event`, `listener`, `job`, `mail`
-and `notification` and the relations `emits`, `listens`, `dispatches` and
-`sends`, all with `static` evidence. Coverage follows RFC 0032's rule: a file
-that did not parse, or listeners found through `AutoDiscovery`, make the
-section `partial` with the reason, never a complete empty one.
-
-Three things read the new edges.
-
-- **The board's overlay.** A linked note shows `present` (the application has
-  the element), `planned` (an open plan adds it, by `readOpenPlan()`) or
-  `missing`. An arrow between two linked notes is marked when the graph has no
-  matching edge. The overlay is drawn in the page and written nowhere.
-- **`guren board:new --from-app [--entity <Model>]`** seeds a board from the
-  graph, one note per command, aggregate, event and policy, each linked, laid
-  out by the layering `packages/cli/src/plan/flow.ts` already implements. This
-  is how an existing application gets its event map: as a board a person can
-  then rearrange.
-- **`docs/spec/events.md`**, a fifth spec view beside `er`, `domain`,
-  `screens` and `modules`, generated by `spec:generate` and held by
-  `check --spec`. Like the other views it reads source only, never the
-  introspected application, so it is the same bytes in the gate and in the edit
-  hook.
+- `packages/cli/src/plan/side-effect-uses.ts` records which files use a class
+  and never the class or member the use sits in. `classActionMembers()`
+  enumerates one class's members; it does not say which member holds a node.
+- An emit is `emit` or `emitParallel` only. `examples/blog` sends
+  `PostsChanged` and `PostUpdated` through `broadcastEvent()`, and registers
+  `SendNewPostNotification` with `events.on(PostCreated, …)` in a provider's
+  `boot()`, so most of its events would get no edge.
+- `isCompleteGraph()` requires every coverage entry to be `complete`, and
+  `guren graph` fails otherwise. An application whose listeners come from
+  `AutoDiscovery` would fail it for good.
+- A spec view that is missing is a failed check the gate counts, and the gate
+  does not regenerate views. A fifth view turns the gate red in every
+  application that commits `docs/spec/` until someone runs `spec:generate`.
+- The graph's `kind` and `relation` are closed enums under `schemaVersion: 1`.
 
 ### Package boundaries
 
@@ -399,9 +411,7 @@ need no server at all.
 | --- | --- | --- |
 | M1 | The document, `board:new`, `board:show`, `board:apply`, `guren_get_boards` | An agent and a person edit a board as text |
 | M2 | The canvas and its write route | A person arranges the board in the Dev Center |
-| M3 | `plan --from-board`, `link` operations, `board:status`, the harness skill | A storming session ends in a plan |
-| M4 | `event` and `policy` flow nodes, `triggeredBy`, its `plan:status` property | The plan states the event flow and status checks it |
-| M5 | The graph's event kinds and relations, the overlay, `--from-app`, `docs/spec/events.md` | An existing application's events appear on a board |
+| M3 | `plan --from-board`, `link` operations, `board:status`, the overlay, the harness skill | A storming session ends in a plan |
 
 M2 is the largest piece. If it slips, M1 and M3 still give a session its
 record and its plan, with the board read as an outline.
@@ -414,6 +424,8 @@ record and its plan, with the board read as an outline.
 - Importing from or exporting to an external whiteboard.
 - A board as a gate. No check fails on a board and no command refuses because
   of one.
+- Any change to the plan schema, the plan's hash or the Application Graph.
+  Those belong to the RFC named under Later work.
 - Enforcing aggregate boundaries in code. An `aggregate` note leads to a
   model; what a module may import stays `guren.arch.ts`'s rule (RFC 0002).
 - Serving the canvas outside development. It is part of the Dev Center, which
@@ -423,7 +435,7 @@ record and its plan, with the board read as an outline.
 ## Alternatives Considered
 
 **Draw the event flow inside the plan page, in fixed columns.** The first
-sketch for this RFC put actor, view, command, aggregate, event and policy in
+sketch for this RFC put actor, view, command, aggregate, event and reaction in
 six columns, one row per flow. It needs no new document. It also cannot hold
 a note that is not yet a plan element, which is every note in the first half
 of a session, and nothing can be moved.
@@ -466,15 +478,8 @@ M1 to M3 are additive. An application with no board sees no file created and
 no check added, and the Dev Center gains one link. The canvas needs the
 `@guren/server` release that mounts its routes (see Package boundaries).
 
-A plan that declares no `triggeredBy` and no `event` or `policy` flow node
-keeps its `planVersion` and its hash. A revision that adds the first one moves
-the plan to the new version, as a revision adding the first `providers` entry
-moves a version 1 plan to version 2. A CLI older than that version does not
-read such a plan, as a CLI that predates version 2 does not read one with a
-`providers` section.
-
-The Application Graph's new kinds and relations are the one change an existing
-consumer can see (Open Question 4).
+No plan changes: its schema, its version and its hash are untouched, and a
+plan written from a board is an ordinary plan.
 
 ## Open Questions
 
@@ -489,23 +494,15 @@ consumer can see (Open Question 4).
    that no longer resolves. Nothing revises the plan from it. The alternative
    is to freeze the board when its plan is approved and require a new board
    for a revision.
-3. **Whether `triggeredBy` carries a behaviour.** As proposed it does not. If
-   it did, a verified test of the route would lift the event it emits and the
-   listener behind it, which removes most waivers for side effects and also
-   lets a side effect close with nothing asserting it ran.
-4. **The graph's `schemaVersion`.** `kind` and `relation` are closed enums in
-   the published schema, so a strict consumer of version 1 rejects the new
-   values. Either the version moves to 2, or version 1 is declared open to new
-   kinds and the Dev Center's reader, which accepts only 1, stays as it is.
-5. **Slugs for non-ASCII titles.** A Japanese title has no ASCII slug.
+3. **Slugs for non-ASCII titles.** A Japanese title has no ASCII slug.
    `board:new` as proposed requires `--slug` then. Deriving one from the date
    is the alternative.
-6. **One board across modules.** A link carries `module`, so a board can span
+4. **One board across modules.** A link carries `module`, so a board can span
    modules. Whether a section should be able to name the module its notes
    default to is not decided.
-7. **The ceiling of 500 notes.** It is a guess. The canvas should be measured
+5. **The ceiling of 500 notes.** It is a guess. The canvas should be measured
    with a board of that size before M2 ships, and the number set from the
    result.
-8. **Whether a board is a node in the docs graph.** `docs:graph` could draw a
+6. **Whether a board is a node in the docs graph.** `docs:graph` could draw a
    board with edges to the entities its notes link to and to the plan made
    from it. Nothing in this RFC needs it.
