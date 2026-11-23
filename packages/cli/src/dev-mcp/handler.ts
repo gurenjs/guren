@@ -9,6 +9,7 @@ import { generateDataTypes } from '../data-types'
 import { runDoctor, suggestNextSteps } from '../doctor'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from '../docs-graph'
 import { readPlanOverview } from '../docs-viewer-plans'
+import { listBoards, readBoardOutline } from '../board/store'
 import { renderEntityContextMarkdown } from '../entity-context'
 import { createFreshContextApi } from '../fresh-context'
 import { runGate } from '../gate'
@@ -67,6 +68,8 @@ function defaultApi(): DevMcpApi {
     buildDocsGraphReport,
     renderDocsGraphMarkdown,
     readPlanOverview,
+    listBoards,
+    readBoardOutline,
     ...createFreshContextApi(),
   }
 }

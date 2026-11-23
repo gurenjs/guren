@@ -40,8 +40,14 @@ function widest(values: Iterable<number>): number {
   return most
 }
 
-function edgesByFrom(edges: PlanFlowEdge[]): Map<string, PlanFlowEdge[]> {
-  const out = new Map<string, PlanFlowEdge[]>()
+/** The two ends every graph laid out here names; a flow's edge and a board's arrow both carry them. */
+export interface LayeredEdge {
+  from: string
+  to: string
+}
+
+function edgesByFrom<E extends LayeredEdge>(edges: readonly E[]): Map<string, E[]> {
+  const out = new Map<string, E[]>()
   for (const edge of edges) {
     const bucket = out.get(edge.from)
     if (bucket) bucket.push(edge)
@@ -55,7 +61,7 @@ function edgesByFrom(edges: PlanFlowEdge[]): Map<string, PlanFlowEdge[]> {
  * than a line, and so is a step looping to itself (`plan:flow-self-loop`), dropped here
  * because a line from a box to itself draws nothing.
  */
-function declaredEdges(stepIds: readonly string[], edges: PlanFlowEdge[]): PlanFlowEdge[] {
+function declaredEdges<E extends LayeredEdge>(stepIds: readonly string[], edges: readonly E[]): E[] {
   const declared = new Set(stepIds)
   return edges.filter((edge) => declared.has(edge.from) && declared.has(edge.to) && edge.from !== edge.to)
 }
@@ -65,9 +71,9 @@ function declaredEdges(stepIds: readonly string[], edges: PlanFlowEdge[]): PlanF
  * onto a step already on the stack is the one that closes it. Which edge of a cycle
  * that is depends on the order, so the order is the plan's, not a map's.
  */
-function backEdges(stepIds: readonly string[], edges: PlanFlowEdge[]): Set<PlanFlowEdge> {
+function backEdges<E extends LayeredEdge>(stepIds: readonly string[], edges: readonly E[]): Set<E> {
   const out = edgesByFrom(edges)
-  const back = new Set<PlanFlowEdge>()
+  const back = new Set<E>()
   const done = new Set<string>()
   const onStack = new Set<string>()
 
@@ -103,7 +109,7 @@ function backEdges(stepIds: readonly string[], edges: PlanFlowEdge[]): Set<PlanF
  * declared before the edge it depends on: quadratic on a flow written back to front,
  * which is what a model writing one from its end produces.
  */
-function columns(stepIds: readonly string[], forward: PlanFlowEdge[]): Map<string, number> {
+function columns<E extends LayeredEdge>(stepIds: readonly string[], forward: readonly E[]): Map<string, number> {
   const out = edgesByFrom(forward)
   const pending = new Map(stepIds.map((id) => [id, 0]))
   for (const edge of forward) pending.set(edge.to, (pending.get(edge.to) as number) + 1)
@@ -124,17 +130,35 @@ function columns(stepIds: readonly string[], forward: PlanFlowEdge[]): Map<strin
   return column
 }
 
+export interface GraphLayers<E extends LayeredEdge> {
+  /** The edges with both ends declared and no self-loop, in the order given. */
+  edges: E[]
+  /** Distance from a step with no incoming forward edge. */
+  column: Map<string, number>
+  /** The edges that close a cycle; they take no part in the layering. */
+  back: Set<E>
+}
+
+/**
+ * The layering a flow is placed by, over any ids and edges: a board's outline orders its
+ * notes by it (RFC 0041 §2), so one graph reads the same in both. `ids` must be distinct.
+ */
+export function layerGraph<E extends LayeredEdge>(ids: readonly string[], allEdges: readonly E[]): GraphLayers<E> {
+  const edges = declaredEdges(ids, allEdges)
+  const back = backEdges(ids, edges)
+  const column = columns(
+    ids,
+    edges.filter((edge) => !back.has(edge)),
+  )
+  return { edges, column, back }
+}
+
 export function layoutPlanFlows(plan: PlanDraft): PlanFlowLayout[] {
   return plan.flows.map((flow) => {
     // Derived once and handed down. A flow may declare one id twice (§2 reports it, and
     // a finding does not stop the page rendering), and everything below is keyed by id.
     const stepIds = [...new Set(flow.nodes.map((node) => node.id))]
-    const edges = declaredEdges(stepIds, flow.edges)
-    const back = backEdges(stepIds, edges)
-    const column = columns(
-      stepIds,
-      edges.filter((edge) => !back.has(edge)),
-    )
+    const { edges, column, back } = layerGraph(stepIds, flow.edges)
 
     const filled = new Map<number, number>()
     const nodes: PlanFlowLayoutNode[] = flow.nodes.map((node) => {

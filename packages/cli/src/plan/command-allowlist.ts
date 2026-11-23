@@ -22,6 +22,7 @@ const DENIALS = {
   environment: "it writes or prints this machine's app key, config cache or links, not application source",
   deploy: 'it writes deployment recipes, which a plan does not describe',
   plan: 'it acts on plans, and a plan does not run the commands that judge it',
+  board: 'it reads or edits a board, which a plan is written from and does not write',
   harness: 'it rewrites the agent harness (rules, skills, hooks) that governs the agent running the plan',
 } as const
 
@@ -156,6 +157,9 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'plan:waive': 'plan',
   'plan:revise': 'plan',
   'plan:close': 'plan',
+  'board:new': 'board',
+  'board:show': 'board',
+  'board:apply': 'board',
   'agent:init': 'harness',
   'agent:sync': 'harness',
 })
