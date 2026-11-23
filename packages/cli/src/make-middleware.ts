@@ -1,5 +1,5 @@
-import type { WriterOptions } from './utils'
-import { scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 
 const MIDDLEWARE_DIR = 'app/Http/Middleware'
 
@@ -13,7 +13,12 @@ export const ${className} = defineMiddleware(async (ctx: Context, next: () => Pr
 }
 
 export async function makeMiddleware(name: string, options: WriterOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = middlewareFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+export function middlewareFile(name: string, options: WriterOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: MIDDLEWARE_DIR,
     suffix: 'Middleware',
     template: ({ normalizedName }) => middlewareTemplate(normalizedName),

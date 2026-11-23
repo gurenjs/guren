@@ -9,6 +9,9 @@ import type { ChangeFact } from '../src/change/lane'
 import type { RouteSecurityRecord } from '../src/change/security-records'
 import { parseSourceFile } from '../src/parse-cache'
 import { composeRouteRegistrarCall } from '../src/route-registrar'
+import { jobFile } from '../src/make-job'
+import { policyFile } from '../src/make-policy'
+import { providerFile } from '../src/make-provider'
 import { PlanSchema, type PlanDraft } from '../src/plan/schema'
 import { parseSchemaSource } from '../src/schema-parser'
 import { loadApprovedCommentsPlan } from './plan-fixture'
@@ -955,5 +958,137 @@ describe('applyPlanDeclarations on a key an env element declares', () => {
   test('should not declare a key no added element names, or two open plans name', async () => {
     expect(await judge([{ file: PLAN_FILE, plan: declaring({ ...ELEMENT, change: { kind: 'existing' } }) }])).toEqual([['medium', undefined]])
     expect(await judge([{ file: PLAN_FILE, plan: declaring() }, { file: 'docs/plans/jobs/plan.json', plan: declaring() }])).toEqual([['medium', undefined]])
+  })
+})
+
+describe('applyPlanDeclarations on a file a command writes', () => {
+  const withCommands = (commands: string[], edit?: (document: Record<string, any>) => void): PlanDraft => commentsPlan((plan) => {
+    plan.commands = commands.map((command, index) => ({ id: `command.${index}`, command, reason: 'needed' }))
+    edit?.(plan)
+  })
+  const fileFact = (path: string): ChangeFact => ({ code: 'file-added', lane: 'medium', files: [path], evidence: 'path', message: `${path} added` })
+
+  async function judge(plans: OpenPlan[], path: string, files: Record<string, string>): Promise<ChangeFact> {
+    const fact = fileFact(path)
+    const [result] = await applyPlanDeclarations([fact], new Map([[fact, { kind: 'file', path }]]), plans, async (asked) => files[asked] ?? null)
+    return result!
+  }
+
+  const job = jobFile('SendDigest')
+  const edited = job.contents.replace('void payload\n  }', "void payload\n    await fetch('https://example.com')\n  }")
+
+  test('should lower the file as the generator writes it and name the command', async () => {
+    const plan = withCommands(['guren make:job SendDigest'])
+
+    expect(await judge([{ file: PLAN_FILE, plan }], job.path, { [job.path]: job.contents })).toEqual({ ...fileFact(job.path), lane: 'low', declaredBy: `${PLAN_FILE}#command.0` })
+  })
+
+  test('should keep a file no planned element owns once it differs from what the generator writes', async () => {
+    expect(edited).not.toBe(job.contents)
+    expect((await judge([{ file: PLAN_FILE, plan: withCommands(['guren make:job SendDigest']) }], job.path, { [job.path]: edited })).lane).toBe('medium')
+  })
+
+  test('should hold a file an added element owns by that element\'s check', async () => {
+    const path = jobFile('SendDigest', { root: 'billing' }).path
+    const plan = withCommands(['guren make:job SendDigest --module billing'], (document) => {
+      document.sideEffects = [{ id: 'job.digest', change: { kind: 'add' }, kind: 'job', name: 'SendDigestJob', module: 'billing', trigger: 'nightly', description: 'd' }]
+    })
+
+    expect(await judge([{ file: PLAN_FILE, plan }], path, { [path]: edited })).toMatchObject({ lane: 'low', declaredBy: `${PLAN_FILE}#command.0,job.digest` })
+    expect((await judge([{ file: PLAN_FILE, plan }], path, { [path]: edited.replace('class SendDigestJob', 'class OtherJob') })).lane).toBe('medium')
+  })
+
+  test('should hold an owned policy to the planned abilities, so the generator\'s own abilities are not lowered', async () => {
+    const path = policyFile('Comment', { root: 'billing' }).path
+    const plan = withCommands(['guren make:policy Comment --module billing'], (document) => {
+      document.policies[0].module = 'billing'
+    })
+
+    expect((await judge([{ file: PLAN_FILE, plan }], path, { [path]: policyFile('Comment', { root: 'billing' }).contents })).lane).toBe('medium')
+  })
+
+  test('should keep a provider that does anything more at boot than the generator writes', async () => {
+    const provider = providerFile('Queue')
+    const more = provider.contents.replace('boot(): void {\n', "boot(): void {\n    globalThis.fetch = () => { throw new Error('x') }\n")
+    const plan = withCommands(['guren make:provider Queue'])
+
+    expect(more).not.toBe(provider.contents)
+    expect((await judge([{ file: PLAN_FILE, plan }], provider.path, { [provider.path]: provider.contents })).lane).toBe('low')
+    expect((await judge([{ file: PLAN_FILE, plan }], provider.path, { [provider.path]: more })).lane).toBe('medium')
+  })
+
+  test('should keep a path two open plans, the scaffold and a command, or two commands claim', async () => {
+    const plan = withCommands(['guren make:job SendDigest'])
+    const twice = withCommands(['guren make:job SendDigest', 'guren make:job SendDigest --force'])
+    const scaffolded = withCommands(['guren make:policy Comment'])
+    const policyPath = 'app/Policies/CommentPolicy.ts'
+
+    expect((await judge([{ file: PLAN_FILE, plan }, { file: 'other.plan.json', plan }], job.path, { [job.path]: job.contents })).lane).toBe('medium')
+    expect((await judge([{ file: PLAN_FILE, plan: twice }], job.path, { [job.path]: job.contents })).lane).toBe('medium')
+    expect(planDeclaredFiles(scaffolded).has(policyPath)).toBe(false)
+  })
+
+  test('should keep a path a command of the plan may also write, though its call does not read', async () => {
+    const plan = withCommands(['guren make:job SendDigest', 'guren make:job SendDigest --force --verbose'])
+    expect((await judge([{ file: PLAN_FILE, plan }], job.path, { [job.path]: job.contents })).lane).toBe('medium')
+  })
+
+  test("should keep a module path a second open plan's element claims, and a provider a second plan's providers element names", async () => {
+    const path = jobFile('SendDigest', { root: 'billing' }).path
+    const effect = (document: Record<string, any>) => {
+      document.sideEffects = [{ id: 'job.digest', change: { kind: 'add' }, kind: 'job', name: 'SendDigestJob', module: 'billing', trigger: 'nightly', description: 'd' }]
+    }
+    const provider = providerFile('Queue')
+    const providers = commentsPlan((document) => {
+      document.planVersion = 2
+      document.providers = [{ id: 'provider.queue', change: { kind: 'add' }, className: 'QueueProvider', purpose: 'binds the queue' }]
+    })
+
+    expect((await judge([{ file: PLAN_FILE, plan: withCommands(['guren make:job SendDigest --module billing'], effect) }, { file: 'other.plan.json', plan: commentsPlan(effect) }], path, { [path]: jobFile('SendDigest', { root: 'billing' }).contents })).lane).toBe('medium')
+    expect((await judge([{ file: PLAN_FILE, plan: withCommands(['guren make:provider Queue']) }, { file: 'other.plan.json', plan: providers }], provider.path, { [provider.path]: provider.contents })).lane).toBe('medium')
+  })
+
+  test('should keep a file while any open plan carries a command that may write more than one reading places', async () => {
+    const plan = withCommands(['guren make:job SendDigest'])
+    const files = { [job.path]: job.contents }
+
+    expect((await judge([{ file: PLAN_FILE, plan: withCommands(['guren make:job SendDigest', 'guren add cache']) }], job.path, files)).lane).toBe('medium')
+    expect((await judge([{ file: PLAN_FILE, plan }, { file: 'other.plan.json', plan: withCommands(['guren make:feature Post --module billing']) }], job.path, files)).lane).toBe('medium')
+    expect((await judge([{ file: PLAN_FILE, plan }, { file: 'other.plan.json', plan: withCommands(['guren make:adr "A decision"']) }], job.path, files)).lane).toBe('low')
+  })
+
+  test('should give a command no element the scaffold writes elsewhere, as a validator named after another entity than its model', () => {
+    const plan = withCommands(['guren make:validator Reply'], (document) => {
+      const validator = document.validators.find((entry: { name: string }) => entry.name === 'CommentPayloadSchema')
+      validator.name = 'ReplyPayloadSchema'
+    })
+
+    expect(planDeclaredFiles(plan).has('app/Http/Validators/ReplyValidator.ts')).toBe(false)
+  })
+
+  test('should keep a file the generator writes with a directive added, which the syntax alone does not show', async () => {
+    const plan = withCommands(['guren make:job SendDigest'])
+    expect((await judge([{ file: PLAN_FILE, plan }], job.path, { [job.path]: `// @ts-nocheck\n${job.contents}` })).lane).toBe('medium')
+  })
+
+  test('should declare each of two commands writing one name to different roots', async () => {
+    const plan = withCommands(['guren make:job SendDigest', 'guren make:job SendDigest --module billing'])
+    const inModule = jobFile('SendDigest', { root: 'billing' })
+
+    expect((await judge([{ file: PLAN_FILE, plan }], job.path, { [job.path]: job.contents })).lane).toBe('low')
+    expect((await judge([{ file: PLAN_FILE, plan }], inModule.path, { [inModule.path]: inModule.contents })).lane).toBe('low')
+  })
+
+  test('should give a scaffold path to no one when a command of the plan may write it, though its call does not read', () => {
+    const path = 'app/Policies/CommentPolicy.ts'
+
+    expect(planDeclaredFiles(withCommands([])).has(path)).toBe(true)
+    expect(planDeclaredFiles(withCommands(['guren make:policy Comment --module='])).has(path)).toBe(false)
+    expect(planDeclaredFiles(withCommands(['guren add attachments'])).has(path)).toBe(true)
+  })
+
+  test('should keep a file with a twin of another extension beside it', async () => {
+    const twin = job.path.replace(/\.ts$/, '.js')
+    expect((await judge([{ file: PLAN_FILE, plan: withCommands(['guren make:job SendDigest']) }], job.path, { [job.path]: job.contents, [twin]: 'export {}\n' })).lane).toBe('medium')
   })
 })

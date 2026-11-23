@@ -1,5 +1,5 @@
-import type { WriterOptions } from './utils'
-import { scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 import { RESOURCES_DIR } from './discovery'
 
 export interface ResourceSourceOptions {
@@ -51,7 +51,12 @@ export interface MakeResourceOptions extends WriterOptions {
 }
 
 export async function makeResource(name: string, options: MakeResourceOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = resourceFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+export function resourceFile(name: string, options: MakeResourceOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: RESOURCES_DIR,
     suffix: 'Resource',
     template: ({ normalizedName }) => {

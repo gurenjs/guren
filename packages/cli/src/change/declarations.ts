@@ -1,10 +1,10 @@
 /**
  * The declaration matcher of RFC 0040 §3: a fact takes its declarable lane only when an approved, open plan
  * declares it. Matched so far: an added file of added elements and an added table of an added model, both
- * against what `plan:scaffold` writes (a declared table taking its own residue with it), and an added migration
- * that only creates such tables; an added route, the routes entry edited by `--mount` alone, and a provider a planned
- * policy implies, registered in the application entry as `plan:scaffold` registers it. A subject
- * two open plans claim, or one the plan does not determine, stays.
+ * against what `plan:scaffold` writes (a declared table taking its own residue with it), an added file a plan's
+ * command writes (`plan/command-files.ts`), an added migration that only creates such tables, an added route,
+ * the routes entry edited by `--mount` alone, and a provider a planned policy implies, registered as
+ * `plan:scaffold` registers it. A subject two open plans claim, or one the plan does not determine, stays.
  */
 
 import type { CallExpression, ClassDeclaration, File, Statement } from '@babel/types'
@@ -12,12 +12,13 @@ import type { JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
 import { readCreationStatements, snapshotRecordsCreation, type CreationForeignKey, type CreationStatement, type MigrationDialect } from '@guren/orm/internal/migration-guard'
 
-import { canonicalSyntax, referencedIdentifiers, walk } from '../ast-walk'
+import { canonicalSyntax, referencedIdentifiers, sameComments, walk } from '../ast-walk'
 import { classActionMembers } from '../controller-methods'
 import { extractClassDeclaration } from '../model-parser'
 import { parseSourceFile } from '../parse-cache'
 import { validatorFieldProperties } from '../plan/field-status'
 import { readPolicyAbilities } from '../plan/policy-abilities'
+import { planCommandClaims, planCommandFiles } from '../plan/command-files'
 import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
 import { plannedSqlDefault, type PlanScaffoldApp, planScaffoldMounts, planScaffoldOutput, sqlNameOf, TWIN_EXTENSIONS } from '../plan/scaffold'
 import { CONFIG_DIR, MODELS_DIR, PROVIDERS_DIR } from '../discovery'
@@ -30,7 +31,7 @@ import { derivePlanTasks, type PlanDerivedStep } from '../plan/tasks'
 import { composeRouteRegistrarCall, findRouteRegistrar } from '../route-registrar'
 import { parseSchemaSource, type SchemaDialect, type SchemaTable } from '../schema-parser'
 import { registeredBefore, routePathsMayOverlap } from '../test-requests'
-import { importSpecifier } from '../utils'
+import { importSpecifier, kebabCase } from '../utils'
 import { composeAppProviderRegistration } from '../provider-registrar'
 import { appEntryListNames, type AppEntryList } from './app-entry'
 import { envKeyValue, importsFrameworkEnv } from './app-env'
@@ -85,11 +86,13 @@ export type DeclaredFileCheck =
 
 export interface DeclaredFile {
   elements: string[]
-  /** The value names the scaffold's own output exports, every one of which the file must export. */
+  /** The value names the scaffold's own output exports (a command's generator's, for a file it writes), every one of which the file must export. */
   exports: string[]
-  /** What the scaffold writes there. */
+  /** What the scaffold, or the command's generator, writes there. */
   contents: string
   check: DeclaredFileCheck
+  /** What a plan's command writes there, when no planned element owns it: the file holds only as one of these, as syntax. */
+  generated?: string[]
 }
 
 /**
@@ -154,7 +157,30 @@ export function planDeclaredFiles(plan: PlanDraft): Map<string, DeclaredFile> {
       else files.set(file.path, { elements: file.elements, exports, contents: file.contents, check: checkOf(file.path, owners as PlanElementEntry[], step) })
     }
   }
+  const scaffolded = new Set([...files.values()].flatMap((file) => file?.elements ?? []))
+  const commandFiles = planCommandFiles(plan)
+  const claims = planCommandClaims(plan)
+  // A command of the plan whose words may name a scaffold path leaves it to no one, whether or not its call reads. A
+  // blueprint's `'all'` is left to `plan:command-target`, which judges its targets against the scaffold's at approval.
+  for (const path of files.keys()) if ([...claims.values()].some((paths) => paths !== 'all' && paths.has(path))) files.set(path, null)
+  const owners = new Map<string, number>()
+  for (const file of commandFiles) for (const id of file.elements) owners.set(id, (owners.get(id) ?? 0) + 1)
+  for (const file of commandFiles) {
+    const ast = parseSourceFile(file.contents[0]!, file.path)
+    const exports = ast ? declaredExports(ast) : undefined
+    // A path the scaffold or another command may also write is not one command's, and an element is held to one file:
+    // the scaffold's where it writes the element (a validator's file is named after its model, not after it).
+    const shared = [...claims].some(([id, paths]) => id !== file.commandId && (paths === 'all' || paths.has(file.path)))
+    const owned = file.elements.some((id) => scaffolded.has(id) || owners.get(id)! > 1)
+    if (files.has(file.path) || shared || owned || !exports || exports.length === 0) files.set(file.path, null)
+    else files.set(file.path, { elements: [file.commandId, ...file.elements], exports, contents: file.contents[0]!, check: file.check, ...(file.check.kind === 'whole' ? { generated: file.contents } : {}) })
+  }
   return new Map([...files].filter((entry): entry is [string, DeclaredFile] => entry[1] !== null))
+}
+
+/** Whether the head is the planned file as syntax, with its comments: `canonicalSyntax` drops a `// @ts-nocheck` an edit adds. */
+function sameWhole(planned: File, plannedText: string, head: File, headText: string): boolean {
+  return canonicalSyntax(head.program.body) === canonicalSyntax(planned.program.body) && sameComments(planned, plannedText, head, headText)
 }
 
 /** The class exported as itself under `name`: a local class an alias exports is not the one a reader of the export gets. */
@@ -168,12 +194,12 @@ function exportedClass(ast: File, name: string): ClassDeclaration | undefined {
 }
 
 /** Whether the head file holds no more than the plan declares, beyond the exports both have. */
-function passesCheck(declared: DeclaredFile, ast: File, path: string, contents = declared.contents): boolean {
+function passesCheck(declared: DeclaredFile, ast: File, text: string, path: string, contents = declared.contents): boolean {
   const { check } = declared
   if (check.kind === 'exports') return true
   const planned = parseSourceFile(contents, path)
   if (!planned) return false
-  if (check.kind === 'whole' || check.kind === 'routes') return canonicalSyntax(ast.program.body) === canonicalSyntax(planned.program.body)
+  if (check.kind === 'whole' || check.kind === 'routes') return sameWhole(planned, contents, ast, text)
   const className = check.kind === 'policy' ? check.policy.name : check.controller.className
   const members = new Set(check.kind === 'policy' ? check.policy.abilities.map((ability) => ability.name) : check.controller.actions.map((action) => action.name))
   const head = classFileAllowed(ast, planned, className, members)
@@ -268,13 +294,24 @@ function importsBuildersAsThemselves(ast: File, statement: Statement, tables: re
  * a second plan naming the file is a claim even where its own scaffold writes nothing there.
  */
 export function planClaimedPaths(plan: PlanDraft): Set<string> {
+  // A module's element is claimed in its module too, where a command of another plan may write it.
+  const inRoot = (element: { module?: string }, paths: string[]): string[] =>
+    element.module === undefined ? paths : [...paths, ...paths.map((path) => `modules/${kebabCase(element.module!)}/${path}`)]
   return new Set([
-    ...plan.models.flatMap((model) => [`${MODELS_DIR}/${model.name}.ts`, validatorFilePath(model), scaffoldRoutesFile(model).path]),
-    ...plan.resources.map(resourceFilePath),
-    ...plan.policies.flatMap((policy) => [policyFilePath(policy), providerFilePath(policy)]),
-    ...plan.controllers.map(controllerFilePath),
-    ...plan.sideEffects.map(sideEffectFilePath),
+    ...plan.models.flatMap((model) => inRoot(model, [`${MODELS_DIR}/${model.name}.ts`, validatorFilePath(model), scaffoldRoutesFile(model).path])),
+    ...plan.resources.flatMap((resource) => inRoot(resource, [resourceFilePath(resource)])),
+    ...plan.policies.flatMap((policy) => inRoot(policy, [policyFilePath(policy), providerFilePath(policy)])),
+    ...plan.controllers.flatMap((controller) => inRoot(controller, [controllerFilePath(controller)])),
+    ...plan.sideEffects.flatMap((effect) => inRoot(effect, [sideEffectFilePath(effect)])),
+    ...(plan.providers ?? []).map((provider) => `${PROVIDERS_DIR}/${provider.className}.ts`),
+    ...(plan.config ?? []).map((entry) => `config/${entry.name}.ts`),
+    ...[...planCommandClaims(plan).values()].flatMap((paths) => (paths === 'all' ? [] : [...paths])),
   ])
+}
+
+/** Whether a command of the plan may write files no reading places, which claims every path a command declares. */
+function claimsEveryCommandPath(plan: PlanDraft): boolean {
+  return [...planCommandClaims(plan).values()].includes('all')
 }
 
 /** Whether any model of the plan, whatever its change, names this table by SQL name in its module. */
@@ -627,6 +664,8 @@ async function declarationOf(
     return id ? `${open.file}#${id}` : undefined
   }
   const declared = files.get(subject.path)!
+  // A command of another plan that no reading places may write any declared path, the scaffold's included.
+  if (owned.some((entry) => entry.open !== open && claimsEveryCommandPath(entry.open.plan))) return undefined
   return (await holdsDeclared(open.plan, declared, subject.path, readHead)) ? `${open.file}#${declared.elements.join(',')}` : undefined
 }
 
@@ -639,8 +678,9 @@ async function holdsDeclared(plan: PlanDraft, declared: DeclaredFile, path: stri
   const ast = text === null ? null : parseSourceFile(text, path)
   const exports = ast ? declaredExports(ast) : undefined
   if (!ast || !exports || !declared.exports.every((name) => exports.includes(name))) return false
+  if (declared.generated?.some((generated) => { const written = parseSourceFile(generated, path); return written !== null && sameWhole(written, generated, ast, text!) })) return true
   const contents = declared.check.kind === 'routes' ? await routesFileAtHead(plan, declared.check.step, path, readHead) : declared.contents
-  return contents !== undefined && passesCheck(declared, ast, path, contents)
+  return contents !== undefined && passesCheck(declared, ast, text!, path, contents)
 }
 
 /**

@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { CONTROLLERS_DIR } from './discovery'
 import { PAGE_COMPONENT_EXTENSIONS } from './inertia-pages'
-import type { WriterOptions } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
 import {
   coreImportLine,
   docComment,
@@ -12,8 +12,9 @@ import {
   pathExists,
   resourceName,
   safeModuleName,
-  scaffoldFile,
+  scaffoldFileEntry,
   writeRoot,
+  writeScaffoldFile,
 } from './utils'
 
 const PAGES_DIR = 'resources/js/pages'
@@ -106,21 +107,22 @@ function jsonControllerTemplate(className: string): string {
  * writes there, so JSON is what such an app asked for.
  */
 export async function makeController(name: string, options: WriterOptions = {}): Promise<string> {
-  const moduleName = options.root ? safeModuleName(options.root) : undefined
   // Resolved once and handed to the write too: a relative `cwd` re-resolved
   // after the probe's awaits could name a different app than the one judged.
   const appRoot = writeRoot(options)
   const apiOnly = await isConfirmedApiOnlyApp(appRoot)
-  return scaffoldFile(name, {
+  const { path, contents } = controllerFile(name, { ...options, apiOnly })
+  return writeScaffoldFile(path, contents, { ...options, cwd: appRoot })
+}
+
+/** What `make:controller` writes; `apiOnly` is the app's, which `makeController()` reads before calling this. */
+export function controllerFile(name: string, options: WriterOptions & { apiOnly: boolean }): ScaffoldFileEntry {
+  const moduleName = options.root ? safeModuleName(options.root) : undefined
+  return scaffoldFileEntry(name, {
     dir: CONTROLLERS_DIR,
     suffix: 'Controller',
-    template: ({ normalizedName }) => {
-      if (apiOnly) {
-        return jsonControllerTemplate(normalizedName)
-      }
-      return inertiaControllerTemplate(normalizedName, moduleName)
-    },
-  }, { ...options, cwd: appRoot })
+    template: ({ normalizedName }) => (options.apiOnly ? jsonControllerTemplate(normalizedName) : inertiaControllerTemplate(normalizedName, moduleName)),
+  }, options)
 }
 
 /**
