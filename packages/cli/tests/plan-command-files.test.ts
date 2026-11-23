@@ -6,7 +6,6 @@ import { builtinSubCommands } from '../src/commands'
 import { jobFile } from '../src/make-job'
 import { channelFile } from '../src/make-channel'
 import { listenerFile } from '../src/make-listener'
-import { validatorFile } from '../src/make-validator'
 import { providerFile } from '../src/make-provider'
 import { judgePlanCommand, planGeneratorNames } from '../src/plan/command-allowlist'
 import { PLAN_COMMAND_FILES, PLAN_COMMAND_FLAG_ALIASES, planCommandClaims, planCommandFiles } from '../src/plan/command-files'
@@ -106,12 +105,9 @@ describe('planCommandFiles', () => {
     ['an empty word after a boolean, which the registry takes as its value', 'guren make:channel Orders --private ""'],
     ['a blank word, which the registry reads as a number', 'guren make:job --force " " Invoice'],
     ['a flag before the name', 'guren make:job --force SendDigest'],
+    ['an empty value, which make:validator reads as no fields', 'guren make:validator Tag --fields ""'],
   ])('should declare nothing for %s', (_why, command) => {
     expect(planCommandFiles(planWith([command]))).toEqual([])
-  })
-
-  test('should read an empty --fields as no fields, as make:validator does', () => {
-    expect(planCommandFiles(planWith(['guren make:validator Tag --fields ""']))[0]!.contents).toEqual([validatorFile('Tag').contents])
   })
 
   test('should claim what a command may write even where its call does not read, in the root and each module it names', () => {

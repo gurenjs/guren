@@ -88,7 +88,6 @@ export const PLAN_COMMAND_FILES: Readonly<Record<string, PlanCommandFileRule>> =
     files: (name, flags, options) => {
       const fields = flags.string('fields', 'F')
       try {
-        // As `make:validator` reads it: an empty `--fields` is no fields, where `parseFieldsString('')` gives the defaults.
         return [validatorFile(name, { ...options, fields: fields ? parseFieldsString(fields) : undefined })]
       } catch {
         return undefined
