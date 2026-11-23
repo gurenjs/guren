@@ -1195,6 +1195,74 @@ describe('judgeChangeLane with per-route security records', () => {
   })
 })
 
+describe('judgeChangeLane with an alter or drop route in an open plan', () => {
+  const auth = { kind: 'alias' as const, name: 'auth', capabilities: { authentication: { mode: 'required' as const } } }
+  const handler = { authenticates: true, authorizes: [], validates: [] }
+  const update = (path: string, middleware: RouteSecurityRecord['middleware'] = [auth]): RouteSecurityRecord => ({
+    method: 'PUT', path, name: 'posts.update', module: null, action: 'app/Http/Controllers/PostController.ts#default.update', middleware, contracts: {}, handler,
+  })
+  const legacy: RouteSecurityRecord = { method: 'GET', path: '/legacy/posts', name: 'posts.legacy', module: null, action: 'app/Http/Controllers/PostController.ts#default.legacy', middleware: [], contracts: {}, handler }
+  const records = (...routes: RouteSecurityRecord[]) => ({ recordVersion: SECURITY_RECORD_VERSION, routes })
+  const action = (id: string, name: string) => ({ id, change: { kind: 'existing' }, name, authorization: { middleware: [] }, response: { kind: 'redirect', to: '/posts' }, rules: [] })
+
+  /** The comments plan, approved, with PostController's update route moved to `/posts/:post` and its legacy route dropped. */
+  async function routePlanRepo(): Promise<{ repo: string; base: string }> {
+    const { repo } = await createRepo()
+    const plan = loadApprovedCommentsPlan() as { controllers: unknown[]; routes: unknown[] }
+    plan.controllers.push({ id: 'controller.posts', change: { kind: 'existing' }, className: 'PostController', actions: [action('action.posts.update', 'update'), action('action.posts.legacy', 'legacy')] })
+    plan.routes.push(
+      { id: 'route.posts.update', change: { kind: 'alter' }, method: 'PUT', path: '/posts/:post', name: 'posts.update', action: 'action.posts.update', middleware: ['auth'], bind: [] },
+      { id: 'route.posts.legacy', change: { kind: 'drop', reason: 'replaced by posts.index' }, method: 'GET', path: '/legacy/posts', name: 'posts.legacy', action: 'action.posts.legacy', middleware: [], bind: [] },
+    )
+    const path = join(repo, 'docs/plans/comments/plan.json')
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, JSON.stringify(plan), 'utf8')
+    await approvePlanFile(path)
+    return { repo, base: await commit(repo, {}) }
+  }
+
+  async function laneWith(pair: SecurityRecordPair): Promise<ChangeLaneReport> {
+    const { repo, base } = await routePlanRepo()
+    const head = await commit(repo, { 'routes/web.ts': 'export function registerWebRoutes() {}\n' })
+    const change = await resolveChange(repo, base, head)
+    const { reader, dispose } = openChange(repo, change)
+    try {
+      return await judgeChangeLane(change, reader, { audit: async () => ({ unavailable: 'not audited in this test', records: pair }) })
+    } finally {
+      await dispose()
+    }
+  }
+  const routeFacts = (report: ChangeLaneReport) => report.facts.filter((fact) => fact.code.startsWith('route-')).map((fact) => [fact.code, fact.lane, fact.declaredBy])
+
+  test('should lower a route moved and a route removed as the plan states them', async () => {
+    const report = await laneWith({ base: records(update('/posts/:id'), legacy), head: records(update('/posts/:post')) })
+
+    expect(routeFacts(report)).toEqual([
+      ['route-removed', 'low', 'docs/plans/comments/plan.json#route.posts.legacy'],
+      ['route-changed', 'low', 'docs/plans/comments/plan.json#route.posts.update'],
+    ])
+  })
+
+  test('should keep a change the element does not state, or a removal another route would answer, at medium', async () => {
+    // Its path is not the planned one.
+    expect(routeFacts(await laneWith({ base: records(update('/posts/:id')), head: records(update('/posts/:slug')) })))
+      .toEqual([['route-changed', 'medium', undefined]])
+    // Its handler changed, which the route element does not state.
+    const unguarded = { ...update('/posts/:post'), handler: { ...handler, validates: [{ member: 'validateBody', schema: 'x' }] } } as unknown as RouteSecurityRecord
+    expect(routeFacts(await laneWith({ base: records(update('/posts/:id')), head: records(unguarded) }))).toEqual([['route-changed', 'medium', undefined]])
+    // A later `ALL /legacy/*` would answer the removed route's requests.
+    const catchAll: RouteSecurityRecord = { ...legacy, method: 'ALL', path: '/legacy/*', name: 'legacy.catch', action: 'app/Http/Controllers/LegacyController.ts#default.handle' }
+    expect(routeFacts(await laneWith({ base: records(legacy, catchAll), head: records(catchAll) }))).toEqual([['route-removed', 'medium', undefined]])
+  })
+
+  test('should keep the facts of a weakened route high beside a declared change', async () => {
+    const report = await laneWith({ base: records(update('/posts/:id')), head: records(update('/posts/:post', [])) })
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane])).toContainEqual(['authorization-removed', 'high'])
+    expect(routeFacts(report)).toEqual([['route-changed', 'medium', undefined]])
+  })
+})
+
 describe('change:lane', () => {
   test('should refuse to run without both commits', async () => {
     await expect(runCommand(builtinSubCommands['change:lane'], { rawArgs: ['--head', 'abc1234'] })).rejects.toThrow('needs both --base <sha> and --head <sha>')

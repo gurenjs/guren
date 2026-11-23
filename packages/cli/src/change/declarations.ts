@@ -7,6 +7,8 @@
  * `plan:scaffold` registers it. A subject two open plans claim, or one the plan does not determine, stays.
  */
 
+import { posix } from 'node:path'
+
 import type { CallExpression, ClassDeclaration, File, Statement } from '@babel/types'
 import type { JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
@@ -20,7 +22,7 @@ import { validatorFieldProperties } from '../plan/field-status'
 import { readPolicyAbilities } from '../plan/policy-abilities'
 import { planApprovalsPath } from '../plan/approvals'
 import { planCommandClaims, planCommandFiles } from '../plan/command-files'
-import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
+import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy, type PlanRoute } from '../plan/schema'
 import { plannedSqlDefault, type PlanScaffoldApp, planScaffoldMounts, planScaffoldOutput, sqlNameOf, TWIN_EXTENSIONS } from '../plan/scaffold'
 import { CONFIG_DIR, MODELS_DIR, PROVIDERS_DIR } from '../discovery'
 import { defaultImportBinding } from '../patch-helpers'
@@ -66,6 +68,8 @@ export type DeclarationSubject =
 export interface HeadRoutes {
   routes: readonly RouteSecurityRecord[]
   added: readonly RouteSecurityRecord[]
+  /** Every base route in registration order, for a route the change removes or changes. */
+  baseRoutes?: readonly RouteSecurityRecord[]
 }
 
 /** An approved plan that is not closed, as the head has it; `file` is app-relative. */
@@ -377,8 +381,8 @@ export async function applyPlanDeclarations(
       : subject?.kind === 'app-entry' ? registered.get(entryKey(subject.list, subject.name))
       : subject?.kind === 'env' ? await declaredEnvKey(subject, owned, readHead)
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
-      : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : undefined)
-      : subject?.kind === 'agent' ? (subject.base === undefined ? await declaredAgentOf(subject.route, facts, subjects, plans, readHead) : undefined)
+      : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : subject.change === 'alter' ? declaredRouteChange(subject, plans) : declaredRouteRemoval(subject, plans))
+      : subject?.kind === 'agent' ? await declaredAgentOf(subject.route, subject.base, facts, subjects, plans, readHead)
       // An edit outside the security surface weakens no route only where every route's record was compared.
       : subject?.kind === 'file' && subject.edited && !recordsCoverRoutes ? undefined
       : subject ? await declarationOf(subject, owned, readHead, presentWhenAdded) : undefined
@@ -477,6 +481,92 @@ export async function declaredRoute(route: RouteSecurityRecord, head: HeadRoutes
   return `${file}#${planned.id}`
 }
 
+/** The record parts an `alter` route may change: what its element states about the route itself, beside its action. */
+const ALTERABLE_ROUTE_PARTS: ReadonlySet<string> = new Set(['method', 'path', 'middleware', 'bindings', 'agent'])
+
+/** The one root plan route of `name` with change `kind`, claimed by one open plan alone. */
+function plannedRouteOf(plans: readonly OpenPlan[], route: RouteSecurityRecord, kind: 'alter' | 'drop'): { file: string; plan: PlanDraft; planned: PlanRoute } | undefined {
+  const claims = plans.filter((open) => claimsRoute(open.plan, route))
+  if (claims.length !== 1 || route.module !== null || route.name === undefined) return undefined
+  const { file, plan } = claims[0]!
+  const planned = plan.routes.filter((candidate) => candidate.name === route.name)
+  if (planned.length !== 1 || planned[0]!.change.kind !== kind) return undefined
+  return { file, plan, planned: planned[0]! }
+}
+
+/** Whether a route of `method` and `path` at `index` overlaps one registered after it that answers its method. */
+function shadowsLater(method: string, path: string, self: { module: string | null; index: number }, routes: readonly RouteSecurityRecord[], skip: ReadonlySet<RouteSecurityRecord>): boolean {
+  return routes.some((other, index) => !skip.has(other) && (other.method === method || other.method === 'ALL')
+    && registeredBefore(self, { module: other.module, index }) !== false && index !== self.index && routePathsMayOverlap(path, other.path))
+}
+
+/**
+ * A route the change removes, declared by the one open plan whose `drop` route names it at its method and path. The base
+ * route registered after it at an overlapping path, of its method or `ALL`, would answer its requests once it is gone.
+ */
+function declaredRouteRemoval(subject: Extract<DeclarationSubject, { kind: 'route' }>, plans: readonly OpenPlan[]): string | undefined {
+  const { route, baseRoutes } = subject
+  const found = plannedRouteOf(plans, route, 'drop')
+  if (!found || !baseRoutes || found.planned.method !== route.method || found.planned.path !== route.path) return undefined
+  if (subject.routes.some((other) => other.name === route.name)) return undefined
+  const index = baseRoutes.indexOf(route)
+  if (index === -1 || shadowsLater(route.method, route.path, { module: route.module, index }, baseRoutes, new Set([route]))) return undefined
+  return `${found.file}#${found.planned.id}`
+}
+
+/**
+ * A route the change alters, declared by the one open plan whose `alter` route names it: the name, module and action are the
+ * same on both sides, every part that changed is one the element states about the route, and the head holds it as stated.
+ * A moved route is held to both overlap rules: the path it leaves and the one it takes.
+ */
+function declaredRouteChange(subject: Extract<DeclarationSubject, { kind: 'route' }>, plans: readonly OpenPlan[]): string | undefined {
+  const { route, base, baseRoutes } = subject
+  if (!base || !baseRoutes || base.name !== route.name || base.module !== route.module || base.action !== route.action) return undefined
+  const found = plannedRouteOf(plans, route, 'alter')
+  if (!found) return undefined
+  const { file, plan, planned } = found
+  if (subject.routes.some((other) => other !== route && other.name === route.name)) return undefined
+  const parts = new Set([...Object.keys(base), ...Object.keys(route)])
+  const changed = [...parts].filter((part) => !sameRecordPart(base[part as keyof RouteSecurityRecord], route[part as keyof RouteSecurityRecord]))
+  if (changed.length === 0 || changed.some((part) => !ALTERABLE_ROUTE_PARTS.has(part))) return undefined
+
+  if (planned.method !== route.method || planned.path !== route.path) return undefined
+  // The route's action is the element's: `<file>#<export>.<action>`, the class by its export or, for a default export, its file.
+  const controller = plan.controllers.find((candidate) => candidate.actions.some((action) => action.id === planned.action))
+  const action = controller?.actions.find((candidate) => candidate.id === planned.action)
+  const target = route.action?.match(/^(?<file>[^#]+)#(?<exported>[^.]+)\.(?<member>[^.]+)$/)?.groups
+  if (!controller || !action || controller.module !== undefined || !target || target.member !== action.name) return undefined
+  if (target.exported !== controller.className && !(target.exported === 'default' && posix.basename(target.file!).replace(SOURCE_EXTENSION, '') === controller.className)) return undefined
+  if (changed.includes('middleware')) {
+    const middleware = plannedRouteMiddleware(planned, action)
+    if (route.middleware.length !== middleware.length) return undefined
+    for (const [at, entry] of route.middleware.entries()) {
+      if (entry.kind === 'inline' || entry.unresolved || entry.name !== middleware[at]) return undefined
+      if (entry.name === 'auth' && entry.capabilities.authentication?.mode !== 'required') return undefined
+    }
+  }
+  if (changed.includes('bindings')) {
+    // The manifest names each binding's model and not its lookup column, so a planned key cannot be held.
+    if (planned.bind.some((binding) => binding.key !== undefined)) return undefined
+    const boundModel = (id: string): string | undefined => {
+      const model = plan.models.find((entry) => entry.id === id)
+      return model && model.module === undefined ? `${MODELS_DIR}/${model.name}.ts#${model.name}` : undefined
+    }
+    if (!sameRecordPart(route.bindings ?? {}, Object.fromEntries(planned.bind.map((binding) => [binding.param, boundModel(binding.model)])))) return undefined
+  }
+  if (changed.includes('agent') && !sameRecordPart(route.agent ?? null, plannedAgentMetadata(planned) ?? null)) return undefined
+
+  if (changed.includes('method') || changed.includes('path')) {
+    const headIndex = subject.routes.indexOf(route)
+    const baseIndex = baseRoutes.indexOf(base)
+    if (headIndex === -1 || baseIndex === -1) return undefined
+    const added = new Set(subject.added)
+    if (shadowsLater(route.method, route.path, { module: route.module, index: headIndex }, subject.routes, new Set([route, ...added]))) return undefined
+    if (shadowsLater(base.method, base.path, { module: base.module, index: baseIndex }, baseRoutes, new Set([base]))) return undefined
+  }
+  return `${file}#${planned.id}`
+}
+
 /**
  * Whether the action's body holds, as a statement of its own, `await this.authorize(ability, subject)`: the subject
  * `[Model, record]`, or also the bare class where the scaffold writes that. A call not awaited lets the action run on.
@@ -539,13 +629,16 @@ function rendersPlannedFields(schema: unknown, validator: PlanDraft['validators'
 }
 
 /** An added route's agent tool is declared with the route: `declaredRoute()` holds its metadata to the plan's. */
-async function declaredAgentOf(route: RouteSecurityRecord, facts: readonly ChangeFact[], subjects: ReadonlyMap<ChangeFact, DeclarationSubject>, plans: readonly OpenPlan[], readHead: (path: string) => Promise<string | null>): Promise<string | undefined> {
-  const added = facts.find((fact) => {
+async function declaredAgentOf(route: RouteSecurityRecord, base: RouteSecurityRecord | undefined, facts: readonly ChangeFact[], subjects: ReadonlyMap<ChangeFact, DeclarationSubject>, plans: readonly OpenPlan[], readHead: (path: string) => Promise<string | null>): Promise<string | undefined> {
+  const change = base === undefined ? 'add' : 'alter'
+  const routed = facts.find((fact) => {
     const subject = subjects.get(fact)
-    return subject?.kind === 'route' && subject.change === 'add' && subject.route === route
+    return subject?.kind === 'route' && subject.change === change && subject.route === route
   })
-  const subject = added && subjects.get(added)
-  return subject?.kind === 'route' && route.agent !== undefined ? declaredRoute(route, subject, plans, readHead) : undefined
+  const subject = routed && subjects.get(routed)
+  if (subject?.kind !== 'route') return undefined
+  if (change === 'alter') return declaredRouteChange(subject, plans)
+  return route.agent !== undefined ? declaredRoute(route, subject, plans, readHead) : undefined
 }
 
 /**
