@@ -62,8 +62,8 @@ export const INTROSPECT_GRAPH_ENV = 'GUREN_INTROSPECT_GRAPH'
 export const GRAPH_SCAN_WARNINGS = { 'model-import': 'binds', 'validator-import': 'validates' } as const
 export type GraphScanWarning = keyof typeof GRAPH_SCAN_WARNINGS
 
-/** A bound parameter's lookup as the child writes it: a model's column, or a custom resolver's source text. */
-export type GraphBindingLookup = { key?: string } | { resolver: string }
+/** A bound parameter's lookup as the child writes it: a model's column and, for a router-level one, its class by export; or a custom resolver. */
+export type GraphBindingLookup = { key?: string; source?: string } | { resolver: true }
 
 /** A route as the CLI's own child writes it: the server's fields, and the CLI's beside them. */
 export type GraphRouteEntry = RouteEntry & {
@@ -80,7 +80,7 @@ export type GraphRouteEntry = RouteEntry & {
   controllerPackage?: string
   /**
    * Graph runs on a server that says how each bound parameter is looked up (`registeredBindingLookups()`): a model by
-   * its column (`key` absent: the primary key), or a router-level custom resolver by a digest of its source.
+   * its column (`key` absent: the primary key), or a router-level custom resolver, whose body the records do not read.
    */
   bindingLookups?: Record<string, GraphBindingLookup & { router?: GraphBindingLookup }>
 }

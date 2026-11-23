@@ -77,11 +77,12 @@ export interface RouteSecurityRecord {
   contracts: Partial<Record<ContractKey, ContractRecord>>
   handler: ActionRecord
   /**
-   * Each bound parameter and its model class, as `file#export` where introspection found the class, else by name, with
-   * `@<column>` for a lookup column; a router-level custom resolver as `resolver#<digest of its source>`.
+   * Each bound parameter and its model class, as `file#export` where introspection found the class, else by name
+   * (`unnamed` without one), with `@<column>` for a lookup column and `+router:` and the router's lookup for a parameter
+   * bound at both levels; a custom resolver as `resolver`.
    */
   bindings?: Record<string, string>
-  /** Set when the server did not say how parameters are looked up (an older `@guren/server`): the columns are unread. */
+  /** Set when a lookup is not read: a custom resolver's body, or a server that did not say (an older `@guren/server`). */
   bindingLookups?: 'unread'
   /** The `.agent()` metadata as declared, which makes the route a tool. */
   agent?: AgentRouteMetadata

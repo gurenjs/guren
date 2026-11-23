@@ -88,7 +88,7 @@ interface RegisteredBinding {
 }
 
 /** How a bound parameter is looked up: a model by `key` (absent: its primary key), or a custom resolver as registered. */
-export type BindingLookup = { key?: string } | { resolver: ModelBindingResolver }
+export type BindingLookup = { key?: string; model?: BindableModel } | { resolver: ModelBindingResolver }
 
 /**
  * A route's lookup of one parameter: its route-level `bind`, else the router-level one. A parameter bound at both levels
@@ -849,7 +849,7 @@ export class Router<in M extends string = never> {
 
   /**
    * How each bound parameter is looked up, indexed like definitions (RFC 0040 §3): what `registeredModelBindings()`
-   * names a model of, by its lookup column, and a router-level custom resolver, which it leaves out.
+   * names a model of, by its lookup column, a router-level model with its class, and a custom resolver, which it leaves out.
    */
   registeredBindingLookups(): ReadonlyArray<Record<string, RouteBindingLookup>> {
     return this.registry.map(({ path, bindings }) => {
@@ -857,7 +857,7 @@ export class Router<in M extends string = never> {
       const routerLevel = new Map<string, BindingLookup>()
       for (const parameter of extractPathParamNames(path)) {
         const registered = this.modelBindings.get(parameter)
-        if (registered) routerLevel.set(parameter, registered.model ? (registered.key === undefined ? {} : { key: registered.key }) : { resolver: registered.resolve })
+        if (registered) routerLevel.set(parameter, registered.model ? { model: registered.model, ...(registered.key === undefined ? {} : { key: registered.key }) } : { resolver: registered.resolve })
       }
       for (const [parameter, lookup] of routerLevel) result[parameter] = lookup
       for (const [parameter, binding] of bindings ?? []) {

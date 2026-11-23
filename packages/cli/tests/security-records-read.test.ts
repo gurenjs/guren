@@ -95,7 +95,7 @@ async function app(name: string, files: Record<string, string>): Promise<string>
 }
 
 describe('readSecurityRecords', () => {
-  test("records each binding's lookup column and a router-level resolver by a digest of its source", async () => {
+  test("records each binding's lookup column, and a router-level resolver as unread", async () => {
     const dir = await app('lookups', {
       ...FILES,
       'app/Models/Post.ts': 'export class Post {\n  static async findOrFail(value: unknown) {\n    return { value }\n  }\n}\n',
@@ -117,26 +117,27 @@ export function registerWebRoutes(router: Router): void {
     expect(records.routes.map((route) => [route.path, route.bindings, route.bindingLookups])).toEqual([
       ['/posts/:post', { post: 'app/Models/Post.ts#Post@slug' }, undefined],
       ['/posts/by-id/:id', { id: 'app/Models/Post.ts#Post' }, undefined],
-      ['/tokens/:token', { token: expect.stringMatching(/^resolver#[0-9a-f]+$/) }, undefined],
+      ['/tokens/:token', { token: 'resolver' }, 'unread'],
     ])
   })
 
-  test('says the lookup columns are unread when the server does not say them, or a resolver is native', async () => {
+  test('says the lookup columns are unread when the server does not say them, or a custom resolver binds one', () => {
     const sources = { post: { file: 'app/Models/Post.ts', exportName: 'Post', name: 'Post' } }
-    const resolverOf = async (source: string) => (source.includes('[native code]') ? undefined : `d:${source.length}`)
-    expect(await bindingsRecord('/posts/:post', { post: 'Post' }, sources, undefined, resolverOf)).toEqual({ bindings: { post: 'app/Models/Post.ts#Post' }, bindingLookups: 'unread' })
+    expect(bindingsRecord('/posts/:post', { post: 'Post' }, sources, undefined)).toEqual({ bindings: { post: 'app/Models/Post.ts#Post' }, bindingLookups: 'unread' })
     // A parameter only a router-level resolver fills has no model binding, and is still unread on such a server.
-    expect(await bindingsRecord('/tokens/:token', undefined, undefined, undefined, resolverOf)).toEqual({ bindingLookups: 'unread' })
-    expect(await bindingsRecord('/health', undefined, undefined, undefined, resolverOf)).toEqual({})
-    expect(await bindingsRecord('/posts/:post', { post: 'Post' }, sources, { post: { key: 'slug' } }, resolverOf)).toEqual({ bindings: { post: 'app/Models/Post.ts#Post@slug' } })
-    // Bound at both levels, the router's lookup stands beside the route's.
-    expect(await bindingsRecord('/posts/:post', { post: 'Post' }, sources, { post: { router: { resolver: 'async (v) => v' } } }, resolverOf))
-      .toEqual({ bindings: { post: 'app/Models/Post.ts#Post+router:resolver#d:14' } })
-    expect(await bindingsRecord('/tokens/:token', undefined, undefined, { token: { resolver: 'function resolve() { [native code] }' } }, resolverOf))
-      .toEqual({ bindings: { token: 'resolver#unread' }, bindingLookups: 'unread' })
+    expect(bindingsRecord('/tokens/:token', undefined, undefined, undefined)).toEqual({ bindingLookups: 'unread' })
+    expect(bindingsRecord('/health', undefined, undefined, undefined)).toEqual({})
+    expect(bindingsRecord('/posts/:post', { post: 'Post' }, sources, { post: { key: 'slug' } })).toEqual({ bindings: { post: 'app/Models/Post.ts#Post@slug' } })
+    // Bound at both levels, the router's model and column stand beside the route's.
+    expect(bindingsRecord('/posts/:post', { post: 'Post' }, sources, { post: { router: { source: 'app/Models/Comment.ts#Comment', key: 'slug' } } }))
+      .toEqual({ bindings: { post: 'app/Models/Post.ts#Post+router:app/Models/Comment.ts#Comment@slug' } })
+    // A custom resolver's body is not read, at either level.
+    expect(bindingsRecord('/tokens/:token', undefined, undefined, { token: { resolver: true } })).toEqual({ bindings: { token: 'resolver' }, bindingLookups: 'unread' })
+    expect(bindingsRecord('/posts/:post', { post: 'Post' }, sources, { post: { router: { resolver: true } } })).toEqual({ bindings: { post: 'app/Models/Post.ts#Post+router:resolver' }, bindingLookups: 'unread' })
     // A model the server could not name is still bound, by its column.
-    expect(await bindingsRecord('/users/:user', undefined, undefined, { user: { key: 'email' } }, resolverOf)).toEqual({ bindings: { user: 'unnamed@email' } })
+    expect(bindingsRecord('/users/:user', undefined, undefined, { user: { key: 'email' } })).toEqual({ bindings: { user: 'unnamed@email' } })
   })
+
 
   test('reads the chain, the contract and its export, and the action\'s calls of an introspected route', async () => {
     const dir = await app('plain', FILES)

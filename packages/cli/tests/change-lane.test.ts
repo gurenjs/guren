@@ -879,6 +879,9 @@ export class CommentPolicy extends Policy {
     expect(edited(await laneOf(stamped.repo, added, head))).toEqual([['source-edited', 'medium', undefined]])
     const skipped = { ...noRoutes, skipped: ['the createApp({ boot }) callback'] }
     expect(edited(await laneRecorded(stamped.repo, added, head, { base: skipped, head: skipped }))).toEqual([['source-edited', 'medium', undefined]])
+    // A route whose lookups the records could not read (a custom resolver, an older server) may use the edited model.
+    const looked = { ...noRoutes, routes: [{ method: 'GET', path: '/tokens/:token', module: null, middleware: [], contracts: {}, handler: { authenticates: false, authorizes: [], validates: [] }, bindings: { token: 'resolver' }, bindingLookups: 'unread' as const }] }
+    expect(edited(await laneRecorded(stamped.repo, added, head, { base: looked, head: looked }))).toEqual([['source-edited', 'medium', undefined]])
     const inline: RouteSecurityRecord = { method: 'POST', path: '/comments', module: null, middleware: [], contracts: {}, handler: { unread: 'an inline handler' } }
     const unread = { ...noRoutes, routes: [inline] }
     expect(edited(await laneRecorded(stamped.repo, added, head, { base: unread, head: unread }))).toEqual([['source-edited', 'medium', undefined]])

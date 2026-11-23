@@ -281,9 +281,9 @@ describe('registeredBindingLookups', () => {
       { post: { key: 'slug' } },
       { id: {} },
       { token: { resolver } },
-      { author: { key: 'slug' } },
+      { author: { model: Post, key: 'slug' } },
       // Bound at both levels, both run: the route's model for `this.model()`, the router's value positionally.
-      { author: { router: { key: 'slug' } } },
+      { author: { router: { model: Post, key: 'slug' } } },
     ])
   })
 })

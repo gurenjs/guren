@@ -655,7 +655,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     const shared = headSkipped.filter((entry) => baseSkipped.includes(entry))
     if (added.length > 0) unjudged.push({ reader: 'security-records', reason: `the head's introspection skipped ${added.join(', ')}, which the base's did not, so a route registered there was not compared`, lane: 'high', files: files.length > 0 ? files : touched })
     if (files.length > 0 && [...compared.base.routes, ...compared.head.routes].some((route) => route.bindingLookups === 'unread')) {
-      unjudged.push({ reader: 'security-records', reason: 'the server did not say how bound parameters are looked up (an older @guren/core, or a native resolver), so a changed lookup column or resolver was not compared', lane: 'medium', files })
+      unjudged.push({ reader: 'security-records', reason: 'a bound parameter is looked up by a custom resolver, whose body is not read, or by a server that did not say (an older @guren/core), so what it looks up was not compared', lane: 'medium', files })
     }
     if (added.length === 0 && shared.length > 0 && files.length > 0) unjudged.push({ reader: 'security-records', reason: `introspection skipped ${shared.join(', ')} on both sides, so a route registered there was not compared`, lane: 'medium', files })
   } else if (notCompared && (notCompared.lane === 'high' || surface.length > 0)) {

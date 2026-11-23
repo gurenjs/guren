@@ -463,7 +463,7 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
   const targets = manifestRouteTargets(manifest, await routeSourceClasses(cwd, manifest, resolve(cwd, await routesEntryOrDefault(cwd)), cache))
   const reachedByName = new Set(collisionsReachedByName(scan, targets.flatMap((route) => (route.controller ? [route.controller] : []))).map((collision) => collision.className))
   const declarations = new Declarations(cwd, cache)
-  let routesFiles: Promise<string> | undefined
+  let routesText: Promise<string> | undefined
   const routes: RouteSecurityRecord[] = []
   for (const [index, route] of targets.entries()) {
     const { contractSources: sources, bindingSources, bindingLookups: lookups } = manifest.routes[index] as GraphRouteEntry
@@ -474,7 +474,7 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
       const exports = (sources?.[key] ?? []).map((source) => `${source.file}#${source.exportName}`).sort()
       const digests: Record<string, string> = {}
       for (const source of sources?.[key] ?? []) digests[`${source.file}#${source.exportName}`] = await declarations.of(resolve(cwd, source.file), source.exportName)
-      if (exports.length === 0) digests[''] = await (routesFiles ??= routesDigest(cwd, manifest.entry.file ?? undefined))
+      if (exports.length === 0) digests[''] = await (routesText ??= routesDigest(cwd, manifest.entry.file ?? undefined))
       contracts[key] = { schema, exports, declarations: digests }
     }
     const ref = route.controller
@@ -496,7 +496,7 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
       })),
       contracts,
       // A model by the file and export introspection found it under, so two classes of one name stay apart; else by name.
-      ...await bindingsRecord(route.path, route.bindings, bindingSources, lookups, (source) => resolverDigest(source, cwd, manifest.entry.file ?? undefined, declarations)),
+      ...bindingsRecord(route.path, route.bindings, bindingSources, lookups),
       ...(route.agent ? { agent: route.agent } : {}),
       handler: ref ? await actionRecord(cwd, scan, ref, reachedByName, declarations, manifest.entry.file ?? undefined) : { unread: 'an inline handler, whose body the reader does not follow' },
     })
@@ -505,46 +505,32 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
 }
 
 /**
- * A custom resolver by its source, every routes file (where it is registered, a factory's arguments included) and the
- * declarations its names reach from them; `undefined` for a native function (a bound method), whose source is not there.
+ * The record's bindings: each model by identity and lookup column, and one bound at both levels with the router's model
+ * and column beside it (`+router:`), which no plan states. A custom resolver is a function whose body this does not read,
+ * and a server that did not say how parameters are looked up leaves the columns unread: either marks the record unread.
  */
-async function resolverDigest(source: string, cwd: string, entry: string | undefined, declarations: Declarations): Promise<string | undefined> {
-  if (/\{\s*\[native code\]\s*\}\s*$/u.test(source)) return undefined
-  const files = await routesFiles(cwd, entry)
-  const names = sourceIdentifiers(source, 'resolver.ts', (text) => `(${text})`)?.names
-  const reached = names ? await Promise.all(files.map((file) => declarations.closure(file, '', names))) : [`unparsed:${digest(source)}`]
-  return digest([source, await routesDigest(cwd, entry), ...reached].join('\n'))
-}
-
-/**
- * The record's bindings: each model by identity and lookup column, a custom resolver by its digest, and one bound at
- * both levels with the router's beside it (`+router:`), which no plan states. What the server did not say, or a resolver
- * whose source is native, the record marks unread rather than reading it as a primary key or as nothing.
- */
-export async function bindingsRecord(
+export function bindingsRecord(
   path: string,
   named: Record<string, string> | undefined,
   sources: GraphRouteEntry['bindingSources'],
   lookups: GraphRouteEntry['bindingLookups'],
-  resolverOf: (source: string) => Promise<string | undefined>,
-): Promise<Pick<RouteSecurityRecord, 'bindings' | 'bindingLookups'>> {
+): Pick<RouteSecurityRecord, 'bindings' | 'bindingLookups'> {
   let unread = lookups === undefined && /(?:^|\/):[^/]/u.test(path)
-  const part = async (lookup: GraphBindingLookup): Promise<string> => {
-    if ('key' in lookup && lookup.key !== undefined) return `@${lookup.key}`
-    if (!('resolver' in lookup)) return ''
-    const found = await resolverOf(lookup.resolver)
-    if (found === undefined) unread = true
-    return `resolver#${found ?? 'unread'}`
+  const part = (lookup: GraphBindingLookup, model: string): string => {
+    if ('resolver' in lookup) {
+      unread = true
+      return 'resolver'
+    }
+    return `${model}${lookup.key === undefined ? '' : `@${lookup.key}`}`
   }
   const bindings: Record<string, string> = {}
   for (const parameter of new Set([...Object.keys(named ?? {}), ...Object.keys(lookups ?? {})])) {
     const source = sources?.[parameter]
     const lookup = lookups?.[parameter]
     const identity = named?.[parameter] === undefined ? undefined : source ? `${source.file}#${source.exportName}` : named[parameter]!
-    const own = lookup ? await part(lookup) : ''
-    // A model the server could not name (no `name`) is still bound.
-    const model = identity ?? (lookup && 'resolver' in lookup ? '' : 'unnamed')
-    bindings[parameter] = `${model}${own}${lookup?.router ? `+router:${await part(lookup.router)}` : ''}`
+    // A model the server could not name is still bound.
+    const own = lookup ? part(lookup, identity ?? ('source' in lookup && lookup.source ? lookup.source : 'unnamed')) : identity!
+    bindings[parameter] = `${own}${lookup?.router ? `+router:${part(lookup.router, ('source' in lookup.router && lookup.router.source) || 'unnamed')}` : ''}`
   }
   if (Object.keys(bindings).length === 0) return unread ? { bindingLookups: 'unread' } : {}
   return { bindings, ...(unread ? { bindingLookups: 'unread' as const } : {}) }
