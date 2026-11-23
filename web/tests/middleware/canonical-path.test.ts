@@ -11,6 +11,7 @@ describe('canonicalPath', () => {
     expect(canonicalPath('/docs/guides/bun/')).toBe('/docs/guides/bun')
     expect(canonicalPath('/blog/some-post//')).toBe('/blog/some-post')
     expect(canonicalPath('/start/')).toBe('/start')
+    expect(canonicalPath('/wallpapers/')).toBe('/wallpapers')
   })
 
   it('should leave canonical paths and other trees alone', () => {

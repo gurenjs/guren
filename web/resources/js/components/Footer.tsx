@@ -64,6 +64,7 @@ export function Footer({ variant }: FooterProps) {
             <Link href="/blog" className="no-underline transition hover:text-crimson-300">Blog</Link>
             <a href="/blog/rss.xml" className="no-underline transition hover:text-crimson-300">RSS</a>
             <a href="/llms.txt" className="no-underline transition hover:text-crimson-300">llms.txt</a>
+            <Link href="/wallpapers" className="no-underline transition hover:text-crimson-300">Wallpapers</Link>
           </nav>
         </div>
         <div>

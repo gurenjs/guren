@@ -14,6 +14,7 @@ export const pageManifest = {
   'Home': './pages/Home.tsx',
   'NotFound': './pages/NotFound.tsx',
   'Start': './pages/Start.tsx',
+  'Wallpapers': './pages/Wallpapers.tsx',
 } as const
 
 export type PageManifest = typeof pageManifest
@@ -147,5 +148,6 @@ export const pages = {
   },
   Home: defineGeneratedPage<'Home', PagePropsMap['Home']>('Home', pageManifest['Home']),
   NotFound: defineGeneratedPage<'NotFound', PagePropsMap['NotFound']>('NotFound', pageManifest['NotFound']),
-  Start: defineGeneratedPage<'Start', PagePropsMap['Start']>('Start', pageManifest['Start'])
+  Start: defineGeneratedPage<'Start', PagePropsMap['Start']>('Start', pageManifest['Start']),
+  Wallpapers: defineGeneratedPage('Wallpapers', pageManifest['Wallpapers'])
 } as const

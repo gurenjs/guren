@@ -6,7 +6,7 @@ import { docPaths } from '../../../config/site.js'
 const FEED_PATH = '/blog/rss.xml'
 const FEED_ALIASES = new Set(['/blog/feed', '/feed', '/rss.xml', '/feed.xml'])
 // Only the page routes: `/_guren/` and the asset paths have trailing-slash forms of their own.
-const PAGE_PREFIXES = ['/docs', '/blog', '/start']
+const PAGE_PREFIXES = ['/docs', '/blog', '/start', '/wallpapers']
 
 /**
  * Where a GET for `pathname` should be sent instead, or undefined when it is
