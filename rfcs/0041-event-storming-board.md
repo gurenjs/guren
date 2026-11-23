@@ -16,10 +16,12 @@ reads.
 Three things were measured on `main` at `ee94bf9e` (2026-11-23).
 
 1. **The plan's own vocabulary for behaviour goes unused.** A plan can declare
-   `flows` and `sideEffects`. No plan file committed to this repository
-   (`*.plan.json`) declares either, and `buildPlanPrompt()`
+   `flows` and `sideEffects`, and the JSON Schema sent with the producer
+   prompt defines both. The prose of `buildPlanPrompt()`
    (`packages/cli/src/plan/prompt.ts`) never mentions a flow, so an agent
-   writing a plan is not asked for one.
+   writing a plan is not asked for one. The evidence here is thin: the only
+   plan files committed to this repository are three test fixtures, and none
+   declares either section.
 2. **A flow is a placed graph, and that is the wrong tool for diverging.**
    RFC 0030 §3 has Guren lay a flow out (longest-path layering) and forbids a
    plan from carrying positions. That is right for a document a person
@@ -51,7 +53,10 @@ The design has five parts, shipped in that order (see Phasing).
 ### 1. The board document
 
 `docs/boards/<slug>.board.json`, committed. The schema lives in
-`packages/cli/src/board/schema.ts`.
+`packages/cli/src/board/schema.ts`. A slug matches `^[a-z0-9][a-z0-9-]{0,63}$`,
+and `boardSlug()` in that module is the one place that says so: the commands
+and the Dev Center routes both refuse any other string before a path is built
+from it.
 
 ```ts
 export const BOARD_NOTE_KINDS = [
@@ -59,7 +64,7 @@ export const BOARD_NOTE_KINDS = [
 ] as const
 
 interface BoardNote {
-  id: string                 // `n_` + 6 base32 characters, never reused
+  id: string                 // ^[a-z][a-z0-9_]{1,31}$, unique among the board's notes
   kind: (typeof BOARD_NOTE_KINDS)[number]
   text: string               // plain text, at most 280 characters
   x: number                  // board units, a multiple of 8, 0..16000
@@ -103,19 +108,27 @@ already declares:
 Three rules keep the document readable by both of its readers.
 
 - **Geometry is never meaning.** Everything an agent is told about a board
-  comes from ids, kinds, arrows, `section` and `about`. Coordinates only draw.
-  The page sets `section` when a note is dropped inside a section and `about`
-  when a question is dropped onto a note, so a person never types either.
+  comes from ids, kinds, arrows, `section` and `about`. Coordinates only draw,
+  and no reader derives membership from them. When a person drops a note
+  inside a section, or a question onto a note, the page sends that as an
+  explicit operation beside the move, so a person never types either.
+- **The writer of a note names it.** An agent picks a readable id
+  (`post_published`); the page generates `n_` and eight random characters. An
+  id is unique among the notes present, and a removed id may be added again,
+  which is how undo restores a note with its arrows' ends intact.
 - **Sizes are the page's.** A note stores no width or height. A section does,
-  since a person sizes it.
+  since a person sizes it. A section cannot be made smaller than the notes
+  that belong to it, and moving it moves them.
 - **One serialization.** Fixed key order, two-space indent, notes and sections
   sorted by id, arrows by `from` then `to`. Two edits to different notes touch
   different lines, so git merges them.
 
-A link names an element the way the plan checks already do
-(`packages/cli/src/plan/app-targets.ts`): a model by its class, a route by its
-name, an action as `Class.action`, a page by its component path, a side effect
-by its class.
+A link names an element by the name a plan gives it. For a model, a route, an
+action and a page that is the name the §2 checks judge by
+(`packages/cli/src/plan/app-targets.ts`): the class, the route name,
+`Class.action`, the component path. A side effect is named by its class, the
+`name` of a `sideEffects` entry. `module` applies to every kind but `page`,
+whose path already carries the module.
 
 ```ts
 interface BoardLink {
@@ -134,11 +147,12 @@ treated as a plan string is (RFC 0030 §3): the page writes it with
 ### 2. Editing a board
 
 **The canvas.** `/_guren/boards` lists the boards and `/_guren/boards/<slug>`
-opens one, in the Dev Center shell. The page is TypeScript under
-`packages/cli/src/board-page/`, bundled into one classic script by
-`bundlePageScript()` (`packages/cli/src/page-bundle.ts`) as the plan page and
-the docs viewer are. It draws notes as positioned elements and arrows as SVG,
-with no dependency. A person can:
+opens one. Both are views of the Dev Center's one shell: a module
+`packages/cli/src/dev-center-page/board.ts` beside `plans.ts` and `ui.ts`, in
+the bundle `devCenterShell()` composes, under the shell's
+`Content-Security-Policy`. They read `/_guren/boards.json` and
+`/_guren/boards/<slug>/board.json`. The view draws notes as positioned
+elements and arrows as SVG, with no dependency. A person can:
 
 - add a note of a kind, edit its text, move it, delete it;
 - connect two notes, and mark an arrow `async`;
@@ -151,41 +165,75 @@ with no dependency. A person can:
 The page's own words come from an `en` and `ja` dictionary held to key parity,
 as the plan page's are.
 
-**The write.** The canvas saves with `POST /_guren/boards/<slug>/ops`. This is
-a second write in the Dev Center, and RFC 0032 says the plan feedback route is
-the only one, for a stated reason: the Dev Center cannot tell the person from
-an agent's browser that `browser:serve` pointed at it, so no button may carry a
-decision. The board route does not carry one. What an agent's browser could
-write through it, the agent can already write to the file, and no command
-reads a board as approval. RFC 0032's note is amended to say so.
+**The write.** The canvas saves with `POST /_guren/boards/<slug>/ops`. RFC 0032
+calls the plan feedback route "the Dev Center's only write" and gives the
+reason: "The Dev Center cannot tell the person from the agent's browser that
+`browser:serve` points at it, which is why no button writes." This RFC amends
+that rule, and two things about the new route are new. It is a second write,
+and it is the first to a tracked file: the feedback route writes the
+git-ignored `.guren/plans/`, while a board is committed. The reason behind the
+rule still holds, because the board route carries no decision. What an agent's
+browser could write through it, the agent can already write to the file, and
+no command reads a board as approval.
 
-The route applies the guards the feedback route applies
-(`packages/cli/src/dev-center-review.ts`): the `Origin` must be the Dev
-Center's own, the body `application/json` within `readWithinLimit()`, and the
-result must satisfy the schema. The body is a list of operations, never the
-whole document:
+The route is guarded in two places, as the feedback route is.
+
+- `@guren/server` mounts every Dev Center path by hand
+  (`packages/server/src/mcp/McpServiceProvider.ts`). The board paths join that
+  list behind `createMcpAccessGuard()` and `isMcpEndpointEnabled()`. The POST
+  is its own route there, which requires the request's `Origin` to be its own
+  origin before the CLI sees it. The CSRF middleware exempts only the feedback
+  path today (`isDevCenterFeedbackRequest()`), so the board path gets the same
+  exemption on the same terms; without it an application with auth answers the
+  POST with a CSRF failure.
+- The CLI handler checks the `Origin` again, requires `application/json`
+  within `readWithinLimit()`, and validates the operations and the resulting
+  board against the schema (`packages/cli/src/dev-center-review.ts` is the
+  pattern).
+
+The body is a list of operations, never the whole document:
 
 ```ts
 type BoardOp =
-  | { op: 'add'; kind: NoteKind; text: string; at?: { x: number; y: number }; after?: string; section?: string; about?: string[] }
-  | { op: 'edit'; id: string; text?: string; kind?: NoteKind }
+  | { op: 'add'; id: string; kind: NoteKind; text: string; at?: { x: number; y: number }; after?: string; section?: string; about?: string[] }
+  | { op: 'edit'; id: string; text?: string; kind?: NoteKind; section?: string | null; about?: string[] }
   | { op: 'move'; id: string; x: number; y: number }
   | { op: 'remove'; id: string }
   | { op: 'connect'; from: string; to: string; kind?: 'async' }
   | { op: 'disconnect'; from: string; to: string }
   | { op: 'link'; id: string; link: BoardLink | null }
-  | { op: 'section'; id?: string; title: string; x: number; y: number; width: number; height: number }
+  | { op: 'section'; id: string; title: string; at?: { x: number; y: number; width: number; height: number } }
   | { op: 'unsection'; id: string }
 ```
 
-`applyBoardOps(board, ops)` in `packages/cli/src/board/ops.ts` is pure. An
-operation naming a note that is gone is dropped and reported; the rest apply.
-Operations on different notes commute, which is what lets a person and an
-agent edit one board in the same minute. The writer takes
-`.guren/boards/<slug>.lock` (created exclusively, stale after five seconds),
-reads the file, applies, and writes through `writeFileAtomic()`. The response
-is the board as written plus the dropped operations, and the page replaces its
-state with it. It also reads the board again when the window regains focus.
+`applyBoardOps(board, ops)` in `packages/cli/src/board/ops.ts` is pure, and
+these are its rules.
+
+- Operations in one list apply in order, so a list can add a note and then
+  connect it.
+- An `add` whose id is present, and any operation naming a note or section
+  that is absent, is dropped and reported; the rest apply. Applying a list a
+  second time therefore changes nothing.
+- `remove` also removes the arrows that touch the note and takes its id out of
+  every `about`. A question left with an empty `about` stays, unattached.
+  `unsection` clears `section` on the notes that named it and leaves them
+  where they are.
+- A `section` with no `at` is placed below the last section at a default
+  size, and grows as notes are placed in it. An agent names a section; it
+  never sizes one.
+- `edit`, `move` and `link` on different notes commute. An `add` with no `at`
+  is placed against what is already there, so the order of two such adds
+  decides where they sit and nothing else: the ids, kinds, arrows, `section`
+  and `about` come out the same, which is all the outline reads.
+
+The writer takes `.guren/boards/<slug>.lock`, created exclusively and holding
+its process id, for one read, apply and `writeFileAtomic()`. A lock whose
+process is gone is removed. A lock whose process is alive is waited on for up
+to five seconds and then reported as an error naming the process; it is never
+broken, since breaking a live holder's lock is how one of two writes is lost
+after both reported success. The response is the board as written plus the
+dropped operations, and the page replaces its state with it. It also reads the
+board again when the window regains focus.
 
 **The agent's path.** An agent never computes a coordinate.
 
@@ -195,35 +243,40 @@ bunx guren board:show post-notifications            # the text form; --json for 
 bunx guren board:apply post-notifications --ops ops.json   # `-` reads standard input
 ```
 
-`board:show` prints the board as an outline: each section, its notes in arrow
-order, questions under the note they are about, unconnected notes last.
+`board:show` prints the board as an outline: each section, then its notes,
+questions under the note they are about, unconnected notes last. Notes are
+ordered by the layering `packages/cli/src/plan/flow.ts` computes for a flow:
+by distance from a note with no incoming arrow, then by id. A note with two
+successors prints both, indented, and an arrow that closes a cycle prints as a
+reference to the earlier note, as that module already marks a back edge.
 
 ```
 Board: Post notifications  (docs/boards/post-notifications.board.json)
 
 Publishing
-  [actor n_4k2m9q] Author
-  -> [command n_7c1x0d] Publish a post
-  -> [aggregate n_b83kqa] Post                         = model Post
-  -> [event n_p0d2ws] Post was published               = event PostCreated
-       ? [n_z61hty] Notify for a saved draft too?
-  -> [policy n_m5r8ea] When published, tell subscribers
-  ~> [command n_q2j4nv] Send the notification mail
+  [actor author] Author
+  -> [command publish_post] Publish a post
+  -> [aggregate post] Post                             = model Post
+  -> [event post_published] Post was published         = event PostCreated
+       ? [draft_too] Notify for a saved draft too?
+  -> [policy tell_subscribers] When published, tell subscribers
+  ~> [command send_mail] Send the notification mail
 Unsorted
-  [event n_t9y3ab] Post was updated
+  [event post_updated] Post was updated
 ```
 
 `board:apply` takes the same operations the page posts, through the same
 function and the same lock. An `add` with no `at` is placed by
 `placeNote()` (`packages/cli/src/board/place.ts`): to the right of the note
 named by `after`, else in the first free cell of `section`, else in an
-`Unsorted` section created on first use. Placement is deterministic, so a
-re-run of the same operations on the same board writes the same bytes.
+`Unsorted` section created on first use. `placeNote()` is a pure function of
+the board and the operation, with no clock and no random number in it.
 
 The development MCP server gains `guren_get_boards`, read-only, returning the
 list and one board's text form, as `guren_get_plans` does for plans.
-`board:*` are classified in `PLAN_COMMAND_CLASSES` as commands a plan's
-`commands` may not run.
+`PLAN_COMMAND_CLASSES` classifies every registry command, so `board:*` join it
+under a new denial, `board`: a plan is written from a board and does not edit
+one.
 
 The harness template gains an `event-storming` skill under
 `packages/cli/templates/agent/core/skills/`. It runs a session in stages and
@@ -258,8 +311,16 @@ board: a plan stays valid if the board is deleted, and its hash does not move
 when a note does.
 
 `bunx guren board:status <slug> [--plan <file>]` reports, per note, whether it
-has a link and whether the link resolves in the plan or in the application.
-It lists the notes that lead nowhere. It is advisory and exits 0.
+has a link and whether the link resolves in a plan or in the application, and
+lists the notes that lead nowhere. The application is read through
+`loadPlanAppState()`, the scan the §2 checks read. With no `--plan` the plans
+are the open ones: found by the discovery rule `check --plan` uses and read
+one by one through `readOpenPlan()`. It is advisory and exits 0.
+
+A board sits under `docs/`, which `change:lane` reads as ambient, and its text
+reaches the producer prompt. That is the standing of the request string today:
+untrusted text, quoted, that a plan is written from. What is reviewed is the
+plan, so the lane of a board file does not change.
 
 ### 4. What the plan gains
 
@@ -317,9 +378,20 @@ Three things read the new edges.
 
 ### Package boundaries
 
-Everything is in `@guren/cli`: `src/board/` (schema, operations, placement,
-text form), `src/board-page/`, `src/commands/board.ts`, the Dev Center routes
-and the harness skill. No runtime package changes and no new dependency.
+Most of it is in `@guren/cli`: `src/board/` (schema, operations, placement,
+text form), `src/dev-center-page/board.ts`, `src/commands/board.ts`, the
+branches in `createDevCenterHandler()` and the harness skill. No new
+dependency.
+
+M2 also changes `@guren/server`, which owns the mount: the board paths in
+`McpServiceProvider.ts`, the POST route with its `Origin` check, and the CSRF
+exemption in `packages/server/src/mcp/endpoint.ts`. That is an additive minor
+of `@guren/server`. The two packages version apart, so both pairings have to
+behave. An older CLI under a newer server answers the board paths with 404
+from its own handler. A newer CLI under an older server has no board routes
+mounted, so the Dev Center home reads `/_guren/boards.json` before it shows
+the link, and on a 404 says which `@guren/server` the canvas needs. M1 and M3
+need no server at all.
 
 ### Phasing
 
@@ -345,7 +417,8 @@ record and its plan, with the board read as an outline.
 - Enforcing aggregate boundaries in code. An `aggregate` note leads to a
   model; what a module may import stays `guren.arch.ts`'s rule (RFC 0002).
 - Serving the canvas outside development. It is part of the Dev Center, which
-  `isDocsViewerEnabled()` already keeps out of production.
+  is mounted only while `isMcpEndpointEnabled()` holds (`GUREN_MCP=1`, never
+  in production) and behind the loopback guard.
 
 ## Alternatives Considered
 
@@ -389,8 +462,9 @@ JSON, and a dependency, for a tool one person and one agent use at a time.
 
 ## Migration Path
 
-Additive. An application with no board sees no change: no file is created, no
-check runs, and the Dev Center gains one link.
+M1 to M3 are additive. An application with no board sees no file created and
+no check added, and the Dev Center gains one link. The canvas needs the
+`@guren/server` release that mounts its routes (see Package boundaries).
 
 A plan that declares no `triggeredBy` and no `event` or `policy` flow node
 keeps its `planVersion` and its hash. A revision that adds the first one moves
