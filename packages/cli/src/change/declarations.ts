@@ -417,7 +417,7 @@ function claimsRoute(plan: PlanDraft, route: RouteSecurityRecord): boolean {
  * action as the controller file the scaffold writes exports it, its middleware by name, its bindings, its agent
  * metadata, its contracts by export and rendered keys, the policy ability the action asks of the policy's model.
  * A route registered before another that a request could match too takes that request without either record
- * changing, so it declares nothing. A binding's lookup column is not in the record, so an unplanned one is unseen.
+ * changing, so it declares nothing. A binding is held to its model and lookup column as the record reads them.
  */
 export async function declaredRoute(route: RouteSecurityRecord, head: HeadRoutes, plans: readonly OpenPlan[], readHead: (path: string) => Promise<string | null>): Promise<string | undefined> {
   const claims = plans.filter((open) => claimsRoute(open.plan, route))

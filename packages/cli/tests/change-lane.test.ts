@@ -1234,6 +1234,12 @@ describe('judgeChangeLane with per-route security records', () => {
     expect(report.facts).toContainEqual(expect.objectContaining({ code: 'authorization-removed', files: ['config/app.ts'] }))
   })
 
+  test('should hold a change to a route file at medium where the records could not read how parameters are looked up', async () => {
+    const unread = { ...route([auth]), bindings: { id: 'app/Models/Post.ts#Post' }, bindingLookups: 'unread' as const }
+    expect(security(await laneWith(controller, { base: records(unread), head: records(unread) }))).toEqual(['medium'])
+    expect(security(await laneWith(controller, { base: records(route([auth])), head: records(route([auth])) }))).toEqual([])
+  })
+
   test('should hold a registrar only the head skipped at high, and one both sides skipped at medium', async () => {
     const skipped = (...names: string[]) => ({ ...records(route([auth])), skipped: names })
     expect(security(await laneWith({ 'src/app.ts': 'export default {}\n' }, { base: records(route([auth])), head: skipped('the createApp({ boot }) callback') }))).toEqual(['high'])

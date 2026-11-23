@@ -90,6 +90,12 @@ interface RegisteredBinding {
 /** How a bound parameter is looked up: a model by `key` (absent: its primary key), or a custom resolver as registered. */
 export type BindingLookup = { key?: string } | { resolver: ModelBindingResolver }
 
+/**
+ * A route's lookup of one parameter: its route-level `bind`, else the router-level one. A parameter bound at both levels
+ * runs both (the route's model for `this.model()`, the router's value positionally), so the router's is under `router`.
+ */
+export type RouteBindingLookup = BindingLookup & { router?: BindingLookup }
+
 function normalizeModelBinding(binding: RouteModelBinding): ModelBinding {
   if (Array.isArray(binding)) {
     const [model, key] = binding as readonly [BindableModel, string]
@@ -843,17 +849,21 @@ export class Router<in M extends string = never> {
 
   /**
    * How each bound parameter is looked up, indexed like definitions (RFC 0040 §3): what `registeredModelBindings()`
-   * names a model of, by its lookup column, and a router-level custom resolver, which it leaves out. Route-level wins.
+   * names a model of, by its lookup column, and a router-level custom resolver, which it leaves out.
    */
-  registeredBindingLookups(): ReadonlyArray<Record<string, BindingLookup>> {
+  registeredBindingLookups(): ReadonlyArray<Record<string, RouteBindingLookup>> {
     return this.registry.map(({ path, bindings }) => {
-      const result: Record<string, BindingLookup> = Object.create(null)
+      const result: Record<string, RouteBindingLookup> = Object.create(null)
+      const routerLevel = new Map<string, BindingLookup>()
       for (const parameter of extractPathParamNames(path)) {
         const registered = this.modelBindings.get(parameter)
-        if (!registered) continue
-        result[parameter] = registered.model ? (registered.key === undefined ? {} : { key: registered.key }) : { resolver: registered.resolve }
+        if (registered) routerLevel.set(parameter, registered.model ? (registered.key === undefined ? {} : { key: registered.key }) : { resolver: registered.resolve })
       }
-      for (const [parameter, binding] of bindings ?? []) result[parameter] = binding.key === undefined ? {} : { key: binding.key }
+      for (const [parameter, lookup] of routerLevel) result[parameter] = lookup
+      for (const [parameter, binding] of bindings ?? []) {
+        const router = routerLevel.get(parameter)
+        result[parameter] = { ...(binding.key === undefined ? {} : { key: binding.key }), ...(router ? { router } : {}) }
+      }
       return result
     })
   }

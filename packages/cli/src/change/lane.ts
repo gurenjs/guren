@@ -646,7 +646,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
       }
     }
     // An action left unread (an inline handler, a class reached by name) compares by what does not cover its imports.
-    const readWhole = (side: SecurityRecords): boolean => (side.skipped ?? []).length === 0 && side.routes.every((route) => !('unread' in route.handler))
+    const readWhole = (side: SecurityRecords): boolean => (side.skipped ?? []).length === 0 && side.routes.every((route) => !('unread' in route.handler) && route.bindingLookups === undefined)
     recordsCoverRoutes = comparison.incomparable.length === 0 && readWhole(compared.base) && readWhole(compared.head)
     if (comparison.incomparable.length > 0) unjudged.push({ reader: 'security-records', reason: `routes whose records cannot be ordered against the base: ${comparison.incomparable.join('; ')}`, lane: 'high', files: files.length > 0 ? files : touched })
     // A skip the change brought in is the change's doing: a route it registers there is not on the list at all.
@@ -654,7 +654,10 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     const added = headSkipped.filter((entry) => !baseSkipped.includes(entry))
     const shared = headSkipped.filter((entry) => baseSkipped.includes(entry))
     if (added.length > 0) unjudged.push({ reader: 'security-records', reason: `the head's introspection skipped ${added.join(', ')}, which the base's did not, so a route registered there was not compared`, lane: 'high', files: files.length > 0 ? files : touched })
-    else if (shared.length > 0 && files.length > 0) unjudged.push({ reader: 'security-records', reason: `introspection skipped ${shared.join(', ')} on both sides, so a route registered there was not compared`, lane: 'medium', files })
+    if (files.length > 0 && [...compared.base.routes, ...compared.head.routes].some((route) => route.bindingLookups === 'unread')) {
+      unjudged.push({ reader: 'security-records', reason: 'the server did not say how bound parameters are looked up (an older @guren/core, or a native resolver), so a changed lookup column or resolver was not compared', lane: 'medium', files })
+    }
+    if (added.length === 0 && shared.length > 0 && files.length > 0) unjudged.push({ reader: 'security-records', reason: `introspection skipped ${shared.join(', ')} on both sides, so a route registered there was not compared`, lane: 'medium', files })
   } else if (notCompared && (notCompared.lane === 'high' || surface.length > 0)) {
     // A base that cannot be read says nothing against the change; a head the change made unreadable does.
     unjudged.push({ reader: 'security-records', reason: `${notCompared.reason}, so authorization-removed and validation-removed were not judged`, lane: notCompared.lane, files: notCompared.lane === 'high' && files.length === 0 ? touched : files })

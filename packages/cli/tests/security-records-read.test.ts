@@ -117,15 +117,25 @@ export function registerWebRoutes(router: Router): void {
     expect(records.routes.map((route) => [route.path, route.bindings, route.bindingLookups])).toEqual([
       ['/posts/:post', { post: 'app/Models/Post.ts#Post@slug' }, undefined],
       ['/posts/by-id/:id', { id: 'app/Models/Post.ts#Post' }, undefined],
-      ['/tokens/:token', { token: expect.stringMatching(/^resolver#[0-9a-f]{64}$/) }, undefined],
+      ['/tokens/:token', { token: expect.stringMatching(/^resolver#[0-9a-f]+$/) }, undefined],
     ])
   })
 
-  test('says the lookup columns are unread when the server does not say them', () => {
+  test('says the lookup columns are unread when the server does not say them, or a resolver is native', async () => {
     const sources = { post: { file: 'app/Models/Post.ts', exportName: 'Post', name: 'Post' } }
-    expect(bindingsRecord({ post: 'Post' }, sources, undefined)).toEqual({ bindings: { post: 'app/Models/Post.ts#Post' }, bindingLookups: 'unread' })
-    expect(bindingsRecord({ post: 'Post' }, sources, { post: { key: 'slug' } })).toEqual({ bindings: { post: 'app/Models/Post.ts#Post@slug' } })
-    expect(bindingsRecord(undefined, undefined, undefined)).toEqual({})
+    const resolverOf = async (source: string) => (source.includes('[native code]') ? undefined : `d:${source.length}`)
+    expect(await bindingsRecord('/posts/:post', { post: 'Post' }, sources, undefined, resolverOf)).toEqual({ bindings: { post: 'app/Models/Post.ts#Post' }, bindingLookups: 'unread' })
+    // A parameter only a router-level resolver fills has no model binding, and is still unread on such a server.
+    expect(await bindingsRecord('/tokens/:token', undefined, undefined, undefined, resolverOf)).toEqual({ bindingLookups: 'unread' })
+    expect(await bindingsRecord('/health', undefined, undefined, undefined, resolverOf)).toEqual({})
+    expect(await bindingsRecord('/posts/:post', { post: 'Post' }, sources, { post: { key: 'slug' } }, resolverOf)).toEqual({ bindings: { post: 'app/Models/Post.ts#Post@slug' } })
+    // Bound at both levels, the router's lookup stands beside the route's.
+    expect(await bindingsRecord('/posts/:post', { post: 'Post' }, sources, { post: { router: { resolver: 'async (v) => v' } } }, resolverOf))
+      .toEqual({ bindings: { post: 'app/Models/Post.ts#Post+router:resolver#d:14' } })
+    expect(await bindingsRecord('/tokens/:token', undefined, undefined, { token: { resolver: 'function resolve() { [native code] }' } }, resolverOf))
+      .toEqual({ bindings: { token: 'resolver#unread' }, bindingLookups: 'unread' })
+    // A model the server could not name is still bound, by its column.
+    expect(await bindingsRecord('/users/:user', undefined, undefined, { user: { key: 'email' } }, resolverOf)).toEqual({ bindings: { user: 'unnamed@email' } })
   })
 
   test('reads the chain, the contract and its export, and the action\'s calls of an introspected route', async () => {

@@ -4,7 +4,6 @@
  * to the file named in argv, never stdout: the app's own modules print there.
  * It exits explicitly, since an app may hold open handles (timers, a Redis client).
  */
-import { createHash } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -19,6 +18,7 @@ import {
   INTROSPECT_CHILD_BUDGET_MARGIN_MS,
   GRAPH_SCAN_WARNINGS,
   INTROSPECT_GRAPH_ENV,
+  type GraphBindingLookup,
   type GraphRouteEntry,
   type GraphScanWarning,
   type Introspection,
@@ -34,11 +34,13 @@ const LISTEN_GUIDANCE =
   + 'Export the app from src/main.ts (`export default app`, with `export const ready = bootstrap()` if it boots) '
   + 'and call listen() from bin/serve.ts, as the scaffold does.'
 
+type ChildLookup = { key?: string } | { resolver: (value: string) => unknown }
+
 interface IntrospectableApp {
   introspect?: () => Promise<AppManifest>
   router?: {
     registeredModelBindings?: () => ReadonlyArray<Record<string, { name?: string }>>
-    registeredBindingLookups?: () => ReadonlyArray<Record<string, { key?: string } | { resolver: (value: string) => unknown }>>
+    registeredBindingLookups?: () => ReadonlyArray<Record<string, ChildLookup & { router?: ChildLookup }>>
     definitions?: () => ReadonlyArray<{ schemas?: Partial<Record<string, unknown>> }>
     registeredHandlers?: () => ReadonlyArray<{ index: number; controller?: unknown }>
     hasRoute?: (name: string) => boolean
@@ -228,16 +230,15 @@ async function exportsByIdentity(
   return exportsOf
 }
 
-/** How each route's bound parameters are looked up, where the server says; a resolver by a digest of its source. */
+/** How each route's bound parameters are looked up, where the server says; a resolver by its source text, which the records digest. */
 function resolveBindingLookups(manifest: AppManifest, app: IntrospectableApp): void {
   const lookups = app.router?.registeredBindingLookups?.()
   if (!lookups) return
+  const written = (lookup: ChildLookup): GraphBindingLookup => ('resolver' in lookup ? { resolver: String(lookup.resolver) } : lookup.key === undefined ? {} : { key: lookup.key })
   for (const [index, bound] of lookups.entries()) {
     const route = manifest.routes[index] as GraphRouteEntry | undefined
     if (!route) continue
-    route.bindingLookups = Object.fromEntries(Object.entries(bound).map(([parameter, lookup]) => [parameter, 'resolver' in lookup
-      ? { resolver: createHash('sha256').update(String(lookup.resolver)).digest('hex') }
-      : lookup.key === undefined ? {} : { key: lookup.key }]))
+    route.bindingLookups = Object.fromEntries(Object.entries(bound).map(([parameter, lookup]) => [parameter, { ...written(lookup), ...(lookup.router ? { router: written(lookup.router) } : {}) }]))
   }
 }
 

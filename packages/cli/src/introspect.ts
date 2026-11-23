@@ -62,6 +62,9 @@ export const INTROSPECT_GRAPH_ENV = 'GUREN_INTROSPECT_GRAPH'
 export const GRAPH_SCAN_WARNINGS = { 'model-import': 'binds', 'validator-import': 'validates' } as const
 export type GraphScanWarning = keyof typeof GRAPH_SCAN_WARNINGS
 
+/** A bound parameter's lookup as the child writes it: a model's column, or a custom resolver's source text. */
+export type GraphBindingLookup = { key?: string } | { resolver: string }
+
 /** A route as the CLI's own child writes it: the server's fields, and the CLI's beside them. */
 export type GraphRouteEntry = RouteEntry & {
   /**
@@ -79,7 +82,7 @@ export type GraphRouteEntry = RouteEntry & {
    * Graph runs on a server that says how each bound parameter is looked up (`registeredBindingLookups()`): a model by
    * its column (`key` absent: the primary key), or a router-level custom resolver by a digest of its source.
    */
-  bindingLookups?: Record<string, { key?: string } | { resolver: string }>
+  bindingLookups?: Record<string, GraphBindingLookup & { router?: GraphBindingLookup }>
 }
 
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000
