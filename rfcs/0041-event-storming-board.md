@@ -2,7 +2,8 @@
 
 **Author:** Guren contributors
 **Date:** 2026-11-23
-**Status:** Draft
+**Status:** Accepted (2026-11-23; the deciding maintainer explicitly approved the
+proposal and shortened the standard discussion period before implementation.)
 
 ## Problem
 
