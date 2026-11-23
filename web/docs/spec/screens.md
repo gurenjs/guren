@@ -13,7 +13,7 @@ Derived from `routes/web.ts`, controller `this.inertia(...)` calls, and page com
 
 Page references are attributed to the controller action whose body makes the call, so a page lists only the routes of the action that renders it. A page referenced outside any action keeps a row with an empty Routes cell.
 
-## Pages (7)
+## Pages (8)
 
 | Page | Props | Routes |
 |------|-------|--------|
@@ -21,6 +21,7 @@ Page references are attributed to the controller action whose body makes the cal
 | Docs/Show | { categories: DocCategoryGroup[] doc: DocPage \| null active?: { category: string; slug: string } locale: 'en' \| 'ja' locales?: LocaleLink[] basePath: string } |  |
 | Home | { codeExamples: Record<string, string> } | GET / → HomeController.index |
 | Start | { initial: StartOptions } | GET /start → StartController.index |
+| Wallpapers |  | GET /wallpapers → WallpapersController.index |
 | admin/PostForm | { post: EditablePost \| null } | GET /admin/posts/:id/edit → PostsController.edit, GET /admin/posts/new → PostsController.create |
 | admin/Posts | { posts: AdminPostSummary[] } | GET /admin → PostsController.index |
 | blog/Index | { posts: BlogPostSummary[] } | GET /blog → BlogController.index |
