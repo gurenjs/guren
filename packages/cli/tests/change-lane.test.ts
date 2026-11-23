@@ -1076,7 +1076,8 @@ export class CommentPolicy extends Policy {
   /** The comments plan, approved, also dropping a `Note` model and the `NoteController` that served it. */
   type DropPlan = { models: Array<Record<string, unknown>>; controllers: unknown[]; commands?: Array<{ id: string; command: string; reason: string }> }
   async function dropPlanRepo(files: Record<string, string>, edit: (plan: DropPlan) => void = () => {}, prepare?: (repo: string) => Promise<void>): Promise<{ repo: string; base: string }> {
-    const { repo } = await createRepo({ ...BASE_FILES, ...files })
+    // The schema stays loaded by the database config once a dropped model that imports it is gone.
+    const { repo } = await createRepo({ ...BASE_FILES, 'config/database.ts': "import * as schema from '@/db/schema'\n\nexport default schema\n", ...files })
     await prepare?.(repo)
     const plan = loadApprovedCommentsPlan() as DropPlan
     plan.models.push({ ...plan.models[0], id: 'model.note', name: 'Note', table: 'notes', change: { kind: 'drop', reason: 'comments replace notes' }, dataMigration: { kind: 'none', reason: 'no rows kept' }, columns: [], relationships: [], fillable: [] })
@@ -1116,8 +1117,14 @@ export class CommentPolicy extends Policy {
     // A directory index left behind answers `@/app/Models/Note`.
     expect(await deleted({ 'app/Models/Note.ts': NOTE }, { 'app/Models/Note/index.ts': 'export class Note {}\n' })).toEqual(medium)
     expect(await deleted({ 'app/Models/Note.ts': NOTE }, { 'app/Models/Note/package.json': '{"main":"impl.ts"}\n', 'app/Models/Note/impl.ts': 'export class Note {}\n' })).toEqual(medium)
-    // A static block runs when the class loads.
+    // A static block, a computed key or a call in the heritage runs when the class loads.
     expect(await deleted({ 'app/Models/Note.ts': NOTE.replace('{}\n', '{\n  static { registerJob(Revoke) }\n}\n') })).toEqual(medium)
+    expect(await deleted({ 'app/Models/Note.ts': NOTE.replace('{}\n', '{\n  [registerJob(Revoke)]() {}\n}\n') })).toEqual(medium)
+    expect(await deleted({ 'app/Models/Note.ts': NOTE.replace('defineModel(notes)', 'defineModel(registerJob(Revoke))') })).toEqual(medium)
+    // A declaration file left behind keeps an import typechecking.
+    expect(await deleted({ 'app/Models/Note.ts': NOTE }, { 'app/Models/Note.d.ts': 'export declare class Note {}\n' })).toEqual(medium)
+    // A local module only the deleted file loaded would stop running.
+    expect(await deleted({ 'app/Models/Note.ts': `import { boot } from './register-legacy'\n${NOTE}`, 'app/Models/register-legacy.ts': 'export const boot = 1\n' })).toEqual(medium)
     // The element is in a module, or a command of the plan writes the path.
     expect(await deleted({ 'app/Models/Note.ts': NOTE }, {}, (plan) => { plan.models.at(-1)!.module = 'billing' })).toEqual(medium)
     expect(await deleted({ 'app/Models/Note.ts': NOTE }, {}, (plan) => { plan.commands = [{ id: 'command.note', command: 'guren make:model Note', reason: 'a fresh Note' }] })).toEqual(medium)

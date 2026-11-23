@@ -709,7 +709,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   const plans = await readChangePlans(reader, trees.head)
   // A change that writes a plan record is high already, and must not cite what it wrote.
   const declared = plans.open.length > 0 && subjects.size > 0 && !facts.some((entry) => entry.code === 'plan-record')
-    ? await (await import('./declarations')).applyPlanDeclarations(facts, subjects, plans.open, (path) => reader.read('head', path), (path) => reader.read('base', path), (record, path) => reader.presentWhenAdded(record, path), recordsCoverRoutes)
+    ? await (await import('./declarations')).applyPlanDeclarations(facts, subjects, plans.open, (path) => reader.read('head', path), (path) => reader.read('base', path), (record, path) => reader.presentWhenAdded(record, path), recordsCoverRoutes, (needle) => reader.containing('head', needle))
     : facts
   const policy = await loadBaseReviewPolicy(reader)
   const judged = policy.state === 'read' ? applyReviewPolicy(declared, change.paths, policy.policy) : declared

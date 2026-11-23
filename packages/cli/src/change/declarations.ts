@@ -370,6 +370,7 @@ export async function applyPlanDeclarations(
   readBase: (path: string) => Promise<string | null> = async () => null,
   presentWhenAdded: (record: string, path: string) => Promise<boolean | undefined> = async () => undefined,
   recordsCoverRoutes = false,
+  headContaining?: (needle: string) => Promise<string[]>,
 ): Promise<ChangeFact[]> {
   const owned = plans.map((open) => ({ open, files: planDeclaredFiles(open.plan), paths: planClaimedPaths(open.plan) }))
   const result: ChangeFact[] = []
@@ -382,7 +383,7 @@ export async function applyPlanDeclarations(
     const declaredBy = subject?.kind === 'table-residue' || subject?.kind === 'routes-entry' ? undefined
       : subject?.kind === 'app-entry' ? registered.get(entryKey(subject.list, subject.name))
       : subject?.kind === 'env' ? await declaredEnvKey(subject, owned, readHead)
-      : subject?.kind === 'removed-file' ? await declaredRemovedFile(subject.path, owned, readHead, readBase, presentWhenAdded)
+      : subject?.kind === 'removed-file' ? await declaredRemovedFile(subject.path, owned, readHead, readBase, presentWhenAdded, headContaining)
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
       : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : subject.change === 'alter' ? declaredRouteChange(subject, plans) : declaredRouteRemoval(subject, plans))
       : subject?.kind === 'agent' ? await declaredAgentOf(subject.route, subject.base, facts, subjects, plans, readHead)
@@ -831,10 +832,11 @@ function planDroppedFiles(plan: PlanDraft): Map<string, { id: string; name: stri
  */
 function holdsOnlyClass(ast: File, name: string): boolean {
   const declaration = exportedClass(ast, name)
-  if (!declaration || (declaration.decorators?.length ?? 0) > 0) return false
-  // A static block or a static initializer that calls runs when the class loads, as a top-level statement would.
+  if (!declaration || (declaration.decorators?.length ?? 0) > 0 || !plainHeritage(ast, declaration.superClass)) return false
+  // A static block, a computed key or a static initializer that calls runs when the class loads, as a top-level statement would.
   for (const member of declaration.body.body) {
     if (member.type === 'StaticBlock' || ('decorators' in member && (member.decorators?.length ?? 0) > 0)) return false
+    if ('computed' in member && member.computed && member.key.type !== 'StringLiteral' && member.key.type !== 'NumericLiteral') return false
     if ('static' in member && member.static && 'value' in member && member.value) {
       let calls = false
       walk([member.value], (node) => { if (node.type === 'CallExpression' || node.type === 'NewExpression' || node.type === 'TaggedTemplateExpression') calls = true })
@@ -849,6 +851,45 @@ function holdsOnlyClass(ast: File, name: string): boolean {
   })
 }
 
+const DECLARATION_EXTENSIONS = ['.d.ts', '.d.mts', '.d.cts'] as const
+
+/** A heritage evaluated at load with nothing of its own: none, a name, or one call of a package's factory over names (`defineModel(posts)`). */
+function plainHeritage(ast: File, heritage: ClassDeclaration['superClass']): boolean {
+  if (!heritage || heritage.type === 'Identifier') return true
+  if (heritage.type !== 'CallExpression' || heritage.callee.type !== 'Identifier') return false
+  const source = importOf(ast, heritage.callee.name)?.split('#')[0]
+  const fromPackage = source !== undefined && !source.startsWith('.') && !source.startsWith('@/')
+  return fromPackage && heritage.arguments.every((argument) => argument.type === 'Identifier' || (argument.type === 'MemberExpression' && !argument.computed && argument.object.type === 'Identifier'))
+}
+
+/** An app module a specifier names, as a path stem from the application root; `undefined` for a package. */
+function localModuleStem(from: string, specifier: string): string | undefined {
+  const joined = specifier.startsWith('@/') ? specifier.slice(2) : specifier.startsWith('.') ? posix.join(posix.dirname(from), specifier) : undefined
+  return joined === undefined ? undefined : posix.normalize(joined).replace(SOURCE_EXTENSION, '').replace(/\/index$/u, '')
+}
+
+/** The app modules a file imports for a value (not `import type`, not only type specifiers), as path stems. */
+function localValueImports(ast: File, path: string): string[] {
+  return ast.program.body.flatMap((node) => {
+    if (node.type !== 'ImportDeclaration' || node.importKind === 'type') return []
+    if (node.specifiers.length > 0 && node.specifiers.every((specifier) => specifier.type === 'ImportSpecifier' && specifier.importKind === 'type')) return []
+    const stem = localModuleStem(path, node.source.value)
+    return stem === undefined ? [] : [stem]
+  })
+}
+
+/** Whether a head file other than `path` imports or re-exports the app module at `stem`. */
+async function importedElsewhere(stem: string, path: string, containing: (needle: string) => Promise<string[]>, readHead: (path: string) => Promise<string | null>): Promise<boolean> {
+  for (const candidate of await containing(posix.basename(stem))) {
+    if (candidate === path || !SOURCE_EXTENSION.test(candidate)) continue
+    const text = await readHead(candidate)
+    const ast = text === null ? null : parseSourceFile(text, candidate)
+    const sources = ast?.program.body.flatMap((node) => ((node.type === 'ImportDeclaration' || node.type === 'ExportAllDeclaration' || node.type === 'ExportNamedDeclaration') && node.source ? [node.source.value] : [])) ?? []
+    if (sources.some((source) => localModuleStem(candidate, source) === stem)) return true
+  }
+  return false
+}
+
 /**
  * A source file the change deletes, declared by the one open plan whose `drop` element owns its path, when the base's file
  * was that class alone and was there when the approval was recorded. What still imports it fails the gate; what it guarded is a route fact.
@@ -859,6 +900,7 @@ async function declaredRemovedFile(
   readHead: (path: string) => Promise<string | null>,
   readBase: (path: string) => Promise<string | null>,
   presentWhenAdded: (record: string, path: string) => Promise<boolean | undefined>,
+  headContaining?: (needle: string) => Promise<string[]>,
 ): Promise<string | undefined> {
   const claims = owned.filter(({ paths }) => paths.has(path))
   if (claims.length !== 1 || owned.some((entry) => claimsEveryCommandPath(entry.open.plan))) return undefined
@@ -869,11 +911,16 @@ async function declaredRemovedFile(
   const text = await readBase(path)
   const ast = text === null ? null : parseSourceFile(text, path)
   if (!ast || !holdsOnlyClass(ast, dropped.name)) return undefined
-  // An importer of the module resolves to a twin or a directory index the change leaves behind, which nothing judged.
+  // An importer of the module resolves to a twin or a directory index the change leaves behind, which nothing judged;
+  // a declaration file left there keeps the import typechecking while the runtime cannot load it.
   const stem = path.replace(SOURCE_EXTENSION, '')
   if ((await readHead(`${stem}/package.json`)) !== null) return undefined
-  for (const extension of TWIN_EXTENSIONS) {
+  for (const extension of [...TWIN_EXTENSIONS, ...DECLARATION_EXTENSIONS]) {
     if ((await readHead(`${stem}${extension}`)) !== null || (await readHead(`${stem}/index${extension}`)) !== null) return undefined
+  }
+  // A local module the file loads for its value runs its top level; once the file is gone something else must load it.
+  for (const imported of localValueImports(ast, path)) {
+    if (!headContaining || !(await importedElsewhere(imported, path, headContaining, readHead))) return undefined
   }
   // The file the plan was approved against: one a later change wrote after the approval is not the element it drops.
   if ((await presentWhenAdded(planApprovalsPath(open.file), path)) !== true) return undefined
