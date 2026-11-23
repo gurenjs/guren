@@ -165,10 +165,17 @@ function matchedInOrder<T>(from: T[], other: T[], key: (item: T) => string): str
 }
 
 /** The base and head items of one key, paired in order: what `unmatched()` leaves out. */
-function pairedByKey<T>(base: T[], head: T[], key: (item: T) => string): Array<[T, T]> {
+function pairedByKey<T>(base: T[], head: T[], key: (item: T) => string, exact: (item: T) => string = key): Array<[T, T]> {
   const remaining = [...head]
+  const left: T[] = []
   const pairs: Array<[T, T]> = []
   for (const item of base) {
+    const at = remaining.findIndex((entry) => exact(entry) === exact(item))
+    if (at === -1) { left.push(item); continue }
+    pairs.push([item, remaining[at]!])
+    remaining.splice(at, 1)
+  }
+  for (const item of left) {
     const at = remaining.findIndex((entry) => key(entry) === key(item))
     if (at === -1) continue
     pairs.push([item, remaining[at]!])
@@ -285,7 +292,8 @@ export function compareRecords(base: RouteSecurityRecord, head: RouteSecurityRec
       else authorization.push(`this.${call.member}('${call.ability}') is no longer called`)
     }
     if (calls.gone.length === 0 && calls.added.length > 0) stronger = true
-    for (const [before, after] of pairedByKey(a.authorizes, b.authorizes, callKey)) {
+    // An unchanged occurrence pairs with itself first: a conditional copy added beside an unconditional check leaves it standing.
+    for (const [before, after] of pairedByKey(a.authorizes, b.authorizes, callKey, canonical)) {
       if (before.unconditional && !after.unconditional) authorization.push(`${label(after)} no longer runs whenever the action does: it sits under a condition, after a return, in a try or a helper`)
       if (!before.unconditional && after.unconditional) stronger = true
       if (!before.unconditional && !after.unconditional && before.reach !== after.reach) incomparable.push(`${label(after)} is reached another way, and it does not run whenever the action does`)
