@@ -654,9 +654,8 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     const added = headSkipped.filter((entry) => !baseSkipped.includes(entry))
     const shared = headSkipped.filter((entry) => baseSkipped.includes(entry))
     if (added.length > 0) unjudged.push({ reader: 'security-records', reason: `the head's introspection skipped ${added.join(', ')}, which the base's did not, so a route registered there was not compared`, lane: 'high', files: files.length > 0 ? files : touched })
-    if (files.length > 0 && [...compared.base.routes, ...compared.head.routes].some((route) => route.bindingLookups === 'unread')) {
-      unjudged.push({ reader: 'security-records', reason: 'a bound parameter is looked up by a custom resolver, whose body is not read, or by a server that did not say (an older @guren/core), so what it looks up was not compared', lane: 'medium', files })
-    }
+    const lookupsUnread = files.length > 0 ? unreadLookups([...compared.base.routes, ...compared.head.routes]) : undefined
+    if (lookupsUnread) unjudged.push({ reader: 'security-records', reason: lookupsUnread, lane: 'medium', files })
     if (added.length === 0 && shared.length > 0 && files.length > 0) unjudged.push({ reader: 'security-records', reason: `introspection skipped ${shared.join(', ')} on both sides, so a route registered there was not compared`, lane: 'medium', files })
   } else if (notCompared && (notCompared.lane === 'high' || surface.length > 0)) {
     // A base that cannot be read says nothing against the change; a head the change made unreadable does.
@@ -733,6 +732,25 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     plans: plans.listed,
     policy,
   }
+}
+
+/**
+ * Why the routes whose records say `bindingLookups: 'unread'` were not compared, naming them: a custom resolver, whose
+ * body is not read, or an `@guren/core` too old to say how its parameters are looked up, which upgrading it fixes.
+ */
+function unreadLookups(routes: readonly RouteSecurityRecord[]): string | undefined {
+  const named = (list: readonly RouteSecurityRecord[]): string => {
+    const labels = [...new Set(list.map(describeRoute))]
+    return labels.length > 3 ? `${labels.slice(0, 3).join(', ')} and ${labels.length - 3} more` : labels.join(', ')
+  }
+  const unread = routes.filter((route) => route.bindingLookups === 'unread')
+  const resolved = unread.filter((route) => Object.values(route.bindings ?? {}).some((value) => /(?:^|\+router:)resolver$/u.test(value)))
+  const older = unread.filter((route) => !resolved.includes(route))
+  const reasons = [
+    ...(resolved.length > 0 ? [`${named(resolved)} bind a parameter through a custom resolver, whose body is not read`] : []),
+    ...(older.length > 0 ? [`the installed @guren/core does not say how ${named(older)} look up their parameters (upgrade @guren/core with @guren/cli)`] : []),
+  ]
+  return reasons.length > 0 ? `${reasons.join('; ')}, so what they look up was not compared` : undefined
 }
 
 /** What `schemaResidue()` keeps, each item with the table whose statement alone holds it. */

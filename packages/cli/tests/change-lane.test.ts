@@ -1239,7 +1239,13 @@ describe('judgeChangeLane with per-route security records', () => {
 
   test('should hold a change to a route file at medium where the records could not read how parameters are looked up', async () => {
     const unread = { ...route([auth]), bindings: { id: 'app/Models/Post.ts#Post' }, bindingLookups: 'unread' as const }
-    expect(security(await laneWith(controller, { base: records(unread), head: records(unread) }))).toEqual(['medium'])
+    const report = await laneWith(controller, { base: records(unread), head: records(unread) })
+    expect(security(report)).toEqual(['medium'])
+    // The reason names the route and, for a server that did not say, the upgrade that fixes it.
+    expect(report.unjudged.find((entry) => entry.reader === 'security-records')?.reason).toBe('the installed @guren/core does not say how PUT /posts/:id look up their parameters (upgrade @guren/core with @guren/cli), so what they look up was not compared')
+    const resolver = { ...route([auth]), path: '/t/:token', bindings: { token: 'resolver' }, bindingLookups: 'unread' as const }
+    const resolved = await laneWith(controller, { base: records(resolver), head: records(resolver) })
+    expect(resolved.unjudged.find((entry) => entry.reader === 'security-records')?.reason).toBe('PUT /t/:token bind a parameter through a custom resolver, whose body is not read, so what they look up was not compared')
     expect(security(await laneWith(controller, { base: records(route([auth])), head: records(route([auth])) }))).toEqual([])
   })
 
