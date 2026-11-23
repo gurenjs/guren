@@ -247,7 +247,10 @@ its process id, for one read, apply and `writeFileAtomic()`. A lock whose
 process is gone is removed. A lock whose process is alive is waited on for up
 to five seconds and then reported as an error naming the process; it is never
 broken, since breaking a live holder's lock is how one of two writes is lost
-after both reported success. The response is the board as written plus the
+after both reported success. **Amended in implementation (M1):** a lock with
+no id in it, left by a writer that died between creating it and writing one,
+counts as held until it is five seconds old and as abandoned after that. The
+response is the board as written plus the
 dropped operations, and the page replaces its state with it. It also reads the
 board again when the window regains focus.
 
@@ -274,7 +277,9 @@ an async arrow, and `(back)` on the arrow that closes a loop. The walk that
 finds that arrow starts from the notes nothing points at, so it is the last
 arrow of the loop that is marked. A section is headed by its title and id, a
 question prints under the first note it is about, and notes in no section
-come last under `(no section)`.
+come last under `(no section)`. A question whose first note is itself a
+question printed under another note stands by itself with `(about …)`, since
+only a note with a line of its own can carry questions.
 
 ```
 Board: Post notifications  (docs/boards/post-notifications.board.json)
@@ -303,7 +308,10 @@ the board and the operation, with no clock and no random number in it.
 takes the first free cell of that section. A question with no `after` and no
 `section` is placed as if `after` were the first note it is about. An `add`
 or `section` the board has no room for is dropped, like any other operation
-that cannot apply.
+that cannot apply. Past the board's right edge a note placed with `after`
+wraps to the first free cell of the section. An `edit` that names a section
+places the note in it unless the note already sits there: an agent has no
+other way to move a note into a section, and the canvas has moved it first.
 
 The development MCP server gains `guren_get_boards`, read-only, returning the
 list and one board's text form, as `guren_get_plans` does for plans.

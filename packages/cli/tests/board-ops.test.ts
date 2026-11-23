@@ -207,6 +207,58 @@ describe('placement', () => {
     expect(note(result.board, 'l2')).toEqual({ id: 'l2', kind: 'event', text: 'L2', x: 2176, y: 2000 })
   })
 
+  test('should wrap a long chain to the next row instead of running off the board', () => {
+    const id = (n: number) => `n${String(n).padStart(3, '0')}`
+    const chain: BoardOp[] = [
+      { op: 'section', id: 'lane', title: 'Lane' },
+      { op: 'add', id: id(1), kind: 'event', text: 'N', section: 'lane' },
+    ]
+    for (let n = 2; n <= 100; n += 1) chain.push({ op: 'add', id: id(n), kind: 'event', text: 'N', after: id(n - 1) })
+
+    const result = applyBoardOps(emptyBoard('Test', 'en'), chain)
+
+    expect(result.dropped).toEqual([])
+    expect(BoardSchema.safeParse(result.board).success).toBe(true)
+    expect(note(result.board, id(90))).toMatchObject({ x: 15696, y: 56 })
+    expect(note(result.board, id(91))).toMatchObject({ x: 32, y: 168, section: 'lane' })
+  })
+
+  test('should keep a note on the board and let a section above one at the edge still grow', () => {
+    const adds = [1, 2, 3, 4, 5, 6].map((n): BoardOp => ({ op: 'add', id: `a${n}`, kind: 'event', text: 'A', section: 'lane' }))
+    const result = applyBoardOps(emptyBoard('Test', 'en'), [
+      { op: 'section', id: 'lane', title: 'Lane' },
+      { op: 'add', id: 'zz', kind: 'event', text: 'Z', at: { x: 16000, y: 16000 } },
+      ...adds,
+    ])
+
+    expect(result.dropped).toEqual([])
+    expect(note(result.board, 'zz')).toMatchObject({ x: 15840, y: 15904 })
+    expect(note(result.board, 'a6')).toMatchObject({ x: 32, y: 168 })
+  })
+
+  test('should place a note in the section an edit names, unless it already sits there', () => {
+    const board = applyBoardOps(lane(), [{ op: 'add', id: 'cc', kind: 'event', text: 'C' }]).board
+
+    const named = applyBoardOps(board, [{ op: 'edit', id: 'cc', section: 'lane' }])
+    const dropped = applyBoardOps(board, [
+      { op: 'move', id: 'cc', x: 504, y: 64 },
+      { op: 'edit', id: 'cc', section: 'lane' },
+    ])
+
+    expect(note(named.board, 'cc')).toMatchObject({ x: 384, y: 56, section: 'lane' })
+    expect(note(dropped.board, 'cc')).toMatchObject({ x: 504, y: 64, section: 'lane' })
+  })
+
+  test('should drop an add that would need a section past the limit, not fail the list', () => {
+    const sections = Array.from({ length: 100 }, (_, n): BoardOp => ({ op: 'section', id: `s${String(n).padStart(3, '0')}`, title: 'S', at: { x: 0, y: 0, width: 80, height: 80 } }))
+
+    const result = applyBoardOps(emptyBoard('Test', 'en'), [...sections, { op: 'add', id: 'xx', kind: 'event', text: 'X' }, { op: 'add', id: 'yy', kind: 'event', text: 'Y', at: { x: 0, y: 0 } }])
+
+    expect(result.dropped).toEqual([{ index: 100, op: 'add', reason: 'a board holds at most 100 sections, so the Unsorted section cannot be made for the note' }])
+    expect(BoardSchema.safeParse(result.board).success).toBe(true)
+    expect(result.board.notes.map((candidate) => candidate.id)).toEqual(['yy'])
+  })
+
   test('should give two adds the same outline in either order, though not the same coordinates', () => {
     const cc: BoardOp = { op: 'add', id: 'cc', kind: 'event', text: 'C' }
     const dd: BoardOp = { op: 'add', id: 'dd', kind: 'event', text: 'D' }

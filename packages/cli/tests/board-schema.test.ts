@@ -75,6 +75,7 @@ describe('BoardSchema', () => {
   test('should refuse a coordinate off the grid, text over one line and an inherited name as an id', () => {
     expect(issues(board({ notes: [{ id: 'aa', kind: 'event', text: 'A', x: 13, y: 0 }] }))).not.toBe('')
     expect(issues(board({ notes: [{ id: 'aa', kind: 'event', text: 'A\nB', x: 0, y: 0 }] }))).toContain('one line')
+    expect(issues(board({ notes: [{ id: 'aa', kind: 'event', text: 'A\u2028B', x: 0, y: 0 }] }))).toContain('one line')
     expect(issues(board({ notes: [{ id: 'constructor', kind: 'event', text: 'A', x: 0, y: 0 }] }))).toContain('inherits')
   })
 

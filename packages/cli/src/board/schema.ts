@@ -68,7 +68,8 @@ function lineOfText(max: number) {
     .string()
     .min(1)
     .max(max)
-    .regex(/^[^\p{Cc}]*$/u, { message: 'must be one line with no control characters' })
+    // U+2028 and U+2029 are no control characters, and a reader of the outline may break a line at them.
+    .regex(/^[^\p{Cc}\u2028\u2029]*$/u, { message: 'must be one line with no control characters' })
     .refine((text) => text.trim() !== '', { message: 'must not be blank' })
 }
 

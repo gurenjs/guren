@@ -91,6 +91,31 @@ describe('renderBoardOutline', () => {
     )
   })
 
+  test('should print a question about a question, and two questions about each other', () => {
+    const { board } = applyBoardOps(emptyBoard('Q', 'en'), [
+      { op: 'add', id: 'aa', kind: 'event', text: 'A', at: { x: 0, y: 0 } },
+      { op: 'add', id: 'q2', kind: 'question', text: 'Two', at: { x: 0, y: 0 }, about: ['aa'] },
+      { op: 'add', id: 'q1', kind: 'question', text: 'One', at: { x: 0, y: 0 }, about: ['q2'] },
+      { op: 'add', id: 'c1', kind: 'question', text: 'Cycle one', at: { x: 0, y: 0 } },
+      { op: 'add', id: 'c2', kind: 'question', text: 'Cycle two', at: { x: 0, y: 0 }, about: ['c1'] },
+      { op: 'edit', id: 'c1', about: ['c2'] },
+    ])
+
+    expect(renderBoardOutline(board, 'q')).toBe(
+      [
+        'Board: Q  (docs/boards/q.board.json)',
+        '',
+        '(no section)',
+        '  [event aa] A',
+        '      ? [q2] Two',
+        '  ? [c1] Cycle one (about c2)',
+        '  ? [c2] Cycle two (about c1)',
+        '  ? [q1] One (about q2)',
+        '',
+      ].join('\n'),
+    )
+  })
+
   test('should say so when the board is empty', () => {
     expect(renderBoardOutline(emptyBoard('Empty', 'en'), 'empty')).toBe('Board: Empty  (docs/boards/empty.board.json)\n\n(no notes)\n')
   })

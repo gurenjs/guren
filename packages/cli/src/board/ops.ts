@@ -7,7 +7,7 @@
 
 import { z } from 'zod'
 
-import { NOTE_SIZE, placeNote, placeSection, SECTION_INSET } from './place'
+import { liesIn, NOTE_SIZE, placeInSection, placeNote, placeSection, SECTION_INSET, UNSORTED_SECTION } from './place'
 import {
   BOARD_EXTENT,
   BOARD_GRID,
@@ -92,6 +92,12 @@ function snapSize(value: number): number {
   return Math.max(BOARD_GRID, snap(value))
 }
 
+/** A note's corner, kept far enough from the edge for the whole note to lie on the board. */
+function snapNote(point: { x: number; y: number }): { x: number; y: number } {
+  return { x: snap(point.x, BOARD_EXTENT - NOTE_SIZE.width), y: snap(point.y, BOARD_EXTENT - NOTE_SIZE.height) }
+}
+
+
 function findNote(board: Board, id: string): BoardNote | undefined {
   return board.notes.find((note) => note.id === id)
 }
@@ -147,9 +153,10 @@ function applyOne(board: Board, op: BoardOp): string | undefined {
       const beside = named ?? (op.about?.[0] === undefined ? undefined : findNote(board, op.about[0]))
       // `after` places the note only inside its own section; another section named beside it wins.
       const after = beside && (!section || beside.section === section.id) ? beside : undefined
-      const placed = op.at
-        ? { x: snap(op.at.x), y: snap(op.at.y), section: section?.id }
-        : placeNote(board, after ? { after } : { section })
+      const placed = op.at ? { ...snapNote(op.at), section: section?.id } : placeNote(board, after ? { after } : { section })
+      if (!placed && !after && !section && !findSection(board, UNSORTED_SECTION.id) && board.sections.length >= BOARD_MAX_SECTIONS) {
+        return `a board holds at most ${BOARD_MAX_SECTIONS} sections, so the ${UNSORTED_SECTION.title} section cannot be made for the note`
+      }
       if (!placed) return 'the board has no room left for the note'
       const note: BoardNote = { id: op.id, kind: op.kind, text: op.text, x: placed.x, y: placed.y }
       if (placed.section !== undefined) note.section = placed.section
@@ -160,24 +167,29 @@ function applyOne(board: Board, op: BoardOp): string | undefined {
     case 'edit': {
       const note = findNote(board, op.id)
       if (!note) return `no note is named ${op.id}`
-      if (typeof op.section === 'string' && !findSection(board, op.section)) return `no section is named ${op.section}`
+      const section = typeof op.section === 'string' ? findSection(board, op.section) : undefined
+      if (typeof op.section === 'string' && !section) return `no section is named ${op.section}`
       const kind = op.kind ?? note.kind
       const about = op.about ?? (kind === 'question' ? note.about : undefined)
       const problem = aboutProblem(board, note.id, kind, about ?? [])
       if (problem) return problem
+      // The canvas moves a note into a section before it says so; an agent only names the section,
+      // and the note is then placed in it. Left outside, a later resize would stretch the section to it.
+      const placed = section && !liesIn(note, section) ? placeInSection(board, section, note) : undefined
+      if (section && !liesIn(note, section) && !placed) return 'the board has no room left for the note'
 
       if (op.text !== undefined) note.text = op.text
       note.kind = kind
       setAbout(note, about)
       if (op.section === null) delete note.section
-      else if (op.section !== undefined) note.section = op.section
+      else if (section) note.section = section.id
+      if (placed) Object.assign(note, { x: placed.x, y: placed.y })
       return undefined
     }
     case 'move': {
       const note = findNote(board, op.id)
       if (!note) return `no note is named ${op.id}`
-      note.x = snap(op.x)
-      note.y = snap(op.y)
+      Object.assign(note, snapNote(op))
       return undefined
     }
     case 'remove': {
@@ -254,7 +266,7 @@ export function applyBoardOps(board: Board, ops: readonly BoardOp[]): AppliedBoa
   const dropped: DroppedBoardOp[] = []
   ops.forEach((op, index) => {
     // Placement grows sections before it can fail, so a placing operation runs on a copy.
-    const places = (op.op === 'add' || op.op === 'section') && op.at === undefined
+    const places = ((op.op === 'add' || op.op === 'section') && op.at === undefined) || (op.op === 'edit' && typeof op.section === 'string')
     const target = places ? structuredClone(draft) : draft
     const reason = applyOne(target, op)
     if (reason === undefined) draft = target

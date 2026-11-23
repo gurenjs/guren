@@ -5,7 +5,7 @@
  * holder's lock loses one of two writes after both reported success.
  */
 
-import { link, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { CliError, formatSchemaIssues } from '../cli-error'
@@ -26,7 +26,7 @@ export function boardPath(appRoot: string, slug: string): string {
   return join(appRoot, boardFile(slug))
 }
 
-type BoardReading = { board: Board; raw: string } | { missing: true } | { unreadable: string }
+type BoardReading = { board: Board } | { missing: true } | { unreadable: string }
 
 async function loadBoard(appRoot: string, slug: string): Promise<BoardReading> {
   const file = boardFile(slug)
@@ -45,10 +45,10 @@ async function loadBoard(appRoot: string, slug: string): Promise<BoardReading> {
   }
   const parsed = BoardSchema.safeParse(document)
   if (!parsed.success) return { unreadable: `${file} does not match the board schema:\n${formatSchemaIssues(parsed.error)}` }
-  return { board: parsed.data, raw }
+  return { board: parsed.data }
 }
 
-async function requireBoard(appRoot: string, slug: string): Promise<{ board: Board; raw: string }> {
+async function requireBoard(appRoot: string, slug: string): Promise<{ board: Board }> {
   const reading = await loadBoard(appRoot, slug)
   if ('missing' in reading) throw new CliError(`No board at ${boardFile(slug)}. Create it with: guren board:new "<title>" --slug ${slug}`)
   if ('unreadable' in reading) throw new CliError(reading.unreadable)
@@ -100,8 +100,17 @@ function isAlive(pid: number): boolean {
   }
 }
 
-/** Removes a lock left by `dead`. Moved aside first: only one of several waiters wins the rename. */
-async function clearDeadLock(path: string, dead: number): Promise<void> {
+/** A lock with no id in it for this long was left by a writer that died before writing one. */
+async function isAbandoned(path: string): Promise<boolean> {
+  const written = await stat(path).then(
+    (stats) => stats.mtimeMs,
+    () => undefined,
+  )
+  return written !== undefined && Date.now() - written > LOCK_WAIT_MS
+}
+
+/** Removes a lock left by `dead`, or an empty one. Moved aside first: only one of several waiters wins the rename. */
+async function clearDeadLock(path: string, dead: number | undefined): Promise<void> {
   const aside = `${path}.${process.pid}`
   try {
     await rename(path, aside)
@@ -130,15 +139,16 @@ async function withBoardLock<T>(appRoot: string, slug: string, waitMs: number, r
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     }
-    // An empty lock is a writer between creating it and writing its id, so it counts as held.
+    // An empty lock is a writer between creating it and writing its id, so it counts as held until it is old.
     const holder = await lockHolder(path)
-    if (holder !== undefined && !isAlive(holder)) {
+    if (holder === undefined ? await isAbandoned(path) : !isAlive(holder)) {
       await clearDeadLock(path, holder)
       continue
     }
     if (Date.now() >= deadline) {
       const who = holder === undefined ? 'another process' : `process ${holder}`
-      throw new CliError(`${boardFile(slug)} is being written by ${who} (${BOARD_LOCK_DIR}/${slug}.lock). Try again once it has finished.`)
+      const lock = `${BOARD_LOCK_DIR}/${slug}.lock`
+      throw new CliError(`${boardFile(slug)} is being written by ${who} (${lock}). Try again once it has finished; if nothing is writing the board, delete ${lock}.`)
     }
     await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS))
   }
@@ -164,13 +174,16 @@ export async function applyBoardOpsFile(
   options: { lockWaitMs?: number } = {},
 ): Promise<AppliedBoardOpsFile> {
   const file = boardFile(slug)
+  // Before the lock, so a mistyped slug or app root leaves no lock directory behind.
+  await requireBoard(appRoot, slug)
   return withBoardLock(appRoot, slug, options.lockWaitMs ?? LOCK_WAIT_MS, async () => {
-    const { board, raw } = await requireBoard(appRoot, slug)
+    const { board } = await requireBoard(appRoot, slug)
     const result = applyBoardOps(board, ops)
     const checked = BoardSchema.safeParse(result.board)
     if (!checked.success) throw new CliError(`The operations would leave ${file} invalid, so nothing was written:\n${formatSchemaIssues(checked.error)}`)
     const next = serializeBoard(checked.data)
-    const changed = next !== raw
+    // Against the board as read, not its bytes: a list that changes nothing never reformats a hand-edited file.
+    const changed = next !== serializeBoard(board)
     if (changed) await writeFileAtomic(join(appRoot, file), next)
     return { ...result, board: checked.data, file, changed }
   })

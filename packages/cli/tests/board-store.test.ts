@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { CliError } from '../src/cli-error'
@@ -124,6 +124,39 @@ describe('applyBoardOpsFile', () => {
 
     expect(await readFile(lockPath(dir), 'utf8')).toBe(`${process.pid}\n`)
     expect(await readFile(boardPath(dir, 'demo'), 'utf8')).toBe(before)
+  })
+
+  test('should clear an empty lock once it is old, and wait on a fresh one', async () => {
+    const dir = await app()
+    await mkdir(join(dir, BOARD_LOCK_DIR), { recursive: true })
+    await writeFile(lockPath(dir), '')
+
+    await expect(applyBoardOpsFile(dir, 'demo', OPS, { lockWaitMs: 100 })).rejects.toThrow('delete .guren/boards/demo.lock')
+
+    const minuteAgo = new Date(Date.now() - 60_000)
+    await utimes(lockPath(dir), minuteAgo, minuteAgo)
+    const result = await applyBoardOpsFile(dir, 'demo', OPS, { lockWaitMs: 100 })
+
+    expect(result.applied).toBe(3)
+    expect(existsSync(lockPath(dir))).toBe(false)
+  })
+
+  test('should leave no lock directory behind when there is no such board', async () => {
+    const dir = join(root, 'empty-app')
+
+    await expect(applyBoardOpsFile(dir, 'typo', OPS)).rejects.toThrow('No board at docs/boards/typo.board.json')
+    expect(existsSync(join(dir, '.guren'))).toBe(false)
+  })
+
+  test('should not reformat a hand-edited board when the list changes nothing', async () => {
+    const dir = await app()
+    const byHand = JSON.stringify({ boardVersion: 1, title: 'Demo', locale: 'en', sections: [], arrows: [], notes: [] })
+    await writeFile(boardPath(dir, 'demo'), byHand)
+
+    const result = await applyBoardOpsFile(dir, 'demo', [{ op: 'remove', id: 'nobody' }])
+
+    expect(result).toMatchObject({ changed: false, applied: 0 })
+    expect(await readFile(boardPath(dir, 'demo'), 'utf8')).toBe(byHand)
   })
 
   test('should apply two lists sent at once, one after the other', async () => {

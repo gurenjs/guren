@@ -29,18 +29,24 @@ export function renderBoardOutline(board: Board, slug: string): string {
     return out.length === 0 ? '' : `  ${out.join(', ')}`
   }
 
-  // A question is printed under the first note it is about; one about nothing stands in its own section.
+  // A question is printed under the first note it is about. One about nothing stands by itself,
+  // and so does one whose first note is a question printed under another: only a note with a
+  // line of its own can carry questions, or a question about a question would never be printed.
+  const firstAbout = (note: BoardNote): string | undefined => (note.kind === 'question' ? [...(note.about ?? [])].sort(compareIds)[0] : undefined)
+  const byId = new Map(board.notes.map((note) => [note.id, note]))
   const questionsUnder = new Map<string, BoardNote[]>()
   const standing: BoardNote[] = []
   for (const note of board.notes) {
-    const about = [...(note.about ?? [])].sort(compareIds)
-    if (note.kind !== 'question' || about.length === 0) standing.push(note)
-    else questionsUnder.set(about[0], [...(questionsUnder.get(about[0]) ?? []), note])
+    const target = firstAbout(note)
+    const carrier = target === undefined ? undefined : byId.get(target)
+    if (!carrier || firstAbout(carrier) !== undefined) standing.push(note)
+    else questionsUnder.set(carrier.id, [...(questionsUnder.get(carrier.id) ?? []), note])
   }
   standing.sort((a, b) => (column.get(a.id) as number) - (column.get(b.id) as number) || compareIds(a.id, b.id))
 
   const noteLines = (note: BoardNote): string[] => {
-    const own = note.kind === 'question' ? `  ? [${note.id}] ${note.text}` : `  [${note.kind} ${note.id}] ${note.text}`
+    const about = note.kind === 'question' && note.about?.length ? ` (about ${[...note.about].sort(compareIds).join(', ')})` : ''
+    const own = note.kind === 'question' ? `  ? [${note.id}] ${note.text}${about}` : `  [${note.kind} ${note.id}] ${note.text}`
     const questions = (questionsUnder.get(note.id) ?? []).sort((a, b) => compareIds(a.id, b.id)).map((question) => {
       const others = (question.about ?? []).filter((id) => id !== note.id).sort(compareIds)
       return `      ? [${question.id}] ${question.text}${others.length === 0 ? '' : ` (also about ${others.join(', ')})`}${arrowsText(question)}`
