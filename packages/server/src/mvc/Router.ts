@@ -83,7 +83,12 @@ interface ModelBinding {
 interface RegisteredBinding {
   resolve: ModelBindingResolver
   model?: BindableModel
+  /** The model's lookup column; `undefined` means its primary key. */
+  key?: string
 }
+
+/** How a bound parameter is looked up: a model by `key` (absent: its primary key), or a custom resolver as registered. */
+export type BindingLookup = { key?: string } | { resolver: ModelBindingResolver }
 
 function normalizeModelBinding(binding: RouteModelBinding): ModelBinding {
   if (Array.isArray(binding)) {
@@ -465,6 +470,7 @@ export class Router<in M extends string = never> {
     const binding = normalizeModelBinding(modelOrResolver as RouteModelBinding)
     this.modelBindings.set(param, {
       model: binding.model,
+      ...(binding.key === undefined ? {} : { key: binding.key }),
       resolve: (value) => resolveModelBinding(binding, value),
     })
     return this
@@ -831,6 +837,23 @@ export class Router<in M extends string = never> {
         if (model) result[parameter] = model
       }
       for (const [parameter, binding] of bindings ?? []) result[parameter] = binding.model
+      return result
+    })
+  }
+
+  /**
+   * How each bound parameter is looked up, indexed like definitions (RFC 0040 §3): what `registeredModelBindings()`
+   * names a model of, by its lookup column, and a router-level custom resolver, which it leaves out. Route-level wins.
+   */
+  registeredBindingLookups(): ReadonlyArray<Record<string, BindingLookup>> {
+    return this.registry.map(({ path, bindings }) => {
+      const result: Record<string, BindingLookup> = Object.create(null)
+      for (const parameter of extractPathParamNames(path)) {
+        const registered = this.modelBindings.get(parameter)
+        if (!registered) continue
+        result[parameter] = registered.model ? (registered.key === undefined ? {} : { key: registered.key }) : { resolver: registered.resolve }
+      }
+      for (const [parameter, binding] of bindings ?? []) result[parameter] = binding.key === undefined ? {} : { key: binding.key }
       return result
     })
   }

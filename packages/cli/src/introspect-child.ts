@@ -4,6 +4,7 @@
  * to the file named in argv, never stdout: the app's own modules print there.
  * It exits explicitly, since an app may hold open handles (timers, a Redis client).
  */
+import { createHash } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -37,6 +38,7 @@ interface IntrospectableApp {
   introspect?: () => Promise<AppManifest>
   router?: {
     registeredModelBindings?: () => ReadonlyArray<Record<string, { name?: string }>>
+    registeredBindingLookups?: () => ReadonlyArray<Record<string, { key?: string } | { resolver: (value: string) => unknown }>>
     definitions?: () => ReadonlyArray<{ schemas?: Partial<Record<string, unknown>> }>
     registeredHandlers?: () => ReadonlyArray<{ index: number; controller?: unknown }>
     hasRoute?: (name: string) => boolean
@@ -226,6 +228,19 @@ async function exportsByIdentity(
   return exportsOf
 }
 
+/** How each route's bound parameters are looked up, where the server says; a resolver by a digest of its source. */
+function resolveBindingLookups(manifest: AppManifest, app: IntrospectableApp): void {
+  const lookups = app.router?.registeredBindingLookups?.()
+  if (!lookups) return
+  for (const [index, bound] of lookups.entries()) {
+    const route = manifest.routes[index] as GraphRouteEntry | undefined
+    if (!route) continue
+    route.bindingLookups = Object.fromEntries(Object.entries(bound).map(([parameter, lookup]) => [parameter, 'resolver' in lookup
+      ? { resolver: createHash('sha256').update(String(lookup.resolver)).digest('hex') }
+      : lookup.key === undefined ? {} : { key: lookup.key }]))
+  }
+}
+
 async function resolveModelBindings(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
   const bindings = app.router?.registeredModelBindings?.()
   if (!bindings) return
@@ -300,6 +315,7 @@ async function introspect(root: string): Promise<Introspection> {
   loadingApp = false
   await resolveControllers(manifest, app, root, loaded.framework, loaded.specifier)
   if (graphScans) {
+    resolveBindingLookups(manifest, app)
     await resolveModelBindings(manifest, app, root)
     await resolveContractSources(manifest, app, root)
   }

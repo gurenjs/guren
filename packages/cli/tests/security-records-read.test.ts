@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from '
 import { rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
-import { readSecurityRecords } from '../src/change/security-records-read'
+import { bindingsRecord, readSecurityRecords } from '../src/change/security-records-read'
 import { createTempRoot, linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 
 // The records introspect the application in a child, past Bun's 5 s default under a loaded suite.
@@ -95,6 +95,39 @@ async function app(name: string, files: Record<string, string>): Promise<string>
 }
 
 describe('readSecurityRecords', () => {
+  test("records each binding's lookup column and a router-level resolver by a digest of its source", async () => {
+    const dir = await app('lookups', {
+      ...FILES,
+      'app/Models/Post.ts': 'export class Post {\n  static async findOrFail(value: unknown) {\n    return { value }\n  }\n}\n',
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { Post } from '../app/Models/Post.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.bind('token', async (value: string) => ({ value }))
+  router.get('/posts/:post', { name: 'posts.show', bind: { post: [Post, 'slug'] } }, (c) => c.text('ok'))
+  router.get('/posts/by-id/:id', { name: 'posts.byId', bind: { id: Post } }, (c) => c.text('ok'))
+  router.get('/tokens/:token', { name: 'tokens.show' }, (c) => c.text('ok'))
+}
+`,
+    })
+
+    const records = await readSecurityRecords(dir)
+
+    if ('unreadable' in records) throw new Error(records.unreadable)
+    expect(records.routes.map((route) => [route.path, route.bindings, route.bindingLookups])).toEqual([
+      ['/posts/:post', { post: 'app/Models/Post.ts#Post@slug' }, undefined],
+      ['/posts/by-id/:id', { id: 'app/Models/Post.ts#Post' }, undefined],
+      ['/tokens/:token', { token: expect.stringMatching(/^resolver#[0-9a-f]{64}$/) }, undefined],
+    ])
+  })
+
+  test('says the lookup columns are unread when the server does not say them', () => {
+    const sources = { post: { file: 'app/Models/Post.ts', exportName: 'Post', name: 'Post' } }
+    expect(bindingsRecord({ post: 'Post' }, sources, undefined)).toEqual({ bindings: { post: 'app/Models/Post.ts#Post' }, bindingLookups: 'unread' })
+    expect(bindingsRecord({ post: 'Post' }, sources, { post: { key: 'slug' } })).toEqual({ bindings: { post: 'app/Models/Post.ts#Post@slug' } })
+    expect(bindingsRecord(undefined, undefined, undefined)).toEqual({})
+  })
+
   test('reads the chain, the contract and its export, and the action\'s calls of an introspected route', async () => {
     const dir = await app('plain', FILES)
 

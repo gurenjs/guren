@@ -75,6 +75,11 @@ export type GraphRouteEntry = RouteEntry & {
    * so the class is outside the app by identity rather than unread.
    */
   controllerPackage?: string
+  /**
+   * Graph runs on a server that says how each bound parameter is looked up (`registeredBindingLookups()`): a model by
+   * its column (`key` absent: the primary key), or a router-level custom resolver by a digest of its source.
+   */
+  bindingLookups?: Record<string, { key?: string } | { resolver: string }>
 }
 
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000

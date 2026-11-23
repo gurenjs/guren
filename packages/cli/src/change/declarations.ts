@@ -433,8 +433,7 @@ export async function declaredRoute(route: RouteSecurityRecord, head: HeadRoutes
   if (route.action !== `${controllerFilePath(controller)}#default.${action.name}`) return undefined
 
   if (!holdsPlannedMiddleware(route, plannedRouteMiddleware(planned, action))) return undefined
-  const bindings = plannedBindings(plan, planned)
-  if (!bindings || !sameRecordPart(route.bindings ?? {}, bindings)) return undefined
+  if (!holdsPlannedBindings(plan, planned, route)) return undefined
   if (!sameRecordPart(route.agent ?? null, plannedAgentMetadata(planned) ?? null)) return undefined
   for (const segment of ['params', 'query', 'body'] as const) {
     const validator = action[segment] === undefined ? undefined : plan.validators.find((candidate) => candidate.id === action[segment])
@@ -485,17 +484,23 @@ function holdsPlannedMiddleware(route: RouteSecurityRecord, middleware: readonly
 }
 
 /**
- * The bindings a plan route registers, each param to its root model's `file#export`; `undefined` when one cannot be
- * stated: a planned lookup column (the manifest does not carry it), or a model in a module or absent from the plan.
+ * The bindings a plan route registers, each param to its root model's `file#export`, with `@<column>` for a planned
+ * key, as the record writes them; `undefined` when one cannot be stated: a model in a module or absent from the plan.
  */
 function plannedBindings(plan: PlanDraft, planned: PlanRoute): Record<string, string> | undefined {
   const bindings: Record<string, string> = {}
   for (const binding of planned.bind) {
     const model = plan.models.find((entry) => entry.id === binding.model)
-    if (binding.key !== undefined || !model || model.module !== undefined) return undefined
-    bindings[binding.param] = `${MODELS_DIR}/${model.name}.ts#${model.name}`
+    if (!model || model.module !== undefined) return undefined
+    bindings[binding.param] = `${MODELS_DIR}/${model.name}.ts#${model.name}${binding.key === undefined ? '' : `@${binding.key}`}`
   }
   return bindings
+}
+
+/** Whether the record's bindings are the plan route's, columns included: a server that did not say how they are looked up cannot show it. */
+function holdsPlannedBindings(plan: PlanDraft, planned: PlanRoute, route: RouteSecurityRecord): boolean {
+  const bindings = plannedBindings(plan, planned)
+  return bindings !== undefined && route.bindingLookups === undefined && sameRecordPart(route.bindings ?? {}, bindings)
 }
 
 /** The one root plan route of `name` with change `kind`, claimed by one open plan alone, its action a root controller's. */
@@ -573,10 +578,7 @@ function declaredRouteChange(subject: Extract<DeclarationSubject, { kind: 'route
   if (!controller || !action || controller.module !== undefined || !target || target.member !== action.name) return undefined
   if (target.exported !== controller.className && !(target.exported === 'default' && posix.basename(target.file!).replace(SOURCE_EXTENSION, '') === controller.className)) return undefined
   if (changed.includes('middleware') && !holdsPlannedMiddleware(route, plannedRouteMiddleware(planned, action))) return undefined
-  if (changed.includes('bindings')) {
-    const bindings = plannedBindings(plan, planned)
-    if (!bindings || !sameRecordPart(route.bindings ?? {}, bindings)) return undefined
-  }
+  if (changed.includes('bindings') && !holdsPlannedBindings(plan, planned, route)) return undefined
   if (changed.includes('agent') && !sameRecordPart(route.agent ?? null, plannedAgentMetadata(planned) ?? null)) return undefined
 
   if (changed.includes('method') || changed.includes('path')) {

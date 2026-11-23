@@ -460,7 +460,7 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
   let routesFiles: Promise<string> | undefined
   const routes: RouteSecurityRecord[] = []
   for (const [index, route] of targets.entries()) {
-    const { contractSources: sources, bindingSources } = manifest.routes[index] as GraphRouteEntry
+    const { contractSources: sources, bindingSources, bindingLookups: lookups } = manifest.routes[index] as GraphRouteEntry
     const contracts: RouteSecurityRecord['contracts'] = {}
     for (const key of CONTRACT_SEGMENTS) {
       const schema = route.schemas[key]
@@ -490,15 +490,35 @@ export async function readSecurityRecords(cwd: string): Promise<SecurityRecords 
       })),
       contracts,
       // A model by the file and export introspection found it under, so two classes of one name stay apart; else by name.
-      ...(route.bindings ? { bindings: Object.fromEntries(Object.entries(route.bindings).map(([parameter, name]) => {
-        const source = bindingSources?.[parameter]
-        return [parameter, source ? `${source.file}#${source.exportName}` : name]
-      })) } : {}),
+      ...bindingsRecord(route.bindings, bindingSources, lookups),
       ...(route.agent ? { agent: route.agent } : {}),
       handler: ref ? await actionRecord(cwd, scan, ref, reachedByName, declarations, manifest.entry.file ?? undefined) : { unread: 'an inline handler, whose body the reader does not follow' },
     })
   }
   return { recordVersion: SECURITY_RECORD_VERSION, routes, ...(skipped.length > 0 ? { skipped } : {}) }
+}
+
+/**
+ * The record's bindings: each model by identity and lookup column, and each custom resolver by its digest. Without the
+ * server's lookups the columns cannot be read, which the record says rather than reading every binding as its primary key.
+ */
+export function bindingsRecord(
+  named: Record<string, string> | undefined,
+  sources: GraphRouteEntry['bindingSources'],
+  lookups: GraphRouteEntry['bindingLookups'],
+): Pick<RouteSecurityRecord, 'bindings' | 'bindingLookups'> {
+  const bindings: Record<string, string> = {}
+  for (const [parameter, name] of Object.entries(named ?? {})) {
+    const source = sources?.[parameter]
+    const lookup = lookups?.[parameter]
+    const key = lookup && 'key' in lookup && lookup.key !== undefined ? `@${lookup.key}` : ''
+    bindings[parameter] = `${source ? `${source.file}#${source.exportName}` : name}${key}`
+  }
+  for (const [parameter, lookup] of Object.entries(lookups ?? {})) {
+    if ('resolver' in lookup && !(parameter in bindings)) bindings[parameter] = `resolver#${lookup.resolver}`
+  }
+  if (Object.keys(bindings).length === 0) return {}
+  return { bindings, ...(lookups === undefined ? { bindingLookups: 'unread' as const } : {}) }
 }
 
 async function actionRecord(

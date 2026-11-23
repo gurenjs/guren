@@ -1,6 +1,6 @@
 {
   "scaffold": {
-    "recordVersion": 3,
+    "recordVersion": 4,
     "routes": [
       {
         "method": "GET",
@@ -16,7 +16,7 @@
     ]
   },
   "mount": {
-    "recordVersion": 3,
+    "recordVersion": 4,
     "routes": [
       {
         "method": "POST",

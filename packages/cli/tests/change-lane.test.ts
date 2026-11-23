@@ -1429,6 +1429,15 @@ describe('judgeChangeLane with an alter or drop route in an open plan', () => {
     expect(report.facts.map((fact) => [fact.code, fact.lane])).toEqual([['source-edited', 'medium'], ['route-added', 'low'], ['route-added', 'low'], ['route-removed', 'low']])
   })
 
+  test('should hold a planned lookup column to the record, and refuse a record whose columns are unread', async () => {
+    const bySlug = (plan: RoutePlan): void => { plan.routes.find((route) => route.id === 'route.posts.update')!.bind = [{ param: 'post', model: 'model.post', key: 'slug' }] }
+    const bound = (value: string, unread = false): RouteSecurityRecord => ({ ...update('/posts/:post'), bindings: { post: value }, ...(unread ? { bindingLookups: 'unread' as const } : {}) })
+
+    expect(routeFacts(await laneWith({ base: records(update('/posts/:post')), head: records(bound('app/Models/Post.ts#Post@slug')) }, bySlug))).toEqual([['route-changed', 'low', 'docs/plans/comments/plan.json#route.posts.update']])
+    expect(routeFacts(await laneWith({ base: records(update('/posts/:post')), head: records(bound('app/Models/Post.ts#Post')) }, bySlug))).toEqual([['route-changed', 'medium', undefined]])
+    expect(routeFacts(await laneWith({ base: records(update('/posts/:post')), head: records(bound('app/Models/Post.ts#Post@slug', true)) }, bySlug))).toEqual([['route-changed', 'medium', undefined]])
+  })
+
   test("should declare a route's agent tool with its change only as the element states it", async () => {
     const planned = (plan: RoutePlan): void => { plan.routes.find((route) => route.id === 'route.posts.update')!.agent = { toolName: 'posts_update', readOnly: false } }
     const tool = (toolName: string) => ({ ...update('/posts/:post'), agent: { toolName, readOnlyHint: false } }) as RouteSecurityRecord
