@@ -1814,6 +1814,11 @@ questions are not judged; a `command` ~~and a `mail` / `notification` class are
 `unjudged`, since nothing reads whether one was run or discovers the other~~ is
 `unjudged`, since nothing reads whether one was run (a mail and a notification
 class are read since, see *policy abilities and side-effect uses* below).
+A binding's lookup `key` is read since, from `Router.registeredBindingLookups()`
+on the router the routes file registers into (RFC 0040 §3 added it for the
+security records): a planned `key` is compared with the column, an absent one
+on either side meaning the primary key, and a custom resolver, a parameter
+bound at both levels, or a server without the method leave it unknown.
 
 A property with no reader is **unknown**. Unknown never counts towards
 `present`, never satisfies a `drop`, and is listed on the page as "planned,

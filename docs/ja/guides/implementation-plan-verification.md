@@ -227,6 +227,10 @@ validator の `fields` は export された zod のスキーマから、Resource
 
 transform、refinement、union の奥にあるフィールドのように確実に判定できないものは、推測せずに `unknown` にします。その理由は `--json` の性質ごとに出力されます。部品ごとの規則は、[RFC 0030](https://github.com/gurenjs/guren/blob/main/rfcs/0030-implementation-plans.md) §6 の、フィールドの読み取りと Policy の ability についての追記にあります。
 
+ルートの `bind` はルーターから読み取ります。パラメータごとに、どのモデルに bind しているかと、どの列でレコードを引くかがわかります。計画の `key` はその列と比べ、`key` のない binding はどちらの側でも主キーとして扱います。そのため、計画に `key` がなくても、ルートが主キー以外の列で引いていれば `differ` になります。
+
+ルーターが 1 つの列で引いていない場合、列は `unknown` になります。カスタムのリゾルバに bind したパラメータ、ルートと `router.bind()` の両方で bind したパラメータ (両方の引き当てが走ります)、この読み取りに対応する前の `@guren/core` を使っているアプリケーションがこれにあたります。
+
 ## 鮮度
 
 承認済みの計画では、`plan:status` は参照している要素を、承認時のハッシュとも比べます。

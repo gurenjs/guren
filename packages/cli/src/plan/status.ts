@@ -178,6 +178,9 @@ export function awaitsVerification(element: PlanElementStatus<PlanElementState>)
   return element.state === 'unjudged' || element.state === element.completesAt
 }
 
+/** What a binding with no `key` looks up by, on either side. */
+const PRIMARY_KEY = 'the primary key'
+
 function compare(property: string, planned: string, actual: string | undefined, whyUnknown: string): PlanPropertyStatus {
   if (actual === undefined) return unknown(property, planned, whyUnknown)
   return actual === planned ? match(property, planned) : differ(property, planned, actual)
@@ -1183,7 +1186,8 @@ class StatusContext {
     for (const binding of route.bind) {
       const model = this.modelsById.get(binding.model)?.name ?? binding.model
       properties.push(compare(`bind ${binding.param}`, model, actual.bindings[binding.param] ?? 'not bound', ''))
-      if (binding.key) properties.push(unknown(`bind ${binding.param} key`, binding.key, 'the lookup column of a binding is not read'))
+      const key = this.bindingKey(binding.key, actual, binding.param)
+      if (key) properties.push(key)
     }
     if (route.agent) {
       if (!actual.agent) properties.push(differ('agent', route.agent.toolName, 'not an agent tool'))
@@ -1193,6 +1197,20 @@ class StatusContext {
       }
     }
     return properties
+  }
+
+  /**
+   * A binding's lookup column (`key` absent: the primary key). Said only where the plan states a column or the route
+   * looks up by another than the primary key, so a plan that states none and a column that cannot be read add nothing.
+   */
+  private bindingKey(planned: string | undefined, actual: PlanAppRouteDetail, param: string): PlanPropertyStatus | undefined {
+    const property = `bind ${param} key`
+    const want = planned ?? PRIMARY_KEY
+    const read = actual.bindingKeys === undefined ? { unread: 'the lookup column of a binding is not read' } : actual.bindingKeys[param]
+    if (read === undefined) return planned === undefined ? undefined : differ(property, want, 'not bound')
+    if (read !== null && typeof read === 'object') return planned === undefined ? undefined : unknown(property, want, read.unread)
+    if (planned === undefined && read === null) return undefined
+    return compare(property, want, read ?? PRIMARY_KEY, '')
   }
 
   view(view: PlanView): PlanElementStatus {

@@ -8,6 +8,14 @@ import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, routesEntryOrDefault } from 
 
 type RouteRegistrar = (router: Router) => void | Promise<void>
 
+/** `Router.registeredBindingLookups()`, typed structurally, since the `@guren/server` an app resolves may predate it. */
+export type RouterBindingLookup = ({ key?: string; model?: unknown } | { resolver: unknown }) & { router?: { key?: string; model?: unknown } | { resolver: unknown } }
+
+/** Filled by {@link loadRouteDefinitions}: per definition, how each bound parameter is looked up, or `undefined` when the server cannot say. */
+export interface BindingLookupSink {
+  lookups?: ReadonlyArray<Record<string, RouterBindingLookup>>
+}
+
 // Lives beside the registrar name contract, which the scaffolders need without
 // pulling in `@guren/core`; re-exported so route-resolving commands find it.
 export { DEFAULT_ROUTES_FILE } from './route-registrar'
@@ -143,6 +151,7 @@ export async function loadRouteDefinitions(
   appRoot: string,
   moduleWarnings?: string[],
   moduleProvenance?: Array<string | null>,
+  bindingLookups?: BindingLookupSink,
 ): Promise<RouteDefinition[]> {
   const moduleExports = await import(importUrl(routesFile)) as Record<string, unknown>
   const registrar = resolveRegistrar(moduleExports)
@@ -172,6 +181,10 @@ export async function loadRouteDefinitions(
     }
   }
 
+  if (bindingLookups) {
+    const read = (router as { registeredBindingLookups?: () => ReadonlyArray<Record<string, RouterBindingLookup>> }).registeredBindingLookups
+    bindingLookups.lookups = typeof read === 'function' ? read.call(router) : undefined
+  }
   return withModuleNames(router.definitions(), moduleNames)
 }
 

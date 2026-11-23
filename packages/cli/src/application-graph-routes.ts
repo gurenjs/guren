@@ -3,7 +3,7 @@ import type { RouteDefinition } from '@guren/server'
 
 import { graphId, type GraphNode } from './application-graph'
 import { routeDefinitionToContextRoute, type ContextRoute } from './context-route'
-import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
+import { loadRouteDefinitions, resolveRoutesFile, type BindingLookupSink, type RouterBindingLookup } from './load-routes'
 
 export interface RouteGraphSource {
   method: string
@@ -48,6 +48,8 @@ export interface RoutesFileGraphReading {
   /** Directory names, distinct from the declared modules in the graph identities. */
   provenance: Array<string | null>
   moduleWarnings: string[]
+  /** Per definition, how each bound parameter is looked up; `undefined` when the server cannot say or nothing loaded. */
+  bindingLookups?: ReadonlyArray<Record<string, RouterBindingLookup>>
 }
 
 /** Plan's registrar reading; importing an app entry or replacing it with a manifest would change approval facts. */
@@ -56,9 +58,13 @@ export async function readRoutesFileGraph(cwd: string, routesFile?: string): Pro
   const reading: RoutesFileGraphReading = { routes: [], entries: [], definitions: undefined, file: undefined, provenance: [], moduleWarnings: [] }
   if (target.silentlyAbsent) return reading
   try {
-    const definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd, reading.moduleWarnings, reading.provenance)
+    const sink: BindingLookupSink = {}
+    const definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd, reading.moduleWarnings, reading.provenance, sink)
     const entries = readRouteGraph(definitions, 'routes-file')
-    return { ...reading, file: target.path, definitions, entries, routes: entries.map(({ route }) => routeDefinitionToContextRoute(route)) }
+    return {
+      ...reading, file: target.path, definitions, entries, routes: entries.map(({ route }) => routeDefinitionToContextRoute(route)),
+      ...(sink.lookups ? { bindingLookups: sink.lookups } : {}),
+    }
   } catch (error) {
     const reason = (error instanceof Error ? error.message : String(error)) || 'the routes file threw without a message'
     return { ...reading, file: target.path, routes: { unreadable: reason } }

@@ -235,6 +235,7 @@ export async function loadPlanAppState(
     routesFile: routes.file,
     routes: routes.routes,
     definitions: routes.definitions,
+    ...(routes.bindingLookups ? { bindingLookups: routes.bindingLookups } : {}),
     provenance: routes.provenance,
     moduleWarnings: routes.moduleWarnings,
     controllers: controllers.scan,

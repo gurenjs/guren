@@ -16,6 +16,7 @@ import { readEnvDeclarations, type EnvDeclaration } from '../env-declarations'
 import { createAppListedFiles, createAppOptions, findModuleDescriptor, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
+import type { RouterBindingLookup } from '../load-routes'
 import { blankCommentsAndStrings, literalAbilities, VALIDATE_CALL_PATTERN, type ControllerMethodScan } from '../controller-methods'
 import {
   CONFIG_DIR,
@@ -69,6 +70,8 @@ export interface PlanAppRouteDetail {
   hasInlineMiddleware: boolean
   /** Route parameter → bound model class. */
   bindings: Record<string, string>
+  /** Route parameter → its lookup column, for every parameter the router binds; absent when nothing read them. */
+  bindingKeys?: Record<string, PlanAppBindingKey>
   agent?: { toolName?: string; readOnly?: boolean }
   /** Still answered by its prototype fixture (RFC 0021), so no controller action serves it. */
   prototype?: true
@@ -85,6 +88,9 @@ export interface PlanAppRouteDetail {
   /** Why a route registered before it may answer its requests; absent when none can. */
   shadowed?: Exclude<PlanAppMount, 'mounted'>
 }
+
+/** A bound parameter's lookup column: `null` for the model's primary key, or why it is not read. */
+export type PlanAppBindingKey = string | null | { unread: string }
 
 export interface PlanAppModelDetail {
   className: string
@@ -226,6 +232,8 @@ export interface PlanAppDetailInput {
   routes: ContextRoute[] | PlanAppUnreadable
   /** The definitions `routes` was rendered from, in the same order, for the live contract schemas. */
   definitions: RouteDefinition[] | undefined
+  /** `Router.registeredBindingLookups()` in the same order; `undefined` when the server has no such method. */
+  bindingLookups?: ReadonlyArray<Record<string, RouterBindingLookup>>
   provenance: Array<string | null>
   moduleWarnings: string[]
   controllers: ControllerMethodScan | PlanAppUnreadable
@@ -319,6 +327,26 @@ function contractSchemaObjects(definitions: RouteDefinition[] | undefined): Set<
   return objects
 }
 
+const NO_BINDING_LOOKUPS = 'the installed @guren/server has no Router.registeredBindingLookups(), so a lookup column is not read: upgrade @guren/core'
+
+/**
+ * Each bound parameter's lookup column, as the router runs it. A custom resolver is a function this does not read, and a
+ * parameter bound at both levels runs both lookups, so neither is the one column a plan's `key` states.
+ */
+function bindingKeys(named: Record<string, string>, lookups: Record<string, RouterBindingLookup> | undefined): Record<string, PlanAppBindingKey> {
+  const keys: Record<string, PlanAppBindingKey> = {}
+  if (lookups === undefined) {
+    for (const parameter of Object.keys(named)) keys[parameter] = { unread: NO_BINDING_LOOKUPS }
+    return keys
+  }
+  for (const [parameter, lookup] of Object.entries(lookups)) {
+    if ('resolver' in lookup) keys[parameter] = { unread: 'the parameter is bound to a custom resolver, whose lookup is not read' }
+    else if (lookup.router) keys[parameter] = { unread: 'the parameter is bound at both the route and the router level, and both lookups run' }
+    else keys[parameter] = lookup.key ?? null
+  }
+  return keys
+}
+
 function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanAppDetail['routes'] {
   const routes = input.routes
   if (!Array.isArray(routes)) return routes
@@ -332,6 +360,7 @@ function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanApp
       middleware: route.middleware ?? [],
       hasInlineMiddleware: route.hasInlineMiddleware === true,
       bindings: route.bindings ?? {},
+      bindingKeys: bindingKeys(route.bindings ?? {}, input.bindingLookups === undefined ? undefined : input.bindingLookups[index] ?? {}),
       ...(route.agent ? { agent: { toolName: route.agent.toolName, readOnly: route.agent.readOnlyHint } } : {}),
       ...(route.prototype ? { prototype: true as const } : {}),
       module: input.provenance[index] ?? null,
