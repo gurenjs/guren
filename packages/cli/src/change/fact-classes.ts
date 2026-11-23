@@ -67,6 +67,3 @@ export type ReviewableFactCode = Exclude<FactCode, 'review-path'>
 export const LANES: readonly Lane[] = ['low', 'medium', 'high']
 
 export const laneRank = (lane: Lane): number => LANES.indexOf(lane)
-
-/** Ends the message of an edit the plan's baseline did not have the file for, read as that plan's addition (RFC 0040 §3). */
-export const PLAN_ADDITION_NOTE = "absent at the plan's baseline, so its addition"

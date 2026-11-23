@@ -798,13 +798,25 @@ export class CommentPolicy extends Policy {
     return { repo, start }
   }
 
+  const noRoutes = { recordVersion: SECURITY_RECORD_VERSION, routes: [] }
+  /** {@link laneOf} with both sides' security records given, as the audit's two exports would read them. */
+  async function laneRecorded(repo: string, base: string, head: string, pair: SecurityRecordPair = { base: noRoutes, head: noRoutes }): Promise<ChangeLaneReport> {
+    const change = await resolveChange(repo, base, head)
+    const { reader, dispose } = openChange(repo, change)
+    try {
+      return await judgeChangeLane(change, reader, { audit: async () => ({ unavailable: 'not audited in this test', records: pair }) })
+    } finally {
+      await dispose()
+    }
+  }
+
   test("should read an edit to a file an earlier task of the plan added as that element's addition", async () => {
     const { repo } = await stampedPlanRepo()
     const base = await commit(repo, { 'app/Models/Comment.ts': MODEL })
-    const report = await laneOf(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL.replace('{}', '{\n  static fillable = [\'body\']\n}') }))
+    const report = await laneRecorded(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL.replace('{}', '{\n  static fillable = [\'body\']\n}') }))
 
     expect(report.facts).toEqual([
-      expect.objectContaining({ code: 'file-added', lane: 'low', files: ['app/Models/Comment.ts'], declaredBy: 'docs/plans/comments/plan.json#model.comment', message: "app/Models/Comment.ts modified: absent at the plan's baseline, so its addition" }),
+      expect.objectContaining({ code: 'file-added', lane: 'low', files: ['app/Models/Comment.ts'], declaredBy: 'docs/plans/comments/plan.json#model.comment', planAddition: true, message: "app/Models/Comment.ts modified: absent at the plan's baseline, so its addition" }),
     ])
     expect(renderChangeLane(report)).toContain("whose change added it since was not checked")
   })
@@ -814,17 +826,23 @@ export class CommentPolicy extends Policy {
     const edited = (report: ChangeLaneReport) => report.facts.map((fact) => [fact.code, fact.lane, fact.declaredBy])
 
     const present = await stampedPlanRepo({ 'app/Models/Comment.ts': MODEL })
-    expect(edited(await laneOf(present.repo, await git(present.repo, ['rev-parse', 'HEAD']), await commit(present.repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
+    expect(edited(await laneRecorded(present.repo, await git(present.repo, ['rev-parse', 'HEAD']), await commit(present.repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
 
     // The fixture's baseline names a commit this clone does not have.
     const { repo } = await planRepo()
     const base = await commit(repo, { 'app/Models/Comment.ts': MODEL })
-    expect(edited(await laneOf(repo, base, await commit(repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
+    expect(edited(await laneRecorded(repo, base, await commit(repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
 
     const stamped = await stampedPlanRepo()
     const added = await commit(stamped.repo, { 'app/Models/Comment.ts': MODEL })
-    const renamed = await laneOf(stamped.repo, added, await commit(stamped.repo, { 'app/Models/Comment.ts': MODEL.replace('class Comment', 'class Note') }))
+    const renamed = await laneRecorded(stamped.repo, added, await commit(stamped.repo, { 'app/Models/Comment.ts': MODEL.replace('class Comment', 'class Note') }))
     expect(edited(renamed)).toEqual([['source-edited', 'medium', undefined]])
+
+    // A validator or a model edit can weaken a route outside the security surface: every route's record must have been compared.
+    const head = await commit(stamped.repo, edit)
+    expect(edited(await laneOf(stamped.repo, added, head))).toEqual([['source-edited', 'medium', undefined]])
+    const skipped = { ...noRoutes, skipped: ['the createApp({ boot }) callback'] }
+    expect(edited(await laneRecorded(stamped.repo, added, head, { base: skipped, head: skipped }))).toEqual([['source-edited', 'medium', undefined]])
   })
 
   test('should lower an added file and an added table the plan declares, naming the element', async () => {

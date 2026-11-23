@@ -71,7 +71,7 @@ export interface ChangeRecord {
   head: string
   floor: Lane | null
   /** `policyFrom`: the lane before `guren.review.ts` set it, which the shadow comparison reads beside the label. */
-  facts: Array<{ code: string; lane: Lane; policyFrom?: Lane; declaredBy?: string; target?: string; files: string[] }>
+  facts: Array<{ code: string; lane: Lane; policyFrom?: Lane; declaredBy?: string; planAddition?: true; target?: string; files: string[] }>
   /** The readers that did not read, which is what a floor above its facts rests on. */
   unjudged: Array<{ reader: string; lane: Lane }>
   audit: ChangeLaneReport['audit'] | null
@@ -345,7 +345,7 @@ export async function changeRecord(cwd: string, base: string, head: string, evid
     mergeBase: evidence.lane?.mergeBase ?? null,
     head: evidence.lane?.head ?? head,
     floor: evidence.lane?.floor ?? null,
-    facts: (evidence.lane?.facts ?? []).map(({ code, lane, policyFrom, declaredBy, target, files }) => ({ code, lane, ...(policyFrom ? { policyFrom } : {}), ...(declaredBy ? { declaredBy } : {}), ...(target ? { target } : {}), files })),
+    facts: (evidence.lane?.facts ?? []).map(({ code, lane, policyFrom, declaredBy, planAddition, target, files }) => ({ code, lane, ...(policyFrom ? { policyFrom } : {}), ...(declaredBy ? { declaredBy } : {}), ...(planAddition ? { planAddition } : {}), ...(target ? { target } : {}), files })),
     unjudged: (evidence.lane?.unjudged ?? []).map(({ reader, lane }) => ({ reader, lane })),
     audit: evidence.lane?.audit ?? null,
     holds: evidence.holds.map(({ code, lane }) => ({ code, lane })),

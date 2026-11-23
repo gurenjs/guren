@@ -36,7 +36,7 @@ import { composeAppProviderRegistration } from '../provider-registrar'
 import { appEntryListNames, type AppEntryList } from './app-entry'
 import { envKeyValue, importsFrameworkEnv } from './app-env'
 import { envBuilderSignature, planEnvEntry, plannedEnvSignature } from '../env-declarations'
-import { FACT_CLASSES, PLAN_ADDITION_NOTE } from './fact-classes'
+import { FACT_CLASSES } from './fact-classes'
 import type { ChangeFact } from './lane'
 import { sameRecordPart, type RouteSecurityRecord } from './security-records'
 
@@ -362,6 +362,7 @@ export async function applyPlanDeclarations(
   readHead: (path: string) => Promise<string | null>,
   readBase: (path: string) => Promise<string | null> = async () => null,
   existedAt: (rev: string, path: string) => Promise<boolean | undefined> = async () => undefined,
+  recordsCoverRoutes = false,
 ): Promise<ChangeFact[]> {
   const owned = plans.map((open) => ({ open, files: planDeclaredFiles(open.plan), paths: planClaimedPaths(open.plan) }))
   const result: ChangeFact[] = []
@@ -377,11 +378,13 @@ export async function applyPlanDeclarations(
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
       : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : undefined)
       : subject?.kind === 'agent' ? (subject.base === undefined ? await declaredAgentOf(subject.route, facts, subjects, plans, readHead) : undefined)
+      // An edit outside the security surface weakens no route only where every route's record was compared.
+      : subject?.kind === 'file' && subject.edited && !recordsCoverRoutes ? undefined
       : subject ? await declarationOf(subject, owned, readHead, existedAt) : undefined
     if (declaredBy && subject?.kind === 'table') declaredTables.add(`${subject.file}\u0000${subject.table.identifier}`)
     // An edit to a file the plan added is that element's addition in every task that touches it.
     const code = declaredBy && subject?.kind === 'file' && subject.edited ? 'file-added' : fact.code
-    const judged = declaredBy ? { ...fact, code, lane: FACT_CLASSES[code].lowest, declaredBy, ...(code !== fact.code ? { message: `${fact.message}: ${PLAN_ADDITION_NOTE}` } : {}) } : fact
+    const judged = declaredBy ? { ...fact, code, lane: FACT_CLASSES[code].lowest, declaredBy, ...(code !== fact.code ? { message: `${fact.message}: absent at the plan's baseline, so its addition`, planAddition: true as const } : {}) } : fact
     result.push(judged)
     if (subject) resultSubjects.set(judged, subject)
   }
