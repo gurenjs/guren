@@ -812,7 +812,7 @@ export class CommentPolicy extends Policy {
     expect(report.facts).toEqual([
       expect.objectContaining({ code: 'file-added', lane: 'low', files: ['app/Models/Comment.ts'], declaredBy: 'docs/plans/comments/plan.json#model.comment', planAddition: true, message: "app/Models/Comment.ts modified: absent when the plan's approval was recorded, so its addition" }),
     ])
-    expect(renderChangeLane(report)).toContain("whose change added it since was not checked")
+    expect(renderChangeLane(report)).toContain("whose change added the file since was not checked")
   })
 
   test("should keep an edit at medium where the commit recording the plan's approval had the file, or the head is not what the plan declares", async () => {
@@ -840,6 +840,19 @@ export class CommentPolicy extends Policy {
     expect(edited(await laneOf(stamped.repo, added, head))).toEqual([['source-edited', 'medium', undefined]])
     const skipped = { ...noRoutes, skipped: ['the createApp({ boot }) callback'] }
     expect(edited(await laneRecorded(stamped.repo, added, head, { base: skipped, head: skipped }))).toEqual([['source-edited', 'medium', undefined]])
+    const inline: RouteSecurityRecord = { method: 'POST', path: '/comments', module: null, middleware: [], contracts: {}, handler: { unread: 'an inline handler' } }
+    const unread = { ...noRoutes, routes: [inline] }
+    expect(edited(await laneRecorded(stamped.repo, added, head, { base: unread, head: unread }))).toEqual([['source-edited', 'medium', undefined]])
+
+    // Merged with a merge commit after the mainline gained the file: the merge brought the approvals to a tree that had it.
+    const merged = await stampedPlanRepo()
+    const mainline = await git(merged.repo, ['rev-parse', 'HEAD~1'])
+    await git(merged.repo, ['branch', '-q', 'plan'])
+    await git(merged.repo, ['reset', '-q', '--hard', mainline])
+    await commit(merged.repo, { 'app/Models/Comment.ts': MODEL })
+    await git(merged.repo, ['merge', '-q', '--no-ff', '-m', 'merge plan', 'plan'])
+    const mergeCommit = await git(merged.repo, ['rev-parse', 'HEAD'])
+    expect(edited(await laneRecorded(merged.repo, mergeCommit, await commit(merged.repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
   })
 
   test('should lower an added file and an added table the plan declares, naming the element', async () => {

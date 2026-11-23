@@ -644,7 +644,9 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
         routeFact({ code: 'agent-tool', target: describeRoute(pair.head), message: `${describeRoute(pair.head)}: ${pair.head.agent ? (pair.base.agent ? 'its agent tool changed' : 'is exposed as an agent tool') : 'is no longer an agent tool'}` }, { kind: 'agent', route: pair.head, base: pair.base })
       }
     }
-    recordsCoverRoutes = comparison.incomparable.length === 0 && (compared.base.skipped ?? []).length === 0 && (compared.head.skipped ?? []).length === 0
+    // An action left unread (an inline handler, a class reached by name) compares by what does not cover its imports.
+    const readWhole = (side: SecurityRecords): boolean => (side.skipped ?? []).length === 0 && side.routes.every((route) => !('unread' in route.handler))
+    recordsCoverRoutes = comparison.incomparable.length === 0 && readWhole(compared.base) && readWhole(compared.head)
     if (comparison.incomparable.length > 0) unjudged.push({ reader: 'security-records', reason: `routes whose records cannot be ordered against the base: ${comparison.incomparable.join('; ')}`, lane: 'high', files: files.length > 0 ? files : touched })
     // A skip the change brought in is the change's doing: a route it registers there is not on the list at all.
     const [baseSkipped, headSkipped] = [compared.base.skipped ?? [], compared.head.skipped ?? []]
