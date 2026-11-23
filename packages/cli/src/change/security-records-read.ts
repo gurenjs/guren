@@ -29,7 +29,7 @@ import {
 import { resolveImportPath } from '../import-resolution'
 import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, type GraphRouteEntry } from '../introspect'
 import { introspectedRoutes, skippedRegistrars } from '../manifest-section'
-import { canonicalSyntax, referencedIdentifiers, unconditionalThisCalls, walk, type BabelNode } from '../ast-walk'
+import { canonicalSyntax, nodeText, referencedIdentifiers, unconditionalThisCalls, walk, type BabelNode } from '../ast-walk'
 import { ParseCache, parseSourceFile } from '../parse-cache'
 import { routesEntryOrDefault } from '../route-registrar'
 import { importsByLocal, specifierBase, type ImportEntry } from '../schema-binding'
@@ -179,6 +179,14 @@ class Declarations {
     if ('leaf' in found) return found.leaf
     const at = `${this.relative(found.module.path)}#${found.name}`
     return declaresClass(found.module.statements.get(found.name)) ? at : `${at}:${await this.of(found.module.path, found.name)}`
+  }
+
+  /** `ns.member` where `file` imports `ns` as a namespace: the member as the module it names exports it. */
+  async memberIdentity(file: string, namespace: string, member: string): Promise<string> {
+    const module = await this.module(file)
+    const target = module && !('unparsed' in module) ? this.target(module, namespace) : undefined
+    if (!target || 'leaf' in target || target.name !== '*') return `namespace:${namespace}.${member}`
+    return this.identity(target.file, member)
   }
 
   /** The module that declares `name` as reached from `file`, following re-exports and `export *`; a leaf where it stops. */
@@ -469,7 +477,15 @@ async function actionRecord(
     const parsed = subject === '' ? undefined : sourceIdentifiers(subject, filePath, (text) => `__args__(${text})`)
     if (subject !== '' && !parsed) unfollowed.push(subject)
     const binds = (name: string): boolean => imports.has(name) || !!local?.declared.has(name)
-    for (const name of parsed?.names ?? []) {
+    const hidden = (name: string): boolean => bodyBindings === undefined || bodyBindings.has(name)
+    // `ns.Post` through a namespace import: the member, followed from the module the namespace names.
+    const members = namespaceMembers(parsed?.program, (name) => imports.get(name)?.kind === 'namespace' && !hidden(name))
+    for (const { namespace, member } of members) {
+      const resolved = await declarations.memberIdentity(controllerFile, namespace, member)
+      if (!classes.includes(resolved)) classes.push(resolved)
+    }
+    const viaNamespace = new Set(members.map((entry) => entry.namespace))
+    for (const name of (parsed?.names ?? []).filter((entry) => !viaNamespace.has(entry))) {
       // A file-level binding is read whatever its spelling, a model named `Map` included.
       if (name === '__args__' || (!binds(name) && NOT_BINDINGS.has(name))) continue
       // A local of the action naming an import or a file-level class hides which one the call asks about.
@@ -479,11 +495,11 @@ async function actionRecord(
         if (!classes.includes(resolved)) classes.push(resolved)
       }
     }
-    // A tuple's class position names a local of the action: what it holds is the body's.
+    // A tuple's class position is read only as a name or a namespace member the file binds; anything else is the body's.
     const first = tupleClass(parsed?.program)
-    if (first !== undefined && !binds(first)) unfollowed.push(first)
+    if (first !== undefined && !classPosition(first, (name) => binds(name) && !hidden(name))) unfollowed.push(nodeText(`__args__(${subject})`, first as { start?: number; end?: number }))
     // How a call that is not unconditional is reached: the statements up to the one holding it, or the whole body.
-    const reach = member === 'authorize' && !unconditional.has(index) ? reachDigest(block, index, rawBody) : undefined
+    const reach = member === 'authorize' && !unconditional.has(index) ? reachDigest(block, rawBody) : undefined
     authorizes.push({ member, ability, subject, ...(classes.length > 0 ? { classes } : {}), ...(member === 'authorize' && unconditional.has(index) ? { unconditional: true as const } : {}), ...(reach ? { reach } : {}) })
   }
   const validates: ValidateCall[] = []
@@ -563,19 +579,35 @@ function declaresClass(statement: BabelNode | undefined): boolean {
   return declarations.length === 1 && declarations[0]!.init?.type === 'ClassExpression'
 }
 
-/** The identifier in the class position of a `[Class, record]` subject, as `sourceIdentifiers()` parsed it inside `__args__(…)`. */
-function tupleClass(program: BabelNode | undefined): string | undefined {
+/** The node in the class position of a `[Class, record]` subject, as `sourceIdentifiers()` parsed it inside `__args__(…)`. */
+function tupleClass(program: BabelNode | undefined): BabelNode | undefined {
   const statement = (program?.body as BabelNode[] | undefined)?.[0] as (BabelNode & { expression?: BabelNode & { arguments?: BabelNode[] } }) | undefined
   const first = statement?.expression?.arguments?.[0] as (BabelNode & { elements?: Array<BabelNode | null> }) | undefined
-  const element = first?.type === 'ArrayExpression' ? first.elements?.[0] : undefined
-  return element?.type === 'Identifier' ? (element.name as string) : undefined
+  return first?.type === 'ArrayExpression' ? (first.elements?.[0] ?? undefined) : undefined
 }
 
-/** A digest of the action's statements up to and including the one holding the call at `index`, or of the whole body. */
-function reachDigest(block: { body: { body: readonly unknown[] }; offset: number } | undefined, index: number, rawBody: string): string {
-  const statements = (block?.body.body ?? []) as Array<{ start?: number | null; end?: number | null }>
-  const at = statements.findIndex((statement) => (statement.start ?? 0) - block!.offset <= index && index < (statement.end ?? 0) - block!.offset)
-  return digest(at === -1 ? rawBody : canonicalSyntax(statements.slice(0, at + 1)))
+/** An allowlist for a class position: a name the file binds, or `ns.Member` on one. */
+function classPosition(node: BabelNode, bound: (name: string) => boolean): boolean {
+  if (node.type === 'Identifier') return bound(node.name as string)
+  const member = node as BabelNode & { object?: BabelNode; property?: BabelNode; computed?: boolean }
+  return node.type === 'MemberExpression' && !member.computed && member.object?.type === 'Identifier' && member.property?.type === 'Identifier' && bound(member.object.name as string)
+}
+
+/** Every `ns.Member` a subject reads on a name `isNamespace` accepts. */
+function namespaceMembers(program: BabelNode | undefined, isNamespace: (name: string) => boolean): Array<{ namespace: string; member: string }> {
+  const found: Array<{ namespace: string; member: string }> = []
+  walk(program, (current) => {
+    const node = current as BabelNode & { object?: BabelNode; property?: BabelNode; computed?: boolean }
+    if (current.type === 'MemberExpression' && !node.computed && node.object?.type === 'Identifier' && node.property?.type === 'Identifier' && isNamespace(node.object.name as string)) {
+      found.push({ namespace: node.object.name as string, member: node.property.name as string })
+    }
+  })
+  return found
+}
+
+/** A digest of the whole action, as syntax: a later statement may call a helper holding the check, or act on its denial. */
+function reachDigest(block: { body: { body: readonly unknown[] }; offset: number } | undefined, rawBody: string): string {
+  return digest(block ? canonicalSyntax(block.body.body) : rawBody)
 }
 
 /** The export an identifier (or `namespace.name`) names through the file's imports, never one matched by name alone. */

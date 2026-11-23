@@ -460,5 +460,39 @@ ${body}
     // A parameter, or a local in the class position, is what the router or the body passes: the body is digested.
     expect(await read('param-shadow', withController("import { Post } from '../../Models/Post.js'", '_c: unknown, Post: unknown', asked))).toMatchObject({ unseen: expect.any(String) })
     expect(await read('local-class', withController("import { Post } from '../../Models/Post.js'", '', "    const klass = Post\n    await this.authorize('update', [klass, post])"))).toMatchObject({ unseen: expect.any(String) })
+    expect(await read('wrapped-class', withController("import { Post } from '../../Models/Post.js'", '', "    const klass = Post\n    await this.authorize('update', [klass!, post])"))).toMatchObject({ unseen: expect.any(String) })
+    // `ns.Post` is the member as the namespace's module exports it, through its barrel.
+    const namespaced = (target: string) => withController("import * as M from '../../Models/index.js'", '', "    await this.authorize('update', [M.Post, post])", { 'app/Models/index.ts': `export { Post } from '${target}'\n` })
+    expect(await read('namespace-model', namespaced('./Post.js'))).toMatchObject({ authorizes: [{ classes: ['app/Models/Post.ts#Post'] }] })
+    expect(await read('namespace-other', namespaced('../Other/Post.js'))).toMatchObject({ authorizes: [{ classes: ['app/Other/Post.ts#Post'] }] })
+  })
+
+  test('digests the whole action for a call that is not unconditional, so a later statement acting on it counts', async () => {
+    const helper = (call: string): Record<string, string> => ({
+      ...FILES,
+      'app/Models/Post.ts': 'export class Post {}\n',
+      'app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
+import { Post } from '../../Models/Post.js'
+
+export class PostController extends Controller {
+  async update(): Promise<Response> {
+    const post = { id: 1 }
+    const check = async () => { await this.authorize('update', [Post, post]) }
+    ${call}
+    return this.json({})
+  }
+}
+`,
+    })
+    const read = async (name: string, files: Record<string, string>) => {
+      const records = await readSecurityRecords(await app(name, files))
+      if ('unreadable' in records) throw new Error(records.unreadable)
+      const handler = records.routes.find((route) => route.path === '/posts/:id')!.handler
+      return 'authorizes' in handler ? handler.authorizes[0]?.reach : undefined
+    }
+    const called = await read('reach-called', helper('await check()'))
+
+    expect(called).toEqual(expect.any(String))
+    expect(await read('reach-dropped', helper('void 0'))).not.toBe(called)
   })
 })

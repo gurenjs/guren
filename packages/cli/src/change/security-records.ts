@@ -40,7 +40,7 @@ export interface AuthorizationCall {
   classes?: string[]
   /** An `authorize()` the action awaits as a statement of its own body, every statement before it falling through to it (`unconditionalThisCalls()`). */
   unconditional?: true
-  /** For an `authorize()` that is not: a digest of the statements up to the one holding it (the whole body when unread), so another way of reaching it is another call. */
+  /** For an `authorize()` that is not: a digest of the action's body, so another way of reaching it, or of acting on its denial, is another call. */
   reach?: string
 }
 
