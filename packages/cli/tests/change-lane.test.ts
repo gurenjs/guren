@@ -1206,14 +1206,16 @@ describe('judgeChangeLane with an alter or drop route in an open plan', () => {
   const action = (id: string, name: string) => ({ id, change: { kind: 'existing' }, name, authorization: { middleware: [] }, response: { kind: 'redirect', to: '/posts' }, rules: [] })
 
   /** The comments plan, approved, with PostController's update route moved to `/posts/:post` and its legacy route dropped. */
-  async function routePlanRepo(): Promise<{ repo: string; base: string }> {
+  type RoutePlan = { controllers: unknown[]; routes: Array<Record<string, unknown>>; models: Array<Record<string, unknown>> }
+  async function routePlanRepo(edit: (plan: RoutePlan) => void = () => {}): Promise<{ repo: string; base: string }> {
     const { repo } = await createRepo()
-    const plan = loadApprovedCommentsPlan() as { controllers: unknown[]; routes: unknown[] }
+    const plan = loadApprovedCommentsPlan() as RoutePlan
     plan.controllers.push({ id: 'controller.posts', change: { kind: 'existing' }, className: 'PostController', actions: [action('action.posts.update', 'update'), action('action.posts.legacy', 'legacy')] })
     plan.routes.push(
       { id: 'route.posts.update', change: { kind: 'alter' }, method: 'PUT', path: '/posts/:post', name: 'posts.update', action: 'action.posts.update', middleware: ['auth'], bind: [] },
       { id: 'route.posts.legacy', change: { kind: 'drop', reason: 'replaced by posts.index' }, method: 'GET', path: '/legacy/posts', name: 'posts.legacy', action: 'action.posts.legacy', middleware: [], bind: [] },
     )
+    edit(plan)
     const path = join(repo, 'docs/plans/comments/plan.json')
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, JSON.stringify(plan), 'utf8')
@@ -1221,8 +1223,8 @@ describe('judgeChangeLane with an alter or drop route in an open plan', () => {
     return { repo, base: await commit(repo, {}) }
   }
 
-  async function laneWith(pair: SecurityRecordPair): Promise<ChangeLaneReport> {
-    const { repo, base } = await routePlanRepo()
+  async function laneWith(pair: SecurityRecordPair, edit?: (plan: RoutePlan) => void): Promise<ChangeLaneReport> {
+    const { repo, base } = await routePlanRepo(edit)
     const head = await commit(repo, { 'routes/web.ts': 'export function registerWebRoutes() {}\n' })
     const change = await resolveChange(repo, base, head)
     const { reader, dispose } = openChange(repo, change)
@@ -1253,6 +1255,43 @@ describe('judgeChangeLane with an alter or drop route in an open plan', () => {
     // A later `ALL /legacy/*` would answer the removed route's requests.
     const catchAll: RouteSecurityRecord = { ...legacy, method: 'ALL', path: '/legacy/*', name: 'legacy.catch', action: 'app/Http/Controllers/LegacyController.ts#default.handle' }
     expect(routeFacts(await laneWith({ base: records(legacy, catchAll), head: records(catchAll) }))).toEqual([['route-removed', 'medium', undefined]])
+  })
+
+  test('should keep a removal or a move at medium where another route could take the requests it answered', async () => {
+    const added: RouteSecurityRecord = { ...legacy, path: '/legacy/:slug', name: 'legacy.show', action: 'app/Http/Controllers/LegacyController.ts#default.show' }
+    // A route the change adds, at a path that answers the removed one.
+    expect(routeFacts(await laneWith({ base: records(legacy), head: records(added) }))).toEqual([['route-added', 'medium', undefined], ['route-removed', 'medium', undefined]])
+    // A head route reusing the dropped name.
+    expect(routeFacts(await laneWith({ base: records(legacy), head: records({ ...added, name: 'posts.legacy', path: '/old/posts' }) })))
+      .toEqual([['route-added', 'medium', undefined], ['route-removed', 'medium', undefined]])
+    // The path a moved route leaves, answered by a base route registered after it.
+    const later: RouteSecurityRecord = { ...update('/legacy-posts/:id'), method: 'ALL', path: '/legacy-posts/*', name: 'posts.fallback', action: 'app/Http/Controllers/FallbackController.ts#default.handle' }
+    expect(routeFacts(await laneWith({ base: records(update('/legacy-posts/:id'), later), head: records(update('/posts/:post'), later) }))).toEqual([['route-changed', 'medium', undefined]])
+    // The path it takes, overlapping a head route registered after it.
+    const after: RouteSecurityRecord = { ...update('/posts/latest'), name: 'posts.latest', action: 'app/Http/Controllers/PostController.ts#default.latest' }
+    expect(routeFacts(await laneWith({ base: records(update('/drafts/:id'), after), head: records(update('/posts/:post'), after) }))).toEqual([['route-changed', 'medium', undefined]])
+  })
+
+  test('should keep a change medium where two base routes pair with it, or a planned binding cannot be stated', async () => {
+    const twin: RouteSecurityRecord = { ...update('/articles/:id') }
+    expect(routeFacts(await laneWith({ base: records(update('/posts/:id'), twin), head: records(update('/posts/:post')) })))
+      .toEqual([['route-changed', 'medium', undefined], ['route-changed', 'medium', undefined]])
+    const bound = { ...update('/posts/:post'), bindings: {} }
+    const moduleBinding = (plan: RoutePlan): void => {
+      plan.models.push({ ...plan.models[0], id: 'model.invoice', name: 'Invoice', table: 'invoices', module: 'billing', change: { kind: 'existing' }, columns: [], relationships: [], fillable: [] })
+      plan.routes.find((route) => route.id === 'route.posts.update')!.bind = [{ param: 'post', model: 'model.invoice' }]
+    }
+    expect(routeFacts(await laneWith({ base: records({ ...update('/posts/:post'), bindings: { post: 'app/Models/Post.ts#Post' } }), head: records(bound) }, moduleBinding)))
+      .toEqual([['route-changed', 'medium', undefined]])
+  })
+
+  test("should declare a route's agent tool with its change only as the element states it", async () => {
+    const planned = (plan: RoutePlan): void => { plan.routes.find((route) => route.id === 'route.posts.update')!.agent = { toolName: 'posts_update', readOnly: false } }
+    const tool = (toolName: string) => ({ ...update('/posts/:post'), agent: { toolName, readOnlyHint: false } }) as RouteSecurityRecord
+    const facts = (report: ChangeLaneReport) => report.facts.filter((fact) => fact.code === 'route-changed' || fact.code === 'agent-tool').map((fact) => [fact.code, fact.lane])
+
+    expect(facts(await laneWith({ base: records(update('/posts/:post')), head: records(tool('posts_update')) }, planned))).toEqual([['route-changed', 'low'], ['agent-tool', 'low']])
+    expect(facts(await laneWith({ base: records(update('/posts/:post')), head: records(tool('posts_write')) }, planned))).toEqual([['route-changed', 'medium'], ['agent-tool', 'medium']])
   })
 
   test('should keep the facts of a weakened route high beside a declared change', async () => {
