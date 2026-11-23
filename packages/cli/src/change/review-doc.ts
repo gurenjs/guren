@@ -48,7 +48,7 @@ const ALWAYS_HIGH: Record<AlwaysHighCode, string> = {
   'audit-fail': 'an audit failure the base did not have',
   'sensitive-exposure': 'a sensitive or hidden column newly reaching a response',
   'csrf-exemption': 'a new CSRF exemption',
-  'audit-warn-changed': 'a security default switched off, a policy or forced-write warning on a file the change touches, or a model rule warning naming a new column on a model the change edits',
+  'audit-warn-changed': 'a security default switched off, a policy or forced-write warning on a file the change touches, or a model rule warning new on a model the change edits (a lost fillable, or a column the base did not name)',
   'dependency-advisory': 'a dependency change that brings in an advisory the base did not have',
   'authorization-removed': 'a route that authenticates or authorizes less than it did at the base: a guard off its middleware chain, or an `authorize()`/`can()` call gone from its action',
   'validation-removed': 'a route that validates less than it did at the base: a contract schema gone, or a validate call gone from its action',
