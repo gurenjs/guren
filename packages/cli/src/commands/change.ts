@@ -46,7 +46,7 @@ function trustBoundary(report: ChangeLaneReport): string[] {
     'Facts are lower bounds: a fact that did not appear has not proved the code unchanged.',
     ...(report.policy.state === 'read' ? [`${REVIEW_POLICY_FILE} was read from the merge base, where a person merged it; an edit to it in this change applies only once merged.`] : []),
     ...(report.facts.some((fact) => fact.declaredBy) ? ['An approved plan declares targets, not their implementation: a fact lowered by a declaration was matched by name, path and what the scaffold or a command of the plan writes, and its body was not read.'] : []),
-    ...(report.facts.some((fact) => fact.declaredBy && fact.code === 'route-added') ? ["A declared route was read off its security record, its action's authorize() call and the routes entry as written: a call asked under a condition, or an entry whose alias does not run as written, reads the same."] : []),
+    ...(report.facts.some((fact) => fact.declaredBy && fact.code === 'route-added') ? ["A declared route was read off its security record, its action's authorize() call and the routes entry as written: an entry whose alias does not run as written reads the same."] : []),
     ...(report.audit.loadedCode ? ["The audit loaded the application's code at the commits it exported, under this shell's environment, so it is no evidence about a change that attacks the runner."] : []),
   ]
 }
@@ -143,7 +143,7 @@ export const changeRecordsCommand = defineCommand({
       const action = 'unread' in route.handler ? `action not read: ${route.handler.unread}`
         : [
           ...(route.handler.authenticates ? ['auth.userOrFail()'] : []),
-          ...route.handler.authorizes.map((call) => `${call.member}('${call.ability}'${call.subject ? `, ${call.subject}` : ''})`),
+          ...route.handler.authorizes.map((call) => `${call.member}('${call.ability}'${call.subject ? `, ${call.subject}` : ''})${call.unconditional ? '' : call.member === 'authorize' ? ' (conditional)' : ''}`),
           ...route.handler.validates.map((call) => `${call.member}(${call.schema || 'a schema written in place'})`),
           ...(route.handler.unseen ? ['a call the reader cannot follow, compared by digest'] : []),
         ].join(', ') || 'no authentication, authorize or validate call'

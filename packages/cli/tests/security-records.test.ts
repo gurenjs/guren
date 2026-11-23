@@ -95,6 +95,7 @@ describe('compareRecords', () => {
     incomparable(route({ middleware: [auth, throttle] }), route({ middleware: [throttle, auth] }))
     incomparable(route(), route({ handler: handler({ authorizes: [authorize('view')] }) }))
     incomparable(route(), route({ handler: handler({ authorizes: [authorize('update', '[Comment, comment]')] }) }))
+    incomparable(route({ handler: handler({ authorizes: [{ ...authorize('update'), classes: ['app/Models/Post.ts#Post'] }] }) }), route({ handler: handler({ authorizes: [{ ...authorize('update'), classes: ['app/Other/Post.ts#Post'] }] }) }))
     incomparable(route(), route({ handler: handler({ validates: [validate('OtherSchema')] }) }))
     incomparable(route(), route({ handler: handler({ validates: [validate('PostIdSchema', 'validateParamsSafe')] }) }))
     incomparable(route(), route({ handler: handler({ validates: [validate('PostIdSchema', 'validateParams', 'declaration:looser')] }) }))
@@ -179,5 +180,14 @@ describe('compareSecurityRecords', () => {
   test('reads a gained agent tool as a changed record, which the security verdict leaves the same', () => {
     const tool = route({ agent: { toolName: 'posts_update' } })
     expect(compareSecurityRecords(records(route()), records(tool))).toEqual({ facts: [], incomparable: [], added: [], removed: [], changed: [{ base: route(), head: tool }] })
+  })
+})
+
+describe('compareRecords on an unconditional authorize()', () => {
+  const asked = (unconditional: boolean): RouteSecurityRecord => route({ handler: handler({ authorizes: [{ ...authorize('update'), ...(unconditional ? { unconditional: true as const } : {}) }] }) })
+
+  test('should read a call that no longer runs whenever the action does as weaker, and the reverse as stronger', () => {
+    expect(compareRecords(asked(true), asked(false))).toMatchObject({ verdict: 'weaker', authorization: [expect.stringContaining('no longer runs whenever the action does')] })
+    expect(compareRecords(asked(false), asked(true))).toEqual({ verdict: 'stronger' })
   })
 })

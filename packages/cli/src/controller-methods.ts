@@ -242,6 +242,8 @@ export interface LiteralAuthorizationCall {
   subject: string
   /** A template literal with a placeholder (`posts.${action}`), or a literal concatenated with more: the ability is built at request time. */
   templated?: true
+  /** Where `this` of the call starts in the raw body. */
+  index: number
 }
 
 /** Where the call opened at `open` closes, judged on the blanked body so a parenthesis in a string is not counted. */
@@ -267,7 +269,7 @@ export function literalAuthorizationCalls(body: string, rawBody: string): Litera
     const subject = close === -1 ? '' : rawBody.slice(after, close).replace(/^\s*,/u, '').replace(/\s+/gu, ' ').trim()
     // A literal that is only part of the ability (`'posts.' + action`) names no ability either.
     const partial = !/^\s*[,)]/u.test(rawBody.slice(after))
-    return { member: match[1] as LiteralAuthorizationCall['member'], ability: match[3]!, subject, ...((match[2] === '`' && match[3]!.includes('${')) || partial ? { templated: true as const } : {}) }
+    return { member: match[1] as LiteralAuthorizationCall['member'], ability: match[3]!, subject, index: match.index, ...((match[2] === '`' && match[3]!.includes('${')) || partial ? { templated: true as const } : {}) }
   })
 }
 

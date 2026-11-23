@@ -376,4 +376,47 @@ export function registerWebRoutes(router: Router): void {
     // `post` is a local, so the body is the scope, but it reads nothing of `this`: another action's edit does not reach it.
     expect((await read('mixin-d', { 'app/Http/Controllers/PostController.ts': controller('return this.json({ edited: true })') })).update).toBe(before.update)
   })
+
+  test("resolves an authorize() subject's class to its file and export, and marks only a call every statement before falls through to", async () => {
+    const withBody = (body: string, models = 'Models'): Record<string, string> => ({
+      ...FILES,
+      'app/Models/Post.ts': 'export class Post {}\n',
+      'app/Other/Post.ts': 'export class Post {}\n',
+      'app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
+import { Post } from '../../${models}/Post.js'
+
+export class PostController extends Controller {
+  async update(): Promise<Response> {
+${body}
+    return this.json({})
+  }
+}
+`,
+    })
+    const read = async (name: string, files: Record<string, string>) => {
+      const records = await readSecurityRecords(await app(name, files))
+      if ('unreadable' in records) throw new Error(records.unreadable)
+      return records.routes.find((route) => route.path === '/posts/:id')!.handler
+    }
+    const asked = "    const post = { id: 1 }\n    await this.authorize('update', [Post, post])"
+    const call = { member: 'authorize', ability: 'update', subject: '[Post, post]', classes: ['app/Models/Post.ts#Post'] }
+
+    expect(await read('subject-plain', withBody(asked))).toMatchObject({ authorizes: [{ ...call, unconditional: true }] })
+    expect(await read('subject-other', withBody(asked, 'Other'))).toMatchObject({ authorizes: [{ ...call, classes: ['app/Other/Post.ts#Post'], unconditional: true }] })
+    for (const [name, body] of [
+      ['subject-if', "    const post = { id: 1 }\n    if (post.id) await this.authorize('update', [Post, post])"],
+      ['subject-return', "    const post = { id: 1 }\n    if (!post.id) return this.json({})\n    await this.authorize('update', [Post, post])"],
+      ['subject-try', "    const post = { id: 1 }\n    try { await this.authorize('update', [Post, post]) } catch {}"],
+      ['subject-void', "    const post = { id: 1 }\n    void this.authorize('update', [Post, post])"],
+      ['subject-helper', "    const post = { id: 1 }\n    const check = async () => { await this.authorize('update', [Post, post]) }\n    await check()"],
+    ] as const) {
+      const handler = await read(name, withBody(body))
+      expect(handler).toMatchObject({ authorizes: [call] })
+      expect('authorizes' in handler && handler.authorizes[0]).not.toHaveProperty('unconditional')
+    }
+    // A local of the action naming the imported class hides which class it is: the body is digested instead.
+    const shadowed = await read('subject-shadow', withBody("    const Post = class {}\n    const post = { id: 1 }\n    await this.authorize('update', [Post, post])"))
+    expect(shadowed).toMatchObject({ authorizes: [{ member: 'authorize', ability: 'update', subject: '[Post, post]', unconditional: true }], unseen: expect.any(String) })
+    expect('authorizes' in shadowed && shadowed.authorizes[0]).not.toHaveProperty('classes')
+  })
 })

@@ -29,11 +29,11 @@ import {
 import { resolveImportPath } from '../import-resolution'
 import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, type GraphRouteEntry } from '../introspect'
 import { introspectedRoutes, skippedRegistrars } from '../manifest-section'
-import { referencedIdentifiers, walk, type BabelNode } from '../ast-walk'
+import { referencedIdentifiers, unconditionalThisCalls, walk, type BabelNode } from '../ast-walk'
 import { ParseCache, parseSourceFile } from '../parse-cache'
 import { routesEntryOrDefault } from '../route-registrar'
 import { importsByLocal, specifierBase, type ImportEntry } from '../schema-binding'
-import { SECURITY_RECORD_VERSION, type ActionRecord, type RouteSecurityRecord, type SecurityRecords, type ValidateCall } from './security-records'
+import { SECURITY_RECORD_VERSION, type ActionRecord, type AuthorizationCall, type RouteSecurityRecord, type SecurityRecords, type ValidateCall } from './security-records'
 
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 16)
 
@@ -445,9 +445,27 @@ async function actionRecord(
   const module = await declarations.module(controllerFile)
   const local = module && !('unparsed' in module) ? module : undefined
   const imports: Map<string, ImportEntry> = local?.imports ?? new Map()
-  const authorizes = literalAuthorizationCalls(body, rawBody).filter((call) => !call.templated).map(({ member, ability, subject }) => ({ member, ability, subject }))
   // The arguments of every call the record cannot name: what the digest has to cover.
   const unfollowed = unfollowedCallArguments(body, rawBody)
+  const block = actionBlock(rawBody, filePath)
+  const unconditional = new Set(block ? unconditionalThisCalls(block.body, 'authorize').map((call) => call.start! - block.offset) : [])
+  const bodyBindings = block ? declaredNames(block.body) : undefined
+  const authorizes: AuthorizationCall[] = []
+  for (const { member, ability, subject, index } of literalAuthorizationCalls(body, rawBody).filter((call) => !call.templated)) {
+    const classes: string[] = []
+    const names = subject === '' ? [] : sourceIdentifiers(subject, filePath, (text) => `__args__(${text})`)?.names.filter((name) => name !== '__args__' && !NOT_BINDINGS.has(name))
+    if (names === undefined) unfollowed.push(subject)
+    for (const name of names ?? []) {
+      const binds = imports.has(name) || !!local?.declared.has(name)
+      // A local of the action naming an import or a file-level class hides which one the call asks about.
+      if (binds && (bodyBindings === undefined || bodyBindings.has(name))) unfollowed.push(name)
+      else if (binds) {
+        const resolved = await subjectClass(cwd, controllerFile, imports, name, declarations)
+        if (!classes.includes(resolved)) classes.push(resolved)
+      }
+    }
+    authorizes.push({ member, ability, subject, ...(classes.length > 0 ? { classes } : {}), ...(member === 'authorize' && unconditional.has(index) ? { unconditional: true as const } : {}) })
+  }
   const validates: ValidateCall[] = []
   for (const site of validateCallSites(body)) {
     // A schema the controller file declares itself, as the documented controller pattern does.
@@ -484,6 +502,39 @@ async function actionRecord(
     validates,
     ...(unseen ? { unseen } : {}),
   }
+}
+
+const ACTION_PREFIX = 'async function __action__() '
+
+/** The action's own block, with where `rawBody` starts in what was parsed; `undefined` for a concise arrow or a body that does not parse. */
+function actionBlock(rawBody: string, file: string): { body: { body: readonly unknown[] }; offset: number } | undefined {
+  if (!rawBody.trimStart().startsWith('{')) return undefined
+  const ast = parseSourceFile(`${ACTION_PREFIX}${rawBody}`, file)
+  const declaration = ast?.program.body[0]
+  return declaration?.type === 'FunctionDeclaration' ? { body: declaration.body, offset: ACTION_PREFIX.length } : undefined
+}
+
+/** Every name a block binds anywhere inside it: declarations, parameters of nested functions, catch clauses, classes. */
+function declaredNames(block: unknown): Set<string> {
+  const names = new Set<string>()
+  walk(block, (current) => {
+    const node = current as BabelNode & { id?: PatternNode; params?: PatternNode[]; param?: PatternNode }
+    if (current.type === 'VariableDeclarator') patternNames(node.id).forEach((name) => names.add(name))
+    if ((current.type === 'FunctionDeclaration' || current.type === 'ClassDeclaration' || current.type === 'FunctionExpression' || current.type === 'ClassExpression') && node.id) patternNames(node.id).forEach((name) => names.add(name))
+    for (const param of node.params ?? []) patternNames(param).forEach((name) => names.add(name))
+    if (current.type === 'CatchClause' && node.param) patternNames(node.param).forEach((name) => names.add(name))
+  })
+  return names
+}
+
+/** `file#export` of a name the controller file binds: an import, resolved to its file, or the file's own declaration. */
+async function subjectClass(cwd: string, file: string, imports: Map<string, ImportEntry>, name: string, declarations: Declarations): Promise<string> {
+  const entry = imports.get(name)
+  if (!entry) return `${declarations.relative(file)}#${name}`
+  const exported = entry.kind === 'named' ? entry.imported : entry.kind === 'default' ? 'default' : '*'
+  const base = specifierBase(cwd, file, entry.source)
+  if (base === null) return `${entry.source}#${exported}`
+  return `${declarations.relative((await resolveImportPath(base)) ?? base)}#${exported}`
 }
 
 /** The export an identifier (or `namespace.name`) names through the file's imports, never one matched by name alone. */

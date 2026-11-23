@@ -548,11 +548,12 @@ describe('declaredRoute', () => {
     ['an agent tool', (route) => ({ ...route, agent: { toolName: 'comments_destroy' } })],
     ['a body contract', (route) => ({ ...route, contracts: STORE.contracts })],
     ['no authorize() call', (route) => ({ ...route, handler: { authenticates: false, authorizes: [], validates: [] } })],
-    ['an authorize() call for another ability', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'update', subject: '[Comment, comment]' }], validates: [] } })],
-    ["an authorize() call of another model's policy", (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: '[Post, post]' }], validates: [] } })],
-    ['an authorize() call of a model whose name starts the same', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: '[CommentDraft, draft]' }], validates: [] } })],
-    ['the bare class where every route binds the record', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: 'Comment' }], validates: [] } })],
-    ['a subject that only starts as the tuple', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: '[Comment, comment][0] && Post' }], validates: [] } })],
+    ['an authorize() call for another ability', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'update', subject: '[Comment, comment]', unconditional: true }], validates: [] } })],
+    ["an authorize() call of another model's policy", (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: '[Post, post]', unconditional: true }], validates: [] } })],
+    ['an authorize() call of a model whose name starts the same', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: '[CommentDraft, draft]', unconditional: true }], validates: [] } })],
+    ['the bare class where every route binds the record', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: 'Comment', unconditional: true }], validates: [] } })],
+    ['the planned authorize() call under a condition', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: '[Comment, comment]', classes: ['app/Models/Comment.ts#Comment'] }], validates: [] } })],
+    ['a subject that only starts as the tuple', (route) => ({ ...route, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject: '[Comment, comment][0] && Post', unconditional: true }], validates: [] } })],
     ['an unread body', (route) => ({ ...route, handler: { unread: 'not found' } })],
   ])('should not declare a route with %s', async (_why, edit) => {
     const route = edit(DESTROY)
@@ -617,7 +618,7 @@ describe('declaredRoute', () => {
       plan.routes[1].bind = []
     })
     const { bindings: _bindings, ...rest } = DESTROY
-    const asked = (subject: string): RouteSecurityRecord => ({ ...rest, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject }], validates: [] } })
+    const asked = (subject: string): RouteSecurityRecord => ({ ...rest, handler: { authenticates: false, authorizes: [{ member: 'authorize', ability: 'delete', subject, unconditional: true }], validates: [] } })
     const bare = asked('Comment')
     expect(await declare(bare, [STORE, bare, HOME], only(unbound), { added: [STORE, bare] })).toBe(`${PLAN_FILE}#route.comments.destroy`)
     const record = asked('[Comment, comment]')
