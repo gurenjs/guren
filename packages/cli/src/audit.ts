@@ -101,6 +101,8 @@ export interface AuditFinding {
   line?: number
   /** Set when `status` is 'ignored' — the reason from config/audit.ts. */
   ignoreReason?: string
+  /** The columns a model rule names (`owner-fillable`, `hidden-columns`), which `change:lane` compares across a change. */
+  columns?: string[]
   /** Standard references (OWASP Top 10 / OWASP API Security / CWE) for the rule. */
   classifications?: AuditClassification[]
   /**
@@ -1410,8 +1412,8 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
     const owners = fillable && table ? (ownerColumns.get(`${scope}:${table}`) ?? []).filter((owner) => fillable.includes(owner.column)) : []
     if (owners.length > 0) {
       const listed = owners.map((owner) => `'${owner.column}'`).join(', ')
-      findings.push(
-        finding(
+      findings.push({
+        ...finding(
           `owner-fillable:${name}`,
           `${name} owner column fillable`,
           'warn',
@@ -1422,7 +1424,8 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
           + `If the user picks it on purpose (an assignee), record that in config/audit.ts.`,
           relPath,
         ),
-      )
+        columns: owners.map((owner) => owner.column),
+      })
     }
 
     // Sensitive columns must be excluded from serialization via hidden/visible.
@@ -1441,8 +1444,8 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
       visibleActive ? info.visible!.includes(column) : !hidden.has(column),
     )
 
-    findings.push(
-      finding(
+    findings.push({
+      ...finding(
         `hidden-columns:${name}`,
         `${name} hidden columns`,
         exposed.length === 0 ? 'pass' : 'warn',
@@ -1456,7 +1459,8 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
             : `Add ${exposed.map((c) => `'${c}'`).join(', ')} to the hidden list in ${relPath} — the typed 'defineModel(table, { hidden: [...] })' option or 'static hidden = [...]'.`,
         relPath,
       ),
-    )
+      ...(exposed.length > 0 ? { columns: exposed } : {}),
+    })
   }
 }
 

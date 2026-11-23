@@ -185,6 +185,35 @@ const SUBDIRECTORY_APP: Record<string, string> = {
 }
 
 describe('openChange', () => {
+  test("should answer whether the newest commit on the merge base's history adding a record had a path", async () => {
+    const { repo } = await createRepo(SUBDIRECTORY_APP)
+    await commit(repo, { 'apps/web/docs/plans/comments/approvals.json': '{}\n' })
+    const added = await commit(repo, { 'apps/web/app/Models/Comment.ts': 'export class Comment {}\n', 'apps/web/later.approvals.json': '{}\n' })
+    const head = await commit(repo, { 'apps/web/app/Models/Comment.ts': 'export class Comment { body = 1 }\n', 'apps/web/head.approvals.json': '{}\n' })
+    const cwd = join(repo, 'apps/web')
+    const { reader } = openChange(cwd, await resolveChange(cwd, added, head))
+
+    expect(await reader.presentWhenAdded('docs/plans/comments/approvals.json', 'app/Models/Comment.ts')).toBe(false)
+    expect(await reader.presentWhenAdded('docs/plans/comments/approvals.json', 'package.json')).toBe(true)
+    expect(await reader.presentWhenAdded('later.approvals.json', 'app/Models/Comment.ts')).toBe(true)
+    // Added only after the merge base, or never: no answer.
+    expect(await reader.presentWhenAdded('head.approvals.json', 'app/Models/Comment.ts')).toBeUndefined()
+    expect(await reader.presentWhenAdded('none.approvals.json', 'app/Models/Comment.ts')).toBeUndefined()
+  })
+
+  test('should give no cut-off at a shallow boundary, where every inherited file reads as added', async () => {
+    const { repo } = await createRepo(SUBDIRECTORY_APP)
+    await commit(repo, { 'apps/web/docs/plans/comments/approvals.json': '{}\n' })
+    const added = await commit(repo, { 'apps/web/app/Models/Comment.ts': 'export class Comment {}\n' })
+    const head = await commit(repo, { 'apps/web/app/Models/Comment.ts': 'export class Comment { body = 1 }\n' })
+    const shallow = join(ROOT, `repo-${repos++}`)
+    await git(ROOT, ['clone', '-q', '--depth', '2', `file://${repo}`, shallow])
+    const cwd = join(shallow, 'apps/web')
+    const { reader } = openChange(cwd, await resolveChange(cwd, added, head))
+
+    expect(await reader.presentWhenAdded('docs/plans/comments/approvals.json', 'app/Models/Comment.ts')).toBeUndefined()
+  })
+
   test('should throw on a file the commit has and git cannot read, rather than read it as absent', async () => {
     const { repo, base } = await createRepo()
     const blob = await git(repo, ['rev-parse', `${base}:package.json`])
@@ -765,6 +794,105 @@ export class CommentPolicy extends Policy {
     if (approve) await approvePlanFile(path)
     return { repo, base: await commit(repo, {}) }
   }
+
+  /** The comments plan approved in one commit on top of `files`, as a squash merge of the plan's pull request leaves it. */
+  async function stampedPlanRepo(files: Record<string, string> = {}): Promise<{ repo: string; approved: string }> {
+    const { repo } = await createRepo({ ...BASE_FILES, ...files })
+    const path = join(repo, 'docs/plans/comments/plan.json')
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, JSON.stringify(loadApprovedCommentsPlan()), 'utf8')
+    await approvePlanFile(path)
+    return { repo, approved: await commit(repo, {}) }
+  }
+
+  const noRoutes = { recordVersion: SECURITY_RECORD_VERSION, routes: [] }
+  /** {@link laneOf} with both sides' security records given, as the audit's two exports would read them. */
+  async function laneRecorded(repo: string, base: string, head: string, pair: SecurityRecordPair = { base: noRoutes, head: noRoutes }): Promise<ChangeLaneReport> {
+    const change = await resolveChange(repo, base, head)
+    const { reader, dispose } = openChange(repo, change)
+    try {
+      return await judgeChangeLane(change, reader, { audit: async () => ({ unavailable: 'not audited in this test', records: pair }) })
+    } finally {
+      await dispose()
+    }
+  }
+
+  test("should read an edit to a file an earlier task of the plan added as that element's addition", async () => {
+    const { repo } = await stampedPlanRepo()
+    const base = await commit(repo, { 'app/Models/Comment.ts': MODEL })
+    const report = await laneRecorded(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL.replace('{}', '{\n  static fillable = [\'body\']\n}') }))
+
+    expect(report.facts).toEqual([
+      expect.objectContaining({ code: 'file-added', lane: 'low', files: ['app/Models/Comment.ts'], declaredBy: 'docs/plans/comments/plan.json#model.comment', planAddition: true, message: "app/Models/Comment.ts modified: absent when the plan's approval was recorded, so its addition" }),
+    ])
+    expect(renderChangeLane(report)).toContain("whose change added the file since was not checked")
+  })
+
+  test("should hold an edit read as the plan's addition to a raise guren.review.ts sets for source-edited", async () => {
+    const { repo } = await stampedPlanRepo()
+    const base = await commit(repo, { 'app/Models/Comment.ts': MODEL, 'guren.review.ts': "export default { facts: { 'source-edited': 'high' } }\n" })
+    const report = await laneRecorded(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL.replace('{}', '{\n  static fillable = [\'body\']\n}') }))
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane, fact.policyFrom, fact.planAddition])).toEqual([['file-added', 'high', 'low', true]])
+  })
+
+  test("should read an edit to a controller the plan added as its addition, and keep a validator's edit at medium", async () => {
+    const controller = readFileSync(join(import.meta.dir, 'fixtures/change-routes/CommentController.ts.txt'), 'utf8')
+    const validator = "import { z } from 'zod'\n\nexport const CommentPayloadSchema = z.object({ body: z.string().min(1) })\n"
+    const { repo } = await stampedPlanRepo()
+    const base = await commit(repo, { 'app/Http/Controllers/CommentController.ts': controller, 'app/Http/Validators/CommentValidator.ts': validator })
+    const head = await commit(repo, {
+      'app/Http/Controllers/CommentController.ts': controller.replace("throw HttpException.notImplemented('CommentController.destroy is planned and not written yet')", 'await comment.delete()\n    return this.redirect(`/posts/${comment.postId}`)'),
+      // A route may parse with it by hand, which no record names.
+      'app/Http/Validators/CommentValidator.ts': validator.replace('z.string().min(1)', 'z.any()'),
+    })
+    const report = await laneRecorded(repo, base, head)
+
+    expect(report.facts.map((fact) => [fact.code, fact.lane, fact.files[0], fact.declaredBy])).toEqual([
+      ['file-added', 'low', 'app/Http/Controllers/CommentController.ts', 'docs/plans/comments/plan.json#controller.comments,action.comments.store,action.comments.destroy'],
+      ['source-edited', 'medium', 'app/Http/Validators/CommentValidator.ts', undefined],
+    ])
+  })
+
+  test("should keep an edit at medium where the commit recording the plan's approval had the file, or the head is not what the plan declares", async () => {
+    const edit = { 'app/Models/Comment.ts': MODEL.replace('{}', '{\n  static fillable = [\'body\']\n}') }
+    const edited = (report: ChangeLaneReport) => report.facts.map((fact) => [fact.code, fact.lane, fact.declaredBy])
+
+    const present = await stampedPlanRepo({ 'app/Models/Comment.ts': MODEL })
+    expect(edited(await laneRecorded(present.repo, present.approved, await commit(present.repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
+
+    // Approved again after the file existed: the newest add of the approvals file is the cut-off.
+    const again = await stampedPlanRepo()
+    await commit(again.repo, { 'app/Models/Comment.ts': MODEL })
+    const approvals = readFileSync(join(again.repo, 'docs/plans/comments/approvals.json'), 'utf8')
+    await commit(again.repo, { 'docs/plans/comments/approvals.json': null })
+    const reapproved = await commit(again.repo, { 'docs/plans/comments/approvals.json': approvals })
+    expect(edited(await laneRecorded(again.repo, reapproved, await commit(again.repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
+
+    const stamped = await stampedPlanRepo()
+    const added = await commit(stamped.repo, { 'app/Models/Comment.ts': MODEL })
+    const renamed = await laneRecorded(stamped.repo, added, await commit(stamped.repo, { 'app/Models/Comment.ts': MODEL.replace('class Comment', 'class Note') }))
+    expect(edited(renamed)).toEqual([['source-edited', 'medium', undefined]])
+
+    // A validator or a model edit can weaken a route outside the security surface: every route's record must have been compared.
+    const head = await commit(stamped.repo, edit)
+    expect(edited(await laneOf(stamped.repo, added, head))).toEqual([['source-edited', 'medium', undefined]])
+    const skipped = { ...noRoutes, skipped: ['the createApp({ boot }) callback'] }
+    expect(edited(await laneRecorded(stamped.repo, added, head, { base: skipped, head: skipped }))).toEqual([['source-edited', 'medium', undefined]])
+    const inline: RouteSecurityRecord = { method: 'POST', path: '/comments', module: null, middleware: [], contracts: {}, handler: { unread: 'an inline handler' } }
+    const unread = { ...noRoutes, routes: [inline] }
+    expect(edited(await laneRecorded(stamped.repo, added, head, { base: unread, head: unread }))).toEqual([['source-edited', 'medium', undefined]])
+
+    // Merged with a merge commit after the mainline gained the file: the merge brought the approvals to a tree that had it.
+    const merged = await stampedPlanRepo()
+    const mainline = await git(merged.repo, ['rev-parse', 'HEAD~1'])
+    await git(merged.repo, ['branch', '-q', 'plan'])
+    await git(merged.repo, ['reset', '-q', '--hard', mainline])
+    await commit(merged.repo, { 'app/Models/Comment.ts': MODEL })
+    await git(merged.repo, ['merge', '-q', '--no-ff', '-m', 'merge plan', 'plan'])
+    const mergeCommit = await git(merged.repo, ['rev-parse', 'HEAD'])
+    expect(edited(await laneRecorded(merged.repo, mergeCommit, await commit(merged.repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
+  })
 
   test('should lower an added file and an added table the plan declares, naming the element', async () => {
     const { repo, base } = await planRepo()

@@ -18,6 +18,7 @@ import { extractClassDeclaration } from '../model-parser'
 import { parseSourceFile } from '../parse-cache'
 import { validatorFieldProperties } from '../plan/field-status'
 import { readPolicyAbilities } from '../plan/policy-abilities'
+import { planApprovalsPath } from '../plan/approvals'
 import { planCommandClaims, planCommandFiles } from '../plan/command-files'
 import { listPlanElementEntries, type PlanController, type PlanDraft, type PlanElementEntry, type PlanPolicy } from '../plan/schema'
 import { plannedSqlDefault, type PlanScaffoldApp, planScaffoldMounts, planScaffoldOutput, sqlNameOf, TWIN_EXTENSIONS } from '../plan/scaffold'
@@ -46,7 +47,8 @@ import { sameRecordPart, type RouteSecurityRecord } from './security-records'
  * A table's residue is the code inside an added table the column reader does not state.
  */
 export type DeclarationSubject =
-  | { kind: 'file'; path: string }
+  /** A source file the change adds, or with `edited` one it edits that the commit recording the plan's approval did not have. */
+  | { kind: 'file'; path: string; edited?: true }
   | { kind: 'table'; table: SchemaTable; file: string; tables: readonly SchemaTable[] }
   | { kind: 'migration'; dir: string; files: string[]; previous?: string }
   | { kind: 'table-residue'; file: string; identifier: string }
@@ -360,6 +362,8 @@ export async function applyPlanDeclarations(
   plans: readonly OpenPlan[],
   readHead: (path: string) => Promise<string | null>,
   readBase: (path: string) => Promise<string | null> = async () => null,
+  presentWhenAdded: (record: string, path: string) => Promise<boolean | undefined> = async () => undefined,
+  recordsCoverRoutes = false,
 ): Promise<ChangeFact[]> {
   const owned = plans.map((open) => ({ open, files: planDeclaredFiles(open.plan), paths: planClaimedPaths(open.plan) }))
   const result: ChangeFact[] = []
@@ -375,9 +379,13 @@ export async function applyPlanDeclarations(
       : subject?.kind === 'migration' ? await declaredMigration(subject, plans, readHead)
       : subject?.kind === 'route' ? (subject.change === 'add' ? await declaredRoute(subject.route, subject, plans, readHead) : undefined)
       : subject?.kind === 'agent' ? (subject.base === undefined ? await declaredAgentOf(subject.route, facts, subjects, plans, readHead) : undefined)
-      : subject ? await declarationOf(subject, owned, readHead) : undefined
+      // An edit outside the security surface weakens no route only where every route's record was compared.
+      : subject?.kind === 'file' && subject.edited && !recordsCoverRoutes ? undefined
+      : subject ? await declarationOf(subject, owned, readHead, presentWhenAdded) : undefined
     if (declaredBy && subject?.kind === 'table') declaredTables.add(`${subject.file}\u0000${subject.table.identifier}`)
-    const judged = declaredBy ? { ...fact, lane: FACT_CLASSES[fact.code].lowest, declaredBy } : fact
+    // An edit to a file the plan added is that element's addition in every task that touches it.
+    const code = declaredBy && subject?.kind === 'file' && subject.edited ? 'file-added' : fact.code
+    const judged = declaredBy ? { ...fact, code, lane: FACT_CLASSES[code].lowest, declaredBy, ...(code !== fact.code ? { message: `${fact.message}: absent when the plan's approval was recorded, so its addition`, planAddition: true as const } : {}) } : fact
     result.push(judged)
     if (subject) resultSubjects.set(judged, subject)
   }
@@ -650,21 +658,38 @@ async function declarationOf(
   subject: Extract<DeclarationSubject, { kind: 'file' | 'table' }>,
   owned: ReadonlyArray<{ open: OpenPlan; files: Map<string, DeclaredFile>; paths: Set<string> }>,
   readHead: (path: string) => Promise<string | null>,
+  presentWhenAdded: (record: string, path: string) => Promise<boolean | undefined>,
 ): Promise<string | undefined> {
   // Claimed by identity first: two approved plans about one file or table are a question for a person.
   const claims = owned.filter(({ open, files, paths }) => (subject.kind === 'table' ? claimsTable(open.plan, subject.table) : files.has(subject.path) || paths.has(subject.path)))
   if (claims.length !== 1) return undefined
   const { open, files } = claims[0]!
   if (subject.kind === 'file' && !files.has(subject.path)) return undefined
+  // The commit that recorded the plan's approval, on the merge base's history whatever the merge style, tells the
+  // plan's own work from a file the application already had; a person read that commit, a plan-record change.
+  if (subject.kind === 'file' && subject.edited && (await presentWhenAdded(planApprovalsPath(open.file), subject.path)) !== false) return undefined
   if (subject.kind === 'table') {
     const id = declaredTable(open.plan, subject, await readHead(subject.file))
     return id ? `${open.file}#${id}` : undefined
   }
   const declared = files.get(subject.path)!
+  if (subject.kind === 'file' && subject.edited && !editLowers(declared, subject.path)) return undefined
   // A command of another plan that no reading places may write any declared path, the scaffold's included.
   if (owned.some((entry) => entry.open !== open && claimsEveryCommandPath(entry.open.plan))) return undefined
   return (await holdsDeclared(open.plan, declared, subject.path, readHead)) ? `${open.file}#${declared.elements.join(',')}` : undefined
 }
+
+/**
+ * The files whose edit may read as the plan's addition: a controller, whose `authorize()`/`validate*()` calls the records
+ * read, and a model, whose fillable owner and serialized sensitive columns the audit reads. A validator, a resource or a side
+ * effect has no reader of its edit. What an action checks by hand and the rest of a model stay unread, as for an addition.
+ */
+function editLowers(declared: DeclaredFile, path: string): boolean {
+  if (declared.check.kind === 'controller') return true
+  return declared.check.kind === 'exports' && MODEL_FILE.test(path) && declared.elements.some((id) => id.startsWith('model.'))
+}
+
+const MODEL_FILE = new RegExp(`^(?:modules/[^/]+/)?${MODELS_DIR}/`)
 
 /** Whether the head's file at `path` is what the plan declares there: its exports, and the check its kind takes. */
 async function holdsDeclared(plan: PlanDraft, declared: DeclaredFile, path: string, readHead: (path: string) => Promise<string | null>): Promise<boolean> {

@@ -1,7 +1,7 @@
 /**
  * The audit facts of a change (RFC 0040 §3), from the audit of its two sides: a failure, a
- * sensitive column, a CSRF exemption, a security toggle or a suppression the base did not have,
- * and an escalating warning on a file the change touches.
+ * sensitive column, a CSRF exemption, a security toggle, a suppression or a model rule's warning on
+ * an edited model the base did not have, and an escalating warning on a file the change touches.
  */
 import { sep } from 'node:path'
 
@@ -10,6 +10,9 @@ import { escalatesOnChange } from '../audit-taxonomy'
 import type { FactCode } from './fact-classes'
 import type { ChangeFact } from './lane'
 import type { ChangeReader, ChangeSide, ResolvedChange } from './resolve'
+
+/** The model rules of `guren audit` whose warning an edit to the model can bring in: a request writing a column, or a column serialized. */
+const MODEL_RULES = ['mass-assignment', 'owner-fillable', 'hidden-columns']
 
 /** `filePath` is relative to the application root in the separators of the OS that ran the audit. */
 const posixPath = (path: string): string => path.split(sep).join('/')
@@ -76,6 +79,18 @@ export async function auditFacts(change: ResolvedChange, reader: ChangeReader, b
   for (const finding of added(startsWith('csrf-exemption:'), startsWith('csrf-exemption:'))) fact('csrf-exemption', finding)
   for (const finding of added((entry) => entry.status === 'fail', (entry) => entry.status === 'fail')) fact('audit-fail', finding)
   for (const finding of added(startsWith('security-toggle:'), startsWith('security-toggle:'))) fact('audit-warn-changed', finding)
+  // A column a model edit newly lets a request write, or newly serializes, is new even where the base warned on another;
+  // one the edit takes out of a warning is not. Only for a file the change edits: a model it adds keeps its warnings.
+  // A model moved and edited is compared at its head path, which `identities()` maps the base's findings to.
+  const edited = new Set(change.paths.filter((entry) => !entry.outsideApp && (entry.status === 'modified' || entry.status === 'renamed')).map((entry) => entry.path))
+  const modelRule = (finding: AuditFinding): boolean => reported(finding) && MODEL_RULES.some((rule) => finding.key.startsWith(`${rule}:`))
+  const baseRules = new Map<string, AuditFinding>()
+  baseIds.forEach((identity, index) => { if (modelRule(base.findings[index]!)) baseRules.set(identity, base.findings[index]!) })
+  for (const { finding, identity } of headFindings) {
+    if (!modelRule(finding) || finding.filePath === undefined || !edited.has(posixPath(finding.filePath))) continue
+    const before = baseRules.get(identity)
+    if (!before || (finding.columns ?? []).some((column) => !(before.columns ?? []).includes(column))) fact('audit-warn-changed', finding)
+  }
   for (const finding of head.findings) {
     if (finding.status === 'warn' && escalatesOnChange(finding.key) && finding.filePath !== undefined && touched.has(posixPath(finding.filePath))) fact('audit-warn-changed', finding)
   }

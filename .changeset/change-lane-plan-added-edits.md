@@ -1,0 +1,5 @@
+---
+'@guren/cli': minor
+---
+
+`guren change:lane` reads an edit to a model or controller file an approved, open plan added as that plan's addition (RFC 0040 §3): when the newest commit on the merge base's history that added the plan's approvals file did not have the file, and every route's security record was compared, the edit is `file-added` (marked `planAddition`, in `record.json` too), held to the check the file's addition takes, and `low` where it passes; a raise `guren.review.ts` sets for `source-edited` still applies to it. A cut-off at a shallow clone's boundary is not used. An edited policy, validator, resource or side effect stays `medium`. An edit to any model that brings in a `mass-assignment`, `owner-fillable` or `hidden-columns` warning naming a column the base's did not is now `audit-warn-changed`; `guren audit --json` carries those columns as `columns` on the `owner-fillable` and `hidden-columns` findings. Run `guren change:policy` to refresh `REVIEW.md`, whose description of `audit-warn-changed` changed.

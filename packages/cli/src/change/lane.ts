@@ -47,6 +47,8 @@ export interface ChangeFact {
   evidence: 'registered' | 'static' | 'path'
   /** The plan and element ids whose declaration lowered it (`docs/plans/comments/plan.json#model.comment`). */
   declaredBy?: string
+  /** A file the change edits, read as the declaring plan's addition: the commit recording its approval did not have it (RFC 0040 §3). */
+  planAddition?: true
   message: string
 }
 
@@ -573,6 +575,8 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     const code = fallbackCode(entry)
     const subject: DeclarationSubject | undefined = code === 'file-added' ? { kind: 'file', path: entry.path }
       : code === 'source-edited' && entry.status === 'modified' && entry.path === routesEntry ? { kind: 'routes-entry', path: entry.path }
+      // A file an earlier task of the plan added is in this base too, and stays that plan's addition (RFC 0040 §3).
+      : code === 'source-edited' && entry.status === 'modified' && !entry.kind ? { kind: 'file', path: entry.path, edited: true }
       : undefined
     fact([entry], { code, lane: 'medium', evidence: 'path', message: `${entry.path} ${entry.status}${entry.oldPath ? ` from ${entry.oldPath}` : ''}` }, subject)
   }
@@ -613,6 +617,8 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   } else if (!pair) {
     notCompared = { reason: 'the two sides were not exported and introspected', lane: 'medium' }
   }
+  // Whether every route was compared: an edit read as the plan's addition may sit outside the surface, a validator say.
+  let recordsCoverRoutes = false
   if (compared) {
     records.compared = true
     const comparison = compareSecurityRecords(compared.base, compared.head)
@@ -638,6 +644,9 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
         routeFact({ code: 'agent-tool', target: describeRoute(pair.head), message: `${describeRoute(pair.head)}: ${pair.head.agent ? (pair.base.agent ? 'its agent tool changed' : 'is exposed as an agent tool') : 'is no longer an agent tool'}` }, { kind: 'agent', route: pair.head, base: pair.base })
       }
     }
+    // An action left unread (an inline handler, a class reached by name) compares by what does not cover its imports.
+    const readWhole = (side: SecurityRecords): boolean => (side.skipped ?? []).length === 0 && side.routes.every((route) => !('unread' in route.handler))
+    recordsCoverRoutes = comparison.incomparable.length === 0 && readWhole(compared.base) && readWhole(compared.head)
     if (comparison.incomparable.length > 0) unjudged.push({ reader: 'security-records', reason: `routes whose records cannot be ordered against the base: ${comparison.incomparable.join('; ')}`, lane: 'high', files: files.length > 0 ? files : touched })
     // A skip the change brought in is the change's doing: a route it registers there is not on the list at all.
     const [baseSkipped, headSkipped] = [compared.base.skipped ?? [], compared.head.skipped ?? []]
@@ -699,7 +708,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   const plans = await readChangePlans(reader, trees.head)
   // A change that writes a plan record is high already, and must not cite what it wrote.
   const declared = plans.open.length > 0 && subjects.size > 0 && !facts.some((entry) => entry.code === 'plan-record')
-    ? await (await import('./declarations')).applyPlanDeclarations(facts, subjects, plans.open, (path) => reader.read('head', path), (path) => reader.read('base', path))
+    ? await (await import('./declarations')).applyPlanDeclarations(facts, subjects, plans.open, (path) => reader.read('head', path), (path) => reader.read('base', path), (record, path) => reader.presentWhenAdded(record, path), recordsCoverRoutes)
     : facts
   const policy = await loadBaseReviewPolicy(reader)
   const judged = policy.state === 'read' ? applyReviewPolicy(declared, change.paths, policy.policy) : declared

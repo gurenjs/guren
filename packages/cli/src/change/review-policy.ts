@@ -162,8 +162,12 @@ export async function loadBaseReviewPolicy(reader: ChangeReader): Promise<Loaded
  * never matched, since the globs are relative to its root.
  */
 export function applyReviewPolicy(facts: readonly ChangeFact[], paths: readonly ChangedPath[], policy: ReviewPolicy): ChangeFact[] {
+  const set = (code: Exclude<FactCode, 'review-path'>): Lane | undefined => (policy.facts && Object.hasOwn(policy.facts, code) ? policy.facts[code] : undefined)
   const applied = facts.map((fact) => {
-    const lane = policy.facts && Object.hasOwn(policy.facts, fact.code) ? policy.facts[fact.code as Exclude<FactCode, 'review-path'>] : undefined
+    let lane = set(fact.code as Exclude<FactCode, 'review-path'>)
+    // An edit read as the plan's addition is still an edit: a raise the policy sets for `source-edited` holds for it too.
+    const edit = fact.planAddition ? set('source-edited') : undefined
+    if (edit !== undefined && laneRank(edit) > laneRank(lane ?? fact.lane)) lane = edit
     return lane === undefined || lane === fact.lane ? fact : { ...fact, lane, policyFrom: fact.lane }
   })
   const claimed = new Set<ChangedPath>()

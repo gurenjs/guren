@@ -3,7 +3,7 @@
  * `openChange()` reads both of its sides from git objects, never from the working tree.
  */
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -46,6 +46,11 @@ export interface ChangeReader {
   containing(side: ChangeSide, needle: string): Promise<string[]>
   /** A directory holding those files of a side at their own paths, for a reader that takes a directory. */
   materialize(side: ChangeSide, paths: readonly string[]): Promise<string>
+  /**
+   * Whether the application path `path` was in the tree of the latest commit on the merge base's history that added
+   * `record` (a plan's approvals file); `undefined` when no such commit is there.
+   */
+  presentWhenAdded(record: string, path: string): Promise<boolean | undefined>
 }
 
 const SHA_PATTERN = /^[0-9a-f]{7,64}$/
@@ -122,6 +127,14 @@ function gitResult(cwd: string, args: string[]): Promise<{ code: number | null; 
   })
 }
 
+/** The commits a shallow clone's history stops at, from `git rev-parse --git-path shallow`; none in a full clone. */
+async function shallowCommits(cwd: string): Promise<ReadonlySet<string>> {
+  const file = (await runGitRaw(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'shallow']))?.trim()
+  if (!file) throw new CliError('git could not name the shallow file of this clone.')
+  const text = await readFile(file, 'utf-8').catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? '' : Promise.reject(error)))
+  return new Set(text.split('\n').map((line) => line.trim()).filter((line) => line.length > 0))
+}
+
 /** Reads the two sides of `change` from git objects. `dispose()` removes what `materialize()` wrote. */
 export function openChange(cwd: string, change: Pick<ResolvedChange, 'mergeBase' | 'head' | 'appPrefix'>): { reader: ChangeReader; dispose: () => Promise<void> } {
   const rev = (side: ChangeSide): string => (side === 'base' ? change.mergeBase : change.head)
@@ -129,6 +142,7 @@ export function openChange(cwd: string, change: Pick<ResolvedChange, 'mergeBase'
   const fullTrees = new Map<ChangeSide, Promise<ReadonlySet<string>>>()
   const appTrees = new Map<ChangeSide, Promise<ReadonlySet<string>>>()
   const texts = new Map<string, Promise<string | null>>()
+  const addedTrees = new Map<string, Promise<ReadonlySet<string> | undefined>>()
   let scratch: Promise<string> | undefined
 
   const fullTree = (side: ChangeSide): Promise<ReadonlySet<string>> => {
@@ -174,6 +188,26 @@ export function openChange(cwd: string, change: Pick<ResolvedChange, 'mergeBase'
       if (code !== 0 && code !== 1) throw new CliError(`git could not search the files of ${rev(side)} for ${needle}.`)
       const marker = `${rev(side)}:`
       return stdout.split('\0').filter((entry) => entry.length > 0).map((entry) => (entry.startsWith(marker) ? entry.slice(marker.length) : entry))
+    },
+    presentWhenAdded(record, path) {
+      let tree = addedTrees.get(record)
+      if (!tree) {
+        tree = (async () => {
+          // The mainline only, merges against their first parent: the cut-off is the tree the record reached the mainline in,
+          // whatever `log.follow`/`log.showRoot`/`log.showSignature` say. `--no-renames`: a record moved into place is added there too.
+          const { code, stdout } = await gitResult(cwd, ['--literal-pathspecs', 'log', '-1', '--no-show-signature', '--no-follow', '--root', '--first-parent', '--diff-merges=first-parent', '--no-patch', '--no-renames', '--diff-filter=A', '--format=%H', change.mergeBase, '--', record])
+          if (code !== 0) throw new CliError(`git could not search the history of ${change.mergeBase} for ${record}.`)
+          const sha = stdout.trim()
+          if (sha.length === 0) return undefined
+          // At a shallow boundary every inherited file reads as added there: the history that would place the cut-off is missing.
+          if ((await shallowCommits(cwd)).has(sha)) return undefined
+          const output = await runGitRaw(cwd, ['ls-tree', '-r', '-z', '--full-tree', sha])
+          if (output === null) throw new CliError(`git could not list the files of ${sha}.`)
+          return new Set(output.split('\0').filter((entry) => entry.length > 0).map((entry) => entry.slice(entry.indexOf('\t') + 1)))
+        })()
+        addedTrees.set(record, tree)
+      }
+      return tree.then((files) => (files === undefined ? undefined : files.has(`${prefix}${path}`)))
     },
     async materialize(side, paths) {
       const dir = join(await (scratch ??= mkdtemp(join(tmpdir(), 'guren-change-'))), side)

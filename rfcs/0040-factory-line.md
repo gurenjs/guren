@@ -218,7 +218,7 @@ among them.
 | `migration-destructive` | `judgeMigrations()` on the migrations the change adds, acknowledged findings included; an existing migration edited or deleted |
 | `authorization-removed` | Per-route security records, below |
 | `validation-removed` | Per-route security records, below |
-| `audit-warn-changed` | An audit warning that `escalatesOnChange()` selects (`policy`, `force-write-request-data`) on a file the change touches, and a security toggle set to `false` (`autoCsrf`, `securityHeaders`, `csrf`, `hostAuthorization`) that the base did not have |
+| `audit-warn-changed` | An audit warning that `escalatesOnChange()` selects (`policy`, `force-write-request-data`) on a file the change touches, and a security toggle set to `false` (`autoCsrf`, `securityHeaders`, `csrf`, `hostAuthorization`) that the base did not have, and a `mass-assignment`, `owner-fillable` or `hidden-columns` warning naming a column the base's did not, on a model the change edits |
 | `audit-suppressed` | A `guren-audit-ignore` comment the base did not have |
 | `audit-fail` | Any audit failure absent at the base |
 | `csrf-exemption` | A new exemption in source, or a new exempting package from `csrf-exemption-audit.ts` |
