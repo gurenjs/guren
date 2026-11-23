@@ -636,10 +636,10 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
       if (route.agent) routeFact({ code: 'agent-tool', target: describeRoute(route), message: `${describeRoute(route)} is exposed as the agent tool ${route.agent.toolName ?? route.name ?? '(unnamed)'}` }, { kind: 'agent', route })
     }
     for (const route of comparison.removed) {
-      routeFact({ code: 'route-removed', target: describeRoute(route), message: `${describeRoute(route)} is no longer registered` }, { kind: 'route', change: 'drop', route, routes, added: comparison.added })
+      routeFact({ code: 'route-removed', target: describeRoute(route), message: `${describeRoute(route)} is no longer registered` }, { kind: 'route', change: 'drop', route, routes, added: comparison.added, baseRoutes: compared.base.routes })
     }
     for (const pair of comparison.changed) {
-      routeFact({ code: 'route-changed', target: describeRoute(pair.head), message: `${describeRoute(pair.head)}${describeRoute(pair.base) === describeRoute(pair.head) ? '' : ` (was ${describeRoute(pair.base)})`}: its record changed` }, { kind: 'route', change: 'alter', route: pair.head, base: pair.base, routes, added: comparison.added })
+      routeFact({ code: 'route-changed', target: describeRoute(pair.head), message: `${describeRoute(pair.head)}${describeRoute(pair.base) === describeRoute(pair.head) ? '' : ` (was ${describeRoute(pair.base)})`}: its record changed` }, { kind: 'route', change: 'alter', route: pair.head, base: pair.base, routes, added: comparison.added, baseRoutes: compared.base.routes })
       if ((pair.head.agent || pair.base.agent) && !sameRecordPart(pair.base.agent, pair.head.agent)) {
         routeFact({ code: 'agent-tool', target: describeRoute(pair.head), message: `${describeRoute(pair.head)}: ${pair.head.agent ? (pair.base.agent ? 'its agent tool changed' : 'is exposed as an agent tool') : 'is no longer an agent tool'}` }, { kind: 'agent', route: pair.head, base: pair.base })
       }
