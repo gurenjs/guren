@@ -411,12 +411,54 @@ ${body}
       ['subject-helper', "    const post = { id: 1 }\n    const check = async () => { await this.authorize('update', [Post, post]) }\n    await check()"],
     ] as const) {
       const handler = await read(name, withBody(body))
-      expect(handler).toMatchObject({ authorizes: [call] })
+      // Not unconditional, so how it is reached is recorded: a further move is another call.
+      expect(handler).toMatchObject({ authorizes: [{ ...call, reach: expect.any(String) }] })
       expect('authorizes' in handler && handler.authorizes[0]).not.toHaveProperty('unconditional')
     }
     // A local of the action naming the imported class hides which class it is: the body is digested instead.
     const shadowed = await read('subject-shadow', withBody("    const Post = class {}\n    const post = { id: 1 }\n    await this.authorize('update', [Post, post])"))
     expect(shadowed).toMatchObject({ authorizes: [{ member: 'authorize', ability: 'update', subject: '[Post, post]', unconditional: true }], unseen: expect.any(String) })
     expect('authorizes' in shadowed && shadowed.authorizes[0]).not.toHaveProperty('classes')
+  })
+
+  test("follows a subject's class to the module declaring it, digests an alias, and hides it behind a parameter or a local", async () => {
+    const withController = (imports: string, params: string, body: string, extra: Record<string, string> = {}): Record<string, string> => ({
+      ...FILES,
+      'app/Models/Post.ts': 'export class Post {}\n',
+      'app/Models/Map.ts': 'export class Map {}\n',
+      'app/Other/Post.ts': 'export class Post {}\n',
+      'app/Other/Draft.ts': 'export class Draft {}\n',
+      'app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
+${imports}
+
+export class PostController extends Controller {
+  async update(${params}): Promise<Response> {
+    const post = { id: 1 }
+${body}
+    return this.json({})
+  }
+}
+`,
+      ...extra,
+    })
+    const read = async (name: string, files: Record<string, string>) => {
+      const records = await readSecurityRecords(await app(name, files))
+      if ('unreadable' in records) throw new Error(records.unreadable)
+      return records.routes.find((route) => route.path === '/posts/:id')!.handler
+    }
+    const asked = "    await this.authorize('update', [Post, post])"
+    const barrel = (target: string) => withController("import { Post } from '../../Models/index.js'", '', asked, { 'app/Models/index.ts': `export { Post } from '${target}'\n` })
+
+    expect(await read('barrel-model', barrel('./Post.js'))).toMatchObject({ authorizes: [{ classes: ['app/Models/Post.ts#Post'] }] })
+    expect(await read('barrel-other', barrel('../Other/Post.js'))).toMatchObject({ authorizes: [{ classes: ['app/Other/Post.ts#Post'] }] })
+    const alias = async (name: string, model: string) => read(name, withController(`import { ${model} } from '../../${model === 'Post' ? 'Models' : 'Other'}/${model}.js'\nconst Subject = ${model}`, '', "    await this.authorize('update', [Subject, post])"))
+    const [post, draft] = [await alias('alias-post', 'Post'), await alias('alias-draft', 'Draft')]
+    expect(post).toMatchObject({ authorizes: [{ classes: [expect.stringMatching(/^app\/Http\/Controllers\/PostController\.ts#Subject:/)] }] })
+    expect(JSON.stringify(post)).not.toBe(JSON.stringify(draft))
+    // A model named after a global is read as the file binds it.
+    expect(await read('global-name', withController("import { Map } from '../../Models/Map.js'", '', "    await this.authorize('update', [Map, post])"))).toMatchObject({ authorizes: [{ classes: ['app/Models/Map.ts#Map'] }] })
+    // A parameter, or a local in the class position, is what the router or the body passes: the body is digested.
+    expect(await read('param-shadow', withController("import { Post } from '../../Models/Post.js'", '_c: unknown, Post: unknown', asked))).toMatchObject({ unseen: expect.any(String) })
+    expect(await read('local-class', withController("import { Post } from '../../Models/Post.js'", '', "    const klass = Post\n    await this.authorize('update', [klass, post])"))).toMatchObject({ unseen: expect.any(String) })
   })
 })

@@ -40,6 +40,23 @@ export interface ControllerMethodInfo {
    * them; where an action-level `// guren-audit-ignore` is read from.
    */
   leadingComments: string[]
+  /** The names the action's parameters bind, which hide a file-level name of the same spelling inside the body. */
+  paramNames: string[]
+}
+
+type ParamNode = { type: string; name?: string; left?: ParamNode; argument?: ParamNode; parameter?: ParamNode; elements?: Array<ParamNode | null>; properties?: Array<{ type: string; value?: ParamNode; argument?: ParamNode }> }
+
+/** Every name a parameter list binds, destructuring and TypeScript parameter properties included. */
+function paramNames(params: readonly ParamNode[], into: string[] = []): string[] {
+  for (const param of params) {
+    if (param.type === 'Identifier' && param.name) into.push(param.name)
+    else if (param.type === 'AssignmentPattern' && param.left) paramNames([param.left], into)
+    else if (param.type === 'RestElement' && param.argument) paramNames([param.argument], into)
+    else if (param.type === 'TSParameterProperty' && param.parameter) paramNames([param.parameter], into)
+    else if (param.type === 'ArrayPattern') paramNames((param.elements ?? []).filter((entry): entry is ParamNode => entry !== null), into)
+    else if (param.type === 'ObjectPattern') for (const property of param.properties ?? []) paramNames([property.type === 'RestElement' ? property.argument! : property.value!].filter(Boolean), into)
+  }
+  return into
 }
 
 /**
@@ -651,6 +668,7 @@ export async function parseControllerMethods(
           filePath: relPath,
           line: member.loc?.start.line ?? 1,
           leadingComments: (member.leadingComments ?? []).map((comment) => comment.value.trim()),
+          paramNames: paramNames(((member.type === 'ClassMethod' ? member.params : (member as { value?: { params?: unknown[] } }).value?.params) ?? []) as ParamNode[]),
         }
         declaration.methods.set(name, info)
         methods.set(`${className}.${name}`, info)

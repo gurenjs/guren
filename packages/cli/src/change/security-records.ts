@@ -40,6 +40,8 @@ export interface AuthorizationCall {
   classes?: string[]
   /** An `authorize()` the action awaits as a statement of its own body, every statement before it falling through to it (`unconditionalThisCalls()`). */
   unconditional?: true
+  /** For an `authorize()` that is not: a digest of the statements up to the one holding it (the whole body when unread), so another way of reaching it is another call. */
+  reach?: string
 }
 
 export interface ValidateCall {
@@ -272,8 +274,8 @@ export function compareRecords(base: RouteSecurityRecord, head: RouteSecurityRec
     if (!a.authenticates && b.authenticates) stronger = true
     if ((a.unseen || b.unseen) && a.unseen !== b.unseen) incomparable.push('the action makes a call whose ability or schema the reader cannot follow, and its body changed')
 
-    // Matched apart from whether it is unconditional, which orders a pair rather than replacing a call.
-    const callKey = (call: AuthorizationCall): string => canonical({ ...call, unconditional: undefined })
+    // Matched apart from how it is reached, which orders a pair rather than replacing a call.
+    const callKey = (call: AuthorizationCall): string => canonical({ ...call, unconditional: undefined, reach: undefined })
     const calls = unmatched(a.authorizes, b.authorizes, callKey)
     if (!same(matchedInOrder(a.authorizes, b.authorizes, callKey), matchedInOrder(b.authorizes, a.authorizes, callKey))) incomparable.push('the authorization calls run in another order')
     const label = (call: AuthorizationCall): string => `this.${call.member}('${call.ability}'${call.subject ? `, ${call.subject}` : ''})${call.classes ? ` (${call.classes.join(', ')})` : ''}`
@@ -286,6 +288,7 @@ export function compareRecords(base: RouteSecurityRecord, head: RouteSecurityRec
     for (const [before, after] of pairedByKey(a.authorizes, b.authorizes, callKey)) {
       if (before.unconditional && !after.unconditional) authorization.push(`${label(after)} no longer runs whenever the action does: it sits under a condition, after a return, in a try or a helper`)
       if (!before.unconditional && after.unconditional) stronger = true
+      if (!before.unconditional && !after.unconditional && before.reach !== after.reach) incomparable.push(`${label(after)} is reached another way, and it does not run whenever the action does`)
     }
 
     const validateKey = (call: ValidateCall): string => `${call.member}\0${call.schema}`

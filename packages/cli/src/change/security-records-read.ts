@@ -29,7 +29,7 @@ import {
 import { resolveImportPath } from '../import-resolution'
 import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, type GraphRouteEntry } from '../introspect'
 import { introspectedRoutes, skippedRegistrars } from '../manifest-section'
-import { referencedIdentifiers, unconditionalThisCalls, walk, type BabelNode } from '../ast-walk'
+import { canonicalSyntax, referencedIdentifiers, unconditionalThisCalls, walk, type BabelNode } from '../ast-walk'
 import { ParseCache, parseSourceFile } from '../parse-cache'
 import { routesEntryOrDefault } from '../route-registrar'
 import { importsByLocal, specifierBase, type ImportEntry } from '../schema-binding'
@@ -167,6 +167,18 @@ class Declarations {
       if (!current) units.push(`member:${parent.local}.${parent.member}`)
     }
     return `class:${digest(units.join('\n'))}`
+  }
+
+  /**
+   * What `name` in `file` is, followed through imports, re-exports and `export *` to the module declaring it:
+   * `file#name` for a class (a model), else that with the digest of the declaration, since `const Subject = Post`
+   * names another class once its right side changes. A hop it cannot follow is its leaf.
+   */
+  async identity(file: string, name: string): Promise<string> {
+    const found = await this.locate(file, name)
+    if ('leaf' in found) return found.leaf
+    const at = `${this.relative(found.module.path)}#${found.name}`
+    return declaresClass(found.module.statements.get(found.name)) ? at : `${at}:${await this.of(found.module.path, found.name)}`
   }
 
   /** The module that declares `name` as reached from `file`, following re-exports and `export *`; a leaf where it stops. */
@@ -449,22 +461,30 @@ async function actionRecord(
   const unfollowed = unfollowedCallArguments(body, rawBody)
   const block = actionBlock(rawBody, filePath)
   const unconditional = new Set(block ? unconditionalThisCalls(block.body, 'authorize').map((call) => call.start! - block.offset) : [])
-  const bodyBindings = block ? declaredNames(block.body) : undefined
+  // What hides a file-level name inside the body: its own bindings and the action's parameters.
+  const bodyBindings = block ? new Set([...declaredNames(block.body), ...lookup.info.paramNames]) : undefined
   const authorizes: AuthorizationCall[] = []
   for (const { member, ability, subject, index } of literalAuthorizationCalls(body, rawBody).filter((call) => !call.templated)) {
     const classes: string[] = []
-    const names = subject === '' ? [] : sourceIdentifiers(subject, filePath, (text) => `__args__(${text})`)?.names.filter((name) => name !== '__args__' && !NOT_BINDINGS.has(name))
-    if (names === undefined) unfollowed.push(subject)
-    for (const name of names ?? []) {
-      const binds = imports.has(name) || !!local?.declared.has(name)
+    const parsed = subject === '' ? undefined : sourceIdentifiers(subject, filePath, (text) => `__args__(${text})`)
+    if (subject !== '' && !parsed) unfollowed.push(subject)
+    const binds = (name: string): boolean => imports.has(name) || !!local?.declared.has(name)
+    for (const name of parsed?.names ?? []) {
+      // A file-level binding is read whatever its spelling, a model named `Map` included.
+      if (name === '__args__' || (!binds(name) && NOT_BINDINGS.has(name))) continue
       // A local of the action naming an import or a file-level class hides which one the call asks about.
-      if (binds && (bodyBindings === undefined || bodyBindings.has(name))) unfollowed.push(name)
-      else if (binds) {
+      if (binds(name) && (bodyBindings === undefined || bodyBindings.has(name))) unfollowed.push(name)
+      else if (binds(name)) {
         const resolved = await subjectClass(cwd, controllerFile, imports, name, declarations)
         if (!classes.includes(resolved)) classes.push(resolved)
       }
     }
-    authorizes.push({ member, ability, subject, ...(classes.length > 0 ? { classes } : {}), ...(member === 'authorize' && unconditional.has(index) ? { unconditional: true as const } : {}) })
+    // A tuple's class position names a local of the action: what it holds is the body's.
+    const first = tupleClass(parsed?.program)
+    if (first !== undefined && !binds(first)) unfollowed.push(first)
+    // How a call that is not unconditional is reached: the statements up to the one holding it, or the whole body.
+    const reach = member === 'authorize' && !unconditional.has(index) ? reachDigest(block, index, rawBody) : undefined
+    authorizes.push({ member, ability, subject, ...(classes.length > 0 ? { classes } : {}), ...(member === 'authorize' && unconditional.has(index) ? { unconditional: true as const } : {}), ...(reach ? { reach } : {}) })
   }
   const validates: ValidateCall[] = []
   for (const site of validateCallSites(body)) {
@@ -514,27 +534,48 @@ function actionBlock(rawBody: string, file: string): { body: { body: readonly un
   return declaration?.type === 'FunctionDeclaration' ? { body: declaration.body, offset: ACTION_PREFIX.length } : undefined
 }
 
-/** Every name a block binds anywhere inside it: declarations, parameters of nested functions, catch clauses, classes. */
+/** Every name a block binds anywhere inside it: declarations, parameters of nested functions, catch clauses, classes, enums. */
 function declaredNames(block: unknown): Set<string> {
   const names = new Set<string>()
   walk(block, (current) => {
     const node = current as BabelNode & { id?: PatternNode; params?: PatternNode[]; param?: PatternNode }
     if (current.type === 'VariableDeclarator') patternNames(node.id).forEach((name) => names.add(name))
-    if ((current.type === 'FunctionDeclaration' || current.type === 'ClassDeclaration' || current.type === 'FunctionExpression' || current.type === 'ClassExpression') && node.id) patternNames(node.id).forEach((name) => names.add(name))
+    // A function, a class, an enum or a namespace binds its name, and an expression of one binds it inside itself.
+    if ((current.type.endsWith('Declaration') || current.type === 'FunctionExpression' || current.type === 'ClassExpression') && node.id) patternNames(node.id).forEach((name) => names.add(name))
     for (const param of node.params ?? []) patternNames(param).forEach((name) => names.add(name))
     if (current.type === 'CatchClause' && node.param) patternNames(node.param).forEach((name) => names.add(name))
   })
   return names
 }
 
-/** `file#export` of a name the controller file binds: an import, resolved to its file, or the file's own declaration. */
+/** What a name the controller file binds is, followed to the module declaring it (`Declarations.identity()`); a package import by its specifier and name. */
 async function subjectClass(cwd: string, file: string, imports: Map<string, ImportEntry>, name: string, declarations: Declarations): Promise<string> {
   const entry = imports.get(name)
-  if (!entry) return `${declarations.relative(file)}#${name}`
-  const exported = entry.kind === 'named' ? entry.imported : entry.kind === 'default' ? 'default' : '*'
-  const base = specifierBase(cwd, file, entry.source)
-  if (base === null) return `${entry.source}#${exported}`
-  return `${declarations.relative((await resolveImportPath(base)) ?? base)}#${exported}`
+  if (entry && specifierBase(cwd, file, entry.source) === null) return `${entry.source}#${entry.kind === 'named' ? entry.imported : entry.kind === 'default' ? 'default' : '*'}`
+  return declarations.identity(file, name)
+}
+
+/** Whether a top-level statement declares a class under its name: `class X`, `export default class`, `const X = class`. */
+function declaresClass(statement: BabelNode | undefined): boolean {
+  const node = (statement?.type === 'ExportNamedDeclaration' || statement?.type === 'ExportDefaultDeclaration' ? statement.declaration : statement) as BabelNode | undefined
+  if (node?.type === 'ClassDeclaration') return true
+  const declarations = node?.type === 'VariableDeclaration' ? (node.declarations as Array<{ init?: BabelNode | null }>) : []
+  return declarations.length === 1 && declarations[0]!.init?.type === 'ClassExpression'
+}
+
+/** The identifier in the class position of a `[Class, record]` subject, as `sourceIdentifiers()` parsed it inside `__args__(…)`. */
+function tupleClass(program: BabelNode | undefined): string | undefined {
+  const statement = (program?.body as BabelNode[] | undefined)?.[0] as (BabelNode & { expression?: BabelNode & { arguments?: BabelNode[] } }) | undefined
+  const first = statement?.expression?.arguments?.[0] as (BabelNode & { elements?: Array<BabelNode | null> }) | undefined
+  const element = first?.type === 'ArrayExpression' ? first.elements?.[0] : undefined
+  return element?.type === 'Identifier' ? (element.name as string) : undefined
+}
+
+/** A digest of the action's statements up to and including the one holding the call at `index`, or of the whole body. */
+function reachDigest(block: { body: { body: readonly unknown[] }; offset: number } | undefined, index: number, rawBody: string): string {
+  const statements = (block?.body.body ?? []) as Array<{ start?: number | null; end?: number | null }>
+  const at = statements.findIndex((statement) => (statement.start ?? 0) - block!.offset <= index && index < (statement.end ?? 0) - block!.offset)
+  return digest(at === -1 ? rawBody : canonicalSyntax(statements.slice(0, at + 1)))
 }
 
 /** The export an identifier (or `namespace.name`) names through the file's imports, never one matched by name alone. */

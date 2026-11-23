@@ -190,4 +190,10 @@ describe('compareRecords on an unconditional authorize()', () => {
     expect(compareRecords(asked(true), asked(false))).toMatchObject({ verdict: 'weaker', authorization: [expect.stringContaining('no longer runs whenever the action does')] })
     expect(compareRecords(asked(false), asked(true))).toEqual({ verdict: 'stronger' })
   })
+
+  test('should read a call that is not unconditional, reached another way, as incomparable', () => {
+    const reached = (reach: string): RouteSecurityRecord => route({ handler: handler({ authorizes: [{ ...authorize('update'), reach }] }) })
+    expect(compareRecords(reached('a'), reached('b'))).toMatchObject({ verdict: 'incomparable', reasons: [expect.stringContaining('is reached another way')] })
+    expect(compareRecords(reached('a'), reached('a'))).toEqual({ verdict: 'same' })
+  })
 })
