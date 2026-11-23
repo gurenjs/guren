@@ -681,8 +681,8 @@ async function declarationOf(
 
 /**
  * The files whose edit may read as the plan's addition: a controller, whose `authorize()`/`validate*()` calls the records
- * read, and a model, whose writable and serialized columns the audit reads. A validator, a resource or a side effect has
- * no reader of its edit. What an action checks by hand and a model's scopes stay unread, as for an addition.
+ * read, and a model, whose fillable owner and serialized sensitive columns the audit reads. A validator, a resource or a side
+ * effect has no reader of its edit. What an action checks by hand and the rest of a model stay unread, as for an addition.
  */
 function editLowers(declared: DeclaredFile, path: string): boolean {
   if (declared.check.kind === 'controller') return true

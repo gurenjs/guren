@@ -79,13 +79,16 @@ export async function auditFacts(change: ResolvedChange, reader: ChangeReader, b
   for (const finding of added(startsWith('csrf-exemption:'), startsWith('csrf-exemption:'))) fact('csrf-exemption', finding)
   for (const finding of added((entry) => entry.status === 'fail', (entry) => entry.status === 'fail')) fact('audit-fail', finding)
   for (const finding of added(startsWith('security-toggle:'), startsWith('security-toggle:'))) fact('audit-warn-changed', finding)
-  // A model rule's message names its columns, so a column a model edit newly lets a request write, or newly serializes,
-  // is new even where the base warned on another. Only for a file the change edits: a model it adds keeps its warnings.
+  // A column a model edit newly lets a request write, or newly serializes, is new even where the base warned on another;
+  // one the edit takes out of a warning is not. Only for a file the change edits: a model it adds keeps its warnings.
   const edited = new Set(change.paths.filter((entry) => !entry.outsideApp && entry.status === 'modified').map((entry) => entry.path))
   const modelRule = (finding: AuditFinding): boolean => reported(finding) && MODEL_RULES.some((rule) => finding.key.startsWith(`${rule}:`))
-  const remaining = baseIds.flatMap((identity, index) => (modelRule(base.findings[index]!) ? [`${identity}\n${base.findings[index]!.message}`] : []))
-  for (const finding of absentAtBase(headFindings.filter(({ finding }) => modelRule(finding) && finding.filePath !== undefined && edited.has(posixPath(finding.filePath))).map(({ finding, identity }) => ({ finding, identity: `${identity}\n${finding.message}` })), remaining)) {
-    fact('audit-warn-changed', finding)
+  const baseRules = new Map<string, AuditFinding>()
+  baseIds.forEach((identity, index) => { if (modelRule(base.findings[index]!)) baseRules.set(identity, base.findings[index]!) })
+  for (const { finding, identity } of headFindings) {
+    if (!modelRule(finding) || finding.filePath === undefined || !edited.has(posixPath(finding.filePath))) continue
+    const before = baseRules.get(identity)
+    if (!before || (finding.columns ?? []).some((column) => !(before.columns ?? []).includes(column))) fact('audit-warn-changed', finding)
   }
   for (const finding of head.findings) {
     if (finding.status === 'warn' && escalatesOnChange(finding.key) && finding.filePath !== undefined && touched.has(posixPath(finding.filePath))) fact('audit-warn-changed', finding)
