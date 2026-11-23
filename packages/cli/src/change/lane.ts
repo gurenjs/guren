@@ -47,7 +47,7 @@ export interface ChangeFact {
   evidence: 'registered' | 'static' | 'path'
   /** The plan and element ids whose declaration lowered it (`docs/plans/comments/plan.json#model.comment`). */
   declaredBy?: string
-  /** A file the change edits, read as the declaring plan's addition: its baseline commit did not have it (RFC 0040 §3). */
+  /** A file the change edits, read as the declaring plan's addition: the commit recording its approval did not have it (RFC 0040 §3). */
   planAddition?: true
   message: string
 }
@@ -706,7 +706,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
   const plans = await readChangePlans(reader, trees.head)
   // A change that writes a plan record is high already, and must not cite what it wrote.
   const declared = plans.open.length > 0 && subjects.size > 0 && !facts.some((entry) => entry.code === 'plan-record')
-    ? await (await import('./declarations')).applyPlanDeclarations(facts, subjects, plans.open, (path) => reader.read('head', path), (path) => reader.read('base', path), (rev, path) => reader.existedAt(rev, path), recordsCoverRoutes)
+    ? await (await import('./declarations')).applyPlanDeclarations(facts, subjects, plans.open, (path) => reader.read('head', path), (path) => reader.read('base', path), (record, path) => reader.presentWhenAdded(record, path), recordsCoverRoutes)
     : facts
   const policy = await loadBaseReviewPolicy(reader)
   const judged = policy.state === 'read' ? applyReviewPolicy(declared, change.paths, policy.policy) : declared

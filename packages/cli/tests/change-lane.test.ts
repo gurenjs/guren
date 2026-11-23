@@ -185,24 +185,20 @@ const SUBDIRECTORY_APP: Record<string, string> = {
 }
 
 describe('openChange', () => {
-  test("should answer whether a commit the merge base descends from had a path, and nothing for any other commit", async () => {
-    const { repo, base: start } = await createRepo(SUBDIRECTORY_APP)
-    const added = await commit(repo, { 'apps/web/app/Models/Comment.ts': 'export class Comment {}\n' })
-    await git(repo, ['checkout', '-q', '-b', 'side', start])
-    const side = await commit(repo, { 'apps/web/side.ts': 'export {}\n' })
-    await git(repo, ['checkout', '-q', 'main'])
-    const head = await commit(repo, { 'apps/web/app/Models/Comment.ts': 'export class Comment { body = 1 }\n' })
+  test("should answer whether the newest commit on the merge base's history adding a record had a path", async () => {
+    const { repo } = await createRepo(SUBDIRECTORY_APP)
+    await commit(repo, { 'apps/web/docs/plans/comments/approvals.json': '{}\n' })
+    const added = await commit(repo, { 'apps/web/app/Models/Comment.ts': 'export class Comment {}\n', 'apps/web/later.approvals.json': '{}\n' })
+    const head = await commit(repo, { 'apps/web/app/Models/Comment.ts': 'export class Comment { body = 1 }\n', 'apps/web/head.approvals.json': '{}\n' })
     const cwd = join(repo, 'apps/web')
     const { reader } = openChange(cwd, await resolveChange(cwd, added, head))
 
-    expect(await reader.existedAt(start, 'app/Models/Comment.ts')).toBe(false)
-    expect(await reader.existedAt(added, 'app/Models/Comment.ts')).toBe(true)
-    expect(await reader.existedAt(start.slice(0, 12), 'package.json')).toBe(true)
-    // Off the change's history, absent from the clone, or no SHA at all: no answer.
-    expect(await reader.existedAt(side, 'app/Models/Comment.ts')).toBeUndefined()
-    expect(await reader.existedAt(head, 'app/Models/Comment.ts')).toBeUndefined()
-    expect(await reader.existedAt('0'.repeat(40), 'app/Models/Comment.ts')).toBeUndefined()
-    expect(await reader.existedAt('main', 'app/Models/Comment.ts')).toBeUndefined()
+    expect(await reader.presentWhenAdded('docs/plans/comments/approvals.json', 'app/Models/Comment.ts')).toBe(false)
+    expect(await reader.presentWhenAdded('docs/plans/comments/approvals.json', 'package.json')).toBe(true)
+    expect(await reader.presentWhenAdded('later.approvals.json', 'app/Models/Comment.ts')).toBe(true)
+    // Added only after the merge base, or never: no answer.
+    expect(await reader.presentWhenAdded('head.approvals.json', 'app/Models/Comment.ts')).toBeUndefined()
+    expect(await reader.presentWhenAdded('none.approvals.json', 'app/Models/Comment.ts')).toBeUndefined()
   })
 
   test('should throw on a file the commit has and git cannot read, rather than read it as absent', async () => {
@@ -786,16 +782,14 @@ export class CommentPolicy extends Policy {
     return { repo, base: await commit(repo, {}) }
   }
 
-  /** The comments plan approved at the repository's first commit, which `files` (committed then) are part of. */
-  async function stampedPlanRepo(files: Record<string, string> = {}): Promise<{ repo: string; start: string }> {
+  /** The comments plan approved in one commit on top of `files`, as a squash merge of the plan's pull request leaves it. */
+  async function stampedPlanRepo(files: Record<string, string> = {}): Promise<{ repo: string; approved: string }> {
     const { repo } = await createRepo({ ...BASE_FILES, ...files })
-    const start = await git(repo, ['rev-parse', 'HEAD'])
     const path = join(repo, 'docs/plans/comments/plan.json')
     await mkdir(dirname(path), { recursive: true })
-    await writeFile(path, JSON.stringify({ ...loadApprovedCommentsPlan(), baseline: { ...(loadApprovedCommentsPlan().baseline as object), rev: start } }), 'utf8')
+    await writeFile(path, JSON.stringify(loadApprovedCommentsPlan()), 'utf8')
     await approvePlanFile(path)
-    await commit(repo, {})
-    return { repo, start }
+    return { repo, approved: await commit(repo, {}) }
   }
 
   const noRoutes = { recordVersion: SECURITY_RECORD_VERSION, routes: [] }
@@ -816,22 +810,25 @@ export class CommentPolicy extends Policy {
     const report = await laneRecorded(repo, base, await commit(repo, { 'app/Models/Comment.ts': MODEL.replace('{}', '{\n  static fillable = [\'body\']\n}') }))
 
     expect(report.facts).toEqual([
-      expect.objectContaining({ code: 'file-added', lane: 'low', files: ['app/Models/Comment.ts'], declaredBy: 'docs/plans/comments/plan.json#model.comment', planAddition: true, message: "app/Models/Comment.ts modified: absent at the plan's baseline, so its addition" }),
+      expect.objectContaining({ code: 'file-added', lane: 'low', files: ['app/Models/Comment.ts'], declaredBy: 'docs/plans/comments/plan.json#model.comment', planAddition: true, message: "app/Models/Comment.ts modified: absent when the plan's approval was recorded, so its addition" }),
     ])
     expect(renderChangeLane(report)).toContain("whose change added it since was not checked")
   })
 
-  test("should keep an edit at medium where the plan's baseline had the file, could not be read, or the head is not what the plan declares", async () => {
+  test("should keep an edit at medium where the commit recording the plan's approval had the file, or the head is not what the plan declares", async () => {
     const edit = { 'app/Models/Comment.ts': MODEL.replace('{}', '{\n  static fillable = [\'body\']\n}') }
     const edited = (report: ChangeLaneReport) => report.facts.map((fact) => [fact.code, fact.lane, fact.declaredBy])
 
     const present = await stampedPlanRepo({ 'app/Models/Comment.ts': MODEL })
-    expect(edited(await laneRecorded(present.repo, await git(present.repo, ['rev-parse', 'HEAD']), await commit(present.repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
+    expect(edited(await laneRecorded(present.repo, present.approved, await commit(present.repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
 
-    // The fixture's baseline names a commit this clone does not have.
-    const { repo } = await planRepo()
-    const base = await commit(repo, { 'app/Models/Comment.ts': MODEL })
-    expect(edited(await laneRecorded(repo, base, await commit(repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
+    // Approved again after the file existed: the newest add of the approvals file is the cut-off.
+    const again = await stampedPlanRepo()
+    await commit(again.repo, { 'app/Models/Comment.ts': MODEL })
+    const approvals = readFileSync(join(again.repo, 'docs/plans/comments/approvals.json'), 'utf8')
+    await commit(again.repo, { 'docs/plans/comments/approvals.json': null })
+    const reapproved = await commit(again.repo, { 'docs/plans/comments/approvals.json': approvals })
+    expect(edited(await laneRecorded(again.repo, reapproved, await commit(again.repo, edit)))).toEqual([['source-edited', 'medium', undefined]])
 
     const stamped = await stampedPlanRepo()
     const added = await commit(stamped.repo, { 'app/Models/Comment.ts': MODEL })
