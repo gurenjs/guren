@@ -376,4 +376,142 @@ export function registerWebRoutes(router: Router): void {
     // `post` is a local, so the body is the scope, but it reads nothing of `this`: another action's edit does not reach it.
     expect((await read('mixin-d', { 'app/Http/Controllers/PostController.ts': controller('return this.json({ edited: true })') })).update).toBe(before.update)
   })
+
+  test("resolves an authorize() subject's class to its file and export, and marks only a call every statement before falls through to", async () => {
+    const withBody = (body: string, models = 'Models'): Record<string, string> => ({
+      ...FILES,
+      'app/Models/Post.ts': 'export class Post {}\n',
+      'app/Other/Post.ts': 'export class Post {}\n',
+      'app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
+import { Post } from '../../${models}/Post.js'
+
+export class PostController extends Controller {
+  async update(): Promise<Response> {
+${body}
+    return this.json({})
+  }
+}
+`,
+    })
+    const read = async (name: string, files: Record<string, string>) => {
+      const records = await readSecurityRecords(await app(name, files))
+      if ('unreadable' in records) throw new Error(records.unreadable)
+      return records.routes.find((route) => route.path === '/posts/:id')!.handler
+    }
+    const asked = "    const post = { id: 1 }\n    await this.authorize('update', [Post, post])"
+    const call = { member: 'authorize', ability: 'update', subject: '[Post, post]', classes: ['app/Models/Post.ts#Post'] }
+
+    expect(await read('subject-plain', withBody(asked))).toMatchObject({ authorizes: [{ ...call, unconditional: true }] })
+    expect(await read('subject-other', withBody(asked, 'Other'))).toMatchObject({ authorizes: [{ ...call, classes: ['app/Other/Post.ts#Post'], unconditional: true }] })
+    for (const [name, body] of [
+      ['subject-if', "    const post = { id: 1 }\n    if (post.id) await this.authorize('update', [Post, post])"],
+      ['subject-return', "    const post = { id: 1 }\n    if (!post.id) return this.json({})\n    await this.authorize('update', [Post, post])"],
+      ['subject-try', "    const post = { id: 1 }\n    try { await this.authorize('update', [Post, post]) } catch {}"],
+      ['subject-void', "    const post = { id: 1 }\n    void this.authorize('update', [Post, post])"],
+      ['subject-helper', "    const post = { id: 1 }\n    const check = async () => { await this.authorize('update', [Post, post]) }\n    await check()"],
+    ] as const) {
+      const handler = await read(name, withBody(body))
+      // Not unconditional, so how it is reached is recorded: a further move is another call.
+      expect(handler).toMatchObject({ authorizes: [{ ...call, reach: expect.any(String) }] })
+      expect('authorizes' in handler && handler.authorizes[0]).not.toHaveProperty('unconditional')
+    }
+    // A local of the action naming the imported class hides which class it is: read by its initializer, never as the import, and the body is digested.
+    const shadowed = await read('subject-shadow', withBody("    const Post = class {}\n    const post = { id: 1 }\n    await this.authorize('update', [Post, post])"))
+    expect(shadowed).toMatchObject({ authorizes: [{ member: 'authorize', ability: 'update', subject: '[Post, post]', classes: [expect.stringMatching(/^local:Post=/)], unconditional: true }], unseen: expect.any(String) })
+  })
+
+  test("follows a subject's class to the module declaring it, digests an alias, and hides it behind a parameter or a local", async () => {
+    const withController = (imports: string, params: string, body: string, extra: Record<string, string> = {}): Record<string, string> => ({
+      ...FILES,
+      'app/Models/Post.ts': 'export class Post {}\n',
+      'app/Models/Map.ts': 'export class Map {}\n',
+      'app/Other/Post.ts': 'export class Post {}\n',
+      'app/Other/Draft.ts': 'export class Draft {}\n',
+      'app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
+${imports}
+
+export class PostController extends Controller {
+  async update(${params}): Promise<Response> {
+    const post = { id: 1 }
+${body}
+    return this.json({})
+  }
+}
+`,
+      ...extra,
+    })
+    const read = async (name: string, files: Record<string, string>) => {
+      const records = await readSecurityRecords(await app(name, files))
+      if ('unreadable' in records) throw new Error(records.unreadable)
+      return records.routes.find((route) => route.path === '/posts/:id')!.handler
+    }
+    const asked = "    await this.authorize('update', [Post, post])"
+    const barrel = (target: string) => withController("import { Post } from '../../Models/index.js'", '', asked, { 'app/Models/index.ts': `export { Post } from '${target}'\n` })
+
+    expect(await read('barrel-model', barrel('./Post.js'))).toMatchObject({ authorizes: [{ classes: ['app/Models/Post.ts#Post'] }] })
+    expect(await read('barrel-other', barrel('../Other/Post.js'))).toMatchObject({ authorizes: [{ classes: ['app/Other/Post.ts#Post'] }] })
+    const alias = async (name: string, model: string) => read(name, withController(`import { ${model} } from '../../${model === 'Post' ? 'Models' : 'Other'}/${model}.js'\nconst Subject = ${model}`, '', "    await this.authorize('update', [Subject, post])"))
+    const [post, draft] = [await alias('alias-post', 'Post'), await alias('alias-draft', 'Draft')]
+    expect(post).toMatchObject({ authorizes: [{ classes: [expect.stringMatching(/^app\/Http\/Controllers\/PostController\.ts#Subject:/)] }] })
+    expect(JSON.stringify(post)).not.toBe(JSON.stringify(draft))
+    // A model named after a global is read as the file binds it.
+    expect(await read('global-name', withController("import { Map } from '../../Models/Map.js'", '', "    await this.authorize('update', [Map, post])"))).toMatchObject({ authorizes: [{ classes: ['app/Models/Map.ts#Map'] }] })
+    // A parameter, or a local in the class position, is what the router or the body passes: the body is digested.
+    expect(await read('param-shadow', withController("import { Post } from '../../Models/Post.js'", '_c: unknown, Post: unknown', asked))).toMatchObject({ unseen: expect.any(String) })
+    // A local declared once and never assigned is read by its initializer, and the classes that names.
+    const local = async (name: string, model: string) => read(name, withController(`import { Post } from '../../Models/Post.js'\nimport { Draft } from '../../Other/Draft.js'`, '', `    const klass = ${model}\n    await this.authorize('update', [klass, post])`))
+    const [localPost, localDraft] = [await local('local-post', 'Post'), await local('local-draft', 'Draft')]
+    expect(localPost).toMatchObject({ authorizes: [{ classes: [expect.stringMatching(/^local:klass=/)] }] })
+    expect(JSON.stringify(localPost)).not.toBe(JSON.stringify(localDraft))
+    const bare = async (name: string, model: string) => read(name, withController(`import { Post } from '../../Models/Post.js'\nimport { Draft } from '../../Other/Draft.js'`, '', `    const Subject = ${model}\n    await this.authorize('create', Subject)`))
+    expect(JSON.stringify(await bare('bare-post', 'Post'))).not.toBe(JSON.stringify(await bare('bare-draft', 'Draft')))
+    // A local hiding the import widens the digest to what the body binds.
+    const shadow = async (name: string, dir: string) => read(name, withController(`import { Post } from '../../Models/Post.js'\nimport { Draft } from '../../${dir}/Draft.js'`, '', "    const Post = Draft\n    await this.authorize('update', [Post, post])", { 'app/Models/Draft.ts': 'export class Draft {}\n' }))
+    const [shadowModels, shadowOther] = [await shadow('shadow-models', 'Models'), await shadow('shadow-other', 'Other')]
+    expect('unseen' in shadowModels && shadowModels.unseen).not.toBe('unseen' in shadowOther && shadowOther.unseen)
+    // The export table wins over a private declaration of the spelling.
+    const decoy = (target: string) => withController("import { Post } from '../../Models/Decoy.js'", '', "    await this.authorize('update', [Post, post])", { 'app/Models/Decoy.ts': `import { Post as A } from './Post.js'\nimport { Draft as B } from '../Other/Draft.js'\nclass Post {}\nexport { ${target} as Post }\n` })
+    expect(await read('decoy-a', decoy('A'))).toMatchObject({ authorizes: [{ classes: ['app/Models/Post.ts#Post'] }] })
+    expect(await read('decoy-b', decoy('B'))).toMatchObject({ authorizes: [{ classes: ['app/Other/Draft.ts#Draft'] }] })
+    // A `super` use parses in its class, so the mark stays.
+    expect(await read('super-use', withController("import { Post } from '../../Models/Post.js'", '', "    await this.authorize('update', [Post, post])\n    super.toString()"))).toMatchObject({ authorizes: [{ unconditional: true }] })
+    expect(await read('wrapped-class', withController("import { Post } from '../../Models/Post.js'", '', "    const klass = Post\n    await this.authorize('update', [klass!, post])"))).toMatchObject({ unseen: expect.any(String) })
+    // `ns.Post` is the member as the namespace's module exports it, through its barrel.
+    const namespaced = (target: string) => withController("import * as M from '../../Models/index.js'", '', "    await this.authorize('update', [M.Post, post])", { 'app/Models/index.ts': `export { Post } from '${target}'\n` })
+    expect(await read('namespace-model', namespaced('./Post.js'))).toMatchObject({ authorizes: [{ classes: ['app/Models/Post.ts#Post'] }] })
+    expect(await read('namespace-other', namespaced('../Other/Post.js'))).toMatchObject({ authorizes: [{ classes: ['app/Other/Post.ts#Post'] }] })
+    // A namespace the reader does not follow keeps its specifier; a hop that ends in a file without the class is digested.
+    expect(await read('namespace-package', withController("import * as M from 'zod'", '', "    await this.authorize('update', [M.ZodString, post])"))).toMatchObject({ authorizes: [{ classes: ['package:zod#ZodString'] }] })
+    const starAs = withController("import { Models } from '../../Models/barrel.js'", '', "    await this.authorize('update', [Models.Post, post])", { 'app/Models/barrel.ts': "export * as Models from './index.js'\n", 'app/Models/index.ts': "export { Post } from './Post.js'\n" })
+    expect(await read('namespace-star-as', starAs)).toMatchObject({ authorizes: [{ classes: ['app/Models/Post.ts#Post'] }] })
+  })
+
+  test('digests the whole action for a call that is not unconditional, so a later statement acting on it counts', async () => {
+    const helper = (call: string): Record<string, string> => ({
+      ...FILES,
+      'app/Models/Post.ts': 'export class Post {}\n',
+      'app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
+import { Post } from '../../Models/Post.js'
+
+export class PostController extends Controller {
+  async update(): Promise<Response> {
+    const post = { id: 1 }
+    const check = async () => { await this.authorize('update', [Post, post]) }
+    ${call}
+    return this.json({})
+  }
+}
+`,
+    })
+    const read = async (name: string, files: Record<string, string>) => {
+      const records = await readSecurityRecords(await app(name, files))
+      if ('unreadable' in records) throw new Error(records.unreadable)
+      const handler = records.routes.find((route) => route.path === '/posts/:id')!.handler
+      return 'authorizes' in handler ? handler.authorizes[0]?.reach : undefined
+    }
+    const called = await read('reach-called', helper('await check()'))
+
+    expect(called).toEqual(expect.any(String))
+    expect(await read('reach-dropped', helper('void 0'))).not.toBe(called)
+  })
 })

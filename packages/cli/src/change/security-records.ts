@@ -13,7 +13,7 @@ import type { ChangeFact } from './lane'
  * Bumped whenever a field's meaning changes, a digest's inputs included: a stored record of another
  * version is not compared, and a differing `@guren/cli` is only named, so this is the one guard.
  */
-export const SECURITY_RECORD_VERSION = 2
+export const SECURITY_RECORD_VERSION = 3
 
 const CONTRACT_KEYS = CONTRACT_SEGMENTS
 type ContractKey = ContractSegment
@@ -36,6 +36,12 @@ export interface AuthorizationCall {
   ability: string
   /** The arguments after the ability, as written: the record or class the policy is asked about. */
   subject: string
+  /** `file#export` of each name in `subject` that binds an import or a declaration of the controller file, in order: two classes of one name stay apart. */
+  classes?: string[]
+  /** An `authorize()` the action awaits as a statement of its own body, every statement before it falling through to it (`unconditionalThisCalls()`). */
+  unconditional?: true
+  /** For an `authorize()` that is not: a digest of the action's body, so another way of reaching it, or of acting on its denial, is another call. */
+  reach?: string
 }
 
 export interface ValidateCall {
@@ -158,6 +164,26 @@ function matchedInOrder<T>(from: T[], other: T[], key: (item: T) => string): str
   })
 }
 
+/** The base and head items of one key, paired in order: what `unmatched()` leaves out. */
+function pairedByKey<T>(base: T[], head: T[], key: (item: T) => string, exact: (item: T) => string = key): Array<[T, T]> {
+  const remaining = [...head]
+  const left: T[] = []
+  const pairs: Array<[T, T]> = []
+  for (const item of base) {
+    const at = remaining.findIndex((entry) => exact(entry) === exact(item))
+    if (at === -1) { left.push(item); continue }
+    pairs.push([item, remaining[at]!])
+    remaining.splice(at, 1)
+  }
+  for (const item of left) {
+    const at = remaining.findIndex((entry) => key(entry) === key(item))
+    if (at === -1) continue
+    pairs.push([item, remaining[at]!])
+    remaining.splice(at, 1)
+  }
+  return pairs
+}
+
 /** One to one: each item of `base` is matched to an equal item of `head` at most once. */
 function unmatched<T>(base: T[], head: T[], key: (item: T) => string): { gone: T[]; added: T[] } {
   const added = [...head]
@@ -255,15 +281,23 @@ export function compareRecords(base: RouteSecurityRecord, head: RouteSecurityRec
     if (!a.authenticates && b.authenticates) stronger = true
     if ((a.unseen || b.unseen) && a.unseen !== b.unseen) incomparable.push('the action makes a call whose ability or schema the reader cannot follow, and its body changed')
 
-    const callKey = (call: AuthorizationCall): string => canonical(call)
+    // Matched apart from how it is reached, which orders a pair rather than replacing a call.
+    const callKey = (call: AuthorizationCall): string => canonical({ ...call, unconditional: undefined, reach: undefined })
     const calls = unmatched(a.authorizes, b.authorizes, callKey)
     if (!same(matchedInOrder(a.authorizes, b.authorizes, callKey), matchedInOrder(b.authorizes, a.authorizes, callKey))) incomparable.push('the authorization calls run in another order')
+    const label = (call: AuthorizationCall): string => `this.${call.member}('${call.ability}'${call.subject ? `, ${call.subject}` : ''})${call.classes ? ` (${call.classes.join(', ')})` : ''}`
     for (const call of calls.gone) {
       const other = calls.added.find((entry) => entry.member === call.member)
-      if (other) incomparable.push(`this.${call.member}('${call.ability}'${call.subject ? `, ${call.subject}` : ''}) became this.${other.member}('${other.ability}'${other.subject ? `, ${other.subject}` : ''})`)
+      if (other) incomparable.push(`${label(call)} became ${label(other)}`)
       else authorization.push(`this.${call.member}('${call.ability}') is no longer called`)
     }
     if (calls.gone.length === 0 && calls.added.length > 0) stronger = true
+    // An unchanged occurrence pairs with itself first: a conditional copy added beside an unconditional check leaves it standing.
+    for (const [before, after] of pairedByKey(a.authorizes, b.authorizes, callKey, canonical)) {
+      if (before.unconditional && !after.unconditional) authorization.push(`${label(after)} no longer runs whenever the action does: it sits under a condition, after a return, in a try or a helper`)
+      if (!before.unconditional && after.unconditional) stronger = true
+      if (!before.unconditional && !after.unconditional && before.reach !== after.reach) incomparable.push(`${label(after)} is reached another way, and it does not run whenever the action does`)
+    }
 
     const validateKey = (call: ValidateCall): string => `${call.member}\0${call.schema}`
     const validates = unmatched(a.validates, b.validates, validateKey)
@@ -271,9 +305,9 @@ export function compareRecords(base: RouteSecurityRecord, head: RouteSecurityRec
       const other = b.validates.find((entry) => validateKey(entry) === validateKey(call))
       if (other && other.declaration !== call.declaration) incomparable.push(`${call.schema || 'a schema'} changed, and a schema an action validates with is not rendered`)
     }
-    const label = (call: ValidateCall): string => `${call.member}(${call.schema || 'a schema written in place'})`
-    if (validates.gone.length > 0 && validates.added.length > 0) incomparable.push(`the action calls ${validates.added.map(label).join(', ')} in place of ${validates.gone.map(label).join(', ')}`)
-    else if (validates.gone.length > 0) validation.push(`the action no longer calls ${validates.gone.map(label).join(', ')}`)
+    const validateLabel = (call: ValidateCall): string => `${call.member}(${call.schema || 'a schema written in place'})`
+    if (validates.gone.length > 0 && validates.added.length > 0) incomparable.push(`the action calls ${validates.added.map(validateLabel).join(', ')} in place of ${validates.gone.map(validateLabel).join(', ')}`)
+    else if (validates.gone.length > 0) validation.push(`the action no longer calls ${validates.gone.map(validateLabel).join(', ')}`)
     else if (validates.added.length > 0) stronger = true
   }
 

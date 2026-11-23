@@ -29,11 +29,11 @@ import {
 import { resolveImportPath } from '../import-resolution'
 import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, type GraphRouteEntry } from '../introspect'
 import { introspectedRoutes, skippedRegistrars } from '../manifest-section'
-import { referencedIdentifiers, walk, type BabelNode } from '../ast-walk'
+import { canonicalSyntax, nodeText, referencedIdentifiers, unconditionalThisCalls, walk, type BabelNode } from '../ast-walk'
 import { ParseCache, parseSourceFile } from '../parse-cache'
 import { routesEntryOrDefault } from '../route-registrar'
 import { importsByLocal, specifierBase, type ImportEntry } from '../schema-binding'
-import { SECURITY_RECORD_VERSION, type ActionRecord, type RouteSecurityRecord, type SecurityRecords, type ValidateCall } from './security-records'
+import { SECURITY_RECORD_VERSION, type ActionRecord, type AuthorizationCall, type RouteSecurityRecord, type SecurityRecords, type ValidateCall } from './security-records'
 
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 16)
 
@@ -53,6 +53,8 @@ interface ModuleBindings {
   reexported: Map<string, { source: string; name: string }>
   /** `export * from` sources. */
   starred: string[]
+  /** `export { local as name }` without a source: the local binding each exported name is. */
+  localExports: Map<string, string>
 }
 
 type PatternNode = { type: string; name?: string; properties?: Array<{ type: string; value?: PatternNode; argument?: PatternNode }>; elements?: Array<PatternNode | null>; left?: PatternNode; argument?: PatternNode }
@@ -167,6 +169,70 @@ class Declarations {
       if (!current) units.push(`member:${parent.local}.${parent.member}`)
     }
     return `class:${digest(units.join('\n'))}`
+  }
+
+  /**
+   * What `name` in `file` is, followed through imports, re-exports and `export *` to the module declaring it:
+   * `file#name` for a class (a model), else that with the digest of the declaration, since `const Subject = Post`
+   * names another class once its right side changes. `undefined` for a hop it cannot follow, which the caller digests:
+   * a leaf names a file or a specifier without the class, so both sides could read alike.
+   */
+  async identity(file: string, name: string, asExport = false): Promise<string | undefined> {
+    const found = await this.declaring(file, name, asExport)
+    if (!found) return undefined
+    const at = `${this.relative(found.module.path)}#${found.name}`
+    return declaresClass(found.module.statements.get(found.name)) ? at : `${at}:${await this.of(found.module.path, found.name)}`
+  }
+
+  /**
+   * The module declaring `name`, read as a local binding of `file` or, with `asExport`, as what `file` exports under
+   * it: an export table entry (`export { A as Post }`, `export { Post } from`) wins over a private declaration of the
+   * spelling. `undefined` wherever it stops, a namespace included.
+   */
+  private async declaring(file: string, name: string, asExport: boolean, depth = 0): Promise<{ module: ModuleBindings; name: string } | undefined> {
+    const module = await this.module(file)
+    if (!module || 'unparsed' in module || depth > 32) return undefined
+    if (asExport) {
+      const local = module.localExports.get(name)
+      if (local !== undefined) return this.declaring(module.path, local, false, depth + 1)
+      const reexport = module.reexported.get(name)
+      if (reexport) {
+        const base = specifierBase(this.cwd, module.path, reexport.source)
+        return base === null || reexport.name === '*' ? undefined : this.declaring(base, reexport.name, true, depth + 1)
+      }
+    }
+    if (module.declared.has(name)) return { module, name }
+    if (!asExport) {
+      const imported = this.target(module, name)
+      if (imported) return 'leaf' in imported || imported.name === '*' ? undefined : this.declaring(imported.file, imported.name, true, depth + 1)
+      return undefined
+    }
+    for (const source of module.starred) {
+      const base = specifierBase(this.cwd, module.path, source)
+      if (base !== null && (await this.provides(base, name, new Set()))) return this.declaring(base, name, true, depth + 1)
+    }
+    return undefined
+  }
+
+  /** The module a namespace binding names: `import * as M`, or a named import of an `export * as M` re-export. */
+  private async namespaceModule(file: string, local: string): Promise<string | undefined> {
+    const module = await this.module(file)
+    const target = module && !('unparsed' in module) ? this.target(module, local) : undefined
+    if (!target || 'leaf' in target) return undefined
+    if (target.name === '*') return target.file
+    const owner = await this.module(target.file)
+    const reexport = owner && !('unparsed' in owner) ? owner.reexported.get(target.name) : undefined
+    return reexport?.name === '*' && owner && !('unparsed' in owner) ? (specifierBase(this.cwd, owner.path, reexport.source) ?? undefined) : undefined
+  }
+
+  /** `ns.member` where `file` imports `ns` as a namespace: the member as the module it names exports it. */
+  async memberIdentity(file: string, namespace: string, member: string): Promise<string | undefined> {
+    const module = await this.module(file)
+    const target = module && !('unparsed' in module) ? this.target(module, namespace) : undefined
+    // A package or an alias the reader does not follow: its specifier and the member.
+    if (target && 'leaf' in target) return `${target.leaf}#${member}`
+    const space = await this.namespaceModule(file, namespace)
+    return space === undefined ? undefined : this.identity(space, member, true)
   }
 
   /** The module that declares `name` as reached from `file`, following re-exports and `export *`; a leaf where it stops. */
@@ -297,14 +363,29 @@ class Declarations {
     const parents = new Map<string, { local: string; member?: string } | { expression: BabelNode }>()
     const reexported = new Map<string, { source: string; name: string }>()
     const starred: string[] = []
+    const localExports = new Map<string, string>()
     for (const statement of body) {
       const slice = text.slice(statement.start ?? 0, statement.end ?? text.length)
-      if (statement.type === 'ExportAllDeclaration') { starred.push(statement.source.value); continue }
+      // `export * as Models from` binds one name to the whole module, which a reader follows as a namespace.
+      if (statement.type === 'ExportAllDeclaration') {
+        const exported = (statement as { exported?: { type: string; name?: string; value?: string } | null }).exported
+        if (exported) reexported.set(exported.type === 'Identifier' ? exported.name! : exported.value!, { source: statement.source.value, name: '*' })
+        else starred.push(statement.source.value)
+        continue
+      }
       if (statement.type === 'ExportNamedDeclaration' && statement.source) {
         for (const specifier of statement.specifiers) {
-          if (specifier.type !== 'ExportSpecifier') continue
           const exported = specifier.exported.type === 'Identifier' ? specifier.exported.name : specifier.exported.value
+          if (specifier.type === 'ExportNamespaceSpecifier') reexported.set(exported, { source: statement.source.value, name: '*' })
+          if (specifier.type !== 'ExportSpecifier') continue
           reexported.set(exported, { source: statement.source.value, name: specifier.local.name })
+        }
+        continue
+      }
+      if (statement.type === 'ExportNamedDeclaration' && !statement.declaration) {
+        for (const specifier of statement.specifiers) {
+          if (specifier.type !== 'ExportSpecifier') continue
+          localExports.set(specifier.exported.type === 'Identifier' ? specifier.exported.name : specifier.exported.value, specifier.local.name)
         }
         continue
       }
@@ -330,7 +411,7 @@ class Declarations {
         bind(node.id.name, node.superClass)
       }
     }
-    return { path, text, declared, statements, parents, imports: importsByLocal(body), reexported, starred }
+    return { path, text, declared, statements, parents, imports: importsByLocal(body), reexported, starred, localExports }
   }
 
   relative(file: string): string {
@@ -445,9 +526,66 @@ async function actionRecord(
   const module = await declarations.module(controllerFile)
   const local = module && !('unparsed' in module) ? module : undefined
   const imports: Map<string, ImportEntry> = local?.imports ?? new Map()
-  const authorizes = literalAuthorizationCalls(body, rawBody).filter((call) => !call.templated).map(({ member, ability, subject }) => ({ member, ability, subject }))
   // The arguments of every call the record cannot name: what the digest has to cover.
   const unfollowed = unfollowedCallArguments(body, rawBody)
+  const block = actionBlock(rawBody, filePath)
+  const unconditional = new Set(block ? unconditionalThisCalls(block.body, 'authorize').map((call) => call.start! - block.offset) : [])
+  // What hides a file-level name inside the body: its own bindings and the action's parameters.
+  const bodyBindings = block ? new Set([...declaredNames(block.body), ...lookup.info.paramNames]) : undefined
+  const authorizes: AuthorizationCall[] = []
+  // A file-level name a local hides: the digest then follows what the body binds, not the file's binding.
+  let shadowed = false
+  for (const { member, ability, subject, index } of literalAuthorizationCalls(body, rawBody).filter((call) => !call.templated)) {
+    const classes: string[] = []
+    const parsed = subject === '' ? undefined : sourceIdentifiers(subject, filePath, (text) => `__args__(${text})`)
+    if (subject !== '' && !parsed) unfollowed.push(subject)
+    const binds = (name: string): boolean => imports.has(name) || !!local?.declared.has(name)
+    const hidden = (name: string): boolean => bodyBindings === undefined || bodyBindings.has(name)
+    // `ns.Post` through a namespace import: the member, followed from the module the namespace names.
+    // Any import may name a namespace (`export * as Models` re-exported by name); one that does not is digested.
+    const members = namespaceMembers(parsed?.program, (name) => imports.has(name) && !hidden(name))
+    for (const { namespace, member } of members) {
+      const resolved = await declarations.memberIdentity(controllerFile, namespace, member)
+      // An answer the reader cannot vouch for is digested, so an unknown shape reads as a change rather than as the same.
+      if (resolved === undefined) unfollowed.push(`${namespace}.${member}`)
+      else if (!classes.includes(resolved)) classes.push(resolved)
+    }
+    const viaNamespace = new Set(members.map((entry) => entry.namespace))
+    for (const name of (parsed?.names ?? []).filter((entry) => !viaNamespace.has(entry))) {
+      // A file-level binding is read whatever its spelling, a model named `Map` included.
+      if (name === '__args__' || (!binds(name) && NOT_BINDINGS.has(name))) continue
+      // A local of the action naming an import or a file-level class hides which one the call asks about.
+      if (binds(name) && (bodyBindings === undefined || bodyBindings.has(name))) {
+        unfollowed.push(name)
+        shadowed = true
+      } else if (binds(name)) {
+        const resolved = await subjectClass(cwd, controllerFile, imports, name, declarations)
+        if (resolved === undefined) unfollowed.push(name)
+        else if (!classes.includes(resolved)) classes.push(resolved)
+      }
+    }
+    // The class position, a tuple's first element or a bare subject: a name or namespace member the file binds, or a
+    // local the action declares once and never assigns, read by its initializer; anything else is the body's.
+    const position = classSubject(parsed?.program)
+    if (position && !classPosition(position.node, (name) => binds(name) && !hidden(name))) {
+      const init = position.node.type === 'Identifier' && block && !lookup.info.paramNames.includes(position.node.name as string) ? soleInitializer(block.body, position.node.name as string) : undefined
+      if (init) {
+        const parts = [canonicalSyntax(init)]
+        for (const name of referencedIdentifiers(init)) {
+          if (!binds(name) || hidden(name)) continue
+          const resolved = await subjectClass(cwd, controllerFile, imports, name, declarations)
+          if (resolved === undefined) unfollowed.push(name)
+          parts.push(resolved ?? '')
+        }
+        classes.push(`local:${position.node.name as string}=${digest(parts.join('\n'))}`)
+      } else if (position.tuple || position.node.type !== 'Identifier') {
+        unfollowed.push(nodeText(`__args__(${subject})`, position.node as { start?: number; end?: number }))
+      }
+    }
+    // How a call that is not unconditional is reached: the whole action, as syntax.
+    const reach = member === 'authorize' && !unconditional.has(index) ? reachDigest(block, rawBody) : undefined
+    authorizes.push({ member, ability, subject, ...(classes.length > 0 ? { classes } : {}), ...(member === 'authorize' && unconditional.has(index) ? { unconditional: true as const } : {}), ...(reach ? { reach } : {}) })
+  }
   const validates: ValidateCall[] = []
   for (const site of validateCallSites(body)) {
     // A schema the controller file declares itself, as the documented controller pattern does.
@@ -470,7 +608,7 @@ async function actionRecord(
     const binds = (name: string): boolean => !!local && (local.declared.has(name) || local.imports.has(name))
     // An argument naming a local of the action reaches whatever the action assigns it: the whole body is the scope.
     const locals = new Set(args?.names.filter((name) => name !== '__args__' && !NOT_BINDINGS.has(name) && !binds(name)) ?? [])
-    const widened = !args || locals.size > 0
+    const widened = !args || locals.size > 0 || shadowed
     const names = widened ? (whole?.names ?? rawBody.match(IDENTIFIER) ?? []) : args.names
     const parts = [await declarations.closure(controllerFile, rawBody, names)]
     // `this.<member>` names the class's own field or method, which only the class statements hold:
@@ -484,6 +622,97 @@ async function actionRecord(
     validates,
     ...(unseen ? { unseen } : {}),
   }
+}
+
+// A method of a derived class, so `super` parses as it does in the controller.
+const ACTION_PREFIX = 'class __Action__ extends Object { async __action__() '
+
+/** The action's own block, with where `rawBody` starts in what was parsed; `undefined` for a concise arrow or a body that does not parse. */
+function actionBlock(rawBody: string, file: string): { body: { body: readonly unknown[] }; offset: number } | undefined {
+  if (!rawBody.trimStart().startsWith('{')) return undefined
+  const ast = parseSourceFile(`${ACTION_PREFIX}${rawBody} }`, file)
+  const declaration = ast?.program.body[0]
+  const method = declaration?.type === 'ClassDeclaration' ? declaration.body.body[0] : undefined
+  const body = method && 'body' in method ? method.body : undefined
+  return body && !Array.isArray(body) && body.type === 'BlockStatement' ? { body, offset: ACTION_PREFIX.length } : undefined
+}
+
+/** Every name a block binds anywhere inside it: declarations, parameters of nested functions, catch clauses, classes, enums. */
+function declaredNames(block: unknown): Set<string> {
+  const names = new Set<string>()
+  walk(block, (current) => {
+    const node = current as BabelNode & { id?: PatternNode; params?: PatternNode[]; param?: PatternNode }
+    if (current.type === 'VariableDeclarator') patternNames(node.id).forEach((name) => names.add(name))
+    // A function, a class, an enum or a namespace binds its name, and an expression of one binds it inside itself.
+    if ((current.type.endsWith('Declaration') || current.type === 'FunctionExpression' || current.type === 'ClassExpression') && node.id) patternNames(node.id).forEach((name) => names.add(name))
+    for (const param of node.params ?? []) patternNames(param).forEach((name) => names.add(name))
+    if (current.type === 'CatchClause' && node.param) patternNames(node.param).forEach((name) => names.add(name))
+  })
+  return names
+}
+
+/** What a name the controller file binds is, followed to the module declaring it (`Declarations.identity()`); a package import by its specifier and name. */
+async function subjectClass(cwd: string, file: string, imports: Map<string, ImportEntry>, name: string, declarations: Declarations): Promise<string | undefined> {
+  const entry = imports.get(name)
+  if (entry && specifierBase(cwd, file, entry.source) === null) return `${entry.source}#${entry.kind === 'named' ? entry.imported : entry.kind === 'default' ? 'default' : '*'}`
+  return declarations.identity(file, name)
+}
+
+/** Whether a top-level statement declares a class under its name: `class X`, `export default class`, `const X = class`. */
+function declaresClass(statement: BabelNode | undefined): boolean {
+  const node = (statement?.type === 'ExportNamedDeclaration' || statement?.type === 'ExportDefaultDeclaration' ? statement.declaration : statement) as BabelNode | undefined
+  if (node?.type === 'ClassDeclaration') return true
+  const declarations = node?.type === 'VariableDeclaration' ? (node.declarations as Array<{ init?: BabelNode | null }>) : []
+  return declarations.length === 1 && declarations[0]!.init?.type === 'ClassExpression'
+}
+
+/**
+ * The node in the class position of a subject, as `sourceIdentifiers()` parsed it inside `__args__(…)`: a tuple's first
+ * element, or a bare identifier, which may hold a class or a record.
+ */
+function classSubject(program: BabelNode | undefined): { node: BabelNode; tuple: boolean } | undefined {
+  const statement = (program?.body as BabelNode[] | undefined)?.[0] as (BabelNode & { expression?: BabelNode & { arguments?: BabelNode[] } }) | undefined
+  const first = statement?.expression?.arguments?.[0] as (BabelNode & { elements?: Array<BabelNode | null> }) | undefined
+  if (first?.type === 'ArrayExpression') return first.elements?.[0] ? { node: first.elements[0], tuple: true } : undefined
+  return first?.type === 'Identifier' ? { node: first, tuple: false } : undefined
+}
+
+/** The initializer of the one declaration of `name` in the block, when nothing assigns it again; `undefined` otherwise. */
+function soleInitializer(block: unknown, name: string): BabelNode | undefined {
+  const inits: Array<BabelNode | null | undefined> = []
+  let assigned = false
+  walk(block, (current) => {
+    const node = current as BabelNode & { id?: PatternNode; init?: BabelNode | null; left?: PatternNode; argument?: PatternNode; params?: PatternNode[] }
+    if (current.type === 'VariableDeclarator' && patternNames(node.id).includes(name)) inits.push(node.id?.type === 'Identifier' ? node.init : null)
+    if (current.type === 'AssignmentExpression' && patternNames(node.left).includes(name)) assigned = true
+    if (current.type === 'UpdateExpression' && node.argument?.type === 'Identifier' && node.argument.name === name) assigned = true
+    if ((node.params ?? []).some((param) => patternNames(param).includes(name))) assigned = true
+  })
+  return !assigned && inits.length === 1 && inits[0] ? inits[0] : undefined
+}
+
+/** An allowlist for a class position: a name the file binds, or `ns.Member` on one. */
+function classPosition(node: BabelNode, bound: (name: string) => boolean): boolean {
+  if (node.type === 'Identifier') return bound(node.name as string)
+  const member = node as BabelNode & { object?: BabelNode; property?: BabelNode; computed?: boolean }
+  return node.type === 'MemberExpression' && !member.computed && member.object?.type === 'Identifier' && member.property?.type === 'Identifier' && bound(member.object.name as string)
+}
+
+/** Every `ns.Member` a subject reads on a name `isNamespace` accepts. */
+function namespaceMembers(program: BabelNode | undefined, isNamespace: (name: string) => boolean): Array<{ namespace: string; member: string }> {
+  const found: Array<{ namespace: string; member: string }> = []
+  walk(program, (current) => {
+    const node = current as BabelNode & { object?: BabelNode; property?: BabelNode; computed?: boolean }
+    if (current.type === 'MemberExpression' && !node.computed && node.object?.type === 'Identifier' && node.property?.type === 'Identifier' && isNamespace(node.object.name as string)) {
+      found.push({ namespace: node.object.name as string, member: node.property.name as string })
+    }
+  })
+  return found
+}
+
+/** A digest of the whole action, as syntax: a later statement may call a helper holding the check, or act on its denial. */
+function reachDigest(block: { body: { body: readonly unknown[] }; offset: number } | undefined, rawBody: string): string {
+  return digest(block ? canonicalSyntax(block.body.body) : rawBody)
 }
 
 /** The export an identifier (or `namespace.name`) names through the file's imports, never one matched by name alone. */

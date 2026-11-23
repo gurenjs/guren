@@ -12,7 +12,7 @@ import type { JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
 import { readCreationStatements, snapshotRecordsCreation, type CreationForeignKey, type CreationStatement, type MigrationDialect } from '@guren/orm/internal/migration-guard'
 
-import { canonicalSyntax, referencedIdentifiers, sameComments, walk } from '../ast-walk'
+import { canonicalSyntax, referencedIdentifiers, sameComments, unconditionalThisCalls, walk } from '../ast-walk'
 import { classActionMembers } from '../controller-methods'
 import { extractClassDeclaration } from '../model-parser'
 import { parseSourceFile } from '../parse-cache'
@@ -448,7 +448,7 @@ export async function declaredRoute(route: RouteSecurityRecord, head: HeadRoutes
     if (!model || model.module !== undefined || 'unread' in route.handler) return undefined
     const tuple = new RegExp(`^\\[\\s*${model.name}\\s*,\\s*[A-Za-z_$][\\w$]*\\s*\\]$`)
     const asks = (subject: string): boolean => tuple.test(subject) || (!asksPolicyOfRecord(plan, action) && subject === model.name)
-    if (!route.handler.authorizes.some((call) => call.member === 'authorize' && call.ability === policy.ability && asks(call.subject))) return undefined
+    if (!route.handler.authorizes.some((call) => call.member === 'authorize' && call.unconditional && call.ability === policy.ability && asks(call.subject))) return undefined
     // The record reads calls by pattern, so the action is read for the call itself: awaited, a statement of the body, on the model.
     const path = controllerFilePath(controller)
     const source = await readHead(path)
@@ -480,11 +480,8 @@ function awaitsPolicy(ast: File, className: string, actionName: string, ability:
   const body = members.length === 1 && !members[0]!.member.static ? members[0]!.body : undefined
   if (body?.type !== 'BlockStatement') return false
   const isModel = (node: unknown): boolean => (node as { type?: string; name?: string } | null)?.type === 'Identifier' && (node as { name: string }).name === model
-  return body.body.some((statement) => {
-    if (statement.type !== 'ExpressionStatement' || statement.expression.type !== 'AwaitExpression') return false
-    const call = statement.expression.argument
-    if (call.type !== 'CallExpression' || call.callee.type !== 'MemberExpression' || call.callee.object.type !== 'ThisExpression') return false
-    if (call.callee.computed || call.callee.property.type !== 'Identifier' || call.callee.property.name !== 'authorize' || call.arguments.length !== 2) return false
+  return unconditionalThisCalls(body, 'authorize').some((call) => {
+    if (call.arguments.length !== 2) return false
     const [first, subject] = call.arguments
     if (first?.type !== 'StringLiteral' || first.value !== ability) return false
     if (subject?.type === 'ArrayExpression') return subject.elements.length === 2 && isModel(subject.elements[0]) && subject.elements[1]?.type === 'Identifier'

@@ -356,3 +356,34 @@ export function sameComments(before: CommentedFile, beforeSource: string, after:
   const [a, b] = [values(before, beforeSource), values(after, afterSource)]
   return a !== undefined && b !== undefined && a.length === b.length && a.every((value, index) => value === b[index])
 }
+
+// A class is stopped at as a whole, its methods with it.
+const FUNCTION_LIKE = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'ObjectMethod', 'ClassDeclaration', 'ClassExpression'])
+
+/** Whether a statement may leave the function it sits in: a `return` in it, one in a nested function or class aside. */
+function mayReturn(statement: unknown): boolean {
+  let found = false
+  walk(statement, (node) => {
+    if (found || FUNCTION_LIKE.has(node.type)) return false
+    if (node.type === 'ReturnStatement') found = true
+  })
+  return found
+}
+
+/**
+ * The `this.<member>(…)` call a statement of a function's own body awaits, when every statement before it falls
+ * through to it (RFC 0040 §3, an unconditional check). An allowlist: a call under a condition, after a `return`
+ * that may run first, inside a `try`, behind `void` or `.catch()`, or in a helper is no such statement.
+ */
+export function unconditionalThisCalls(body: { body: readonly unknown[] }, member: string): Array<Node & { type: 'CallExpression' }> {
+  const calls: Array<Node & { type: 'CallExpression' }> = []
+  for (const statement of body.body as Node[]) {
+    if (statement.type === 'ExpressionStatement' && statement.expression.type === 'AwaitExpression') {
+      const call = statement.expression.argument
+      if (call.type === 'CallExpression' && call.callee.type === 'MemberExpression' && call.callee.object.type === 'ThisExpression'
+        && !call.callee.computed && call.callee.property.type === 'Identifier' && call.callee.property.name === member) calls.push(call)
+    }
+    if (mayReturn(statement)) break
+  }
+  return calls
+}

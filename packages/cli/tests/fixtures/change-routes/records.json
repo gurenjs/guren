@@ -1,6 +1,6 @@
 {
   "scaffold": {
-    "recordVersion": 2,
+    "recordVersion": 3,
     "routes": [
       {
         "method": "GET",
@@ -16,7 +16,7 @@
     ]
   },
   "mount": {
-    "recordVersion": 2,
+    "recordVersion": 3,
     "routes": [
       {
         "method": "POST",
@@ -100,7 +100,11 @@
             {
               "member": "authorize",
               "ability": "delete",
-              "subject": "[Comment, comment]"
+              "subject": "[Comment, comment]",
+              "classes": [
+                "app/Models/Comment.ts#Comment"
+              ],
+              "unconditional": true
             }
           ],
           "validates": []
