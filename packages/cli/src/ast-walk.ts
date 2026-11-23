@@ -357,7 +357,8 @@ export function sameComments(before: CommentedFile, beforeSource: string, after:
   return a !== undefined && b !== undefined && a.length === b.length && a.every((value, index) => value === b[index])
 }
 
-const FUNCTION_LIKE = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'ObjectMethod', 'ClassMethod', 'ClassPrivateMethod', 'ClassDeclaration', 'ClassExpression'])
+// A class is stopped at as a whole, its methods with it.
+const FUNCTION_LIKE = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'ObjectMethod', 'ClassDeclaration', 'ClassExpression'])
 
 /** Whether a statement may leave the function it sits in: a `return` in it, one in a nested function or class aside. */
 function mayReturn(statement: unknown): boolean {
