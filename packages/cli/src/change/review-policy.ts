@@ -165,8 +165,8 @@ export function applyReviewPolicy(facts: readonly ChangeFact[], paths: readonly 
   const set = (code: Exclude<FactCode, 'review-path'>): Lane | undefined => (policy.facts && Object.hasOwn(policy.facts, code) ? policy.facts[code] : undefined)
   const applied = facts.map((fact) => {
     let lane = set(fact.code as Exclude<FactCode, 'review-path'>)
-    // An edit read as the plan's addition is still an edit: a raise the policy sets for `source-edited` holds for it too.
-    const edit = fact.planAddition ? set('source-edited') : undefined
+    // A declared edit or deletion is still one: a raise the policy sets for `source-edited` or `source-removed` holds for it too.
+    const edit = fact.planAddition ? set('source-edited') : fact.code === 'file-removed' ? set('source-removed') : undefined
     if (edit !== undefined && laneRank(edit) > laneRank(lane ?? fact.lane)) lane = edit
     return lane === undefined || lane === fact.lane ? fact : { ...fact, lane, policyFrom: fact.lane }
   })

@@ -44,6 +44,8 @@ export const FACT_CLASSES = {
   'provider-added': { kind: 'declarable', lowest: 'low' },
   'config-added': { kind: 'declarable', lowest: 'low' },
   'env-added': { kind: 'declarable', lowest: 'low' },
+  // A source file the change deletes at the path one open plan's `drop` element owns: `source-removed`, declared.
+  'file-removed': { kind: 'declarable', lowest: 'low' },
   'policy-changed': { kind: 'declarable', lowest: 'medium' },
   'dependencies-changed': { kind: 'declarable', lowest: 'medium' },
   'ambient': { kind: 'ambient', lowest: 'low' },
