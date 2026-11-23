@@ -296,6 +296,18 @@ describe('auditFacts', () => {
     expect(await codes(report([]), warning('app/Http/Controllers/CommentController.ts'))).toEqual([])
   })
 
+  test('should call a model rule warning new on an edited model by its message, and leave an added model alone', async () => {
+    const model = 'app/Models/Comment.ts'
+    const owner = (columns: string) => ({ key: 'owner-fillable:Comment', filePath: model, message: `Comment lists ${columns} in fillable` })
+    const change = fakeChange([{ path: model, status: 'modified' }])
+
+    expect(await codes(report([{ key: 'mass-assignment:Comment', filePath: model, status: 'pass' }]), report([{ key: 'mass-assignment:Comment', filePath: model }, owner("'authorId'")]), change))
+      .toEqual(['audit-warn-changed mass-assignment:Comment', 'audit-warn-changed owner-fillable:Comment'])
+    expect(await codes(report([owner("'authorId'")]), report([owner("'authorId'")]), change)).toEqual([])
+    expect(await codes(report([owner("'authorId'")]), report([owner("'authorId', 'editorId'")]), change)).toEqual(['audit-warn-changed owner-fillable:Comment'])
+    expect(await codes(report([]), report([owner("'authorId'")]), fakeChange([{ path: model, status: 'added' }]))).toEqual([])
+  })
+
   test('should call a sensitive column, a CSRF exemption and a suppression the base did not have by their own facts', async () => {
     const head = report([
       { key: 'exposure-sensitive-column:User.passwordHash:app/Http/Resources/UserResource.ts:toArray', filePath: 'app/Http/Resources/UserResource.ts', line: 5 },

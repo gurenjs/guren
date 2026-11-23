@@ -680,13 +680,16 @@ async function declarationOf(
 }
 
 /**
- * The files whose edit may read as the plan's addition: a controller, whose actions the records read, and a model, whose
- * writes the audit reads. A validator a route parses by hand, a resource or a side effect has no reader of its edit.
+ * The files whose edit may read as the plan's addition: a controller, whose `authorize()`/`validate*()` calls the records
+ * read, and a model, whose writable and serialized columns the audit reads. A validator, a resource or a side effect has
+ * no reader of its edit. What an action checks by hand and a model's scopes stay unread, as for an addition.
  */
 function editLowers(declared: DeclaredFile, path: string): boolean {
   if (declared.check.kind === 'controller') return true
-  return declared.check.kind === 'exports' && path.startsWith(`${MODELS_DIR}/`) && declared.elements.some((id) => id.startsWith('model.'))
+  return declared.check.kind === 'exports' && MODEL_FILE.test(path) && declared.elements.some((id) => id.startsWith('model.'))
 }
+
+const MODEL_FILE = new RegExp(`^(?:modules/[^/]+/)?${MODELS_DIR}/`)
 
 /** Whether the head's file at `path` is what the plan declares there: its exports, and the check its kind takes. */
 async function holdsDeclared(plan: PlanDraft, declared: DeclaredFile, path: string, readHead: (path: string) => Promise<string | null>): Promise<boolean> {
