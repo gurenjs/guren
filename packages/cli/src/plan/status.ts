@@ -178,8 +178,8 @@ export function awaitsVerification(element: PlanElementStatus<PlanElementState>)
   return element.state === 'unjudged' || element.state === element.completesAt
 }
 
-/** What a binding with no `key` looks up by, on either side. */
-const PRIMARY_KEY = 'the primary key'
+/** The column `findOrFail()` looks a record up by when a binding names none (orm `Model.findOrFail`). */
+const DEFAULT_LOOKUP_KEY = 'id'
 
 function compare(property: string, planned: string, actual: string | undefined, whyUnknown: string): PlanPropertyStatus {
   if (actual === undefined) return unknown(property, planned, whyUnknown)
@@ -1200,17 +1200,20 @@ class StatusContext {
   }
 
   /**
-   * A binding's lookup column (`key` absent: the primary key). Said only where the plan states a column or the route
-   * looks up by another than the primary key, so a plan that states none and a column that cannot be read add nothing.
+   * A binding's lookup column, `id` on either side where no `key` is given (`findOrFail()`'s default). Said for every
+   * planned binding, so an `alter` back to the default still has a property to show it; only a detail that read no
+   * lookups at all (`bindingKeys` absent) keeps to a planned `key`.
    */
   private bindingKey(planned: string | undefined, actual: PlanAppRouteDetail, param: string): PlanPropertyStatus | undefined {
     const property = `bind ${param} key`
-    const want = planned ?? PRIMARY_KEY
-    const read = actual.bindingKeys === undefined ? { unread: 'the lookup column of a binding is not read' } : actual.bindingKeys[param]
-    if (read === undefined) return planned === undefined ? undefined : differ(property, want, 'not bound')
-    if (read !== null && typeof read === 'object') return planned === undefined ? undefined : unknown(property, want, read.unread)
-    if (planned === undefined && read === null) return undefined
-    return compare(property, want, read ?? PRIMARY_KEY, '')
+    const want = planned ?? DEFAULT_LOOKUP_KEY
+    if (actual.bindingKeys === undefined) return planned === undefined ? undefined : unknown(property, want, 'the lookup column of a binding is not read')
+    // With no model bound either, `bind <param>` already says so; a bound name that no lookup runs (an inline handler,
+    // a parameter the path does not declare) is a differ of its own.
+    if (!Object.hasOwn(actual.bindingKeys, param)) return actual.bindings[param] === undefined ? undefined : differ(property, want, 'not looked up')
+    const read = actual.bindingKeys[param]!
+    if (read !== null && typeof read === 'object') return unknown(property, want, read.unread)
+    return compare(property, want, read ?? DEFAULT_LOOKUP_KEY, '')
   }
 
   view(view: PlanView): PlanElementStatus {

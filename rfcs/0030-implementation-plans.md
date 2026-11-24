@@ -1817,8 +1817,12 @@ class are read since, see *policy abilities and side-effect uses* below).
 A binding's lookup `key` is read since, from `Router.registeredBindingLookups()`
 on the router the routes file registers into (RFC 0040 §3 added it for the
 security records): a planned `key` is compared with the column, an absent one
-on either side meaning the primary key, and a custom resolver, a parameter
-bound at both levels, or a server without the method leave it unknown.
+on either side meaning `id`, `findOrFail()`'s default, and a bound model no
+lookup runs (an inline handler, a parameter the path does not declare) is a
+`differ`. A custom resolver, a parameter bound at both levels, a router-level
+binding a module or two registrars set (one map serves every route, so the
+winner depends on `createApp({ modules })`), or a server without the method
+leave it unknown.
 
 A property with no reader is **unknown**. Unknown never counts towards
 `present`, never satisfies a `drop`, and is listed on the page as "planned,

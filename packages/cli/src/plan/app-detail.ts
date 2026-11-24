@@ -49,6 +49,7 @@ import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../rou
 import { importsByLocal, specifierBase, withoutExtension } from '../schema-binding'
 import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
 import { answersMethod, registeredBefore, routePathCovers } from '../test-requests'
+import { extractPathParamNames } from '../utils'
 import { discoverSectionFiles } from './discovery'
 import { isUnreadable } from './unreadable'
 import type { PlanAppScope, PlanAppUnreadable } from './app-state'
@@ -234,6 +235,8 @@ export interface PlanAppDetailInput {
   definitions: RouteDefinition[] | undefined
   /** `Router.registeredBindingLookups()` in the same order; `undefined` when the server has no such method. */
   bindingLookups?: ReadonlyArray<Record<string, RouterBindingLookup>>
+  /** Which registrars called `router.bind()` on each parameter: `null` for the entry's, else the module directory. */
+  bindingBinders?: ReadonlyMap<string, ReadonlySet<string | null>>
   provenance: Array<string | null>
   moduleWarnings: string[]
   controllers: ControllerMethodScan | PlanAppUnreadable
@@ -330,21 +333,39 @@ function contractSchemaObjects(definitions: RouteDefinition[] | undefined): Set<
 const NO_BINDING_LOOKUPS = 'the installed @guren/server has no Router.registeredBindingLookups(), so a lookup column is not read: upgrade @guren/core'
 
 /**
- * Each bound parameter's lookup column, as the router runs it. A custom resolver is a function this does not read, and a
- * parameter bound at both levels runs both lookups, so neither is the one column a plan's `key` states.
+ * Each path parameter's lookup column, as a request runs it: only a controller action resolves bindings, and only for a
+ * parameter its path declares. A custom resolver is a function this does not read; a parameter bound at both levels runs
+ * both lookups; and a router-level binding a module sets, or one two registrars set, serves every route through one map,
+ * so which wins depends on the modules `createApp()` lists and their order, which this reading does not follow.
  */
-function bindingKeys(named: Record<string, string>, lookups: Record<string, RouterBindingLookup> | undefined): Record<string, PlanAppBindingKey> {
-  const keys: Record<string, PlanAppBindingKey> = {}
-  if (lookups === undefined) {
-    for (const parameter of Object.keys(named)) keys[parameter] = { unread: NO_BINDING_LOOKUPS }
-    return keys
-  }
-  for (const [parameter, lookup] of Object.entries(lookups)) {
-    if ('resolver' in lookup) keys[parameter] = { unread: 'the parameter is bound to a custom resolver, whose lookup is not read' }
+function bindingKeys(
+  route: ContextRoute,
+  lookups: Record<string, RouterBindingLookup> | undefined,
+  binders: ReadonlyMap<string, ReadonlySet<string | null>> | undefined,
+  scope: string | null,
+): Record<string, PlanAppBindingKey> {
+  const keys: Record<string, PlanAppBindingKey> = Object.create(null)
+  if (!route.controller) return keys
+  for (const parameter of extractPathParamNames(route.path)) {
+    if (lookups === undefined) {
+      keys[parameter] = { unread: NO_BINDING_LOOKUPS }
+      continue
+    }
+    if (!Object.hasOwn(lookups, parameter)) continue
+    const lookup = lookups[parameter]!
+    const routerLevel = 'model' in lookup || 'resolver' in lookup ? lookup : lookup.router
+    const registrars = binders?.get(parameter)
+    if (routerLevel && registrars && !(registrars.size === 1 && (registrars.has(null) || registrars.has(scope)))) {
+      keys[parameter] = { unread: `router.bind() sets the parameter in ${describeBinders(registrars)}, and one binding serves every route, so which one a request runs depends on the modules createApp() lists and their order` }
+    } else if ('resolver' in lookup) keys[parameter] = { unread: 'the parameter is bound to a custom resolver, whose lookup is not read' }
     else if (lookup.router) keys[parameter] = { unread: 'the parameter is bound at both the route and the router level, and both lookups run' }
     else keys[parameter] = lookup.key ?? null
   }
   return keys
+}
+
+function describeBinders(registrars: ReadonlySet<string | null>): string {
+  return [...registrars].map((registrar) => (registrar === null ? 'the entry registrar' : `modules/${registrar}`)).join(' and ')
 }
 
 function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanAppDetail['routes'] {
@@ -360,7 +381,7 @@ function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanApp
       middleware: route.middleware ?? [],
       hasInlineMiddleware: route.hasInlineMiddleware === true,
       bindings: route.bindings ?? {},
-      bindingKeys: bindingKeys(route.bindings ?? {}, input.bindingLookups === undefined ? undefined : input.bindingLookups[index] ?? {}),
+      bindingKeys: bindingKeys(route, input.bindingLookups === undefined ? undefined : input.bindingLookups[index] ?? {}, input.bindingBinders, input.provenance[index] ?? null),
       ...(route.agent ? { agent: { toolName: route.agent.toolName, readOnly: route.agent.readOnlyHint } } : {}),
       ...(route.prototype ? { prototype: true as const } : {}),
       module: input.provenance[index] ?? null,

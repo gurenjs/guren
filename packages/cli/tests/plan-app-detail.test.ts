@@ -353,6 +353,8 @@ export function registerWebRoutes(router: Router): void {
   router.get('/drafts/:draft', { name: 'drafts.show', bind: { draft: Post } }, [PostController, 'index'])
   router.get('/authors/:author', [PostController, 'index']).name('authors.show')
   router.get('/by/:author', { name: 'by.show', bind: { author: Post } }, [PostController, 'index'])
+  router.get('/inline/:post', { name: 'inline.show', bind: { post: Post } }, (c) => c.text('ok'))
+  router.get('/stray/:id', { name: 'stray.show', bind: { post: [Post, 'slug'] } }, [PostController, 'index'])
 }
 `,
     })
@@ -362,6 +364,42 @@ export function registerWebRoutes(router: Router): void {
     expect(keys['drafts.show']).toEqual({ draft: null })
     expect(keys['authors.show']).toEqual({ author: { unread: expect.stringContaining('custom resolver') } })
     expect(keys['by.show']).toEqual({ author: { unread: expect.stringContaining('both the route and the router level') } })
+    // An inline handler resolves no binding, and a request has no parameter its path does not declare.
+    expect(keys['inline.show']).toEqual({})
+    expect(keys['stray.show']).toEqual({})
+  })
+
+  test('should leave a router-level binding a module sets unread outside that module\'s own routes', async () => {
+    const detail = await detailOf('binding-lookups-module', {
+      'src/app.ts': entry('{ routes: registerWebRoutes, modules: [billing] }'),
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+
+class Post {
+  static findOrFail(): null { return null }
+}
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/drafts/:draft', { name: 'drafts.show', bind: { draft: Post } }, [PostController, 'index'])
+}
+`,
+      'modules/billing/routes.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../../app/Http/Controllers/PostController.js'
+
+class Invoice {
+  static findOrFail(): null { return null }
+}
+
+export function registerBillingRoutes(router: Router): void {
+  router.bind('draft', [Invoice, 'uuid'])
+  router.get('/billing/drafts/:draft', [PostController, 'index']).name('billing.drafts.show')
+}
+`,
+    })
+    const keys = Object.fromEntries((detail.routes as PlanAppRouteDetail[]).map((route) => [route.name, route.bindingKeys]))
+
+    expect(keys['billing.drafts.show']).toEqual({ draft: 'uuid' })
+    expect(keys['drafts.show']).toEqual({ draft: { unread: expect.stringContaining('modules/billing') } })
   })
 })
 

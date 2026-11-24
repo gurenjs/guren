@@ -50,6 +50,8 @@ export interface RoutesFileGraphReading {
   moduleWarnings: string[]
   /** Per definition, how each bound parameter is looked up; `undefined` when the server cannot say or nothing loaded. */
   bindingLookups?: ReadonlyArray<Record<string, RouterBindingLookup>>
+  /** Which registrars called `router.bind()` on each parameter (`BindingLookupSink.binders`). */
+  bindingBinders?: ReadonlyMap<string, ReadonlySet<string | null>>
 }
 
 /** Plan's registrar reading; importing an app entry or replacing it with a manifest would change approval facts. */
@@ -64,6 +66,7 @@ export async function readRoutesFileGraph(cwd: string, routesFile?: string): Pro
     return {
       ...reading, file: target.path, definitions, entries, routes: entries.map(({ route }) => routeDefinitionToContextRoute(route)),
       ...(sink.lookups ? { bindingLookups: sink.lookups } : {}),
+      ...(sink.binders && sink.binders.size > 0 ? { bindingBinders: sink.binders } : {}),
     }
   } catch (error) {
     const reason = (error instanceof Error ? error.message : String(error)) || 'the routes file threw without a message'

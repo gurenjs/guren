@@ -911,8 +911,8 @@ describe('judgePlan', () => {
         controllers: [controller(EXISTING, [action(EXISTING, { name: 'show' })])],
         routes: [{ id: 'r', change: ADD, method: 'GET', path: '/posts/:id', name: 'posts.show', action: 'a', middleware: [], bind: [{ param: 'id', model: 'm', ...(key ? { key } : {}) }] }],
       })
-      const registered = (bindingKeys?: PlanAppRouteDetail['bindingKeys']): PlanAppState => app({
-        routes: [{ name: 'posts.show', method: 'GET', path: '/posts/:id', action: 'PostController.show', middleware: [], hasInlineMiddleware: false, bindings: { id: 'Post' }, module: null, contractSchemas: [], ...(bindingKeys ? { bindingKeys } : {}) }],
+      const registered = (bindingKeys?: PlanAppRouteDetail['bindingKeys'], bindings: Record<string, string> = { id: 'Post' }): PlanAppState => app({
+        routes: [{ name: 'posts.show', method: 'GET', path: '/posts/:id', action: 'PostController.show', middleware: [], hasInlineMiddleware: false, bindings, module: null, contractSchemas: [], ...(bindingKeys ? { bindingKeys } : {}) }],
       })
       const keyOf = (document: PlanDraft, state: PlanAppState) =>
         only(judgePlan(document, state), 'r').properties.find((property) => property.property === 'bind id key')
@@ -920,22 +920,27 @@ describe('judgePlan', () => {
       test.each([
         { name: 'the planned column', key: 'slug', read: 'slug', verdict: 'match' },
         { name: 'another column', key: 'slug', read: 'uuid', verdict: 'differ' },
-        { name: 'the primary key where the plan states a column', key: 'slug', read: null, verdict: 'differ' },
+        { name: 'findOrFail()\'s default where the plan states a column', key: 'slug', read: null, verdict: 'differ' },
         { name: 'a column where the plan states none', key: undefined, read: 'slug', verdict: 'differ' },
+        { name: 'findOrFail()\'s default where the plan states none', key: undefined, read: null, verdict: 'match' },
+        { name: 'findOrFail()\'s default where the plan states id', key: 'id', read: null, verdict: 'match' },
+        { name: 'id where the plan states none', key: undefined, read: 'id', verdict: 'match' },
       ] as const)('should judge a route looking the parameter up by $name', ({ key, read, verdict }) => {
         expect(keyOf(bound(key), registered({ id: read }))).toMatchObject({ verdict })
-      })
-
-      test('should add nothing when both sides look the parameter up by its primary key', () => {
-        expect(keyOf(bound(), registered({ id: null }))).toBeUndefined()
       })
 
       test('should call the column unknown, with the reason, where the router does not say it', () => {
         const unread = { unread: 'the parameter is bound to a custom resolver, whose lookup is not read' }
 
         expect(keyOf(bound('slug'), registered({ id: unread }))).toMatchObject({ verdict: 'unknown', reason: unread.unread })
+        expect(keyOf(bound(), registered({ id: unread }))).toMatchObject({ verdict: 'unknown', reason: unread.unread })
         expect(keyOf(bound('slug'), registered())).toMatchObject({ verdict: 'unknown' })
-        expect(keyOf(bound(), registered({ id: unread }))).toBeUndefined()
+        expect(keyOf(bound(), registered())).toBeUndefined()
+      })
+
+      test('should differ on a bound model no lookup runs, and leave an absent binding to bind <param>', () => {
+        expect(keyOf(bound(), registered({}))).toMatchObject({ verdict: 'differ', actual: 'not looked up' })
+        expect(keyOf(bound('slug'), registered({}, {}))).toBeUndefined()
       })
     })
 
