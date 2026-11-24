@@ -58,9 +58,14 @@ export function aboutOps(board: Board, questionId: string, targetId: string): Bo
 
 function readd(note: BoardNote): BoardOp[] {
   const ops: BoardOp[] = [{ op: 'add', id: note.id, kind: note.kind, text: note.text, at: { x: note.x, y: note.y } }]
-  if (note.section !== undefined) ops.push({ op: 'edit', id: note.id, section: note.section })
+  // Naming the section may place the note in it, so its own position is set again after.
+  if (note.section !== undefined) ops.push({ op: 'edit', id: note.id, section: note.section }, { op: 'move', id: note.id, x: note.x, y: note.y })
   if (note.link) ops.push({ op: 'link', id: note.id, link: note.link })
   return ops
+}
+
+function sameRect(a: BoardSection, b: BoardSection): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
 }
 
 function sectionRect(section: BoardSection): { x: number; y: number; width: number; height: number } {
@@ -102,6 +107,11 @@ export function inverseOps(before: Board, after: Board, ops: readonly BoardOp[])
     } else if (!was && is) {
       unsections.push({ op: 'unsection', id })
     } else if (was && is) {
+      // A rename leaves the rectangle alone, so undoing it must not move a section another writer moved since.
+      if (sameRect(was, is)) {
+        if (was.title !== is.title) sectionsBack.push({ op: 'section', id, title: was.title })
+        continue
+      }
       sectionsBack.push({ op: 'section', id, title: was.title, at: sectionRect(was) })
       for (const note of before.notes) {
         const now = findNote(after, note.id)
@@ -129,13 +139,14 @@ export function inverseOps(before: Board, after: Board, ops: readonly BoardOp[])
       if (was.about?.length) edits.push({ op: 'edit', id, about: was.about })
       continue
     }
-    if (is.x !== was.x || is.y !== was.y) edits.push({ op: 'move', id, x: was.x, y: was.y })
     const edit: BoardOp & { op: 'edit' } = { op: 'edit', id }
     if (is.text !== was.text) edit.text = was.text
     if (is.kind !== was.kind) edit.kind = was.kind
     if (is.section !== was.section) edit.section = was.section ?? null
     if (JSON.stringify(is.about ?? []) !== JSON.stringify(was.about ?? [])) edit.about = was.about ?? []
     if (Object.keys(edit).length > 2) edits.push(edit)
+    // After the edit: naming a section may place the note, and this puts it back where it was.
+    if (is.x !== was.x || is.y !== was.y || edit.section !== undefined) edits.push({ op: 'move', id, x: was.x, y: was.y })
     if (JSON.stringify(is.link) !== JSON.stringify(was.link)) links.push({ op: 'link', id, link: was.link ?? null })
   }
 

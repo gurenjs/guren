@@ -178,14 +178,24 @@ has no language switch, so the canvas picks its dictionary from the board's own
 `locale` (Japanese for `ja`, English otherwise). The `ja` table is typed by the
 `en` keys, so a missing key does not compile, and a test holds the placeholders
 alike. The canvas shows an edit before the server answers by running the same
-`applyBoardOps()` the server runs. To bundle it without zod, the applier,
-placement, the canonical form and the board's sizes and rules (`liesIn`, the
-id pattern, the one-line rule) moved to modules that import zod only as types
-(`board/apply.ts`, `board/canonical.ts`, `board/geometry.ts`), and the page and
-the server judge a note's section by one function. One request is in flight at
-a time, and edits made meanwhile wait in a queue. Undo replays operations that
-put back only what the edit touched, read from the board before it, so an
-agent's edit made in between survives an undo.
+`applyBoardOps()` the server runs. So that the canvas's own code bundles no
+schema, the applier, placement, the canonical form and the board's sizes and
+rules (`liesIn`, the id pattern, the one-line rule) moved to modules that import
+zod only as types (`board/apply.ts`, `board/canonical.ts`, `board/geometry.ts`),
+and the page and the server judge a note's section by one function. (The Dev
+Center's page bundle already carries zod through the MCP Apps view; the move
+keeps the board's schema modules out of it, not zod's bytes.) One request is in
+flight at a time, and edits made meanwhile wait in a queue (`board-queue.ts`,
+which has no DOM and is tested on its own). Undo replays operations that put
+back only what the edit touched, read from the board before it, so an agent's
+edit made in between survives an undo; a failed save empties the undo history
+with the edits it threw away.
+
+The keyboard reaches notes and sections: Tab moves between notes and section
+titles, arrow keys move what is selected, Enter edits or renames, Delete
+removes, and C starts an arrow that Enter on another note finishes. ~~do all of
+it from the keyboard~~ Selecting an arrow, selecting several notes and resizing
+a section still need a pointer.
 
 **The write.** The canvas saves with `POST /_guren/boards/<slug>/ops`. RFC 0032
 calls the plan feedback route "the Dev Center's only write" and gives the

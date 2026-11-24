@@ -1,49 +1,63 @@
 /**
  * The board canvas (RFC 0041 §2): notes, arrows and sections drawn from the board, and every edit
- * sent as operations to the board's ops route. One request is in flight at a time; edits made
- * meanwhile wait in a queue, and the canvas shows the server's board with the waiting edits
- * applied by the same `applyBoardOps()` the server runs. Every board string is written with
- * `textContent`, since an agent or a person wrote it.
+ * sent as operations to the board's ops route through `board-queue.ts`, which shows an edit before
+ * the server answers. Every board string is written with `textContent`, since an agent or a person
+ * wrote it.
  */
 
-import { applyBoardOps } from '../board/apply'
+import type { DroppedBoardOp } from '../board/apply'
 import { BOARD_EXTENT, BOARD_MAX_NOTES, BOARD_NOTE_KINDS, lineProblem, NOTE_SIZE, NOTE_TEXT_MAX, SECTION_TITLE_MAX, sectionUnder, snap, type BoardNoteKind } from '../board/geometry'
-import type { BoardOp, DroppedBoardOp } from '../board/ops'
+import type { BoardOp } from '../board/ops'
+import { DEFAULT_SECTION_SIZE } from '../board/place'
 import type { Board, BoardArrow, BoardNote, BoardSection } from '../board/schema'
 import { boardOpsPath } from '../dev-center-links'
 import { el } from '../docs-viewer-page/dom'
 import { borderPoint, svgEl } from '../plan/page/svg'
-import { aboutOps, dragOps, inverseOps, newId, noteUnder } from './board-model'
+import { aboutOps, dragOps, newId, noteUnder } from './board-model'
+import { createBoardQueue, type PostResult, type QueueStatus } from './board-queue'
 import { boardWords, kindWord, type BoardWords } from './board-words'
 
-const DEFAULT_SECTION = { width: 912, height: 168 }
 const MIN_ZOOM = 0.2
 const MAX_ZOOM = 2
 const DRAG_THRESHOLD = 3
-
-interface Saved {
-  board: Board
-  dropped: DroppedBoardOp[]
-}
+const KEY_STEP = 8
+const KEY_STEP_LARGE = 40
 
 type Selection = { notes: Set<string>; section?: string; arrow?: string }
 
 const arrowKey = (arrow: Pick<BoardArrow, 'from' | 'to'>) => `${arrow.from}>${arrow.to}`
 
 export interface BoardCanvas {
-  /** Replaces the board, as read again from the server, keeping the view and the selection. */
-  replace(board: Board): void
-  /** Whether edits are waiting to be saved, which a read from outside must not overwrite. */
+  /** Replaces the board read again from the server, unless a save settled since `stamp()` was taken. */
+  replace(board: Board, stamp: number): void
+  /** Whether edits are waiting to be saved. */
   busy(): boolean
+  stamp(): number
+}
+
+/** One request to the ops route, read into what the queue needs. */
+async function postOps(slug: string, ops: BoardOp[]): Promise<PostResult> {
+  const response = await fetch(boardOpsPath(slug), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ops }),
+    cache: 'no-store',
+    redirect: 'error',
+  })
+  const payload = (await response.json().catch(() => ({}))) as { board?: Board; dropped?: DroppedBoardOp[]; error?: { code?: string; message?: string } }
+  if (response.ok && payload.board) return { ok: true, board: payload.board, dropped: payload.dropped ?? [] }
+  return { ok: false, locked: response.status === 409 && payload.error?.code === 'locked', reason: payload.error?.message ?? `HTTP ${response.status}` }
+}
+
+/** Every value a section rectangle may carry: the ops route refuses one past the board's extent. */
+function clampRect(rect: { x: number; y: number; width: number; height: number }): { x: number; y: number; width: number; height: number } {
+  const unit = (value: number) => Math.min(BOARD_EXTENT, Math.max(0, value))
+  return { x: unit(rect.x), y: unit(rect.y), width: unit(rect.width), height: unit(rect.height) }
 }
 
 export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board, reread: () => Promise<Board>): BoardCanvas {
   const words: BoardWords = boardWords(initial.locale)
-  let server = initial
-  let inflight: BoardOp[] | undefined
-  let queued: BoardOp[] = []
-  let view = server
-  const undo: BoardOp[][] = []
+  let view = initial
   const selection: Selection = { notes: new Set() }
   let connecting = false
   let zoom = 1
@@ -88,14 +102,25 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
   }
 
 
-  const recompute = () => {
-    view = applyBoardOps(server, [...(inflight ?? []), ...queued]).board
+  const onChange = (next: Board) => {
+    view = next
     for (const id of selection.notes) if (!view.notes.some((note) => note.id === id)) selection.notes.delete(id)
     if (selection.section && !view.sections.some((section) => section.id === selection.section)) selection.section = undefined
     if (selection.arrow && !view.arrows.some((arrow) => arrowKey(arrow) === selection.arrow)) selection.arrow = undefined
     if (gesturing) stale = true
     else render()
   }
+
+  const onStatus = (next: QueueStatus) => {
+    if (next.kind === 'saving') say(words('status.saving'))
+    else if (next.kind === 'saved') say(words('status.saved'))
+    else if (next.kind === 'dropped') say(words('status.dropped', { count: next.count, reason: next.reason }), 'warning')
+    else if (next.kind === 'locked') say(words('status.locked'), 'error')
+    else say(words('status.failed', { reason: next.reason }), 'error')
+    paint()
+  }
+
+  const queue = createBoardQueue(initial, (ops) => postOps(slug, ops), reread, { change: (next) => onChange(next), status: (next) => onStatus(next) })
 
   const endGesture = () => {
     gesturing = false
@@ -105,61 +130,10 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
     }
   }
 
-  const fail = async (message: string) => {
-    inflight = undefined
-    queued = []
-    try { server = await reread() } catch { /* the message below already says the board was not saved */ }
-    say(message, 'error')
-    recompute()
+  /** Records `ops` as one user edit, undoable as one, and sends it; an edit that changes nothing is neither. */
+  const submit = (ops: BoardOp[], options?: { record?: boolean }) => {
+    queue.submit(ops, options)
   }
-
-  const flush = async (): Promise<void> => {
-    if (inflight || queued.length === 0) return
-    inflight = queued
-    queued = []
-    say(words('status.saving'))
-    let response: Response
-    try {
-      response = await fetch(boardOpsPath(slug), {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ops: inflight }),
-        cache: 'no-store',
-        redirect: 'error',
-      })
-    } catch (error) {
-      await fail(words('status.failed', { reason: error instanceof Error ? error.message : 'network' }))
-      return
-    }
-    const payload = (await response.json().catch(() => ({}))) as Partial<Saved> & { error?: { code?: string; message?: string } }
-    if (response.status === 409 && payload.error?.code === 'locked') {
-      await fail(words('status.locked'))
-      return
-    }
-    if (!response.ok || !payload.board) {
-      await fail(words('status.failed', { reason: payload.error?.message ?? `HTTP ${response.status}` }))
-      return
-    }
-    server = payload.board
-    inflight = undefined
-    const dropped = payload.dropped ?? []
-    if (dropped.length) say(words('status.dropped', { count: dropped.length, reason: dropped[0]!.reason }), 'warning')
-    else say(words('status.saved'))
-    recompute()
-    void flush()
-  }
-
-  /** Records `ops` as one user edit, undoable as one, and sends it. */
-  const submit = (ops: BoardOp[], { record = true } = {}) => {
-    if (ops.length === 0) return
-    const before = view
-    const after = applyBoardOps(before, ops).board
-    if (record) undo.push(inverseOps(before, after, ops))
-    queued.push(...ops)
-    recompute()
-    void flush()
-  }
-
 
   /** One-line text input over the canvas; `commit` gets the trimmed value, which it may refuse. */
   const ask = (at: { x: number; y: number; width: number }, label: string, value: string, max: number, commit: (text: string) => void) => {
@@ -189,10 +163,12 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
         done = true
         input.remove()
       }
-      viewport.focus()
+      focusSelection()
     }
     input.addEventListener('keydown', (event) => {
       event.stopPropagation()
+      // Enter during an IME composition confirms the conversion, not the text.
+      if (event.isComposing || event.keyCode === 229) return
       if (event.key === 'Enter') { event.preventDefault(); finish(true) }
       if (event.key === 'Escape') { event.preventDefault(); finish(false) }
     })
@@ -219,10 +195,10 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
 
   const addSection = () => {
     const centre = viewportCentre()
-    const at = { x: snap(centre.x - DEFAULT_SECTION.width / 2), y: snap(centre.y - DEFAULT_SECTION.height / 2) }
+    const at = { x: snap(centre.x - DEFAULT_SECTION_SIZE.width / 2), y: snap(centre.y - DEFAULT_SECTION_SIZE.height / 2) }
     ask({ ...at, width: 280 }, words('input.section'), '', SECTION_TITLE_MAX, (title) => {
       const id = newId(view, 's')
-      submit([{ op: 'section', id, title, at: { ...at, ...DEFAULT_SECTION } }])
+      submit([{ op: 'section', id, title, at: clampRect({ ...at, ...DEFAULT_SECTION_SIZE }) }])
       select({ notes: new Set(), section: id })
     })
   }
@@ -267,13 +243,19 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
   }
 
   const undoLast = () => {
-    const ops = undo.pop()
-    if (!ops) {
+    if (!queue.undo()) {
       say(words('status.nothingToUndo'))
       return
     }
-    submit(ops, { record: false })
     select({ notes: new Set() })
+  }
+
+  /** Ends a connection at `target`; an arrow that exists is left as it is, async or not. */
+  const finishConnect = (target: string) => {
+    const [from] = [...selection.notes]
+    if (from && from !== target && !view.arrows.some((arrow) => arrow.from === from && arrow.to === target)) submit([{ op: 'connect', from, to: target }])
+    say('')
+    select({ notes: new Set([target]) })
   }
 
   const startConnect = () => {
@@ -348,6 +330,7 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
   const render = () => {
     const active = document.activeElement
     const focusedId = active instanceof HTMLElement && noteLayer.contains(active) ? active.dataset.id : undefined
+    const focusedSection = active instanceof HTMLElement && sectionLayer.contains(active) ? active.dataset.section : undefined
     const kinds = new Map(view.notes.map((note) => [note.id, note]))
     sectionNodes.clear()
     arrowNodes.clear()
@@ -373,8 +356,21 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
       }
     }
     arrows.replaceChildren(...lines)
-    if (focusedId) noteNodes.get(focusedId)?.focus({ preventScroll: true })
+    // The focused node was replaced; a note or section that is gone hands focus to the canvas, which keeps the keys working.
+    if (focusedId || focusedSection) {
+      const next = focusedId ? noteNodes.get(focusedId) : sectionNodes.get(focusedSection!)?.querySelector<HTMLElement>('.board-section-title')
+      ;(next ?? viewport).focus({ preventScroll: true })
+    }
     paint()
+  }
+
+  /** Back to what was being edited, so Tab and the arrow keys carry on from there. */
+  const focusSelection = () => {
+    const [only] = selection.notes.size === 1 ? selection.notes : []
+    const next = selection.section !== undefined
+      ? sectionNodes.get(selection.section)?.querySelector<HTMLElement>('.board-section-title')
+      : only !== undefined ? noteNodes.get(only) : undefined
+    ;(next ?? viewport).focus({ preventScroll: true })
   }
 
   const paint = () => {
@@ -393,7 +389,7 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
     const selectedArrow = view.arrows.find((candidate) => arrowKey(candidate) === selection.arrow)
     asyncButton.textContent = selectedArrow?.kind === 'async' ? words('tool.sync') : words('tool.async')
     deleteButton.disabled = selection.notes.size === 0 && !selection.section && !selection.arrow
-    undoButton.disabled = undo.length === 0
+    undoButton.disabled = !queue.canUndo()
     for (const node of kindButtons) node.disabled = view.notes.length >= BOARD_MAX_NOTES
   }
 
@@ -427,7 +423,13 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
     sectionNodes.set(section.id, node)
     Object.assign(node.style, { left: `${section.x}px`, top: `${section.y}px`, width: `${section.width}px`, height: `${section.height}px` })
     const title = el('div', 'board-section-title', section.title)
+    title.tabIndex = 0
+    title.setAttribute('role', 'button')
+    title.dataset.section = section.id
     title.setAttribute('aria-label', words('aria.section', { title: section.title }))
+    title.addEventListener('focus', () => {
+      if (title.matches(':focus-visible') && selection.section !== section.id) select({ notes: new Set(), section: section.id })
+    })
     const handle = el('div', 'board-section-resize')
     handle.setAttribute('aria-label', words('aria.resize', { title: section.title }))
     node.append(title, handle)
@@ -448,8 +450,9 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
     if (note.link) node.append(el('span', 'board-note-link mono', `${note.link.kind} ${note.link.name}`))
     node.addEventListener('pointerdown', (event) => pressNote(event, note))
     node.addEventListener('dblclick', (event) => { event.stopPropagation(); editNote(note) })
+    // Only keyboard focus selects: a click has already set the selection, a shift-click included.
     node.addEventListener('focus', () => {
-      if (!selection.notes.has(note.id) && !connecting) select({ notes: new Set([note.id]) })
+      if (node.matches(':focus-visible') && !selection.notes.has(note.id) && !connecting) select({ notes: new Set([note.id]) })
     })
     noteNodes.set(note.id, node)
     return node
@@ -460,9 +463,7 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
     if (event.button !== 0) return
     event.stopPropagation()
     if (connecting) {
-      const [from] = [...selection.notes]
-      if (from && from !== note.id) submit([{ op: 'connect', from, to: note.id }])
-      select({ notes: new Set([note.id]) })
+      finishConnect(note.id)
       return
     }
     if (event.shiftKey) {
@@ -489,10 +490,19 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
         if (node) node.style.transform = `translate(${dx}px, ${dy}px)`
       }
     }
-    const up = (next: PointerEvent) => {
+    const stop = () => {
       target.removeEventListener('pointermove', move)
       target.removeEventListener('pointerup', up)
-      target.removeEventListener('pointercancel', up)
+      target.removeEventListener('pointercancel', cancel)
+    }
+    const cancel = () => {
+      stop()
+      gesturing = false
+      stale = false
+      render()
+    }
+    const up = (next: PointerEvent) => {
+      stop()
       if (!dragged) {
         endGesture()
         return
@@ -511,13 +521,14 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
       }
       const ops = dragOps(view, moves)
       if (onto) ops.push(...aboutOps(view, moving[0]!.id, onto.id))
+      // Redraws even when nothing is sent: a drag that snapped back still has to lose its transforms.
       gesturing = false
       stale = false
-      submit(ops)
+      if (!queue.submit(ops)) render()
     }
     target.addEventListener('pointermove', move)
     target.addEventListener('pointerup', up)
-    target.addEventListener('pointercancel', up)
+    target.addEventListener('pointercancel', cancel)
   }
 
   const dragRect = (grip: HTMLElement, section: BoardSection, mode: 'move' | 'resize') => {
@@ -527,6 +538,7 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
       // A text selection starting on the title would cancel the pointer stream mid-drag.
       event.preventDefault()
       select({ notes: new Set(), section: section.id })
+      viewport.focus({ preventScroll: true })
       const node = grip.parentElement!
       const start = { x: event.clientX, y: event.clientY }
       let dragged = false
@@ -551,27 +563,39 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
           }
         }
       }
-      const up = (next: PointerEvent) => {
+      const stop = () => {
         grip.removeEventListener('pointermove', move)
         grip.removeEventListener('pointerup', up)
-        grip.removeEventListener('pointercancel', up)
+        grip.removeEventListener('pointercancel', cancel)
+      }
+      const cancel = () => {
+        stop()
+        gesturing = false
+        stale = false
+        render()
+      }
+      const up = (next: PointerEvent) => {
+        stop()
         if (!dragged) {
           endGesture()
           return
         }
-        const r = at(next)
         gesturing = false
         stale = false
-        submit([{ op: 'section', id: section.id, title: section.title, at: { x: Math.max(0, r.x), y: Math.max(0, r.y), width: r.width, height: r.height } }])
+        if (!queue.submit([{ op: 'section', id: section.id, title: section.title, at: clampRect(at(next)) }])) render()
       }
       grip.addEventListener('pointermove', move)
       grip.addEventListener('pointerup', up)
-      grip.addEventListener('pointercancel', up)
+      grip.addEventListener('pointercancel', cancel)
     })
   }
 
+  /** Empty canvas: the viewport, the world, or a section's own body (its notes, title and handle take their own gestures). */
+  const isBackground = (target: EventTarget | null) =>
+    target === viewport || target === world || (target instanceof HTMLElement && target.classList.contains('board-section'))
+
   viewport.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0 || (event.target !== viewport && event.target !== world && !(event.target instanceof SVGSVGElement))) return
+    if (event.button !== 0 || !isBackground(event.target)) return
     if (connecting) {
       connecting = false
       say('')
@@ -597,7 +621,7 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
   })
 
   viewport.addEventListener('dblclick', (event) => {
-    if (event.target !== viewport && event.target !== world && !(event.target instanceof SVGSVGElement)) return
+    if (!isBackground(event.target)) return
     addNote(lastKind, toWorld(event.clientX, event.clientY))
   })
 
@@ -628,10 +652,22 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
       removeSelected()
       return
     }
+    const focusedNote = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.id : undefined
+    if (connecting && (event.key === 'Enter' || event.key === ' ') && focusedNote) {
+      event.preventDefault()
+      finishConnect(focusedNote)
+      return
+    }
     const one = selection.notes.size === 1 ? view.notes.find((note) => selection.notes.has(note.id)) : undefined
+    const section = selection.notes.size === 0 && selection.section ? view.sections.find((candidate) => candidate.id === selection.section) : undefined
     if (event.key === 'Enter' && one) {
       event.preventDefault()
       editNote(one)
+      return
+    }
+    if (event.key === 'Enter' && section) {
+      event.preventDefault()
+      renameSection(section)
       return
     }
     if (event.key.toLowerCase() === 'c' && one && !event.metaKey && !event.ctrlKey) {
@@ -639,8 +675,14 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
       startConnect()
       return
     }
-    const step = event.shiftKey ? 40 : 8
+    const step = event.shiftKey ? KEY_STEP_LARGE : KEY_STEP
     const delta = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key] as [number, number] | undefined
+    if (delta && section) {
+      event.preventDefault()
+      const at = clampRect({ x: section.x + delta[0], y: section.y + delta[1], width: section.width, height: section.height })
+      submit([{ op: 'section', id: section.id, title: section.title, at }])
+      return
+    }
     if (delta && selection.notes.size > 0) {
       event.preventDefault()
       const moves = view.notes
@@ -657,11 +699,10 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
   requestAnimationFrame(fit)
 
   return {
-    replace(board) {
-      server = board
-      recompute()
-      say(words('status.reread'))
+    replace(board, stamp) {
+      if (queue.replace(board, stamp)) say(words('status.reread'))
     },
-    busy: () => inflight !== undefined || queued.length > 0,
+    busy: () => queue.busy(),
+    stamp: () => queue.stamp(),
   }
 }

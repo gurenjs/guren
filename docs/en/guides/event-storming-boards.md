@@ -49,6 +49,8 @@ On a board's page:
 - **Sections** group notes. Drag a section by its title to move it with its notes, and drag its bottom-right corner to resize it.
 - **Delete** removes what is selected, and Ctrl or ⌘ with Z takes back your last edit.
 
+From the keyboard, Tab moves between notes and section titles. The arrow keys move what is selected (hold Shift for larger steps), Enter edits it, and Delete removes it. To connect two notes, press C on the first, Tab to the second and press Enter. Selecting an arrow, selecting several notes and resizing a section need a pointer.
+
 Drag the background to pan, and hold Ctrl or ⌘ while scrolling to zoom. Every edit is saved to the board file as you make it. When you come back to the window, the page reads the file again, so an edit your agent made in the meantime appears.
 
 ## Let your agent read and edit it
@@ -101,4 +103,4 @@ The plan's own checks, review page and approval then take over, as described in 
 
 ## Limits
 
-A board holds at most 500 notes, 2,000 arrows and 100 sections, and a note's text is one line of at most 280 characters. The canvas stays responsive at 500 notes: moving a note there takes well under one frame.
+A board holds at most 500 notes, 2,000 arrows and 100 sections, and a note's text is one line of at most 280 characters. The canvas stays responsive at 500 notes: dragging a note moves it without delay, and saving the move takes about 15 milliseconds.

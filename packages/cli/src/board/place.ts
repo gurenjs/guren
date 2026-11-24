@@ -8,8 +8,6 @@
 import { BOARD_EXTENT, BOARD_MAX_SECTIONS, liesIn, NOTE_SIZE, SECTION_INSET } from './geometry'
 import type { Board, BoardNote, BoardSection } from './schema'
 
-export { liesIn, NOTE_SIZE, SECTION_INSET } from './geometry'
-
 const CELL = { width: 176, height: 112 }
 
 const SECTION_COLUMNS = 5
@@ -17,6 +15,12 @@ const SECTION_GAP = 32
 const BOARD_MARGIN = 16
 
 export const UNSORTED_SECTION = { id: 'unsorted', title: 'Unsorted' }
+
+/** A new section's size: a row of five notes. The canvas gives a section it adds the same. */
+export const DEFAULT_SECTION_SIZE = {
+  width: 2 * SECTION_INSET.side + SECTION_COLUMNS * CELL.width,
+  height: SECTION_INSET.top + CELL.height + SECTION_INSET.bottom,
+}
 
 export interface Placement {
   x: number
@@ -107,8 +111,7 @@ export function placeSection(draft: Board): Pick<BoardSection, 'x' | 'y' | 'widt
   const rect = {
     x: BOARD_MARGIN,
     y: bottom === 0 ? BOARD_MARGIN : bottom + SECTION_GAP,
-    width: 2 * SECTION_INSET.side + SECTION_COLUMNS * CELL.width,
-    height: SECTION_INSET.top + CELL.height + SECTION_INSET.bottom,
+    ...DEFAULT_SECTION_SIZE,
   }
   return rect.y + rect.height <= BOARD_EXTENT ? rect : undefined
 }

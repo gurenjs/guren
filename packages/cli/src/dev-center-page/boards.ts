@@ -90,12 +90,14 @@ export async function loadBoard(slug: string, status: HTMLElement, title: HTMLEl
   status.textContent = 'Reading the board…'
   status.className = ''
   try {
+    // A save that settles while this read is out returns a newer board than the read will.
+    const stamp = canvas?.stamp()
     const payload = await readBoardPayload(slug)
     title.textContent = payload.board.title
     document.title = `${payload.board.title} · Guren Dev Center`
     status.textContent = payload.file
     if (canvas) {
-      canvas.replace(payload.board)
+      canvas.replace(payload.board, stamp ?? canvas.stamp())
     } else {
       const surface = el('div', 'board-surface')
       const outline = el('details', 'board-outline')
