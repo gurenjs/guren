@@ -189,7 +189,7 @@ async show() {
 }
 ```
 
-The column name is a plain string: a misspelled column fails the query rather than returning 404, so keep it aligned with your schema. When the same parameter is bound both on the router (below) and on the route, the route's own `bind` wins and the record is looked up once.
+The column name is a plain string: a misspelled column fails the query rather than returning 404, so keep it aligned with your schema. When the same parameter is bound both on the router (below) and on the route, both run: `this.model()` holds the route's record, and the router's value arrives as the positional argument.
 
 ### Router-level bindings
 
