@@ -415,18 +415,27 @@ no held-step judgement, which needs the application read.
 The same day the plan review moved here as RFC 0030's served mode:
 `/_guren/plans/<slug>/review` serves the page `plan:render` wrote, and
 `/_guren/plans/<slug>/feedback` saves the person's verdicts, comments and
-answers to `.guren/plans/<slug>.feedback.json`. That route is the Dev Center's
-only write. It checks the `Origin`, the schema and the plan's digest, runs no
+answers to `.guren/plans/<slug>.feedback.json`. ~~That route is the Dev Center's
+only write.~~ It checks the `Origin`, the schema and the plan's digest, runs no
 command, and leaves approval to `plan:approve`.
+
+**Amended by RFC 0041 §2 (2026-11-23):** `/_guren/boards/<slug>/ops` is a second
+write, and the first to a tracked file: it applies a list of operations to
+`docs/boards/<slug>.board.json`. It is held to the same guards (the loopback
+guard, the request's own `Origin`, the schema of what it writes), and it keeps
+the reason below intact, since it carries no decision: no command reads a board
+as approval, and what an agent's browser could write through it the agent can
+already write to the file.
 
 On 2026-11-01 the plan page was designed to carry the person's three decisions
 (RFC 0030 §8, amended that day). Approve, waive and close are checked, never
 run: `/_guren/plans/<slug>/readiness/<approve|close|waive>` runs the matching
 command with `--dry-run --json` as a child, as `/_guren/graph.json` runs
-`guren graph`, and the page copies the command for the person's terminal. The
-feedback route stays the only write. The Dev Center cannot tell the person
-from the agent's browser that `browser:serve` points at it, which is why no
-button writes.
+`guren graph`, and the page copies the command for the person's terminal.
+~~The feedback route stays the only write.~~ **Amended by RFC 0041 §2:** it
+stays the only write that records a person's decision. The Dev Center cannot
+tell the person from the agent's browser that `browser:serve` points at it,
+which is why no button writes one.
 
 Also on 2026-10-31, the plan page gained each step's evidence, so a person can
 judge a step without asking the agent. `/_guren/plans/<slug>/evidence` returns,

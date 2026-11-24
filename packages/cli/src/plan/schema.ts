@@ -16,7 +16,7 @@ export { PLAN_VERSION, SUPPORTED_PLAN_VERSIONS }
 export const NonEmptySchema = z.string().min(1)
 
 // BCP 47 in its common shape (`en`, `ja`, `pt-BR`, `zh-Hant-TW`); the page puts it on `<html lang>`.
-const LocaleSchema = z.string().regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/)
+export const LocaleSchema = z.string().regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/)
 
 export const ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
 

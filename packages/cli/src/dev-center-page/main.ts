@@ -1,11 +1,12 @@
 import type { GraphNode, GurenApplicationGraph, GraphResult } from '../application-graph'
 import type { PlanEvidence, StepBrowserEvidence, StepEvidence } from '../dev-center-evidence'
 import type { PlanReadiness } from '../dev-center-readiness'
-import { browserScreenshotPath, MCP_APPS_PAGE_PATH, planEvidencePath, planPagePath, planReadinessPath, planReviewPath, planSlugFromPath, savedReviewPrompt, UI_CATALOG_PAGE_PATH, type PlanDecision } from '../dev-center-links'
+import { BOARDS_PAGE_PATH, boardSlugFromPath, browserScreenshotPath, MCP_APPS_PAGE_PATH, planEvidencePath, planPagePath, planReadinessPath, planReviewPath, planSlugFromPath, savedReviewPrompt, UI_CATALOG_PAGE_PATH, type PlanDecision } from '../dev-center-links'
 import type { PlanOverview } from '../docs-viewer-plans'
 import { commandRow } from '../docs-viewer-page/dom'
 import type { RuntimeErrorResult } from '../runtime-errors'
 import { gurenCommandLine } from '../shell-quote'
+import { loadBoard, loadBoards } from './boards'
 import { card, readJson } from './dom'
 import { startMcpAppsPreview } from './mcp-apps'
 import { loadUiCatalog } from './ui'
@@ -474,7 +475,23 @@ kind.onchange = renderNodes
 refresh.onclick = () => { void loadGraph() }
 errorsButton.onclick = () => { void loadErrors() }
 const planPage = planSlugFromPath(location.pathname)
-if (location.pathname === UI_CATALOG_PAGE_PATH) {
+const boardPage = boardSlugFromPath(location.pathname)
+if (location.pathname === BOARDS_PAGE_PATH) {
+  element('home').hidden = true
+  element('boards-view').hidden = false
+  document.title = 'Boards · Guren Dev Center'
+  const button = element<HTMLButtonElement>('refresh-boards-page')
+  const load = () => loadBoards(element('boards-page-status'), element('boards-page'), button)
+  button.onclick = () => { void load() }
+  void load()
+} else if (boardPage !== undefined) {
+  element('home').hidden = true
+  element('board-view').hidden = false
+  const button = element<HTMLButtonElement>('refresh-board')
+  const load = () => loadBoard(boardPage, element('board-status'), element('board-title'), element('board-body'), button)
+  button.onclick = () => { void load() }
+  void load()
+} else if (location.pathname === UI_CATALOG_PAGE_PATH) {
   element('home').hidden = true
   element('ui-view').hidden = false
   document.title = 'Components · Guren Dev Center'
@@ -490,6 +507,10 @@ if (location.pathname === UI_CATALOG_PAGE_PATH) {
 } else if (planPage === undefined) {
   element<HTMLButtonElement>('refresh-plans').onclick = () => { void loadPlans() }
   void loadPlans()
+  const boardsButton = element<HTMLButtonElement>('refresh-boards')
+  const readBoardList = () => loadBoards(element('boards-status'), element('boards'), boardsButton)
+  boardsButton.onclick = () => { void readBoardList() }
+  void readBoardList()
   void loadGraph()
   void loadErrors()
 } else {

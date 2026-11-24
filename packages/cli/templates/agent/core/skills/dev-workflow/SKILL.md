@@ -63,6 +63,7 @@ are rejected with 403.
 | `guren_get_dependency_exposure` | Which routes and files reach each installed package (narrow with `package`) — read it when an advisory names one |
 | `guren_get_runtime_errors` | Server errors the running dev app retained: status, route, project stack frames |
 | `guren_get_plans` | Implementation plans not closed yet, drafts included: approval, step outcomes, the active step, the next command |
+| `guren_get_boards` | Event-storming boards under `docs/boards/`: the list, or one board as an outline (pass `board`) — edit one with `guren board:apply` |
 | `guren_list_models` | List models (relations, soft deletes, auth trait) |
 | `guren_generate_guidelines` | Generate project-specific coding guidelines |
 | `guren_doctor` | Project health check + suggested next actions |

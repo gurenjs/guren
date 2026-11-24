@@ -1,7 +1,7 @@
 import type { RuntimeErrorBuffer, RuntimeErrorQuery } from './runtime-errors'
 import { RUNTIME_ERRORS_BINDING, RUNTIME_ERRORS_PATH } from './runtime-error-capture'
 import { ServiceProvider } from '../container/ServiceProvider'
-import { createMcpAccessGuard, DEV_CENTER_FEEDBACK_ROUTE, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from './endpoint'
+import { createMcpAccessGuard, DEV_CENTER_WRITE_ROUTES, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from './endpoint'
 
 /**
  * What this provider calls on `@guren/cli`, spelled here: the package cannot be
@@ -14,6 +14,15 @@ export interface DevMcpCliApi {
     fetch(request: Request): Promise<Response>
   }
 }
+
+/** Every path the Dev Center reads; a CLI that does not know one answers it with 404. The status path is RFC 0041 M3's. */
+const DEV_CENTER_READ_PATHS = [
+  '/_guren', '/_guren/', '/_guren/graph.json',
+  '/_guren/plans.json', '/_guren/plans/:slug', '/_guren/plans/:slug/review', '/_guren/plans/:slug/evidence', '/_guren/plans/:slug/readiness/:decision',
+  '/_guren/browser/:run/screenshots/:sha256',
+  '/_guren/ui', '/_guren/ui.json', '/_guren/mcp-apps', '/_guren/mcp-apps/sandbox',
+  '/_guren/boards', '/_guren/boards.json', '/_guren/boards/:slug', '/_guren/boards/:slug/board.json', '/_guren/boards/:slug/status',
+]
 
 export const DEV_MCP_CLI_TOO_OLD =
   'GUREN_MCP=1 but the installed @guren/cli predates the 2026-07-28 MCP endpoint, so /_guren/mcp is not mounted. '
@@ -63,17 +72,20 @@ export class McpServiceProvider extends ServiceProvider {
     // Optional capability: older CLIs keep serving their existing MCP tools.
     if (cli.createDevCenterHandler) {
       const center = cli.createDevCenterHandler({ cwd: process.cwd() })
-      for (const path of ['/_guren', '/_guren/', '/_guren/graph.json', '/_guren/plans.json', '/_guren/plans/:slug', '/_guren/plans/:slug/review', '/_guren/plans/:slug/evidence', '/_guren/plans/:slug/readiness/:decision', '/_guren/browser/:run/screenshots/:sha256', '/_guren/ui', '/_guren/ui.json', '/_guren/mcp-apps', '/_guren/mcp-apps/sandbox', DEV_CENTER_FEEDBACK_ROUTE]) {
+      for (const path of [...DEV_CENTER_READ_PATHS, ...DEV_CENTER_WRITE_ROUTES.map(({ route }) => route)]) {
         hono.use(path, createMcpAccessGuard())
         hono.get(path, (ctx) => isMcpEndpointEnabled() ? center.fetch(ctx.req.raw) : ctx.notFound())
       }
-      // The Dev Center's one write (RFC 0030 §8), exempt from the CSRF token: the request's own origin is
-      // required here, whatever CLI answers it, and the CLI checks it again with the schema and the plan's digest.
-      hono.post(DEV_CENTER_FEEDBACK_ROUTE, (ctx) => {
-        if (!isMcpEndpointEnabled()) return ctx.notFound()
-        if (ctx.req.header('origin') !== new URL(ctx.req.url).origin) return ctx.json({ schemaVersion: 1, error: { code: 'origin', message: 'Feedback is accepted from the Dev Center page only.' } }, 403)
-        return center.fetch(ctx.req.raw)
-      })
+      // The Dev Center's writes (RFC 0030 §8, RFC 0041 §2), exempt from the CSRF token: the request's own origin
+      // is required here, whatever CLI answers it, and the CLI checks it again with the schema of what it writes.
+      for (const { route, refusal } of DEV_CENTER_WRITE_ROUTES) {
+        hono.post(route, (ctx) => {
+          if (!isMcpEndpointEnabled()) return ctx.notFound()
+          // Its own code: the CLI repeats the check with `origin`, and a test has to tell which one refused.
+          if (ctx.req.header('origin') !== new URL(ctx.req.url).origin) return ctx.json({ schemaVersion: 1, error: { code: 'cross-origin', message: refusal } }, 403)
+          return center.fetch(ctx.req.raw)
+        })
+      }
     }
 
     const buffer = this.container.makeOptional<RuntimeErrorBuffer>(RUNTIME_ERRORS_BINDING)

@@ -31,6 +31,45 @@ export function mcpAppsPageOrigin(sandboxOrigin: string): string | undefined {
   return `http://localhost${url.port ? `:${url.port}` : ''}`
 }
 
+/** The boards (RFC 0041 §2); `McpServiceProvider` mounts each path, and the ops path as the Dev Center's second write. */
+export const BOARDS_PAGE_PATH = '/_guren/boards'
+export const BOARDS_JSON_PATH = '/_guren/boards.json'
+const BOARD_PAGE = /^\/_guren\/boards\/([^/]+)$/
+// `endpoint.ts` in @guren/server spells the ops path for its CSRF rule.
+const BOARD_RESOURCE = /^\/_guren\/boards\/([^/]+)\/(board\.json|ops)$/
+
+export interface BoardRoute {
+  slug: string
+  resource: 'board' | 'ops'
+}
+
+export function boardPagePath(slug: string): string {
+  return `${BOARDS_PAGE_PATH}/${encodeURIComponent(slug)}`
+}
+
+export function boardJsonPath(slug: string): string {
+  return `${boardPagePath(slug)}/board.json`
+}
+
+/** Where the canvas posts its operations. */
+export function boardOpsPath(slug: string): string {
+  return `${boardPagePath(slug)}/ops`
+}
+
+/** The slug a board page path names, decoded, which the handler still has to judge as a slug. */
+export function boardSlugFromPath(pathname: string): string | undefined {
+  const match = BOARD_PAGE.exec(pathname)
+  if (!match) return undefined
+  try { return decodeURIComponent(match[1]!) } catch { return undefined }
+}
+
+/** A board's document or its operations endpoint, or `undefined` for any other path. */
+export function boardRoute(pathname: string): BoardRoute | undefined {
+  const match = BOARD_RESOURCE.exec(pathname)
+  if (!match) return undefined
+  try { return { slug: decodeURIComponent(match[1]!), resource: match[2] === 'ops' ? 'ops' : 'board' } } catch { return undefined }
+}
+
 const PLAN_PAGE = /^\/_guren\/plans\/([^/]+)$/
 // `endpoint.ts` in @guren/server spells the feedback path for its CSRF rule, and `plan/page/served.ts` the review's.
 const REVIEW_PATH = /^\/_guren\/plans\/([^/]+)\/(review|feedback)$/
