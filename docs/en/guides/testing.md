@@ -216,7 +216,7 @@ const database = createSqliteDatabase({
 Nothing a test creates shows up in the dev server's data. Both keys are declared in the scaffolded `config/env.ts`, and `context` carries their validated values when the app boots (see [Configuration](./configuration.md#the-database-connection)).
 
 > [!WARNING]
-> Only the SQLite scaffold switches databases. An app created with `--db postgres` or `--db mysql` reads `DATABASE_URL` in tests too, so `resetDatabase()` in a test would empty your development database. Create a separate test database and run the tests against it, for example `DATABASE_URL=postgres://guren:guren@localhost:54322/guren_test bun test`.
+> Only the SQLite scaffold switches databases. An app created with `--db postgres` or `--db mysql` reads `DATABASE_URL` in tests too, so `resetDatabase()` in a test would empty your development database. Create a separate test database and run the tests against it, for example `DATABASE_URL=postgres://guren:guren@127.0.0.1:54322/guren_test bun test`.
 
 > [!WARNING]
 > Apps scaffolded with `create-guren-app` 1.1.0 or earlier write to `DATABASE_URL` (or `./data/guren.db`) whatever `NODE_ENV` is, so `bun test` writes into the database your dev server reads. To fix one, replace the `filename` option and declare `DATABASE_URL` and `TEST_DATABASE_URL` in `config/env.ts` (an app without that file adds it first; see [Configuration](./configuration.md#apps-with-service-providers)):

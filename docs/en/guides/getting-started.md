@@ -77,8 +77,8 @@ bun run db:up
 
 Default connection strings:
 
-- PostgreSQL: `postgres://guren:guren@localhost:54322/guren`
-- MySQL: `mysql://guren:guren@localhost:33306/guren`
+- PostgreSQL: `postgres://guren:guren@127.0.0.1:54322/guren`
+- MySQL: `mysql://guren:guren@127.0.0.1:33306/guren`
 
 Stop the container with `bun run db:down` when you are done.
 
