@@ -101,14 +101,17 @@ describe('readSecurityRecords', () => {
       'app/Models/Post.ts': 'export class Post {\n  static async findOrFail(value: unknown) {\n    return { value }\n  }\n}\n',
       'routes/web.ts': `import type { Router } from '@guren/core'
 import { Post } from '../app/Models/Post.js'
+import { PostController } from '../app/Http/Controllers/PostController.js'
 
 export function registerWebRoutes(router: Router): void {
   router.bind('token', async (value: string) => ({ value }))
   router.bind('author', [Post, 'slug'])
-  router.get('/posts/:post', { name: 'posts.show', bind: { post: [Post, 'slug'] } }, (c) => c.text('ok'))
-  router.get('/posts/by-id/:id', { name: 'posts.byId', bind: { id: Post } }, (c) => c.text('ok'))
-  router.get('/tokens/:token', { name: 'tokens.show' }, (c) => c.text('ok'))
-  router.get('/authors/:author', { name: 'authors.show', bind: { author: Post } }, (c) => c.text('ok'))
+  router.get('/posts/:post', { name: 'posts.show', bind: { post: [Post, 'slug'] } }, [PostController, 'update'])
+  router.get('/posts/by-id/:id', { name: 'posts.byId', bind: { id: Post } }, [PostController, 'update'])
+  router.get('/tokens/:token', { name: 'tokens.show' }, [PostController, 'update'])
+  router.get('/authors/:author', { name: 'authors.show', bind: { author: Post } }, [PostController, 'update'])
+  // An inline handler resolves no binding, so the router's resolver does not run for it.
+  router.get('/inline/:token', { name: 'inline.show' }, (c) => c.text('ok'))
 }
 `,
     })
@@ -122,6 +125,7 @@ export function registerWebRoutes(router: Router): void {
       ['/tokens/:token', { token: 'resolver' }, 'unread'],
       // Bound at both levels: the router's model is found by its export in the child, like the route's.
       ['/authors/:author', { author: 'app/Models/Post.ts#Post+router:app/Models/Post.ts#Post@slug' }, undefined],
+      ['/inline/:token', undefined, undefined],
     ])
   })
 
@@ -138,6 +142,8 @@ export function registerWebRoutes(router: Router): void {
     // A custom resolver's body is not read, at either level.
     expect(bindingsRecord('/tokens/:token', undefined, undefined, { token: { resolver: true } })).toEqual({ bindings: { token: 'resolver' }, bindingLookups: 'unread' })
     expect(bindingsRecord('/posts/:post', { post: 'Post' }, sources, { post: { router: { resolver: true } } })).toEqual({ bindings: { post: 'app/Models/Post.ts#Post+router:resolver' }, bindingLookups: 'unread' })
+    // A parameter named `__proto__` stays a key of the record.
+    expect(Object.keys(bindingsRecord('/x/:__proto__', Object.fromEntries([['__proto__', 'Post']]), undefined, Object.fromEntries([['__proto__', { key: 'slug' }]])).bindings ?? {})).toEqual(['__proto__'])
     // A model the server could not name is still bound, by its column.
     expect(bindingsRecord('/users/:user', undefined, undefined, { user: { key: 'email' } })).toEqual({ bindings: { user: 'unnamed@email' } })
   })

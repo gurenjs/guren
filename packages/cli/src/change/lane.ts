@@ -654,8 +654,9 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     const added = headSkipped.filter((entry) => !baseSkipped.includes(entry))
     const shared = headSkipped.filter((entry) => baseSkipped.includes(entry))
     if (added.length > 0) unjudged.push({ reader: 'security-records', reason: `the head's introspection skipped ${added.join(', ')}, which the base's did not, so a route registered there was not compared`, lane: 'high', files: files.length > 0 ? files : touched })
-    const lookupsUnread = files.length > 0 ? unreadLookups([...compared.base.routes, ...compared.head.routes]) : undefined
-    if (lookupsUnread) unjudged.push({ reader: 'security-records', reason: lookupsUnread, lane: 'medium', files })
+    // A resolver's body may sit in any file (the app entry, a model), so any change the records were read for is held.
+    const lookupsUnread = unreadLookups([...compared.base.routes, ...compared.head.routes])
+    if (lookupsUnread) unjudged.push({ reader: 'security-records', reason: lookupsUnread, lane: 'medium', files: files.length > 0 ? files : touched })
     if (added.length === 0 && shared.length > 0 && files.length > 0) unjudged.push({ reader: 'security-records', reason: `introspection skipped ${shared.join(', ')} on both sides, so a route registered there was not compared`, lane: 'medium', files })
   } else if (notCompared && (notCompared.lane === 'high' || surface.length > 0)) {
     // A base that cannot be read says nothing against the change; a head the change made unreadable does.

@@ -850,10 +850,12 @@ export class Router<in M extends string = never> {
   /**
    * How each bound parameter is looked up, indexed like definitions (RFC 0040 §3): what `registeredModelBindings()`
    * names a model of, by its lookup column, a router-level model with its class, and a custom resolver, which it leaves out.
+   * Only a controller action resolves bindings, so an inline or prototype handler's route looks nothing up.
    */
   registeredBindingLookups(): ReadonlyArray<Record<string, RouteBindingLookup>> {
-    return this.registry.map(({ path, bindings }) => {
+    return this.registry.map(({ path, bindings, handler }) => {
       const result: Record<string, RouteBindingLookup> = Object.create(null)
+      if (!isControllerAction(handler)) return result
       const routerLevel = new Map<string, BindingLookup>()
       for (const parameter of extractPathParamNames(path)) {
         const registered = this.modelBindings.get(parameter)
