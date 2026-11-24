@@ -1495,7 +1495,7 @@ controllers, routes, their mount, and side effects.
   route files would change route existence, and with it every approved plan's
   freshness stamps. So before `--mount` the actions read `present` and the
   routes `planned`; after it the routes, their actions and the validators they
-  use read `wired`. A binding's lookup column is unread.
+  use read `wired`. A binding's lookup column is unread (read since, see the `plan:status` amendment to §6).
 - `guren check` warns on an unmounted `routes/*.ts`, and that warning fails
   `guren gate`, which the `Stop` hook runs on every stop between the scaffold
   and the `http` step. An unmounted file the scaffold of an approved, unclosed
@@ -1814,6 +1814,15 @@ questions are not judged; a `command` ~~and a `mail` / `notification` class are
 `unjudged`, since nothing reads whether one was run or discovers the other~~ is
 `unjudged`, since nothing reads whether one was run (a mail and a notification
 class are read since, see *policy abilities and side-effect uses* below).
+A binding's lookup `key` is read since, from `Router.registeredBindingLookups()`
+on the router the routes file registers into (RFC 0040 §3 added it for the
+security records): a planned `key` is compared with the column, an absent one
+on either side meaning `id`, `findOrFail()`'s default, and a bound model no
+lookup runs (an inline handler, a parameter the path does not declare) is a
+`differ`. A custom resolver, a parameter bound at both levels, a router-level
+binding a module or two registrars set (one map serves every route, so the
+winner depends on `createApp({ modules })`), or a server without the method
+leave it unknown.
 
 A property with no reader is **unknown**. Unknown never counts towards
 `present`, never satisfies a `drop`, and is listed on the page as "planned,
