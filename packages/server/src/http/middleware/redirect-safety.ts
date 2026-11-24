@@ -49,9 +49,8 @@ export function isSafeRedirectUrl(
     return true
   }
 
-  // Protocol-relative URLs (//evil.com) are treated as absolute
   try {
-    const target = new URL(normalized, requestUrl)
+    const target = redirectTargetUrl(normalized, requestUrl)
     const current = new URL(requestUrl)
 
     if (target.host === current.host && target.protocol === current.protocol) {
@@ -61,6 +60,20 @@ export function isSafeRedirectUrl(
     return hostMatchesAllowlist(target, allowedHosts)
   } catch {
     return false
+  }
+}
+
+/**
+ * A value with a scheme is read without a base. Against an `http:` request URL
+ * (TLS ended at a proxy) `http:evil.com` resolves to a path on the request host,
+ * while a browser on `https:` reads it as the host `evil.com`. Only a value with
+ * no scheme, such as `//evil.com` or `next`, resolves against `requestUrl`.
+ */
+function redirectTargetUrl(value: string, requestUrl: string): URL {
+  try {
+    return new URL(value)
+  } catch {
+    return new URL(value, requestUrl)
   }
 }
 

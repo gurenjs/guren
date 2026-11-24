@@ -33,6 +33,23 @@ describe('isSafeRedirectUrl', () => {
     expect(isSafeRedirectUrl('/\r\n/evil.com', requestUrl)).toBe(false)
   })
 
+  // Behind a TLS-terminating proxy the request reads `http:` while the browser
+  // reads `https:`, and a browser on the other scheme reads the value as a host.
+  test('should reject a scheme with no // naming another host, on either request scheme', () => {
+    for (const current of ['http://example.com/current', 'https://example.com/current']) {
+      expect(isSafeRedirectUrl('http:evil.com', current)).toBe(false)
+      expect(isSafeRedirectUrl('https:evil.com', current)).toBe(false)
+      expect(isSafeRedirectUrl('http:/evil.com/phish', current)).toBe(false)
+      expect(isSafeRedirectUrl('HTTP:evil.com', current)).toBe(false)
+    }
+  })
+
+  test('should still allow relative paths and a scheme with no // naming the request host', () => {
+    expect(isSafeRedirectUrl('other', requestUrl)).toBe(true)
+    expect(isSafeRedirectUrl('?page=2', requestUrl)).toBe(true)
+    expect(isSafeRedirectUrl('http:example.com/other', requestUrl)).toBe(true)
+  })
+
   test('should allow URLs to allowed hosts', () => {
     expect(isSafeRedirectUrl('https://accounts.google.com/auth', requestUrl, ['accounts.google.com'])).toBe(true)
   })
@@ -65,6 +82,17 @@ describe('createRedirectSafetyMiddleware', () => {
     app.get('/redirect', (c) => c.redirect(c.req.query('next') ?? '/'))
 
     const res = await app.request('http://example.com/redirect?next=%2F%09%2Fevil.com')
+
+    expect(res.status).toBe(302)
+    expect(res.headers.get('Location')).toBe('/')
+  })
+
+  test('should rewrite a query-supplied scheme with no // that names another host', async () => {
+    const app = new Hono()
+    app.use('*', createRedirectSafetyMiddleware())
+    app.get('/redirect', (c) => c.redirect(c.req.query('next') ?? '/'))
+
+    const res = await app.request('http://example.com/redirect?next=http%3Aevil.com%2Fphish')
 
     expect(res.status).toBe(302)
     expect(res.headers.get('Location')).toBe('/')

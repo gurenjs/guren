@@ -129,6 +129,14 @@ one: a tool outside the grant is absent from `tools/list`, and
 [`guren_preflight`](./agent-interface.md#rehearsing-a-call-over-mcp) refuses it too. Read the name from `bunx guren tool:list` and
 re-authorize with `tool:<name>`.
 
+A token calls only the tools its own `scope` names. A client can narrow one
+by sending `scope` on the token request (the authorization code exchange or a
+refresh), and the token keeps the granted entries that request names, compared
+as written. A refresh that sends the advertised `tools:read` against a grant
+stored as `tool:<name>` entries therefore keeps none: the token response says
+`scope: ""` and the token can call nothing. To refresh without losing what the
+user consented to, send no `scope`, or the one the token response returned.
+
 ## Approval-gated tools
 
 Some actions should not happen because an agent asked. Mark the route, and a

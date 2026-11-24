@@ -1,12 +1,21 @@
 import { mail, type MailManager } from '@guren/core'
 import type { UserRecord } from '../Models/User.js'
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 export async function sendWelcomeMail(manager: MailManager, user: UserRecord): Promise<void> {
   await mail(manager)
     .to(user.email)
     .subject('Welcome to our Blog!')
     .html(`
-      <h1>Welcome, ${user.name}!</h1>
+      <h1>Welcome, ${escapeHtml(user.name)}!</h1>
       <p>Thank you for joining our blog platform.</p>
       <p>You can now:</p>
       <ul>

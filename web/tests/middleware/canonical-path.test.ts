@@ -14,6 +14,12 @@ describe('canonicalPath', () => {
     expect(canonicalPath('/wallpapers/')).toBe('/wallpapers')
   })
 
+  it('should drop only the trailing run of a long slash run', () => {
+    const run = '/'.repeat(10_000)
+    expect(canonicalPath(`/docs/${run}a/`)).toBe(`/docs/${run}a`)
+    expect(canonicalPath(`/blog/post${run}`)).toBe('/blog/post')
+  })
+
   it('should leave canonical paths and other trees alone', () => {
     expect(canonicalPath('/')).toBeUndefined()
     expect(canonicalPath('/docs')).toBeUndefined()

@@ -372,10 +372,11 @@ export class GurenAgent<
     const client = createAgentToolClient({
       runtime,
       agentName: registration.name,
-      // The SDK's own instance name (`Agent.name`), which is the `:instance`
-      // half of `agent:<name>:<instance>` — the per-instance principal that
-      // keeps one instance from spending another's approval.
-      instanceId: this.name,
+      // The routed name `idFromName` and the route authorizer both saw, which is
+      // the `:instance` half of the per-instance principal. Not `Agent.name`: it
+      // decodes a `cf-agents:v2:<logical>:<digest>` name to `<logical>` on a root
+      // object too, so a caller could take on another instance's principal.
+      instanceId: this.lifecycle.name,
     })
 
     // Bound rather than passed: `this.sql` is a method, and handing the

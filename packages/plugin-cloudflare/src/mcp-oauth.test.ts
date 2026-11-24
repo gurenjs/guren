@@ -280,6 +280,89 @@ describe('cloudflare:build --mcp-oauth', () => {
     })
 
     /**
+     * The provider hands apiHandler the props stored with a token and never the
+     * token's own `scope`, so the callback's answer is the only way a token
+     * narrowed at the token endpoint reaches the scope gate narrowed.
+     */
+    describe('token exchange callback', () => {
+      type Callback = (options: Record<string, unknown>) => unknown
+
+      /** The callback as the worker emits it, loaded on its own. */
+      async function loadCallback(): Promise<Callback> {
+        const worker = await build()
+        const start = worker.indexOf('  tokenExchangeCallback(')
+        expect(start).toBeGreaterThan(-1)
+        const end = worker.indexOf('\n  },\n', start)
+        expect(end).toBeGreaterThan(start)
+
+        const file = join(root, 'token-exchange-callback.mjs')
+        writeFileSync(file, `export default {\n${worker.slice(start, end)}\n  },\n}\n`)
+        const loaded = (await import(file)) as { default: { tokenExchangeCallback: Callback } }
+        return loaded.default.tokenExchangeCallback
+      }
+
+      const granted = ['tool:posts.index', 'tool:posts.destroy']
+
+      test('should change only the access token props, never the grant', async () => {
+        const worker = await build()
+
+        expect(worker).toContain('tokenExchangeCallback({ scope, requestedScope, props }) {')
+        expect(worker).toContain('return { accessTokenProps: { ...props, scopes } }')
+        // As a key or a shorthand: the comment above the callback names it.
+        expect(worker).not.toMatch(/newProps\s*[:,}]/)
+        // The refresh grant answers invalid_request to a result carrying this key at all.
+        expect(worker).not.toContain('refreshTokenTTL')
+      })
+
+      test('should leave a token carrying the whole grant as it is', async () => {
+        const callback = await loadCallback()
+
+        expect(callback({
+          grantType: 'refresh_token',
+          scope: granted,
+          requestedScope: granted,
+          props: { userId: 7, scopes: granted },
+        })).toBeUndefined()
+      })
+
+      test('should narrow the props of a token narrowed by its scope', async () => {
+        const callback = await loadCallback()
+        const props = { userId: 7, scopes: [...granted], grantedBy: 'consent' }
+
+        expect(callback({
+          grantType: 'refresh_token',
+          scope: granted,
+          requestedScope: ['tool:posts.index'],
+          props,
+        })).toEqual({ accessTokenProps: { userId: 7, scopes: ['tool:posts.index'], grantedBy: 'consent' } })
+        expect(props.scopes).toEqual(granted)
+      })
+
+      test('should leave no tool to a token whose scope matched nothing granted', async () => {
+        const callback = await loadCallback()
+
+        // What `scope=tools:read` downscopes to against a grant of tool:<name> entries.
+        expect(callback({
+          grantType: 'authorization_code',
+          scope: granted,
+          requestedScope: [],
+          props: { userId: 'user-1', scopes: granted },
+        })).toEqual({ accessTokenProps: { userId: 'user-1', scopes: [] } })
+      })
+
+      test('should leave a shape it cannot read for the endpoint to refuse', async () => {
+        const callback = await loadCallback()
+        const narrowed = { grantType: 'refresh_token', scope: granted, requestedScope: ['tool:posts.index'] }
+
+        expect(callback({ ...narrowed, props: null })).toBeUndefined()
+        expect(callback({ ...narrowed, props: { userId: 7 } })).toBeUndefined()
+        expect(callback({ ...narrowed, props: { userId: 7, scopes: [1, 'tool:posts.index'] } })).toBeUndefined()
+        expect(callback({ grantType: 'refresh_token', scope: granted, props: { userId: 7, scopes: granted } }))
+          .toBeUndefined()
+      })
+    })
+
+    /**
      * One `createWorkersHandler`, threaded through both halves: two would each
      * dedupe boot in their own slot while sharing the module-global env holder,
      * the topology `handler.ts` says it cannot reason about.

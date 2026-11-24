@@ -583,6 +583,22 @@ describe('createSqliteDatabase connection-URI filenames', () => {
     expect(existsSync(resolve('postgres:'))).toBe(false)
   })
 
+  // A boot failure is printed to stderr and shipped to log streams that never see the environment.
+  test('should keep the password of a rejected URI out of the error', async () => {
+    process.env.DATABASE_URL = 'postgres://app:canary-pw-7f3a@db.internal:5432/prod'
+
+    const database = createSqliteDatabase({ migrationsFolder: join(workDir, 'migrations') })
+
+    const failure = await database.getDatabase().then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    expect(failure).toBeInstanceOf(Error)
+    const message = (failure as Error).message
+    expect(message).toContain('postgres://')
+    expect(message).not.toContain('canary-pw-7f3a')
+  })
+
   describe('in-memory filenames', () => {
     // What a Linux Bun, whose sqlite ignores URI filenames, opens for these forms.
     const strayMemoryFiles = ['file::memory:', 'file::memory:#section', 'file::memory:?cache=shared'].map((name) =>
