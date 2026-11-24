@@ -1,7 +1,10 @@
+import type { Board } from '../board/schema'
 import type { BoardOverview, BoardSummary } from '../board/store'
 import { boardJsonPath, boardPagePath, BOARDS_JSON_PATH } from '../dev-center-links'
 import { commandRow, el } from '../docs-viewer-page/dom'
 import { gurenCommandLine } from '../shell-quote'
+import { mountBoardCanvas, type BoardCanvas } from './board-canvas'
+import { boardWords } from './board-words'
 import { card } from './dom'
 
 export type BoardsReading = { boards: BoardSummary[] } | { unmounted: true }
@@ -65,31 +68,59 @@ export async function loadBoards(status: HTMLElement, list: HTMLElement, button:
 interface BoardPayload {
   schemaVersion: number
   file: string
-  board: { title: string }
+  board: Board
   outline: string
   error?: { message: string }
 }
 
-/** One board, as its outline until the canvas ships: the same text `guren board:show` prints. */
+async function readBoardPayload(slug: string): Promise<BoardPayload> {
+  const response = await fetch(boardJsonPath(slug), { cache: 'no-store', redirect: 'error' })
+  const payload = (await response.json()) as BoardPayload
+  if (!response.ok) throw new Error(payload.error?.message ?? `HTTP ${response.status}`)
+  if (payload.schemaVersion !== 1 || typeof payload.outline !== 'string' || !payload.board) throw new Error('Unsupported board payload')
+  return payload
+}
+
+let canvas: BoardCanvas | undefined
+let watching = false
+
+/** One board on its canvas, with the outline `guren board:show` prints folded below it. */
 export async function loadBoard(slug: string, status: HTMLElement, title: HTMLElement, body: HTMLElement, button: HTMLButtonElement): Promise<void> {
   button.disabled = true
   status.textContent = 'Reading the board…'
   status.className = ''
   try {
-    const response = await fetch(boardJsonPath(slug), { cache: 'no-store', redirect: 'error' })
-    const payload = (await response.json()) as BoardPayload
-    if (!response.ok) throw new Error(payload.error?.message ?? `HTTP ${response.status}`)
-    if (payload.schemaVersion !== 1 || typeof payload.outline !== 'string') throw new Error('Unsupported board payload')
+    const payload = await readBoardPayload(slug)
     title.textContent = payload.board.title
     document.title = `${payload.board.title} · Guren Dev Center`
     status.textContent = payload.file
-    body.replaceChildren(
-      card('Outline', el('pre', 'g-code', payload.outline)),
-      card('Commands', el('p', 'meta', 'An agent reads and edits this board with:'), commandRow(gurenCommandLine(['board:show', slug])), commandRow(gurenCommandLine(['board:apply', slug, '--ops', 'ops.json']))),
-    )
+    if (canvas) {
+      canvas.replace(payload.board)
+    } else {
+      const surface = el('div', 'board-surface')
+      const outline = el('details', 'board-outline')
+      outline.append(el('summary', '', boardWords(payload.board.locale)('outline')), el('pre', 'g-code', payload.outline))
+      body.replaceChildren(
+        surface,
+        outline,
+        card('Commands', el('p', 'meta', 'An agent reads and edits this board with:'), commandRow(gurenCommandLine(['board:show', slug])), commandRow(gurenCommandLine(['board:apply', slug, '--ops', 'ops.json']))),
+      )
+      canvas = mountBoardCanvas(surface, slug, payload.board, async () => (await readBoardPayload(slug)).board)
+    }
+    // An agent may have edited the file while the window was elsewhere; waiting edits are never overwritten.
+    if (!watching) {
+      watching = true
+      window.addEventListener('focus', () => {
+        if (canvas && !canvas.busy()) void loadBoard(slug, status, title, body, button)
+      })
+    }
+    const pre = body.querySelector('.board-outline pre')
+    if (pre) pre.textContent = payload.outline
   } catch (error) {
-    title.textContent = slug
-    body.replaceChildren()
+    if (!canvas) {
+      title.textContent = slug
+      body.replaceChildren()
+    }
     status.textContent = `Board unavailable: ${error instanceof Error ? error.message : 'Read failed'}. Refresh to retry.`
     status.className = 'error'
   } finally {

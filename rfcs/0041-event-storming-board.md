@@ -173,6 +173,20 @@ elements and arrows as SVG, with no dependency. A person can:
 The page's own words come from an `en` and `ja` dictionary held to key parity,
 as the plan page's are.
 
+**Amended in implementation (M2b):** the rest of the Dev Center is English and
+has no language switch, so the canvas picks its dictionary from the board's own
+`locale` (Japanese for `ja`, English otherwise). The `ja` table is typed by the
+`en` keys, so a missing key does not compile, and a test holds the placeholders
+alike. The canvas shows an edit before the server answers by running the same
+`applyBoardOps()` the server runs. To bundle it without zod, the applier,
+placement, the canonical form and the board's sizes and rules (`liesIn`, the
+id pattern, the one-line rule) moved to modules that import zod only as types
+(`board/apply.ts`, `board/canonical.ts`, `board/geometry.ts`), and the page and
+the server judge a note's section by one function. One request is in flight at
+a time, and edits made meanwhile wait in a queue. Undo replays operations that
+put back only what the edit touched, read from the board before it, so an
+agent's edit made in between survives an undo.
+
 **The write.** The canvas saves with `POST /_guren/boards/<slug>/ops`. RFC 0032
 calls the plan feedback route "the Dev Center's only write" and gives the
 reason: "The Dev Center cannot tell the person from the agent's browser that
@@ -535,9 +549,17 @@ plan written from a board is an ordinary plan.
 4. **One board across modules.** A link carries `module`, so a board can span
    modules. Whether a section should be able to name the module its notes
    default to is not decided.
-5. **The ceiling of 500 notes.** It is a guess. The canvas should be measured
+5. ~~**The ceiling of 500 notes.** It is a guess. The canvas should be measured
    with a board of that size before M2 ships, and the number set from the
-   result.
+   result.~~
+   **Resolved in implementation (M2b), the ceiling stays at 500.** Measured in
+   the Dev Center on a board of 500 notes, 499 arrows and 10 sections (Chromium
+   in the desktop app's browser pane, Apple silicon): the board document read in
+   26 ms; a pointer move during a drag took 0.02 ms on average and 0.2 ms at
+   most, since it only sets CSS transforms; releasing a drag, which runs
+   `applyBoardOps()` over the whole board and redraws it, took 14.8 ms; a refresh
+   including the fetch took 20 ms. Every interaction stays within one frame, so
+   nothing measured argues for a lower ceiling.
 6. **Whether a board is a node in the docs graph.** `docs:graph` could draw a
    board with edges to the entities its notes link to and to the plan made
    from it. Nothing in this RFC needs it.
