@@ -273,8 +273,8 @@ describe('registeredBindingLookups', () => {
     router.bind('author', [Post, 'slug'])
     router.get('/posts/:post', { bind: { post: [Post, 'slug'] } }, [PostController, 'show'])
     router.get('/posts/by-id/:id', { bind: { id: Post } }, [PostController, 'show'])
-    router.get('/tokens/:token', (c: Context) => c.text('ok'))
-    router.get('/authors/:author', (c: Context) => c.text('ok'))
+    router.get('/tokens/:token', [PostController, 'show'])
+    router.get('/authors/:author', [PostController, 'show'])
     router.get('/authors/:author/posts', { bind: { author: Post } }, [PostController, 'show'])
 
     expect(router.registeredBindingLookups()).toEqual([
@@ -285,5 +285,13 @@ describe('registeredBindingLookups', () => {
       // Bound at both levels, both run: the route's model for `this.model()`, the router's value positionally.
       { author: { router: { model: Post, key: 'slug' } } },
     ])
+  })
+
+  it('looks nothing up for an inline handler, which resolves no binding', () => {
+    const router = new Router()
+    router.bind('token', async (value: string): Promise<string> => value)
+    router.get('/tokens/:token', (c: Context) => c.text('ok'))
+
+    expect(router.registeredBindingLookups()).toEqual([{}])
   })
 })

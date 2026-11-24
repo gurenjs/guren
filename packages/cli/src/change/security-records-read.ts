@@ -523,17 +523,18 @@ export function bindingsRecord(
     }
     return `${model}${lookup.key === undefined ? '' : `@${lookup.key}`}`
   }
-  const bindings: Record<string, string> = {}
+  // Entries, not assignment: a parameter named `__proto__` would set the prototype rather than a key.
+  const entries: Array<[string, string]> = []
   for (const parameter of new Set([...Object.keys(named ?? {}), ...Object.keys(lookups ?? {})])) {
     const source = sources?.[parameter]
     const lookup = lookups?.[parameter]
     const identity = named?.[parameter] === undefined ? undefined : source ? `${source.file}#${source.exportName}` : named[parameter]!
     // A model the server could not name is still bound.
     const own = lookup ? part(lookup, identity ?? ('source' in lookup && lookup.source ? lookup.source : 'unnamed')) : identity!
-    bindings[parameter] = `${own}${lookup?.router ? `+router:${part(lookup.router, ('source' in lookup.router && lookup.router.source) || 'unnamed')}` : ''}`
+    entries.push([parameter, `${own}${lookup?.router ? `+router:${part(lookup.router, ('source' in lookup.router && lookup.router.source) || 'unnamed')}` : ''}`])
   }
-  if (Object.keys(bindings).length === 0) return unread ? { bindingLookups: 'unread' } : {}
-  return { bindings, ...(unread ? { bindingLookups: 'unread' as const } : {}) }
+  if (entries.length === 0) return unread ? { bindingLookups: 'unread' } : {}
+  return { bindings: Object.fromEntries(entries), ...(unread ? { bindingLookups: 'unread' as const } : {}) }
 }
 
 async function actionRecord(

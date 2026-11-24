@@ -1247,6 +1247,8 @@ describe('judgeChangeLane with per-route security records', () => {
     const resolved = await laneWith(controller, { base: records(resolver), head: records(resolver) })
     expect(resolved.unjudged.find((entry) => entry.reader === 'security-records')?.reason).toBe('PUT /t/:token bind a parameter through a custom resolver, whose body is not read, so what they look up was not compared')
     expect(security(await laneWith(controller, { base: records(route([auth])), head: records(route([auth])) }))).toEqual([])
+    // A resolver's body may sit outside the route surface, in a model or the app entry, so those edits are held too.
+    expect(security(await laneWith({ 'app/Models/Post.ts': 'export class Post {}\n' }, { base: records(resolver), head: records(resolver) }))).toEqual(['medium'])
   })
 
   test('should hold a registrar only the head skipped at high, and one both sides skipped at medium', async () => {
