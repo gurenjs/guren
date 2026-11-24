@@ -97,7 +97,9 @@ export async function loadBoard(slug: string, status: HTMLElement, title: HTMLEl
     document.title = `${payload.board.title} · Guren Dev Center`
     status.textContent = payload.file
     if (canvas) {
-      canvas.replace(payload.board, stamp ?? canvas.stamp())
+      // A refused read is older than the outline the last save answered with.
+      const pre = body.querySelector('.board-outline pre')
+      if (canvas.replace(payload.board, stamp ?? canvas.stamp()) && pre) pre.textContent = payload.outline
     } else {
       const surface = el('div', 'board-surface')
       const outline = el('details', 'board-outline')
@@ -107,7 +109,13 @@ export async function loadBoard(slug: string, status: HTMLElement, title: HTMLEl
         outline,
         card('Commands', el('p', 'meta', 'An agent reads and edits this board with:'), commandRow(gurenCommandLine(['board:show', slug])), commandRow(gurenCommandLine(['board:apply', slug, '--ops', 'ops.json']))),
       )
-      canvas = mountBoardCanvas(surface, slug, payload.board, async () => (await readBoardPayload(slug)).board)
+      const pre = outline.querySelector('pre')!
+      // A save answers with the outline of the board it wrote, so it stays the file's after canvas edits.
+      canvas = mountBoardCanvas(surface, slug, payload.board, async () => {
+        const reread = await readBoardPayload(slug)
+        pre.textContent = reread.outline
+        return reread.board
+      }, (text) => { pre.textContent = text })
     }
     // An agent may have edited the file while the window was elsewhere; waiting edits are never overwritten.
     if (!watching) {
@@ -116,8 +124,6 @@ export async function loadBoard(slug: string, status: HTMLElement, title: HTMLEl
         if (canvas && !canvas.busy()) void loadBoard(slug, status, title, body, button)
       })
     }
-    const pre = body.querySelector('.board-outline pre')
-    if (pre) pre.textContent = payload.outline
   } catch (error) {
     if (!canvas) {
       title.textContent = slug

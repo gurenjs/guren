@@ -13,7 +13,7 @@ import type { Board, BoardArrow, BoardNote, BoardSection } from '../board/schema
 import { boardOpsPath } from '../dev-center-links'
 import { el } from '../docs-viewer-page/dom'
 import { borderPoint, svgEl } from '../plan/page/svg'
-import { aboutOps, dragOps, newId, noteUnder } from './board-model'
+import { aboutOps, besideNote, dragOps, freeSpot, newId, noteUnder } from './board-model'
 import { createBoardQueue, type PostResult, type QueueStatus } from './board-queue'
 import { boardWords, kindWord, type BoardWords } from './board-words'
 
@@ -29,7 +29,7 @@ const arrowKey = (arrow: Pick<BoardArrow, 'from' | 'to'>) => `${arrow.from}>${ar
 
 export interface BoardCanvas {
   /** Replaces the board read again from the server, unless a save settled since `stamp()` was taken. */
-  replace(board: Board, stamp: number): void
+  replace(board: Board, stamp: number): boolean
   /** Whether edits are waiting to be saved. */
   busy(): boolean
   stamp(): number
@@ -44,8 +44,10 @@ async function postOps(slug: string, ops: BoardOp[]): Promise<PostResult> {
     cache: 'no-store',
     redirect: 'error',
   })
-  const payload = (await response.json().catch(() => ({}))) as { board?: Board; dropped?: DroppedBoardOp[]; error?: { code?: string; message?: string } }
-  if (response.ok && payload.board) return { ok: true, board: payload.board, dropped: payload.dropped ?? [] }
+  const payload = (await response.json().catch(() => ({}))) as { board?: Board; dropped?: DroppedBoardOp[]; outline?: unknown; error?: { code?: string; message?: string } }
+  if (response.ok && payload.board) {
+    return { ok: true, board: payload.board, dropped: payload.dropped ?? [], ...(typeof payload.outline === 'string' ? { outline: payload.outline } : {}) }
+  }
   return { ok: false, locked: response.status === 409 && payload.error?.code === 'locked', reason: payload.error?.message ?? `HTTP ${response.status}` }
 }
 
@@ -55,7 +57,13 @@ function clampRect(rect: { x: number; y: number; width: number; height: number }
   return { x: unit(rect.x), y: unit(rect.y), width: unit(rect.width), height: unit(rect.height) }
 }
 
-export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board, reread: () => Promise<Board>): BoardCanvas {
+export function mountBoardCanvas(
+  root: HTMLElement,
+  slug: string,
+  initial: Board,
+  reread: () => Promise<Board>,
+  onOutline: (text: string) => void = () => {},
+): BoardCanvas {
   const words: BoardWords = boardWords(initial.locale)
   let view = initial
   const selection: Selection = { notes: new Set() }
@@ -120,7 +128,7 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
     paint()
   }
 
-  const queue = createBoardQueue(initial, (ops) => postOps(slug, ops), reread, { change: (next) => onChange(next), status: (next) => onStatus(next) })
+  const queue = createBoardQueue(initial, (ops) => postOps(slug, ops), reread, { change: (next) => onChange(next), status: (next) => onStatus(next), outline: onOutline })
 
   const endGesture = () => {
     gesturing = false
@@ -131,9 +139,7 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
   }
 
   /** Records `ops` as one user edit, undoable as one, and sends it; an edit that changes nothing is neither. */
-  const submit = (ops: BoardOp[], options?: { record?: boolean }) => {
-    queue.submit(ops, options)
-  }
+  const submit = (ops: BoardOp[], options?: { record?: boolean }): boolean => queue.submit(ops, options)
 
   /** One-line text input over the canvas; `commit` gets the trimmed value, which it may refuse. */
   const ask = (at: { x: number; y: number; width: number }, label: string, value: string, max: number, commit: (text: string) => void) => {
@@ -184,12 +190,11 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
       return
     }
     lastKind = kind
-    const at = { x: snap(point.x - NOTE_SIZE.width / 2, BOARD_EXTENT - NOTE_SIZE.width), y: snap(point.y - NOTE_SIZE.height / 2, BOARD_EXTENT - NOTE_SIZE.height) }
+    const at = freeSpot(view, { x: snap(point.x - NOTE_SIZE.width / 2, BOARD_EXTENT - NOTE_SIZE.width), y: snap(point.y - NOTE_SIZE.height / 2, BOARD_EXTENT - NOTE_SIZE.height) })
     ask({ ...at, width: NOTE_SIZE.width }, words('input.note', { kind: kindWord(words, kind) }), '', NOTE_TEXT_MAX, (text) => {
       const id = newId(view, 'n')
       const section = sectionUnder(view, at)?.id
-      submit([{ op: 'add', id, kind, text, at, ...(section ? { section } : {}) }])
-      select({ notes: new Set([id]) })
+      if (submit([{ op: 'add', id, kind, text, at, ...(section ? { section } : {}) }])) select({ notes: new Set([id]) })
     })
   }
 
@@ -198,8 +203,7 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
     const at = { x: snap(centre.x - DEFAULT_SECTION_SIZE.width / 2), y: snap(centre.y - DEFAULT_SECTION_SIZE.height / 2) }
     ask({ ...at, width: 280 }, words('input.section'), '', SECTION_TITLE_MAX, (title) => {
       const id = newId(view, 's')
-      submit([{ op: 'section', id, title, at: clampRect({ ...at, ...DEFAULT_SECTION_SIZE }) }])
-      select({ notes: new Set(), section: id })
+      if (submit([{ op: 'section', id, title, at: clampRect({ ...at, ...DEFAULT_SECTION_SIZE }) }])) select({ notes: new Set(), section: id })
     })
   }
 
@@ -517,7 +521,8 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
       // A question dropped on a note becomes about it, and settles beside it rather than over it.
       const onto = moving.length === 1 && moving[0]!.kind === 'question' ? noteUnder(view, moves[0]!) : undefined
       if (onto) {
-        moves[0] = { id: moves[0]!.id, x: snap(onto.x + NOTE_SIZE.width + 16, BOARD_EXTENT - NOTE_SIZE.width), y: snap(onto.y, BOARD_EXTENT - NOTE_SIZE.height) }
+        const beside = besideNote(onto)
+        moves[0] = { id: moves[0]!.id, x: snap(beside.x, BOARD_EXTENT - NOTE_SIZE.width), y: snap(beside.y, BOARD_EXTENT - NOTE_SIZE.height) }
       }
       const ops = dragOps(view, moves)
       if (onto) ops.push(...aboutOps(view, moving[0]!.id, onto.id))
@@ -700,7 +705,9 @@ export function mountBoardCanvas(root: HTMLElement, slug: string, initial: Board
 
   return {
     replace(board, stamp) {
-      if (queue.replace(board, stamp)) say(words('status.reread'))
+      const taken = queue.replace(board, stamp)
+      if (taken) say(words('status.reread'))
+      return taken
     },
     busy: () => queue.busy(),
     stamp: () => queue.stamp(),

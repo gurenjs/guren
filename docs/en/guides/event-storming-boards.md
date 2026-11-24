@@ -47,7 +47,7 @@ On a board's page:
 - **Connect** two notes: select the first, press C (or **Connect**), then click the second. Select an arrow and press **Async** for a step the caller does not wait for, such as a queued job; the arrow turns dashed.
 - **Ask a question about a note** by dropping a question onto it. The question then sits beside the note, joined to it by a dotted line.
 - **Sections** group notes. Drag a section by its title to move it with its notes, and drag its bottom-right corner to resize it.
-- **Delete** removes what is selected, and Ctrl or ⌘ with Z takes back your last edit.
+- **Delete** removes what is selected, and Ctrl or ⌘ with Z takes back your last edit. Undo puts back only what that edit changed, so anything else your agent changed meanwhile stays. An edit the file did not take, such as removing a note your agent had already removed, has nothing to undo.
 
 From the keyboard, Tab moves between notes and section titles. The arrow keys move what is selected (hold Shift for larger steps), Enter edits it, and Delete removes it. To connect two notes, press C on the first, Tab to the second and press Enter. Selecting an arrow, selecting several notes and resizing a section need a pointer.
 
