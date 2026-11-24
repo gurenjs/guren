@@ -353,6 +353,40 @@ function storedContentType(prepared: PreparedSource): string {
   return prepared.inspection.contentType ?? prepared.declaredContentType ?? 'application/octet-stream'
 }
 
+/** HTTP token characters (RFC 9110 §5.6.2), the only ones a MIME type and subtype may hold. */
+const MIME_ESSENCE = /^[!#$%&'*+.^_`|~0-9a-z-]+\/[!#$%&'*+.^_`|~0-9a-z-]+$/
+
+/** Essences a browser sniffs the body of, HTML included (WHATWG MIME Sniffing §7.1). */
+const SNIFFED_ESSENCES = new Set(['unknown/unknown', 'application/unknown', '*/*'])
+
+/** Essences a browser renders as a document that runs script; any `+xml` subtype (SVG, XHTML) too. */
+const DOCUMENT_ESSENCES = new Set([
+  'text/html',
+  'text/xml',
+  'application/xml',
+  'text/xsl',
+  // Firefox renders the HTML parts of a mixed-replace stream.
+  'multipart/x-mixed-replace',
+])
+
+/**
+ * The type written onto the stored object, which S3 and R2 serve as its
+ * `Content-Type` with no `nosniff`. The row keeps the declared type: the
+ * delivery route reads it through `INLINE_CONTENT_TYPES` with `nosniff` and a sandbox.
+ */
+function objectContentType(contentType: string): string {
+  return rendersAsDocument(contentType) ? 'application/octet-stream' : contentType
+}
+
+function rendersAsDocument(contentType: string): boolean {
+  // Outside printable ASCII the header is not what a browser parses, and a comma
+  // splits it into several types, the last valid one winning (Fetch "extract a MIME type").
+  if (!/^[\x20-\x7e]*$/.test(contentType) || contentType.includes(',')) return true
+  const essence = (contentType.split(';', 1)[0] ?? '').trim().toLowerCase()
+  if (!MIME_ESSENCE.test(essence) || SNIFFED_ESSENCES.has(essence)) return true
+  return DOCUMENT_ESSENCES.has(essence) || essence.endsWith('+xml')
+}
+
 /**
  * What a storage factory receives when no Application exists at all: a
  * factory that ignores its argument (`() => storage`) keeps working, and one
@@ -561,7 +595,7 @@ export class AttachmentEngine {
     const replaced =
       spec.kind === 'one' ? await this.rowsFor(model, recordId, { collection }) : []
 
-    await disk.put(path, Buffer.from(inspection.bytes), { contentType })
+    await disk.put(path, Buffer.from(inspection.bytes), { contentType: objectContentType(contentType) })
 
     const variants = await this.buildVariants(spec, id, disk, inspection)
 
