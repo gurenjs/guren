@@ -1,0 +1,85 @@
+# ナビゲーション
+
+`defineNavigation()` を使うと、レイアウトに並べるリンクをサーバー側で宣言できます。各エントリーにはルートと、誰に見せるかを書きます。サーバーはページごとに、今のユーザーが見てよいリンクだけを `navigation` という共有 prop でレイアウトに渡すので、レイアウトにロールの判定を書く必要はありません。
+
+## エントリーを宣言する
+
+```ts
+// config/navigation.ts
+import { defineNavigation } from '@guren/core'
+import { Job } from '@/app/Models/Job'
+
+export default defineNavigation([
+  { label: 'Jobs', route: 'jobs.index' },
+  { label: 'Post a job', route: 'jobs.create', show: { can: ['create', Job] } },
+  { label: 'Dashboard', route: 'dashboard', show: { auth: 'required' } },
+])
+```
+
+この定義は、ほかの config 定義と同じように `createApp()` に渡します（[設定](./configuration.md#config-定義) を参照）。
+
+```ts
+// src/app.ts
+import navigation from '../config/navigation'
+
+export const app = createApp({
+  // ...
+  config: [navigation],
+})
+```
+
+エントリーはただのデータで、ラベル、ルート名、省略できる `show` を持ちます。リンクにはパスのパラメーターを埋める手段がないので、ルートは名前付きの `GET` で、パラメーターを持たないものに限ります。1 つのルートにつきエントリーは 1 つです。
+
+## 誰にエントリーを見せるか
+
+`show` には条件を 3 つまで書けます。書いた条件をすべて満たしたときだけ、エントリーが表示されます。
+
+| 条件 | 表示されるとき |
+|---|---|
+| `auth: 'required'` | ユーザーがサインインしている |
+| `auth: 'guest'` | 誰もサインインしていない |
+| `auth: 'any'` | 常に（既定値） |
+| `where: { role: 'admin' }` | ユーザーの各フィールドが値と `===` で一致する |
+| `can: ['create', Job]` | ゲートがそのモデルのクラスに対する ability を許可する |
+
+`auth` と `where` を先に判定するので、サインインが必要なエントリーのためにゲストの分までゲートに問い合わせることはありません。`where` は厳密に比べます。`teamId` が文字列の `'1'` のユーザーは `{ teamId: 1 }` に一致せず、ゲストはどの `where` にも一致しません。ポリシーを持たないアプリで使う条件です。
+
+`can` は、コントローラーで `this.authorize('create', Job)` を呼んだときと同じく、レコードを渡さずにクラスだけでゲートに問い合わせます（[認可](./authorization.md) を参照）。ゲートは 2 つ目の引数なしでポリシーのメソッドを呼ぶので、ユーザーだけを受け取るメソッドの ability を指定してください。ゲストの場合はユーザーを `null` として問い合わせるので、ユーザーを読むメソッドには `null` への備えが要ります。判定が拒否ならエントリーは隠れます。判定が例外を投げた場合も隠れ、サーバーはそのエラーを ability とモデルの組ごとに 1 回だけログに出します。
+
+ability とモデルの組は、ページごとに 1 回ずつ、まとめて同時に問い合わせます。
+
+リンクを隠しても、ページを守ることにはなりません。ユーザーは URL を直接入力できるので、ページを非公開に保つのはルートのミドルウェアと、アクションの `this.authorize()` の役目です。
+
+## リンクを描画する
+
+`navigation` prop には、ユーザーが見てよいエントリーごとに `label`、`path`、現在のページかどうかを表す `current` だけが入ります。ability の名前、隠れたルート、`where` のフィールドはブラウザーに届きません。現在のエントリーは、パスがリクエストと一致するものです。一致するものがなければ、セグメント単位でリクエストのパスの先頭に当たるもののうち、最も長いものになります。そのため `/jobs/42` では `/jobs` が現在のエントリーになり、`/jobsboard` ではなりません。`/` が現在のエントリーになるのは `/` のときだけです。
+
+```tsx
+// resources/js/components/Navigation.tsx
+import { Link, usePage } from '@inertiajs/react'
+import type { NavigationItem } from '@guren/core'
+
+export function Navigation() {
+  const { navigation = [] } = usePage<{ navigation?: NavigationItem[] }>().props
+  return (
+    <nav>
+      {navigation.map((item) => (
+        <Link key={item.path} href={item.path} aria-current={item.current ? 'page' : undefined}>
+          {item.label}
+        </Link>
+      ))}
+    </nav>
+  )
+}
+```
+
+この prop は lazy です。通常の訪問では解決されますが、`navigation` を求めない部分リロードでは、ゲートへの問い合わせごと飛ばされます。
+
+## 起動時に隠れるエントリー
+
+アプリが起動すると、各エントリーがルートに結び付けられます。ルートが登録されていない、`GET` でない、パスのパラメーターを持つ、のどれかに当たるエントリーは隠れ、起動時にエントリーと理由を書いた警告が出ます。ほかのエントリーはそのまま描画されます。存在しないルート名をそのまま使うと、すべてのページが 500 を返してしまうためです。
+
+## 次に読む
+
+- [認可](./authorization.md): `can` の条件が問い合わせるポリシー
+- [Inertia](./inertia.md): 共有 prop と部分リロード
