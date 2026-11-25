@@ -12,6 +12,8 @@ export type BoardNoteKind = (typeof BOARD_NOTE_KINDS)[number]
 export const BOARD_MAX_NOTES = 500
 export const BOARD_MAX_SECTIONS = 100
 export const BOARD_MAX_ARROWS = 2000
+/** The most operations one `board:apply` or ops route request carries. */
+export const BOARD_MAX_OPS = 1000
 export const NOTE_TEXT_MAX = 280
 export const SECTION_TITLE_MAX = 120
 
@@ -51,7 +53,7 @@ export function snapNote(point: { x: number; y: number }): { x: number; y: numbe
 }
 
 /** By its centre, so a note a person dropped across a section's edge counts as inside. */
-export function liesIn(note: Pick<BoardNote, 'x' | 'y'>, section: Pick<BoardSection, 'x' | 'y' | 'width' | 'height'>): boolean {
+export function liesIn(note: Pick<BoardNote, 'x' | 'y'>, section: BoardRect): boolean {
   const x = note.x + NOTE_SIZE.width / 2
   const y = note.y + NOTE_SIZE.height / 2
   return x >= section.x && x <= section.x + section.width && y >= section.y && y <= section.y + section.height
@@ -84,18 +86,18 @@ export function holdMembers(board: Pick<Board, 'notes'>, section: BoardSection):
 }
 
 /** Moves and resizes `section` to `rect`, carrying its notes along, then keeps it around them. */
-export function placeSectionAt(board: Pick<Board, 'notes'>, section: BoardSection, rect: { x: number; y: number; width: number; height: number }): void {
+export function placeSectionAt(board: Pick<Board, 'notes'>, section: BoardSection, rect: BoardRect): void {
   const dx = rect.x - section.x
   const dy = rect.y - section.y
   for (const note of board.notes) {
-    if (note.section !== section.id) continue
-    note.x = snap(note.x + dx, BOARD_EXTENT - NOTE_SIZE.width)
-    note.y = snap(note.y + dy, BOARD_EXTENT - NOTE_SIZE.height)
+    if (note.section === section.id) Object.assign(note, snapNote({ x: note.x + dx, y: note.y + dy }))
   }
   Object.assign(section, rect)
   holdMembers(board, section)
 }
 
-export function snapRect(rect: { x: number; y: number; width: number; height: number }): { x: number; y: number; width: number; height: number } {
+export type BoardRect = Pick<BoardSection, 'x' | 'y' | 'width' | 'height'>
+
+export function snapRect(rect: BoardRect): BoardRect {
   return { x: snap(rect.x), y: snap(rect.y), width: snapSize(rect.width), height: snapSize(rect.height) }
 }

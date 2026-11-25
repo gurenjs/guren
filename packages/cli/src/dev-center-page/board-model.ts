@@ -4,9 +4,20 @@
  * before it, so an agent's edit in between is kept.
  */
 
-import { BOARD_EXTENT, BOARD_ID_PATTERN, liesIn, NOTE_SIZE, sectionUnder } from '../board/geometry'
+import { findNote, findSection } from '../board/apply'
+import { BOARD_EXTENT, BOARD_ID_PATTERN, liesIn, NOTE_SIZE, sectionUnder, type BoardRect } from '../board/geometry'
 import type { BoardOp } from '../board/ops'
-import type { Board, BoardNote, BoardSection } from '../board/schema'
+import type { Board, BoardArrow, BoardNote, BoardSection } from '../board/schema'
+
+/** An arrow's identity; `>` is in no id, so the key splits back into its ends. */
+export function arrowKey(arrow: Pick<BoardArrow, 'from' | 'to'>): string {
+  return `${arrow.from}>${arrow.to}`
+}
+
+export function arrowEnds(key: string): { from: string; to: string } {
+  const [from, to] = key.split('>') as [string, string]
+  return { from, to }
+}
 
 const ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
 
@@ -18,10 +29,6 @@ export function newId(board: Pick<Board, 'notes' | 'sections'>, prefix: 'n' | 's
     for (let i = 0; i < 8; i += 1) id += ID_ALPHABET[Math.floor(random() * ID_ALPHABET.length) % ID_ALPHABET.length]
     if (BOARD_ID_PATTERN.test(id) && !taken.has(id)) return id
   }
-}
-
-function findNote(board: Board, id: string): BoardNote | undefined {
-  return board.notes.find((note) => note.id === id)
 }
 
 /**
@@ -44,9 +51,7 @@ export function dragOps(board: Board, moves: ReadonlyArray<{ id: string; x: numb
 
 /** The note a dragged note was dropped on: its centre inside the other's box. */
 export function noteUnder(board: Board, dragged: { id: string; x: number; y: number }): BoardNote | undefined {
-  const x = dragged.x + NOTE_SIZE.width / 2
-  const y = dragged.y + NOTE_SIZE.height / 2
-  return board.notes.find((note) => note.id !== dragged.id && x >= note.x && x <= note.x + NOTE_SIZE.width && y >= note.y && y <= note.y + NOTE_SIZE.height)
+  return board.notes.find((note) => note.id !== dragged.id && liesIn(dragged, { x: note.x, y: note.y, ...NOTE_SIZE }))
 }
 
 const SPOT_STEP = 24
@@ -91,7 +96,7 @@ function sameRect(a: BoardSection, b: BoardSection): boolean {
   return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
 }
 
-function sectionRect(section: BoardSection): { x: number; y: number; width: number; height: number } {
+function sectionRect(section: BoardSection): BoardRect {
   return { x: section.x, y: section.y, width: section.width, height: section.height }
 }
 
@@ -100,7 +105,7 @@ function touched(ops: readonly BoardOp[]): { notes: Set<string>; sections: Set<s
   const sections = new Set<string>()
   const arrows = new Set<string>()
   for (const op of ops) {
-    if (op.op === 'connect' || op.op === 'disconnect') arrows.add(`${op.from}\u0000${op.to}`)
+    if (op.op === 'connect' || op.op === 'disconnect') arrows.add(arrowKey(op))
     else if (op.op === 'section' || op.op === 'unsection') sections.add(op.id)
     else notes.add(op.id)
   }
@@ -130,37 +135,40 @@ export function inverseOps(before: Board, after: Board, ops: readonly BoardOp[],
   const edits: BoardOp[] = []
   const links: BoardOp[] = []
   const unsections: BoardOp[] = []
-  const restored = new Set([...notes].filter((id) => findNote(before, id) && !findNote(after, id)))
+  const notesOf = (board: Board) => new Map(board.notes.map((note) => [note.id, note]))
+  const beforeNotes = notesOf(before)
+  const afterNotes = notesOf(after)
+  const nowNotes = now === after ? afterNotes : notesOf(now)
+  const restored = new Set([...notes].filter((id) => beforeNotes.has(id) && !afterNotes.has(id)))
   // A question about several removed notes gets one edit, or the last would undo the others.
   const aboutBack = new Map<string, string[]>()
 
   for (const id of sections) {
-    const was = before.sections.find((section) => section.id === id)
-    const is = after.sections.find((section) => section.id === id)
+    const was = findSection(before, id)
+    const is = findSection(after, id)
     if (was && !is) {
       sectionsBack.push({ op: 'section', id, title: was.title, at: sectionRect(was) })
-      for (const note of before.notes) if (note.section === id && findNote(after, note.id)) edits.push({ op: 'edit', id: note.id, section: id })
+      for (const note of before.notes) if (note.section === id && afterNotes.has(note.id)) edits.push({ op: 'edit', id: note.id, section: id })
     } else if (!was && is) {
       unsections.push({ op: 'unsection', id })
     } else if (was && is) {
-      // A rename leaves the rectangle alone, so undoing it must not move a section another writer moved since.
-      if (sameRect(was, is)) {
-        if (was.title !== is.title) sectionsBack.push({ op: 'section', id, title: was.title })
-        continue
-      }
-      // A move or resize keeps a title another writer gave the section since.
-      const title = was.title !== is.title ? was.title : (now.sections.find((section) => section.id === id)?.title ?? was.title)
-      sectionsBack.push({ op: 'section', id, title, at: sectionRect(was) })
+      // Each field is put back only if this edit changed it, so another writer's move or rename since stays.
+      const renamed = was.title !== is.title
+      const at = sameRect(was, is) ? undefined : sectionRect(was)
+      if (!renamed && !at) continue
+      const title = renamed ? was.title : (findSection(now, id)?.title ?? was.title)
+      sectionsBack.push({ op: 'section', id, title, ...(at ? { at } : {}) })
+      if (!at) continue
       for (const note of before.notes) {
-        const now = findNote(after, note.id)
-        if (note.section === id && now && (now.x !== note.x || now.y !== note.y)) edits.push({ op: 'move', id: note.id, x: note.x, y: note.y })
+        const moved = afterNotes.get(note.id)
+        if (note.section === id && moved && (moved.x !== note.x || moved.y !== note.y)) edits.push({ op: 'move', id: note.id, x: note.x, y: note.y })
       }
     }
   }
 
   for (const id of notes) {
-    const was = findNote(before, id)
-    const is = findNote(after, id)
+    const was = beforeNotes.get(id)
+    const is = afterNotes.get(id)
     if (!was && is) {
       removals.push({ op: 'remove', id })
       continue
@@ -172,13 +180,14 @@ export function inverseOps(before: Board, after: Board, ops: readonly BoardOp[],
         if (arrow.from === id || arrow.to === id) links.push({ op: 'connect', from: arrow.from, to: arrow.to, ...(arrow.kind ? { kind: arrow.kind } : {}) })
       }
       for (const other of before.notes) {
-        const current = findNote(now, other.id)
-        if (other.id === id || restored.has(other.id) || !other.about?.includes(id) || !current) continue
+        if (other.id === id || restored.has(other.id) || !other.about?.includes(id)) continue
+        const current = nowNotes.get(other.id)
+        if (!current) continue
         const about = aboutBack.get(other.id) ?? [...(current.about ?? [])]
         if (!about.includes(id)) about.splice(Math.min(other.about.indexOf(id), about.length), 0, id)
         aboutBack.set(other.id, about)
       }
-      const about = was.about?.filter((target) => restored.has(target) || findNote(now, target))
+      const about = was.about?.filter((target) => restored.has(target) || nowNotes.has(target))
       if (about?.length) edits.push({ op: 'edit', id, about })
       continue
     }
@@ -187,14 +196,14 @@ export function inverseOps(before: Board, after: Board, ops: readonly BoardOp[],
     if (is.kind !== was.kind) edit.kind = was.kind
     if (is.section !== was.section) edit.section = was.section ?? null
     if (JSON.stringify(is.about ?? []) !== JSON.stringify(was.about ?? [])) {
-      edit.about = revertList(was.about ?? [], is.about ?? [], findNote(now, id)?.about ?? is.about ?? []).filter((target) => findNote(now, target))
+      edit.about = revertList(was.about ?? [], is.about ?? [], nowNotes.get(id)?.about ?? is.about ?? []).filter((target) => nowNotes.has(target))
     }
     const moved = is.x !== was.x || is.y !== was.y
     // The move goes first, so a note whose old place lies in its old section is not placed again.
     if (moved || edit.section !== undefined) edits.push({ op: 'move', id, x: was.x, y: was.y })
     if (Object.keys(edit).length > 2) edits.push(edit)
     // Its old place outside that section: the edit placed it, and this puts it back.
-    const home = typeof edit.section === 'string' ? now.sections.find((section) => section.id === edit.section) : undefined
+    const home = typeof edit.section === 'string' ? findSection(now, edit.section) : undefined
     if (home && !liesIn(was, home)) edits.push({ op: 'move', id, x: was.x, y: was.y })
     if (JSON.stringify(is.link) !== JSON.stringify(was.link)) links.push({ op: 'link', id, link: was.link ?? null })
   }
@@ -202,7 +211,7 @@ export function inverseOps(before: Board, after: Board, ops: readonly BoardOp[],
   for (const [id, about] of aboutBack) edits.push({ op: 'edit', id, about })
 
   for (const key of arrows) {
-    const [from, to] = key.split('\u0000') as [string, string]
+    const { from, to } = arrowEnds(key)
     const was = before.arrows.find((arrow) => arrow.from === from && arrow.to === to)
     const is = after.arrows.find((arrow) => arrow.from === from && arrow.to === to)
     if (was && (!is || is.kind !== was.kind)) links.push({ op: 'connect', from, to, ...(was.kind ? { kind: was.kind } : {}) })

@@ -7,12 +7,15 @@
 
 import { applyBoardOps, type DroppedBoardOp } from '../board/apply'
 import { serializeBoard } from '../board/canonical'
+import { BOARD_MAX_OPS } from '../board/geometry'
 import type { BoardOp } from '../board/ops'
 import type { Board } from '../board/schema'
 import { inverseOps } from './board-model'
 
-/** The ops route's own list limit (`BOARD_MAX_OPS` in `board/ops.ts`, which imports zod). */
-export const QUEUE_BATCH = 1000
+export const QUEUE_BATCH = BOARD_MAX_OPS
+
+/** Each entry holds two boards, so the oldest edits are forgotten past this many. */
+export const UNDO_LIMIT = 100
 
 export type PostResult = { ok: true; board: Board; dropped: DroppedBoardOp[]; outline?: string } | { ok: false; locked: boolean; reason: string }
 
@@ -47,9 +50,6 @@ interface UndoEntry {
   before: Board
   after: Board
   ops: BoardOp[]
-  /** Operations the server has not answered for yet. */
-  pending: number
-  dropped: boolean
 }
 
 type QueuedOp = { op: BoardOp; entry?: UndoEntry }
@@ -79,18 +79,19 @@ export function createBoardQueue(
 
   const sendInverse = (entry: UndoEntry): boolean => submit(inverseOps(entry.before, entry.after, entry.ops, view), { record: false })
 
+  const unanswered = (entry: UndoEntry): boolean => (inflight ?? []).some((item) => item.entry === entry) || queued.some((item) => item.entry === entry)
+
   const runDeferred = () => {
-    while (deferred.length && deferred[0]!.pending === 0) {
-      const entry = deferred.shift()!
+    while (deferred.length && !unanswered(deferred[0]!)) {
       // An inverse that changes nothing would swallow the keypress, so it goes on to the next edit.
-      if (!entry.dropped && !sendInverse(entry)) undoNext()
+      if (!sendInverse(deferred.shift()!)) undoNext()
     }
   }
 
   function undoNext(): boolean {
     for (let entry = undo.pop(); entry; entry = undo.pop()) {
       // Behind a deferred undo, even an answered edit waits, so undos land in the order asked.
-      if (entry.pending > 0 || deferred.length) {
+      if (deferred.length || unanswered(entry)) {
         deferred.push(entry)
         return true
       }
@@ -100,7 +101,7 @@ export function createBoardQueue(
   }
 
   const flush = async (): Promise<void> => {
-    if (inflight || queued.length === 0) return
+    if (queued.length === 0) return
     const batch = queued.splice(0, QUEUE_BATCH)
     inflight = batch
     events.status({ kind: 'saving' })
@@ -114,18 +115,16 @@ export function createBoardQueue(
       server = result.board
       inflight = undefined
       saves += 1
-      for (const item of batch) if (item.entry) item.entry.pending -= 1
       // Undoing an edit the server refused part of would undo what another writer did instead.
-      for (const drop of result.dropped) {
-        const entry = batch[drop.index]?.entry
-        if (entry) entry.dropped = true
-      }
-      for (let i = undo.length - 1; i >= 0; i -= 1) if (undo[i]!.dropped) undo.splice(i, 1)
+      const refused = new Set(result.dropped.map((drop) => batch[drop.index]?.entry))
+      for (let i = undo.length - 1; i >= 0; i -= 1) if (refused.has(undo[i])) undo.splice(i, 1)
+      deferred = deferred.filter((entry) => !refused.has(entry))
       if (result.outline !== undefined) events.outline?.(result.outline)
       if (result.dropped.length) events.status({ kind: 'dropped', count: result.dropped.length, reason: result.dropped[0]!.reason })
-      else if (queued.length === 0 && refusedLocally) events.status({ kind: 'dropped', ...refusedLocally })
-      else if (queued.length === 0) events.status({ kind: 'saved' })
-      if (queued.length === 0) refusedLocally = undefined
+      else if (queued.length === 0) {
+        events.status(refusedLocally ? { kind: 'dropped', ...refusedLocally } : { kind: 'saved' })
+        refusedLocally = undefined
+      }
       recompute()
       runDeferred()
       return flush()
@@ -159,8 +158,9 @@ export function createBoardQueue(
     // The server would drop these as well, and the edit's undo with them.
     const refused = new Set(applied.dropped.map((drop) => drop.index))
     const sent = ops.filter((_, index) => !refused.has(index))
-    const entry: UndoEntry | undefined = record ? { before, after: applied.board, ops: sent, pending: sent.length, dropped: false } : undefined
-    if (entry && inverseOps(before, applied.board, sent).length) undo.push(entry)
+    const entry: UndoEntry | undefined = record && inverseOps(before, applied.board, sent).length ? { before, after: applied.board, ops: sent } : undefined
+    if (entry) undo.push(entry)
+    if (undo.length > UNDO_LIMIT) undo.shift()
     queued.push(...sent.map((op) => ({ op, entry })))
     recompute()
     kick()

@@ -6,7 +6,7 @@
 
 import { z } from 'zod'
 
-import { BOARD_EXTENT } from './geometry'
+import { BOARD_EXTENT, BOARD_MAX_OPS } from './geometry'
 import { BoardLinkSchema, BoardNoteSchema, BoardSectionSchema } from './schema'
 
 export { applyBoardOps, type AppliedBoardOps, type DroppedBoardOp } from './apply'
@@ -48,7 +48,6 @@ export const BoardOpSchema = z.discriminatedUnion('op', [
 
 export type BoardOp = z.infer<typeof BoardOpSchema>
 
-export const BOARD_MAX_OPS = 1000
 const BoardOpListSchema = z.array(BoardOpSchema).max(BOARD_MAX_OPS)
 
 /** What `board:apply` and the canvas send: the list, bare or under `ops`. */

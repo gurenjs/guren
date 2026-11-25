@@ -24,12 +24,11 @@ export interface AppliedBoardOps {
   dropped: DroppedBoardOp[]
 }
 
-
-function findNote(board: Board, id: string): BoardNote | undefined {
+export function findNote(board: Pick<Board, 'notes'>, id: string): BoardNote | undefined {
   return board.notes.find((note) => note.id === id)
 }
 
-function findSection(board: Board, id: string): BoardSection | undefined {
+export function findSection(board: Pick<Board, 'sections'>, id: string): BoardSection | undefined {
   return board.sections.find((section) => section.id === id)
 }
 
@@ -157,13 +156,20 @@ function applyOne(board: Board, op: BoardOp): string | undefined {
   }
 }
 
+/** Whether naming `sectionId` on the note runs placement: only for a note outside that section. */
+function editPlaces(board: Board, id: string, sectionId: string): boolean {
+  const note = findNote(board, id)
+  const section = findSection(board, sectionId)
+  return note !== undefined && section !== undefined && !liesIn(note, section)
+}
+
 /** Pure: `board` is not changed. The result is in canonical order. */
 export function applyBoardOps(board: Board, ops: readonly BoardOp[]): AppliedBoardOps {
   let draft = structuredClone(board)
   const dropped: DroppedBoardOp[] = []
   ops.forEach((op, index) => {
     // Placement grows sections before it can fail, so a placing operation runs on a copy.
-    const places = ((op.op === 'add' || op.op === 'section') && op.at === undefined) || (op.op === 'edit' && typeof op.section === 'string')
+    const places = ((op.op === 'add' || op.op === 'section') && op.at === undefined) || (op.op === 'edit' && typeof op.section === 'string' && editPlaces(draft, op.id, op.section))
     const target = places ? structuredClone(draft) : draft
     const reason = applyOne(target, op)
     if (reason === undefined) draft = target

@@ -6,14 +6,15 @@
  */
 
 import type { DroppedBoardOp } from '../board/apply'
-import { BOARD_EXTENT, BOARD_MAX_NOTES, BOARD_NOTE_KINDS, lineProblem, NOTE_SIZE, NOTE_TEXT_MAX, SECTION_TITLE_MAX, sectionUnder, snap, type BoardNoteKind } from '../board/geometry'
+import { compareIds } from '../board/canonical'
+import { BOARD_EXTENT, BOARD_MAX_NOTES, BOARD_NOTE_KINDS, lineProblem, NOTE_SIZE, NOTE_TEXT_MAX, SECTION_TITLE_MAX, sectionUnder, snap, snapNote, snapRect, type BoardNoteKind } from '../board/geometry'
 import type { BoardOp } from '../board/ops'
 import { DEFAULT_SECTION_SIZE } from '../board/place'
 import type { Board, BoardArrow, BoardNote, BoardSection } from '../board/schema'
 import { boardOpsPath } from '../dev-center-links'
 import { el } from '../docs-viewer-page/dom'
 import { borderPoint, svgEl } from '../plan/page/svg'
-import { aboutOps, besideNote, dragOps, freeSpot, newId, noteUnder } from './board-model'
+import { aboutOps, arrowEnds, arrowKey, besideNote, dragOps, freeSpot, newId, noteUnder } from './board-model'
 import { createBoardQueue, type PostResult, type QueueStatus } from './board-queue'
 import { boardWords, kindWord, type BoardWords } from './board-words'
 
@@ -24,8 +25,6 @@ const KEY_STEP = 8
 const KEY_STEP_LARGE = 40
 
 type Selection = { notes: Set<string>; section?: string; arrow?: string }
-
-const arrowKey = (arrow: Pick<BoardArrow, 'from' | 'to'>) => `${arrow.from}>${arrow.to}`
 
 export interface BoardCanvas {
   /** Replaces the board read again from the server, unless a save settled since `stamp()` was taken. */
@@ -49,12 +48,6 @@ async function postOps(slug: string, ops: BoardOp[]): Promise<PostResult> {
     return { ok: true, board: payload.board, dropped: payload.dropped ?? [], ...(typeof payload.outline === 'string' ? { outline: payload.outline } : {}) }
   }
   return { ok: false, locked: response.status === 409 && payload.error?.code === 'locked', reason: payload.error?.message ?? `HTTP ${response.status}` }
-}
-
-/** Every value a section rectangle may carry: the ops route refuses one past the board's extent. */
-function clampRect(rect: { x: number; y: number; width: number; height: number }): { x: number; y: number; width: number; height: number } {
-  const unit = (value: number) => Math.min(BOARD_EXTENT, Math.max(0, value))
-  return { x: unit(rect.x), y: unit(rect.y), width: unit(rect.width), height: unit(rect.height) }
 }
 
 export function mountBoardCanvas(
@@ -109,7 +102,6 @@ export function mountBoardCanvas(
     return toWorld(rect.left + rect.width / 2, rect.top + rect.height / 2)
   }
 
-
   const onChange = (next: Board) => {
     view = next
     for (const id of selection.notes) if (!view.notes.some((note) => note.id === id)) selection.notes.delete(id)
@@ -128,18 +120,8 @@ export function mountBoardCanvas(
     paint()
   }
 
-  const queue = createBoardQueue(initial, (ops) => postOps(slug, ops), reread, { change: (next) => onChange(next), status: (next) => onStatus(next), outline: onOutline })
-
-  const endGesture = () => {
-    gesturing = false
-    if (stale) {
-      stale = false
-      render()
-    }
-  }
-
-  /** Records `ops` as one user edit, undoable as one, and sends it; an edit that changes nothing is neither. */
-  const submit = (ops: BoardOp[], options?: { record?: boolean }): boolean => queue.submit(ops, options)
+  const queue = createBoardQueue(initial, (ops) => postOps(slug, ops), reread, { change: onChange, status: onStatus, outline: onOutline })
+  const submit = queue.submit
 
   /** One-line text input over the canvas; `commit` gets the trimmed value, which it may refuse. */
   const ask = (at: { x: number; y: number; width: number }, label: string, value: string, max: number, commit: (text: string) => void) => {
@@ -155,20 +137,16 @@ export function mountBoardCanvas(
     const finish = (save: boolean) => {
       if (done) return
       const text = input.value.trim()
-      if (save && text !== value) {
-        const problem = lineProblem(text, max)
-        if (problem) {
-          say(words(problem === 'empty' ? 'input.empty' : problem === 'too-long' ? 'input.tooLong' : 'input.oneLine', { max }), 'warning')
-          input.focus()
-          return
-        }
-        done = true
-        input.remove()
-        commit(text)
-      } else {
-        done = true
-        input.remove()
+      const changed = save && text !== value
+      const problem = changed ? lineProblem(text, max) : undefined
+      if (problem) {
+        say(words(problem === 'empty' ? 'input.empty' : problem === 'too-long' ? 'input.tooLong' : 'input.oneLine', { max }), 'warning')
+        input.focus()
+        return
       }
+      done = true
+      input.remove()
+      if (changed) commit(text)
       focusSelection()
     }
     input.addEventListener('keydown', (event) => {
@@ -190,7 +168,7 @@ export function mountBoardCanvas(
       return
     }
     lastKind = kind
-    const at = freeSpot(view, { x: snap(point.x - NOTE_SIZE.width / 2, BOARD_EXTENT - NOTE_SIZE.width), y: snap(point.y - NOTE_SIZE.height / 2, BOARD_EXTENT - NOTE_SIZE.height) })
+    const at = freeSpot(view, snapNote({ x: point.x - NOTE_SIZE.width / 2, y: point.y - NOTE_SIZE.height / 2 }))
     ask({ ...at, width: NOTE_SIZE.width }, words('input.note', { kind: kindWord(words, kind) }), '', NOTE_TEXT_MAX, (text) => {
       const id = newId(view, 'n')
       const section = sectionUnder(view, at)?.id
@@ -203,7 +181,7 @@ export function mountBoardCanvas(
     const at = { x: snap(centre.x - DEFAULT_SECTION_SIZE.width / 2), y: snap(centre.y - DEFAULT_SECTION_SIZE.height / 2) }
     ask({ ...at, width: 280 }, words('input.section'), '', SECTION_TITLE_MAX, (title) => {
       const id = newId(view, 's')
-      if (submit([{ op: 'section', id, title, at: clampRect({ ...at, ...DEFAULT_SECTION_SIZE }) }])) select({ notes: new Set(), section: id })
+      if (submit([{ op: 'section', id, title, at: snapRect({ ...at, ...DEFAULT_SECTION_SIZE }) }])) select({ notes: new Set(), section: id })
     })
   }
 
@@ -219,7 +197,6 @@ export function mountBoardCanvas(
     })
   }
 
-
   const select = (next: Selection) => {
     selection.notes = next.notes
     selection.section = next.section
@@ -232,10 +209,7 @@ export function mountBoardCanvas(
     const ops: BoardOp[] = []
     for (const id of selection.notes) ops.push({ op: 'remove', id })
     if (selection.section) ops.push({ op: 'unsection', id: selection.section })
-    if (selection.arrow) {
-      const [from, to] = selection.arrow.split('>') as [string, string]
-      ops.push({ op: 'disconnect', from, to })
-    }
+    if (selection.arrow) ops.push({ op: 'disconnect', ...arrowEnds(selection.arrow) })
     submit(ops)
     select({ notes: new Set() })
   }
@@ -325,9 +299,7 @@ export function mountBoardCanvas(
   tools.append(el('span', 'board-tool-group'), sectionButton, connectButton, asyncButton, deleteButton, undoButton, zoomOut, zoomIn, fitButton)
   tools.firstElementChild!.append(...kindButtons)
 
-
   const noteNodes = new Map<string, HTMLElement>()
-
   const sectionNodes = new Map<string, HTMLElement>()
   const arrowNodes = new Map<string, SVGElement>()
 
@@ -341,7 +313,7 @@ export function mountBoardCanvas(
     sectionLayer.replaceChildren(...view.sections.map(drawSection))
     noteNodes.clear()
     // Tab order follows reading order on the board, top to bottom, then left to right.
-    const ordered = [...view.notes].sort((a, b) => a.y - b.y || a.x - b.x || (a.id < b.id ? -1 : 1))
+    const ordered = [...view.notes].sort((a, b) => a.y - b.y || a.x - b.x || compareIds(a.id, b.id))
     noteLayer.replaceChildren(...ordered.map(drawNote))
     const defs = svgEl('defs')
     const marker = svgEl('marker', { id: 'board-head', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' })
@@ -462,6 +434,44 @@ export function mountBoardCanvas(
     return node
   }
 
+  /** One pointer drag on `grip`: `move` follows it past the threshold, and `drop` names what to send when it ends. */
+  const track = (grip: HTMLElement, event: PointerEvent, handlers: { move(dx: number, dy: number): void; drop(dx: number, dy: number): BoardOp[] }) => {
+    const start = { x: event.clientX, y: event.clientY }
+    const delta = (next: PointerEvent): [number, number] => [(next.clientX - start.x) / zoom, (next.clientY - start.y) / zoom]
+    let dragged = false
+    grip.setPointerCapture(event.pointerId)
+    gesturing = true
+    const move = (next: PointerEvent) => {
+      if (!dragged && Math.hypot(next.clientX - start.x, next.clientY - start.y) < DRAG_THRESHOLD) return
+      dragged = true
+      handlers.move(...delta(next))
+    }
+    const stop = () => {
+      grip.removeEventListener('pointermove', move)
+      grip.removeEventListener('pointerup', up)
+      grip.removeEventListener('pointercancel', cancel)
+      gesturing = false
+    }
+    const cancel = () => {
+      stop()
+      stale = false
+      render()
+    }
+    const up = (next: PointerEvent) => {
+      stop()
+      const redraw = stale
+      stale = false
+      if (!dragged) {
+        if (redraw) render()
+        return
+      }
+      // Redraws even when nothing is sent: a drag that snapped back still has to lose its transforms.
+      if (!queue.submit(handlers.drop(...delta(next)))) render()
+    }
+    grip.addEventListener('pointermove', move)
+    grip.addEventListener('pointerup', up)
+    grip.addEventListener('pointercancel', cancel)
+  }
 
   const pressNote = (event: PointerEvent, note: BoardNote) => {
     if (event.button !== 0) return
@@ -479,61 +489,23 @@ export function mountBoardCanvas(
     }
     if (!selection.notes.has(note.id)) select({ notes: new Set([note.id]) })
     const moving = view.notes.filter((candidate) => selection.notes.has(candidate.id))
-    const start = { x: event.clientX, y: event.clientY }
-    let dragged = false
-    const target = event.currentTarget as HTMLElement
-    target.setPointerCapture(event.pointerId)
-    gesturing = true
-    const move = (next: PointerEvent) => {
-      const dx = (next.clientX - start.x) / zoom
-      const dy = (next.clientY - start.y) / zoom
-      if (!dragged && Math.hypot(next.clientX - start.x, next.clientY - start.y) < DRAG_THRESHOLD) return
-      dragged = true
-      for (const each of moving) {
-        const node = noteNodes.get(each.id)
-        if (node) node.style.transform = `translate(${dx}px, ${dy}px)`
-      }
-    }
-    const stop = () => {
-      target.removeEventListener('pointermove', move)
-      target.removeEventListener('pointerup', up)
-      target.removeEventListener('pointercancel', cancel)
-    }
-    const cancel = () => {
-      stop()
-      gesturing = false
-      stale = false
-      render()
-    }
-    const up = (next: PointerEvent) => {
-      stop()
-      if (!dragged) {
-        endGesture()
-        return
-      }
-      const dx = (next.clientX - start.x) / zoom
-      const dy = (next.clientY - start.y) / zoom
-      const moves = moving.map((each) => ({
-        id: each.id,
-        x: snap(each.x + dx, BOARD_EXTENT - NOTE_SIZE.width),
-        y: snap(each.y + dy, BOARD_EXTENT - NOTE_SIZE.height),
-      }))
-      // A question dropped on a note becomes about it, and settles beside it rather than over it.
-      const onto = moving.length === 1 && moving[0]!.kind === 'question' ? noteUnder(view, moves[0]!) : undefined
-      if (onto) {
-        const beside = besideNote(onto)
-        moves[0] = { id: moves[0]!.id, x: snap(beside.x, BOARD_EXTENT - NOTE_SIZE.width), y: snap(beside.y, BOARD_EXTENT - NOTE_SIZE.height) }
-      }
-      const ops = dragOps(view, moves)
-      if (onto) ops.push(...aboutOps(view, moving[0]!.id, onto.id))
-      // Redraws even when nothing is sent: a drag that snapped back still has to lose its transforms.
-      gesturing = false
-      stale = false
-      if (!queue.submit(ops)) render()
-    }
-    target.addEventListener('pointermove', move)
-    target.addEventListener('pointerup', up)
-    target.addEventListener('pointercancel', cancel)
+    track(event.currentTarget as HTMLElement, event, {
+      move: (dx, dy) => {
+        for (const each of moving) {
+          const node = noteNodes.get(each.id)
+          if (node) node.style.transform = `translate(${dx}px, ${dy}px)`
+        }
+      },
+      drop: (dx, dy) => {
+        const moves = moving.map((each) => ({ id: each.id, ...snapNote({ x: each.x + dx, y: each.y + dy }) }))
+        // A question dropped on a note becomes about it, and settles beside it rather than over it.
+        const onto = moving.length === 1 && moving[0]!.kind === 'question' ? noteUnder(view, moves[0]!) : undefined
+        if (onto) moves[0] = { id: moves[0]!.id, ...snapNote(besideNote(onto)) }
+        const ops = dragOps(view, moves)
+        if (onto) ops.push(...aboutOps(view, moving[0]!.id, onto.id))
+        return ops
+      },
+    })
   }
 
   const dragRect = (grip: HTMLElement, section: BoardSection, mode: 'move' | 'resize') => {
@@ -545,53 +517,21 @@ export function mountBoardCanvas(
       select({ notes: new Set(), section: section.id })
       viewport.focus({ preventScroll: true })
       const node = grip.parentElement!
-      const start = { x: event.clientX, y: event.clientY }
-      let dragged = false
-      grip.setPointerCapture(event.pointerId)
-      gesturing = true
-      const at = (next: PointerEvent) => {
-        const dx = (next.clientX - start.x) / zoom
-        const dy = (next.clientY - start.y) / zoom
-        return mode === 'move'
-          ? { x: section.x + dx, y: section.y + dy, width: section.width, height: section.height }
-          : { x: section.x, y: section.y, width: Math.max(NOTE_SIZE.width, section.width + dx), height: Math.max(NOTE_SIZE.height, section.height + dy) }
-      }
-      const move = (next: PointerEvent) => {
-        if (!dragged && Math.hypot(next.clientX - start.x, next.clientY - start.y) < DRAG_THRESHOLD) return
-        dragged = true
-        const r = at(next)
-        Object.assign(node.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
-        if (mode === 'move') {
+      const at = (dx: number, dy: number) => mode === 'move'
+        ? { x: section.x + dx, y: section.y + dy, width: section.width, height: section.height }
+        : { x: section.x, y: section.y, width: Math.max(NOTE_SIZE.width, section.width + dx), height: Math.max(NOTE_SIZE.height, section.height + dy) }
+      track(grip, event, {
+        move: (dx, dy) => {
+          const r = at(dx, dy)
+          Object.assign(node.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
+          if (mode !== 'move') return
           for (const note of view.notes) {
             const each = note.section === section.id ? noteNodes.get(note.id) : undefined
-            if (each) each.style.transform = `translate(${r.x - section.x}px, ${r.y - section.y}px)`
+            if (each) each.style.transform = `translate(${dx}px, ${dy}px)`
           }
-        }
-      }
-      const stop = () => {
-        grip.removeEventListener('pointermove', move)
-        grip.removeEventListener('pointerup', up)
-        grip.removeEventListener('pointercancel', cancel)
-      }
-      const cancel = () => {
-        stop()
-        gesturing = false
-        stale = false
-        render()
-      }
-      const up = (next: PointerEvent) => {
-        stop()
-        if (!dragged) {
-          endGesture()
-          return
-        }
-        gesturing = false
-        stale = false
-        if (!queue.submit([{ op: 'section', id: section.id, title: section.title, at: clampRect(at(next)) }])) render()
-      }
-      grip.addEventListener('pointermove', move)
-      grip.addEventListener('pointerup', up)
-      grip.addEventListener('pointercancel', cancel)
+        },
+        drop: (dx, dy) => [{ op: 'section', id: section.id, title: section.title, at: snapRect(at(dx, dy)) }],
+      })
     })
   }
 
@@ -640,7 +580,6 @@ export function mountBoardCanvas(
     applyView()
   }, { passive: false })
 
-
   viewport.addEventListener('keydown', (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
       event.preventDefault()
@@ -684,7 +623,7 @@ export function mountBoardCanvas(
     const delta = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key] as [number, number] | undefined
     if (delta && section) {
       event.preventDefault()
-      const at = clampRect({ x: section.x + delta[0], y: section.y + delta[1], width: section.width, height: section.height })
+      const at = snapRect({ x: section.x + delta[0], y: section.y + delta[1], width: section.width, height: section.height })
       submit([{ op: 'section', id: section.id, title: section.title, at }])
       return
     }
@@ -692,7 +631,7 @@ export function mountBoardCanvas(
       event.preventDefault()
       const moves = view.notes
         .filter((note) => selection.notes.has(note.id))
-        .map((note) => ({ id: note.id, x: snap(note.x + delta[0], BOARD_EXTENT - NOTE_SIZE.width), y: snap(note.y + delta[1], BOARD_EXTENT - NOTE_SIZE.height) }))
+        .map((note) => ({ id: note.id, ...snapNote({ x: note.x + delta[0], y: note.y + delta[1] }) }))
       submit(dragOps(view, moves))
       const focused = one ? noteNodes.get(one.id) : undefined
       focused?.focus()

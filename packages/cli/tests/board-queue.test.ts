@@ -4,7 +4,7 @@ import { BOARD_EXTENT, BOARD_MAX_SECTIONS, NOTE_SIZE } from '../src/board/geomet
 import { applyBoardOps, type BoardOp } from '../src/board/ops'
 import { emptyBoard, type Board } from '../src/board/schema'
 import { besideNote, freeSpot, inverseOps } from '../src/dev-center-page/board-model'
-import { createBoardQueue, QUEUE_BATCH, type PostResult, type QueueStatus } from '../src/dev-center-page/board-queue'
+import { createBoardQueue, QUEUE_BATCH, UNDO_LIMIT, type PostResult, type QueueStatus } from '../src/dev-center-page/board-queue'
 
 const NOTE = (id: string, x = 0): BoardOp => ({ op: 'add', id, kind: 'event', text: id.toUpperCase(), at: { x, y: 0 } })
 
@@ -180,6 +180,18 @@ describe('createBoardQueue', () => {
     await queue.settled()
 
     expect(server.posts.map((ops) => ops.length)).toEqual([QUEUE_BATCH, 5])
+  })
+
+  test('should keep only the most recent edits for undo', async () => {
+    const start = applyBoardOps(emptyBoard('Test', 'en'), [NOTE('aa')]).board
+    const server = fakeServer(start)
+    const { queue } = queueOn(server, start)
+
+    for (let n = 1; n <= UNDO_LIMIT + 1; n += 1) queue.submit([{ op: 'move', id: 'aa', x: n * 8, y: 0 }])
+    let undone = 0
+    while (queue.undo()) undone += 1
+
+    expect(undone).toBe(UNDO_LIMIT)
   })
 
   test('should forget the undo of an edit the server dropped, so it cannot bring back what another writer removed', async () => {

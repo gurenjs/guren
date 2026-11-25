@@ -11,8 +11,7 @@ import { CliError } from '../cli-error'
 import { LocaleSchema } from '../plan/schema'
 import { BOARD_EXTENT, BOARD_GRID, BOARD_ID_PATTERN, lineProblem, BOARD_MAX_ARROWS, BOARD_MAX_NOTES, BOARD_MAX_SECTIONS, BOARD_NOTE_KINDS, NOTE_TEXT_MAX, SECTION_TITLE_MAX } from './geometry'
 
-export { BOARD_EXTENT, BOARD_GRID, BOARD_ID_PATTERN, BOARD_MAX_ARROWS, BOARD_MAX_NOTES, BOARD_MAX_SECTIONS, BOARD_NOTE_KINDS, type BoardNoteKind } from './geometry'
-export { canonicalBoard, compareIds, serializeBoard } from './canonical'
+export { compareIds, serializeBoard } from './canonical'
 
 export const BOARD_VERSION = 1
 
