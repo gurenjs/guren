@@ -553,6 +553,17 @@ describe('a tool call whose path resolves to another route', () => {
   }
 
   // `boot` runs before the routes mount, so a route it adds to Hono matches ahead of the tool's.
+  test('should ignore a route header longer than any tool route needs', async () => {
+    const { app, reached } = await bootApp({ routes: postsRoutes() })
+    const header = encodeURIComponent(JSON.stringify({ method: 'GET', path: `/posts/:id${'/:a'.repeat(700)}`, name: 'x' }))
+
+    const response = await app.fetch(new Request('http://localhost/posts/new', { headers: { 'X-Guren-Agent-Route': header } }))
+
+    expect(header.length).toBeGreaterThan(2048)
+    expect(response.status).toBe(200)
+    expect(reached).toEqual(['create'])
+  })
+
   test('should refuse a value that lands on a route the boot callback added straight to Hono', async () => {
     const { app, tool, reached } = await bootWithHono((hono, seen) => {
       hono.get('/posts/new', (c) => {
@@ -700,7 +711,12 @@ describe('a tool call that crossed a socket', () => {
     const tool = staleTool('/posts/:id{[0-9]+}', 'posts.show')
     const request = overSocket(tool, { id: 7 })
 
-    expect(readAgentRouteHeader(request)).toEqual({ method: 'GET', path: '/posts/:id{[0-9]+}', name: 'posts.show' })
+    expect(readAgentRouteHeader(request)).toEqual({
+      method: 'GET',
+      path: '/posts/:id{[0-9]+}',
+      shape: '/posts/:{[0-9]+}',
+      name: 'posts.show',
+    })
   })
 
   test('should refuse a value that lands on an earlier literal route, uncached, without running it', async () => {

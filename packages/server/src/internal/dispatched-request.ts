@@ -65,8 +65,13 @@ export const AGENT_ROUTE_HEADER = 'X-Guren-Agent-Route'
 export interface ClaimedToolRoute {
   method: string
   path: string
+  /** {@link routePathShape} of `path`, computed once per request. */
+  shape: string
   name?: string
 }
+
+/** Longer than any real tool route needs; a longer header is unreadable, so it cannot cost a shape per route. */
+const MAX_AGENT_ROUTE_HEADER_LENGTH = 2048
 
 /** The header value for `route`: URI-encoded JSON, since a path constraint may hold any character. */
 export function encodeAgentRouteHeader(route: DispatchedToolRoute): string {
@@ -76,7 +81,7 @@ export function encodeAgentRouteHeader(route: DispatchedToolRoute): string {
 /** The route `request`'s {@link AGENT_ROUTE_HEADER} names, or `undefined` when it is absent or unreadable. */
 export function readAgentRouteHeader(request: Request): ClaimedToolRoute | undefined {
   const raw = request.headers.get(AGENT_ROUTE_HEADER)
-  if (raw === null) return undefined
+  if (raw === null || raw.length > MAX_AGENT_ROUTE_HEADER_LENGTH) return undefined
   let parsed: unknown
   try {
     parsed = JSON.parse(decodeURIComponent(raw))
@@ -86,7 +91,12 @@ export function readAgentRouteHeader(request: Request): ClaimedToolRoute | undef
   if (typeof parsed !== 'object' || parsed === null) return undefined
   const { method, path, name } = parsed as Record<string, unknown>
   if (typeof method !== 'string' || typeof path !== 'string') return undefined
-  return { method: method.toUpperCase(), path, ...(typeof name === 'string' && name !== '' ? { name } : {}) }
+  return {
+    method: method.toUpperCase(),
+    path,
+    shape: routePathShape(path),
+    ...(typeof name === 'string' && name !== '' ? { name } : {}),
+  }
 }
 
 /**
@@ -96,7 +106,7 @@ export function readAgentRouteHeader(request: Request): ClaimedToolRoute | undef
  */
 export function isClaimedRoute(claimed: ClaimedToolRoute, route: { method: string; path: string; name?: string }): boolean {
   if (claimed.name !== undefined && claimed.name === route.name) return true
-  return claimed.method === route.method.toUpperCase() && routePathShape(claimed.path) === routePathShape(route.path)
+  return claimed.method === route.method.toUpperCase() && claimed.shape === routePathShape(route.path)
 }
 
 /**
