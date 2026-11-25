@@ -353,8 +353,11 @@ function storedContentType(prepared: PreparedSource): string {
   return prepared.inspection.contentType ?? prepared.declaredContentType ?? 'application/octet-stream'
 }
 
-/** HTTP token characters (RFC 9110 §5.6.2), the only ones a MIME type and subtype may hold. */
-const MIME_ESSENCE = /^[!#$%&'*+.^_`|~0-9a-z-]+\/[!#$%&'*+.^_`|~0-9a-z-]+$/
+/**
+ * HTTP token characters (RFC 9110 §5.6.2), the only ones a MIME type and subtype may hold.
+ * `'` and the backtick are escaped: `tests/source-scan.ts` would read them as opening a literal.
+ */
+const MIME_ESSENCE = /^[!#$%&\x27*+.^_\x60|~0-9a-z-]+\/[!#$%&\x27*+.^_\x60|~0-9a-z-]+$/
 
 /** Essences a browser sniffs the body of, HTML included (WHATWG MIME Sniffing §7.1). */
 const SNIFFED_ESSENCES = new Set(['unknown/unknown', 'application/unknown', '*/*'])
