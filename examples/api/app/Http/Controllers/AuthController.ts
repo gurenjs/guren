@@ -8,7 +8,7 @@ import { getTokenStore } from '../../Providers/ApiTokenProvider.js'
 const hash = new Hash()
 let missingUserHash: Promise<string> | undefined
 
-// An unknown address verifies against a hash no password opens, so it costs what a wrong password costs.
+// An unknown address verifies against a hash no password opens, so it costs about what a wrong password costs.
 function hashForMissingUser(): Promise<string> {
   missingUserHash ??= hash.hash(crypto.randomUUID()).catch((error: unknown) => {
     missingUserHash = undefined
