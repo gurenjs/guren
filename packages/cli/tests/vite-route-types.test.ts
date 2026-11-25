@@ -213,6 +213,14 @@ describe('routeTypesPlugin watches route schemas', () => {
     expect(await touchedBy('modules/billing/index.ts')).toBe(true)
   })
 
+  it('regenerates for config/navigation.ts, whose presence routes.gen.ts depends on', async () => {
+    expect(await touchedBy('config/navigation.ts')).toBe(true)
+  })
+
+  it('ignores another config file', async () => {
+    expect(await touchedBy('config/session.ts')).toBe(false)
+  })
+
   it('ignores a non-source file beside the routes entry', async () => {
     expect(await touchedBy('routes/README.md')).toBe(false)
   })

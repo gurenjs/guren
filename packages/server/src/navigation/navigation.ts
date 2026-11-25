@@ -31,10 +31,24 @@ export interface NavigationShow {
   readonly where?: Readonly<Record<string, NavigationFieldValue>>
 }
 
+/**
+ * Registry `guren codegen` merges a `routes` map into, once the app has
+ * `config/navigation.ts`: the named `GET` routes with no path parameter. Left
+ * empty, a navigation entry accepts any route name.
+ */
+export interface GurenNavigationRoutes {}
+
+type RegisteredNavigationRoutes = GurenNavigationRoutes extends { routes: infer R extends object } ? R : never
+
+/** A route name a navigation entry accepts: one codegen listed, or any string before codegen has run. */
+export type NavigationRouteName = [RegisteredNavigationRoutes] extends [never]
+  ? string
+  : keyof RegisteredNavigationRoutes & string
+
 export interface NavigationEntry {
   readonly label: string
   /** A named `GET` route with no path parameter. */
-  readonly route: string
+  readonly route: NavigationRouteName
   /** Every condition given must hold. */
   readonly show?: NavigationShow
 }

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { consola } from 'consola'
 import type { DerivedAgentTool, RouteDefinition as ServerRouteDefinition } from '@guren/server'
@@ -5,8 +6,9 @@ import { agentToolRouteKey, loadIntrospectedRouteDefinitions, routesFileFallback
 import { introspectApp } from './introspect'
 import { ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
 import { routesEntryOrDefault } from './route-registrar'
-import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, isParameterless, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { CONTRACT_SEGMENTS } from './contract-segments'
+import { NAVIGATION_CONFIG_FILE } from './discovery'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import {
   RUNTIME_TYPE_DEFINITIONS,
@@ -91,6 +93,7 @@ export async function generateRouteTypes(
   })
   const runtimeModule = buildRouteModuleContent(definitions, {
     source: relative(appRoot, routesFile) || DEFAULT_ROUTES_FILE,
+    navigation: existsSync(resolve(appRoot, NAVIGATION_CONFIG_FILE)),
   })
 
   const outputPath = await writeGeneratedFileIn(appRoot, outputFile, declaration, { force: options.force })
@@ -140,7 +143,7 @@ ${routeLines}
 `
 }
 
-export function buildRouteModuleContent(definitions: RouteDefinition[], context: { source: string }): string {
+export function buildRouteModuleContent(definitions: RouteDefinition[], context: { source: string; navigation?: boolean }): string {
   const namedDefinitions = definitions
     .filter((definition): definition is RouteDefinition & { name: string } => Boolean(definition.name))
     .sort((left, right) => left.name.localeCompare(right.name))
@@ -166,7 +169,7 @@ ${RUNTIME_TYPE_DEFINITIONS}
 ${RUNTIME_ROUTE_FUNCTION}
 export const routes = ${helperObject} as const
 
-${RUNTIME_UTILITY_FUNCTIONS}${buildContractAugmentation(namedDefinitions)}`
+${RUNTIME_UTILITY_FUNCTIONS}${buildContractAugmentation(namedDefinitions)}${context.navigation ? buildNavigationAugmentation(namedDefinitions) : ''}`
 }
 
 /**
@@ -194,6 +197,29 @@ declare module '@guren/core' {
     routes: {
 ${entries.join('\n')}
     }
+  }
+}
+`
+}
+
+/**
+ * The `GurenNavigationRoutes` registry `defineNavigation()` checks an entry's route
+ * against: a name every definition of which is a `GET` with no path parameter, so
+ * the runtime links it whichever of them `Router.route()` gives.
+ */
+function buildNavigationAugmentation(definitions: Array<RouteDefinition & { name: string }>): string {
+  const linkable = new Map<string, boolean>()
+  for (const definition of definitions) {
+    const fits = definition.method === 'GET' && isParameterless(definition.path)
+    linkable.set(definition.name, (linkable.get(definition.name) ?? true) && fits)
+  }
+  const entries = [...linkable].filter(([, fits]) => fits).map(([name]) => `      ${quoteObjectKey(name)}: true`)
+  const routes = entries.length > 0 ? `{\n${entries.join('\n')}\n    }` : '{}'
+
+  return `
+declare module '@guren/core' {
+  interface GurenNavigationRoutes {
+    routes: ${routes}
   }
 }
 `

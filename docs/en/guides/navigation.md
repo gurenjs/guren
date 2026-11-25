@@ -30,6 +30,8 @@ export const app = createApp({
 
 An entry is plain data: a label, a route name and an optional `show`. The route must be a named `GET` route with no path parameter, since a link has nothing to fill one with. One entry per route.
 
+Once `config/navigation.ts` exists, `guren codegen` writes the route names an entry may use into `.guren/routes.gen.ts`, so a name that is not a parameterless `GET` route fails the type check. A name that two routes share is listed only when both are parameterless `GET` routes. Until codegen has run, any name type-checks, and the boot warning below is what catches one.
+
 ## Who sees an entry
 
 `show` takes up to three conditions, and every one you give must hold:

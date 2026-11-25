@@ -1120,7 +1120,7 @@ export {
 } from './config/define'
 export type { ConfigDefinition, ConfigDefinitions, HttpConfig, OAuthConfig } from './config/define'
 export { defineNavigation } from './navigation/navigation'
-export type { NavigationAuth, NavigationConfig, NavigationEntry, NavigationFieldValue, NavigationItem, NavigationModel, NavigationShow } from './navigation/navigation'
+export type { GurenNavigationRoutes, NavigationAuth, NavigationConfig, NavigationEntry, NavigationFieldValue, NavigationItem, NavigationModel, NavigationRouteName, NavigationShow } from './navigation/navigation'
 export type { InertiaI18nProps } from './providers/I18nServiceProvider'
 // Queue: SQS adapter
 export { SqsDriver, createSqsAdapter } from './queue/drivers/SqsDriver'

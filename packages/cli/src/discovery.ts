@@ -360,6 +360,9 @@ export const PROVIDERS_DIR = 'app/Providers'
 /** Where `make:validator` writes and `plan:status` reads validators. */
 export const VALIDATORS_DIR = 'app/Http/Validators'
 
+/** Where `defineNavigation()` lives: codegen lists the route names an entry may use only beside it, and the Vite plugin watches it. */
+export const NAVIGATION_CONFIG_FILE = 'config/navigation.ts'
+
 /** Where `make:policy` writes and `plan:status` and `guren audit` read policies. */
 export const POLICIES_DIR = 'app/Policies'
 
