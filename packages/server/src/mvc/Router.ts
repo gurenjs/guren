@@ -8,7 +8,13 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
-import { markRouterRouteEntry, readDispatchedToolRoute } from '../internal/dispatched-request'
+import {
+  claimsRegisteredRoute,
+  isClaimedRoute,
+  markRouterRouteEntry,
+  readAgentRouteHeader,
+  readDispatchedToolRoute,
+} from '../internal/dispatched-request'
 import { refuseMisroutedToolCall } from '../agent/dispatched-route-guard'
 import { trimSlashes } from '../support/trim-slashes'
 import { extractPathParamNames, PATH_PARAM_PATTERN } from '../internal/route-path'
@@ -753,7 +759,7 @@ export class Router<in M extends string = never> {
       if (preflightMiddleware) chain.push(preflightMiddleware)
       chain.push(handler)
       // Wrapped, not prepended: each Hono handler is a route entry of its own.
-      chain[0] = markRouterRouteEntry(guardDispatchedRoute(route, chain[0]!))
+      chain[0] = markRouterRouteEntry(guardDispatchedRoute(route, chain[0]!, this.registry))
       return { route, chain }
     })
     for (const { route, chain } of prepared) {
@@ -1421,13 +1427,23 @@ function throwOnInvalid<T>(schema: ValidationSchema<T>, data: unknown): T {
  * The refusal calls neither `first` nor `next()`, which would run this route's rest. Any
  * other request reaches `first` as Hono called it; `length` and `name` are kept for `hono/dev`.
  */
-function guardDispatchedRoute(route: RegisteredRoute, first: MiddlewareHandler): MiddlewareHandler {
+function guardDispatchedRoute(
+  route: RegisteredRoute,
+  first: MiddlewareHandler,
+  registry: readonly RegisteredRoute[],
+): MiddlewareHandler {
   const guarded = function (this: unknown, c: Context, next: Next): Promise<Response | void> {
     const target = readDispatchedToolRoute(c.req.raw)
-    if (
-      target === undefined
-      || (target.method === route.method.toUpperCase() && target.path === route.path && target.name === route.name)
-    ) {
+    if (target === undefined) {
+      // Off a socket the mark is gone; the header refuses only a route it names on neither
+      // name nor shape, and nothing when it names no route at all (a page from before a deploy).
+      const claimed = readAgentRouteHeader(c.req.raw)
+      if (claimed === undefined || isClaimedRoute(claimed, route) || !claimsRegisteredRoute(claimed, registry)) {
+        return first.call(this, c, next)
+      }
+      return Promise.resolve(refuseMisroutedToolCall(c, claimed, { fromHeader: true }))
+    }
+    if (target.method === route.method.toUpperCase() && target.path === route.path && target.name === route.name) {
       return first.call(this, c, next)
     }
     return Promise.resolve(refuseMisroutedToolCall(c, target))

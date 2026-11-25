@@ -6,7 +6,8 @@ import { deriveAgentTools, type DerivedAgentTool } from '../../src/agent/derive'
 import { advertisesStructuredOutput, buildToolRequest, mapToolResponse } from '../../src/agent/dispatch'
 import { createAgentInvocationPipeline } from '../../src/agent/pipeline'
 import { createApp } from '../../src/http/Application'
-import { markDispatchedToolRequest, readDispatchedToolRoute } from '../../src/internal/dispatched-request'
+import { markDispatchedToolRequest, readAgentRouteHeader, readDispatchedToolRoute } from '../../src/internal/dispatched-request'
+import { pathCovers } from '../../src/agent/dispatched-route-guard'
 import { attachAuthContext, requireAuthenticated, requireGuest } from '../../src/http/middleware/auth'
 import { requireVerifiedEmail } from '../../src/auth/email-verification'
 import { createMockAuthContext } from '@guren/testing'
@@ -650,6 +651,201 @@ describe('the dispatched-route guard on a bare Hono app', () => {
 
     expect(response.status).toBe(200)
     expect(await response.text()).toBe('7')
+  })
+})
+
+/**
+ * A WebMCP call reaches the app as the page's own fetch: a new `Request` that carries the
+ * route header and not the in-process mark, which `new Request(built.request)` reproduces.
+ */
+describe('a tool call that crossed a socket', () => {
+  function overSocket(tool: DerivedAgentTool, args: Record<string, unknown>): Request {
+    const built = buildToolRequest(tool, args, { surface: 'webmcp' })
+    if (!('request' in built)) throw new Error('request not built')
+    const copy = new Request(built.request)
+    expect(readDispatchedToolRoute(copy)).toBeUndefined()
+    return copy
+  }
+
+  function staleTool(path: string, name: string): DerivedAgentTool {
+    return toolFor((router) => {
+      router.get(path, handler).name(name).agent({ toolName: 'posts_show' })
+    }, 'posts_show')
+  }
+
+  async function bootApp(options: {
+    routes: (router: Router, reached: string[]) => void
+    hono?: (hono: Hono, reached: string[]) => void
+  }) {
+    const reached: string[] = []
+    const app = createApp({
+      ...(options.hono ? { boot: (hono: Hono) => options.hono!(hono, reached) } : {}),
+      routes: (router) => options.routes(router, reached),
+    })
+    await app.boot()
+    return { app, reached }
+  }
+
+  function postsRoutes(showPath = '/posts/:id', showName = 'posts.show') {
+    return (router: Router, reached: string[]) => {
+      router.get('/posts/new', () => {
+        reached.push('create')
+        return Response.json({ page: 'create' })
+      }).name('posts.create')
+      router.get(showPath, (c) => Response.json({ shown: Object.values(c.req.param())[0] })).name(showName)
+    }
+  }
+
+  test('should carry the route it was built for in the route header', () => {
+    const tool = staleTool('/posts/:id{[0-9]+}', 'posts.show')
+    const request = overSocket(tool, { id: 7 })
+
+    expect(readAgentRouteHeader(request)).toEqual({ method: 'GET', path: '/posts/:id{[0-9]+}', name: 'posts.show' })
+  })
+
+  test('should refuse a value that lands on an earlier literal route, uncached, without running it', async () => {
+    const { app, reached } = await bootApp({ routes: postsRoutes() })
+
+    const response = await app.fetch(overSocket(staleTool('/posts/:id', 'posts.show'), { id: 'new' }))
+
+    expect(response.status).toBe(400)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
+    expect(response.headers.get('Vary')).toContain('X-Guren-Agent-Route')
+    expect(reached).toEqual([])
+  })
+
+  test('should answer a value the tool\'s own route matches', async () => {
+    const { app } = await bootApp({ routes: postsRoutes() })
+
+    const response = await app.fetch(overSocket(staleTool('/posts/:id', 'posts.show'), { id: '7' }))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ shown: '7' })
+  })
+
+  test('should run a page built before its route\'s parameter and name were renamed', async () => {
+    const { app } = await bootApp({ routes: postsRoutes('/posts/:postId', 'posts.view') })
+
+    const response = await app.fetch(overSocket(staleTool('/posts/:id', 'posts.show'), { id: '7' }))
+
+    expect(response.status).toBe(200)
+  })
+
+  test('should run a page built before its route\'s constraint, `?` or `*` changed', async () => {
+    for (const [built, live] of [
+      ['/posts/:id{[0-9]+}', '/posts/:id'],
+      ['/posts/:id', '/posts/:id?'],
+      ['/posts/:id', '/posts/:id*'],
+    ] as const) {
+      const { app } = await bootApp({ routes: postsRoutes(live) })
+
+      const response = await app.fetch(overSocket(staleTool(built, 'posts.show'), { id: '7' }))
+
+      expect(response.status).toBe(200)
+    }
+  })
+
+  test('should refuse a renamed route\'s shape on an earlier literal route', async () => {
+    const { app, reached } = await bootApp({ routes: postsRoutes('/posts/:postId', 'posts.view') })
+
+    const response = await app.fetch(overSocket(staleTool('/posts/:id', 'posts.show'), { id: 'new' }))
+
+    expect(response.status).toBe(400)
+    expect(reached).toEqual([])
+  })
+
+  test('should let through a header that names no route the app registers', async () => {
+    const { app, reached } = await bootApp({ routes: postsRoutes() })
+    const gone = { method: 'GET', path: '/posts/:slug{[a-z]+}', name: 'posts.gone' }
+
+    const response = await app.fetch(new Request('http://localhost/posts/new', {
+      headers: { 'X-Guren-Agent-Route': encodeURIComponent(JSON.stringify(gone)) },
+    }))
+
+    expect(response.status).toBe(200)
+    expect(reached).toEqual(['create'])
+  })
+
+  test('should ignore a route header that does not parse', async () => {
+    const { app, reached } = await bootApp({ routes: postsRoutes() })
+
+    const response = await app.fetch(new Request('http://localhost/posts/new', { headers: { 'X-Guren-Agent-Route': '%%' } }))
+
+    expect(response.status).toBe(200)
+    expect(reached).toEqual(['create'])
+  })
+
+  test('should refuse a value that lands on a route the boot callback added straight to Hono', async () => {
+    const { app, reached } = await bootApp({
+      routes: postsRoutes(),
+      hono: (hono, seen) => {
+        hono.get('/posts/new', (c) => {
+          seen.push('boot route')
+          return c.json({ page: 'create' })
+        })
+      },
+    })
+
+    const response = await app.fetch(overSocket(staleTool('/posts/:id', 'posts.show'), { id: 'new' }))
+
+    expect(response.status).toBe(400)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
+    expect(reached).toEqual([])
+  })
+
+  test('should pass Hono middleware whose path covers the tool\'s, a trailing `/*` or a plain `:x`', async () => {
+    for (const middlewarePath of ['/posts/:x/*', '/posts/:x', '/posts/*', '*']) {
+      const { app, reached } = await bootApp({
+        routes: postsRoutes('/posts/:id{[0-9]+}'),
+        hono: (hono, seen) => {
+          hono.on('GET', middlewarePath, async (_c, next) => {
+            seen.push('boot middleware')
+            await next()
+          })
+        },
+      })
+
+      const response = await app.fetch(overSocket(staleTool('/posts/:id{[0-9]+}', 'posts.show'), { id: '7' }))
+
+      expect(response.status).toBe(200)
+      expect(reached).toEqual(['boot middleware'])
+    }
+  })
+
+  test('should pass Hono middleware that covers the route as it reads now, for a page from before the change', async () => {
+    const { app, reached } = await bootApp({
+      routes: postsRoutes('/posts/:id{[0-9]+}'),
+      hono: (hono, seen) => {
+        hono.on('GET', '/posts/:x{[0-9]+}', async (_c, next) => {
+          seen.push('boot middleware')
+          await next()
+        })
+      },
+    })
+
+    const response = await app.fetch(overSocket(staleTool('/posts/:id', 'posts.show'), { id: '7' }))
+
+    expect(response.status).toBe(200)
+    expect(reached).toEqual(['boot middleware'])
+  })
+})
+
+describe('pathCovers', () => {
+  test('should cover a pattern whose every URL the entry also matches', () => {
+    expect(pathCovers('/posts/:x', '/posts/:id')).toBe(true)
+    expect(pathCovers('/posts/:x', '/posts/:id{[0-9]+}')).toBe(true)
+    expect(pathCovers('/posts/:x/*', '/posts/:id')).toBe(true)
+    expect(pathCovers('/posts/*', '/posts/:id/comments')).toBe(true)
+    expect(pathCovers('*', '/posts/:id')).toBe(true)
+    expect(pathCovers('/posts/:x{[0-9]+}', '/posts/:id{[0-9]+}')).toBe(true)
+    expect(pathCovers('/posts/:x?', '/posts')).toBe(true)
+  })
+
+  test('should not cover a literal, a narrower constraint, or a different length', () => {
+    expect(pathCovers('/posts/new', '/posts/:id')).toBe(false)
+    expect(pathCovers('/posts/:x{[0-9]+}', '/posts/:id')).toBe(false)
+    expect(pathCovers('/posts/:x/edit', '/posts/:id')).toBe(false)
+    expect(pathCovers('/posts', '/posts/:id')).toBe(false)
   })
 })
 

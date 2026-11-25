@@ -23,3 +23,12 @@ export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*
 export function extractPathParamNames(path: string): string[] {
   return Array.from(path.matchAll(PATH_PARAM_PATTERN), (match) => match[2]!)
 }
+
+/**
+ * `path` with every parameter's label dropped and its constraint, `*` and `?` kept, so
+ * `/posts/:id{[0-9]+}` and `/posts/:postId{[0-9]+}` read alike and a changed constraint does not.
+ */
+export function routePathShape(path: string): string {
+  return path.replace(PATH_PARAM_PATTERN, (match, lead: string, name: string) =>
+    `${lead}:${name.endsWith('*') ? '*' : ''}${match.slice(lead.length + 1 + name.length)}`)
+}
