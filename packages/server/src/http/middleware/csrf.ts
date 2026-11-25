@@ -1,5 +1,6 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { getCookie } from 'hono/cookie'
+import { matchedRoutes } from 'hono/route'
 import { jsonResponse } from './index'
 import { renderErrorPage } from '../../errors/error-page'
 import { wantsHtmlResponse } from '../../errors/wants-html'
@@ -10,6 +11,7 @@ import { secureCompare } from '../../encryption/Hash'
 import { isDevCenterWriteRequest, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '../../mcp/endpoint'
 import { hasBearerHeader } from '../../auth/api-token'
 import { readAgentPrincipal } from '../../internal/agent-principal'
+import { isRouterRouteEntry } from '../../internal/dispatched-request'
 
 export const CSRF_TOKEN_KEY = '_csrf_token'
 export const CSRF_HEADER_NAME = 'X-CSRF-TOKEN'
@@ -150,10 +152,32 @@ export type CookielessAuthEndpoints = () => ReadonlySet<string>
  * literal route, and a pattern here would be an escape hatch.
  */
 function isCookielessAuthEndpoint(
+  ctx: Context,
   path: string,
   declared: CookielessAuthEndpoints | undefined,
 ): boolean {
-  return declared !== undefined && declared().has(path)
+  return declared !== undefined && declared().has(path) && !routerRouteAnswersAhead(ctx, path)
+}
+
+/**
+ * Whether a `Router` route whose pattern matches this request (`POST /:slug` at
+ * `/mcp`) sits ahead of the declaring endpoint, the last entry at the literal path.
+ * Only Router entries count: Hono records `hono.post('*', mw)` exactly as a route,
+ * so counting raw entries would 403 the endpoint's own callers. A route added
+ * straight to Hono ahead of the endpoint is therefore not seen here.
+ */
+function routerRouteAnswersAhead(ctx: Context, path: string): boolean {
+  const entries = matchedRoutes(ctx)
+  const own = ctx.req.routeIndex
+  let endpoint = entries.length
+  for (let index = entries.length - 1; index > own; index--) {
+    const entry = entries[index]!
+    if (entry.path === path && !isRouterRouteEntry(entry.handler)) {
+      endpoint = index
+      break
+    }
+  }
+  return entries.slice(own + 1, endpoint).some((entry) => isRouterRouteEntry(entry.handler))
 }
 
 /**
@@ -377,7 +401,7 @@ export function createCsrfMiddleware(
       || isMcpEndpointRequest(path)
       // Exempt on the MCP endpoint's terms; the route requires the request's own `Origin` instead.
       || isDevCenterWriteRequest(path)
-      || isCookielessAuthEndpoint(path, cookielessAuthEndpoints)
+      || isCookielessAuthEndpoint(ctx, path, cookielessAuthEndpoints)
       || isBearerRequestWithoutCookies(ctx)
       || isSeamPrincipalRequest(ctx)
     ) {
