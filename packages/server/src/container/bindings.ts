@@ -23,6 +23,7 @@ import type { AgentAuditEmitter } from '../agent/audit-emitter'
 import type { SessionManager } from '../http/middleware/session-manager'
 import type { AppEnv, EnvSource } from '../config/env'
 import type { HostAuthorizationOptions } from '../http/middleware/host-authorization'
+import type { NavigationConfig } from '../navigation/navigation'
 
 /** Maps service keys to their concrete types, for `container.make('key')`. */
 export interface ServiceBindings {
@@ -46,6 +47,8 @@ export interface ServiceBindings {
   health: HealthManager
   scheduler: Scheduler
   gate: Gate
+  /** Bound by `defineNavigation()` (RFC 0040 §5). */
+  navigation: NavigationConfig
   /** Bound lazily on the first `shareInertiaProps(fn, container)` call. */
   'inertia.sharedProps': SharedInertiaPropsRegistry
   /** `createApp({ inertia: { document } })`; read by the Inertia engine ahead of `setInertiaDocument()` (RFC 0023 §1). */

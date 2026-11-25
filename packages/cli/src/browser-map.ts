@@ -99,8 +99,9 @@ function featureFile(name: string): string {
   return `${BROWSER_MAP_DIR}/${slugifyProse(name, '-', 'feature')}.md`
 }
 
+/** The same test as `isParameterlessPath()` in `@guren/core/internal/route-path`, which the navigation links by. */
 export function isParameterless(path: string): boolean {
-  return !/[:*]/u.test(path)
+  return !/(?:^|\/):|\*/u.test(path)
 }
 
 export function buildBrowserMap(

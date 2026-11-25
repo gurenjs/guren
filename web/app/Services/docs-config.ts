@@ -58,6 +58,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'frontend',
       'inertia',
       'views',
+      'navigation',
     ],
   },
   {
