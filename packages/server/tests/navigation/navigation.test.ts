@@ -82,6 +82,10 @@ async function bootWith(entries: readonly NavigationEntry[]): Promise<Applicatio
       router.get('/reports', [PageController, 'show']).name('reports')
       router.get('/jobs/:id', [PageController, 'show']).name('jobs.show')
       router.post('/jobs', [PageController, 'store']).name('jobs.store')
+      router.get('/status/foo:bar', [PageController, 'show']).name('status')
+      const early = router.get('/early', [PageController, 'show'])
+      router.get('/late', [PageController, 'show']).name('renamed')
+      early.name('renamed')
     },
   })
   await app.boot()
@@ -230,6 +234,19 @@ describe('defineNavigation (RFC 0040 §5)', () => {
     expect(messages.some((message) => message.includes('"Store" is hidden: route "jobs.store" is a POST route'))).toBe(true)
     expect(messages.some((message) => message.includes('"Job" is hidden: route "jobs.show" has a path parameter'))).toBe(true)
     expect(await labels(app, '/')).toEqual(['Home'])
+  })
+
+  test('links a name to the route Router.route() gives, and a colon inside a segment as a literal path', async () => {
+    const app = await bootWith([
+      { label: 'Renamed', route: 'renamed' },
+      { label: 'Status', route: 'status' },
+    ])
+
+    expect(app.router.route('renamed')).toBe('/early')
+    expect((await visit(app, '/')).navigation).toEqual([
+      { label: 'Renamed', path: '/early', current: false },
+      { label: 'Status', path: '/status/foo:bar', current: false },
+    ])
   })
 
   test('marks the entry at the request path, else the longest prefix by whole segments, and never / as a prefix', async () => {

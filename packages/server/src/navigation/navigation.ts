@@ -12,6 +12,7 @@ import type { Container } from '../container/Container'
 import { resolveOptional } from '../container/resolve-optional'
 import type { Application } from '../http/Application'
 import { isParameterlessPath } from '../internal/route-path'
+import type { Router } from '../mvc/Router'
 import { shareInertiaProps } from '../mvc/inertia/shared'
 
 export type NavigationAuth = 'any' | 'required' | 'guest'
@@ -74,7 +75,7 @@ export function defineNavigation(entries: readonly NavigationEntry[]): ConfigDef
     },
     boot: (container, resolved) => {
       const app = container.make<Application>('app')
-      const links = linkEntries(app.router.definitions(), resolved.entries)
+      const links = linkEntries(app.router, resolved.entries)
       shareInertiaProps((ctx) => ({ navigation: () => navigationItems(ctx, links, container) }), container)
     },
   })
@@ -126,16 +127,17 @@ function assertShow(show: NavigationShow, at: string): void {
 
 /**
  * Hidden rather than failing the request: `Router.route()` throws on a missing
- * name, and the layout renders on every page. A name two routes carry links to
- * the one registered last.
+ * name, and the layout renders on every page. The path is the one `Router.route()`
+ * gives, the route last named so, whatever order the routes were registered in.
  */
-function linkEntries(
-  definitions: ReadonlyArray<{ method: string; path: string; name?: string }>,
-  entries: readonly NavigationEntry[],
-): LinkedEntry[] {
+function linkEntries(router: Router, entries: readonly NavigationEntry[]): LinkedEntry[] {
+  const definitions = router.definitions()
   const links: LinkedEntry[] = []
   for (const entry of entries) {
-    const route = [...definitions].reverse().find((definition) => definition.name === entry.route)
+    const path = router.hasRoute(entry.route) ? router.route(entry.route) : undefined
+    const route = path === undefined
+      ? undefined
+      : [...definitions].reverse().find((definition) => definition.name === entry.route && definition.path === path)
     const hidden = (reason: string) => console.warn(`[guren] The navigation entry "${entry.label}" is hidden: route "${entry.route}" ${reason}.`)
     if (route === undefined) {
       hidden('is not registered')

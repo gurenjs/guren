@@ -273,4 +273,10 @@ describe('isParameterless', () => {
       expect(isParameterless(path)).toBe(isParameterlessPath(path))
     }
   })
+
+  test('reads a colon inside a segment as literal, as Hono does, and a wildcard anywhere as one', () => {
+    expect(isParameterless('/status/foo:bar')).toBe(true)
+    expect(isParameterless('/files/:path')).toBe(false)
+    expect(isParameterless('/files/*.png')).toBe(false)
+  })
 })

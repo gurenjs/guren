@@ -16,9 +16,12 @@
 // next brace: `\{[^}]*\}(?:[^/]*\})*` is quadratic (CodeQL js/polynomial-redos; 2.9s vs 1.9ms at 16k chars).
 export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu
 
-/** No parameter or wildcard; `isParameterless()` in the CLI's `browser-map.ts` is the same test. */
+/**
+ * No parameter (a `:` opening a segment, as {@link PATH_PARAM_PATTERN} reads one) and
+ * no `*` anywhere; `isParameterless()` in the CLI's `browser-map.ts` is the same test.
+ */
 export function isParameterlessPath(path: string): boolean {
-  return !/[:*]/u.test(path)
+  return !/(?:^|\/):|\*/u.test(path)
 }
 
 /**
