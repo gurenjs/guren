@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 
 import { buildApplicationGraph, graphId, packageControllerSource, type ApplicationGraphInputs, type GraphNode, type GurenApplicationGraph } from '../src/application-graph'
-import { BROWSER_MAP_SECTIONS, buildBrowserMap, renderFeatureDoc, renderIndexDoc, type BrowserMap } from '../src/browser-map'
+import { isParameterlessPath } from '@guren/core/internal/route-path'
+import { BROWSER_MAP_SECTIONS, buildBrowserMap, isParameterless, renderFeatureDoc, renderIndexDoc, type BrowserMap } from '../src/browser-map'
 import { approvedPlans } from '../src/browser-map-files'
 import { extractAcceptanceCitations } from '../src/docs-acceptance'
 import { createTempWorkspace, writeWorkspaceFiles } from './helpers'
@@ -263,5 +264,13 @@ describe('approvedPlans', () => {
       expect(plans.map((entry) => entry.file)).toEqual(['docs/plans/approved/plan.json'])
       expect(unreadable.map((entry) => entry.plan).sort()).toEqual(['broken.plan.json', 'docs/plans/garbled/plan.json'])
     } finally { await workspace.cleanup() }
+  })
+})
+
+describe('isParameterless', () => {
+  test('agrees with the rule the navigation links entries by', () => {
+    for (const path of ['/', '/jobs', '/jobs/:id', '/files/:path*', '/assets/*', '/status/foo:bar', '/a/:id{[0-9]+}']) {
+      expect(isParameterless(path)).toBe(isParameterlessPath(path))
+    }
   })
 })

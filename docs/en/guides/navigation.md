@@ -44,7 +44,7 @@ An entry is plain data: a label, a route name and an optional `show`. The route 
 
 `auth` and `where` are judged first, so an entry that requires sign-in never asks the gate for a guest. `where` compares strictly: a user whose `teamId` is the string `'1'` does not match `{ teamId: 1 }`, and a guest matches no `where` at all. Use it in an app with no policy to ask.
 
-`can` asks the gate the way `this.authorize('create', Job)` does in a controller, with the bare class and no record (see [Authorization](./authorization.md)). Name an ability whose policy method takes the user alone: the gate calls it with no second argument. A guest is asked with a `null` user, so guard a policy method that reads the user. A check that denies hides the entry; one that throws hides it too, and the server logs the error once per ability and model.
+`can` asks the gate the way `this.authorize('create', Job)` does in a controller, with the bare class and no record (see [Authorization](./authorization.md)). Name an ability whose policy method takes the user alone: the gate calls it with no second argument. A guest is asked with a `null` user, so guard a policy method that reads the user. A check that denies hides the entry; one that throws hides it too, and the server logs the error once per ability and model. So does an ability with no policy bound to the model and no gate of that name: the gate denies it, the entry is hidden for everyone, and nothing is logged.
 
 Each distinct ability and model is asked once per page, and all of them at the same time.
 

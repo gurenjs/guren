@@ -5,6 +5,7 @@ import { resetDefaultApplication } from '../../src/http/default-application'
 
 class Job {}
 class Report {}
+class Slow {}
 
 const policyCalls: Array<{ ability: string; user: unknown }> = []
 
@@ -24,6 +25,22 @@ class ReportPolicy extends Policy {
   viewAny(user: { role: string } | null): boolean {
     policyCalls.push({ ability: 'viewAny', user })
     return (user as { role: string }).role === 'admin'
+  }
+}
+
+const slowOrder: string[] = []
+
+class SlowPolicy extends Policy {
+  async first(): Promise<boolean> {
+    slowOrder.push('first:start')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    slowOrder.push('first:end')
+    return true
+  }
+
+  second(): boolean {
+    slowOrder.push('second:start')
+    return true
   }
 }
 
@@ -57,6 +74,7 @@ async function bootWith(entries: readonly NavigationEntry[]): Promise<Applicatio
       router.get('/', [PageController, 'show']).name('home')
       router.get('/jobs', [PageController, 'show']).name('jobs.index')
       router.get('/jobs/create', [PageController, 'show']).name('jobs.create')
+      router.get('/jobs/create/preview', [PageController, 'show']).name('jobs.preview')
       router.get('/jobsboard', [PageController, 'show']).name('jobsboard')
       router.get('/dashboard', [PageController, 'show']).name('dashboard')
       router.get('/login', [PageController, 'show']).name('login')
@@ -70,6 +88,7 @@ async function bootWith(entries: readonly NavigationEntry[]): Promise<Applicatio
   const gate = app.container.make('gate')
   gate.policy(Job, JobPolicy)
   gate.policy(Report, ReportPolicy)
+  gate.policy(Slow, SlowPolicy)
   return app
 }
 
@@ -94,6 +113,7 @@ function warnings(): string[] {
 
 beforeEach(() => {
   policyCalls.length = 0
+  slowOrder.length = 0
   warn = spyOn(console, 'warn').mockImplementation(() => {})
 })
 
@@ -157,10 +177,30 @@ describe('defineNavigation (RFC 0040 §5)', () => {
   test('judges auth and where before asking the gate', async () => {
     const app = await bootWith([
       { label: 'Post a job', route: 'jobs.create', show: { auth: 'required', can: ['create', Job] } },
+      { label: 'Jobs', route: 'jobs.index', show: { where: { role: 'employer' }, can: ['viewAny', Job] } },
     ])
 
     expect(await labels(app, '/')).toEqual([])
-    expect(policyCalls).toEqual([])
+    expect(await labels(app, '/', { user: { id: 1, role: 'member' } })).toEqual([])
+    expect(policyCalls.map((call) => call.ability)).toEqual(['create'])
+  })
+
+  test('starts every check before any of them settles', async () => {
+    const app = await bootWith([
+      { label: 'Jobs', route: 'jobs.index', show: { can: ['first', Slow] } },
+      { label: 'Dashboard', route: 'dashboard', show: { can: ['second', Slow] } },
+    ])
+
+    expect(await labels(app, '/')).toEqual(['Jobs', 'Dashboard'])
+    expect(slowOrder).toEqual(['first:start', 'second:start', 'first:end'])
+  })
+
+  test('serves each application its own navigation when two share a process', async () => {
+    const first = await bootWith([{ label: 'Jobs', route: 'jobs.index' }])
+    const second = await bootWith([{ label: 'Dashboard', route: 'dashboard' }])
+
+    expect(await labels(first, '/')).toEqual(['Jobs'])
+    expect(await labels(second, '/')).toEqual(['Dashboard'])
   })
 
   test('hides an entry whose check throws, and warns once per ability and model', async () => {
@@ -207,6 +247,7 @@ describe('defineNavigation (RFC 0040 §5)', () => {
     expect(await current('/jobs')).toEqual(['Jobs'])
     expect(await current('/jobs/create')).toEqual(['Post a job'])
     expect(await current('/jobs/42')).toEqual(['Jobs'])
+    expect(await current('/jobs/create/preview')).toEqual(['Post a job'])
     expect(await current('/jobsboard')).toEqual([])
     expect(await current('/dashboard')).toEqual([])
   })

@@ -126,8 +126,8 @@ function assertShow(show: NavigationShow, at: string): void {
 
 /**
  * Hidden rather than failing the request: `Router.route()` throws on a missing
- * name, and the layout renders on every page. A name registered twice resolves
- * to the last `.name()`, as `Router.route()` does.
+ * name, and the layout renders on every page. A name two routes carry links to
+ * the one registered last.
  */
 function linkEntries(
   definitions: ReadonlyArray<{ method: string; path: string; name?: string }>,

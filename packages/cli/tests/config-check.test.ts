@@ -56,6 +56,16 @@ describe('checkConfigWiring', () => {
     })])
   })
 
+  test('warns about an unwired navigation, whose builder is not named define*Config', async () => {
+    const results = await run({
+      'config/navigation.ts': "import { defineNavigation } from '@guren/core'\n\nexport default defineNavigation([{ label: 'Home', route: 'home' }])\n",
+      'src/app.ts': entry('{ providers: [] }', ''),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([['config-unwired:config/navigation.ts', 'warn']])
+    expect(results[0].message).toContain('declares the "navigation" config')
+  })
+
   // The deploy plugin reads it while building (RFC 0035 §3); the app never does.
   test('does not report config/cloudflare.ts, a build-time definition', async () => {
     const results = await run({
