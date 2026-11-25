@@ -37,10 +37,11 @@ createMarkdownRenderer({
 
 markdownの記法だけでも、`href`や`src`に`javascript:`や`data:`のURLを入れられます。そのため、生のHTMLをエスケープするだけでは足りません。デフォルトの`sanitize: true`では、レンダリングしたHTMLを返す前に`sanitize-html`の許可リスト（allowlist）に通します。
 
-- 許可するのは構造を表すタグだけです。`<script>`のような生のHTMLは、黙って消さずにエスケープします
+- 許可するのは構造を表すタグだけです。`<script>`のような生のHTMLは、黙って消さずにエスケープします。許可されているタグは生のHTMLで書いても残りますが、属性は許可されたものだけになります
 - `href`と`src`に使えるのは`http`、`https`、`mailto`だけで、プロトコル相対URL（`//host/path`）は拒否します
 - インラインのstyleは、shikiが出力する宣言（色と`--shiki-dark`カスタムプロパティ）だけを許可します。そのため、ハイライトしたコードはサニタイズ後もそのまま残ります
 - 見出しの`id`とアラートのマークアップは、値が完全に一致する場合に限って許可します
+- `class`の値は、レンダラと`createShikiHighlight`が出力するものだけを残します。対象はアラートのクラス、コードフェンスに付くmarkedの`language-*`、shikiの`shiki`、`shiki-themes`、同梱テーマの名前、`line`です。生のHTMLで書いた`fixed inset-0`のような、それ以外のクラスは取り除きます
 
 こうして得られた結果は、`dangerouslySetInnerHTML`で安全に埋め込めます。
 
@@ -137,6 +138,21 @@ Workersのバンドルに入るコードでは、`shiki`のフルエントリを
 ### カスタムハイライタ
 
 `highlight`は、`(code, lang) => string | Promise<string>`という形のただの関数です。結果が`<pre`で始まる場合は完成したコードブロックとみなしてそのまま出力し（shikiの出力がこの形です）、それ以外はデフォルトの`<pre><code>`で包みます。
+
+デフォルトのサニタイザはハイライタの出力とソース中の生のHTMLを見分けられないので、許可リストにないクラスはハイライタが付けたものでも取り除きます。highlight.jsの`hljs-*`のように別のクラスを出力するハイライタや、shikiが同梱していない名前で読み込んだテーマを使う場合は、`sanitize`コールバックで`allowedClasses`に追加してください。`*`は任意の文字列に一致します。追加したクラスは生のHTMLに書かれた場合も残るので、ハイライタが実際に出力する名前か接頭辞だけを挙げます。
+
+```ts
+createMarkdownRenderer({
+  highlight,
+  sanitize: (defaults) => ({
+    ...defaults,
+    allowedClasses: {
+      ...defaults.allowedClasses,
+      span: [...((defaults.allowedClasses?.span as string[] | undefined) ?? []), 'hljs-*'],
+    },
+  }),
+})
+```
 
 ## スタイリング
 
