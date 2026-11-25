@@ -1,15 +1,16 @@
 #!/usr/bin/env bun
 // Claude Code PreToolUse hook: before `git push`, refuse a branch whose files
 // main has since rewritten (.claude/rules/common-pitfalls.md, "Duplicate Work").
-// It runs the fetch itself: a stale origin/main reports "0 behind" and fails
-// open, and skipping the fetch is what the recorded rule never prevented.
-// Every git call runs where the push will (the payload `cwd`, then `cd <dir>`
-// and `git -C <dir>` in the command) and on the refs the command names, not in
-// the hook process's cwd on HEAD: those describe the session's worktree, which
-// a push from a sibling worktree never touches (the same defect class as #349).
+// It fetches itself, since a stale origin/main reports "0 behind" and fails open.
+// It judges the directory the push runs in (the payload `cwd`, then `cd <dir>`
+// and `git -C <dir>` in the command) and the refs the command names, never the
+// hook process's cwd and HEAD (#349). It runs before the user approves the
+// command, so git never runs in that directory: only the project's own git dir
+// is read, and a directory outside the project and its worktrees is skipped.
 
+import { lstatSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 
 type Result = { ok: boolean; out: string; err: string }
 
@@ -21,6 +22,99 @@ const run = (cwd: string, ...args: string[]): Result => {
   } catch (e) {
     return { ok: false, out: '', err: `cannot run git in ${cwd}: ${e instanceof Error ? e.message : String(e)}` }
   }
+}
+
+/** A worktree `git worktree list` names, by its real path. */
+type Worktree = { path: string; head?: string; branch?: string }
+
+/** The repository this session works in: its common git dir and every worktree of it. */
+export type Project = { dir: string; gitDir: string; worktrees: Worktree[] }
+
+/** `--git-dir` pins every call to the project's config; a worktree's `.git` file is never followed. */
+const git = (project: Project, ...args: string[]): Result => run(project.dir, `--git-dir=${project.gitDir}`, ...args)
+
+const realpath = (path: string): string | undefined => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return undefined
+  }
+}
+
+/** The project `projectDir` belongs to, or undefined when it is no repository. */
+export function readProject(projectDir: string): Project | undefined {
+  const common = run(projectDir, 'rev-parse', '--git-common-dir')
+  if (!common.ok || common.out === '') return undefined
+  const project: Project = { dir: projectDir, gitDir: resolve(projectDir, common.out), worktrees: [] }
+  const list = git(project, 'worktree', 'list', '--porcelain', '-z')
+  if (!list.ok) return undefined
+  for (const block of list.out.split('\0\0')) {
+    const fields = block.split('\0').filter((f) => f !== '')
+    const listed = fields.find((f) => f.startsWith('worktree '))?.slice('worktree '.length)
+    const path = listed === undefined || fields.includes('bare') ? undefined : realpath(listed)
+    if (path === undefined) continue
+    const head = fields.find((f) => f.startsWith('HEAD '))?.slice('HEAD '.length)
+    const branch = fields.find((f) => f.startsWith('branch refs/heads/'))?.slice('branch refs/heads/'.length)
+    project.worktrees.push({ path, head, branch })
+  }
+  return project
+}
+
+/** `path` with its deepest existing ancestor resolved through symlinks, and whether it exists. */
+function canonical(path: string): { path: string; exists: boolean } {
+  let base = resolve(path)
+  const rest: string[] = []
+  for (;;) {
+    const real = realpath(base)
+    if (real !== undefined) return { path: join(real, ...rest), exists: rest.length === 0 }
+    const parent = dirname(base)
+    if (parent === base) return { path: resolve(path), exists: false }
+    rest.unshift(base.slice(parent.length).replace(/^[/\\]+/, ''))
+    base = parent
+  }
+}
+
+const hasGitEntry = (dir: string): boolean => {
+  try {
+    lstatSync(join(dir, '.git'))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The worktree a push from `cwd` runs in, judged from paths alone: the deepest
+ * listed worktree holding `cwd`, unless a `.git` between them makes it another repository.
+ */
+function owningWorktree(project: Project, cwd: string): { worktree: Worktree; exists: boolean } | undefined {
+  const target = canonical(cwd)
+  const owner = project.worktrees
+    .filter((w) => target.path === w.path || target.path.startsWith(w.path.endsWith(sep) ? w.path : w.path + sep))
+    .sort((a, b) => b.path.length - a.path.length)[0]
+  if (owner === undefined) return undefined
+  let dir = owner.path
+  for (const segment of relative(owner.path, target.path).split(sep).filter((s) => s !== '')) {
+    dir = join(dir, segment)
+    if (hasGitEntry(dir)) return undefined
+  }
+  return { worktree: owner, exists: target.exists }
+}
+
+/**
+ * `ref` as the project's git dir reads it: `HEAD` there is the main worktree's,
+ * so a HEAD-relative ref is rewritten from the worktree's own listing. Undefined
+ * for a detached HEAD, a form that needs the worktree's own files (`@{1}`), or a
+ * word git would read as an option, which no branch can be.
+ */
+function worktreeRef(worktree: Worktree, ref: string): string | undefined {
+  if (ref.startsWith('-')) return undefined
+  const m = /^(?:HEAD|@)(?![A-Za-z0-9_./-])(.*)$/.exec(ref)
+  if (m === null) return ref
+  const rest = m[1]!
+  if (rest === '') return worktree.branch
+  if (/^[~^]/.test(rest) && worktree.head !== undefined) return `${worktree.head}${rest}`
+  return undefined
 }
 
 /**
@@ -282,19 +376,26 @@ export function pushTargets(command: string, baseCwd: string): PushTarget[] {
 
 /**
  * The message to block a push with, or undefined when there is nothing to say.
- * `fetched` memoises the origin/main fetch per directory across one command's pushes.
+ * `fetched` memoises the origin/main fetch per git dir across one command's pushes.
  */
-export function checkOverlap({ cwd, ref }: PushTarget, fetched = new Set<string>()): string | undefined {
-  const branch = run(cwd, 'rev-parse', '--abbrev-ref', ref)
+export function checkOverlap(target: PushTarget, project: Project, fetched = new Set<string>()): string | undefined {
+  const owner = owningWorktree(project, target.cwd)
+  if (owner === undefined) return undefined
+  if (!owner.exists) {
+    return `cannot run git in ${target.cwd}: no such directory, so this push is unchecked for work main already carries.`
+  }
+  const ref = worktreeRef(owner.worktree, target.ref)
+  if (ref === undefined) return undefined
+  const branch = git(project, 'rev-parse', '--verify', '--abbrev-ref', '--end-of-options', ref)
   if (!branch.ok && branch.err.startsWith('cannot run git')) {
     return `${branch.err}, so this push is unchecked for work main already carries.`
   }
   if (!branch.ok || branch.out === 'HEAD' || branch.out === 'main') return undefined
   // Without this, a repo with no origin would fail the fetch and block wrongly.
-  if (!run(cwd, 'remote', 'get-url', 'origin').ok) return undefined
+  if (!git(project, 'remote', 'get-url', 'origin').ok) return undefined
 
-  if (!fetched.has(cwd)) {
-    const fetch = run(cwd, 'fetch', '-q', 'origin', 'main')
+  if (!fetched.has(project.gitDir)) {
+    const fetch = git(project, 'fetch', '-q', 'origin', 'main')
     if (!fetch.ok) {
       const why = fetch.err === '' ? 'no output' : fetch.err
       return [
@@ -302,21 +403,21 @@ export function checkOverlap({ cwd, ref }: PushTarget, fetched = new Set<string>
         'already carries. Re-run after fetching, or push knowing it was not checked.',
       ].join(' ')
     }
-    fetched.add(cwd)
+    fetched.add(project.gitDir)
   }
 
-  const base = run(cwd, 'merge-base', ref, 'origin/main')
+  const base = git(project, 'merge-base', '--end-of-options', ref, 'origin/main')
   if (!base.ok || base.out === '') return undefined
 
   const filesOn = (range: string): string[] => {
-    const r = run(cwd, 'diff', '--name-only', range)
+    const r = git(project, 'diff', '--name-only', '--end-of-options', range)
     return r.ok && r.out !== '' ? r.out.split('\n') : []
   }
   const mine = new Set(filesOn(`${base.out}..${ref}`))
   const signal = filesOn(`${base.out}..origin/main`).filter((f) => mine.has(f) && !noise(f))
   if (signal.length === 0) return undefined
 
-  const commits = run(cwd, 'log', '--oneline', `${base.out}..origin/main`, '--', ...signal)
+  const commits = git(project, 'log', '--oneline', '--end-of-options', `${base.out}..origin/main`, '--', ...signal)
   return [
     `origin/main has rewritten ${signal.length} file(s) this branch (${branch.out}) also changes:`,
     indent(signal.join('\n')),
@@ -341,9 +442,14 @@ if (import.meta.main) {
   if (command === undefined) process.exit(0)
 
   // The payload `cwd` follows the Bash tool's `cd` across calls; the hook process's does not.
+  const targets = pushTargets(command, payload.cwd ?? process.cwd())
+  const projectDir = process.env.CLAUDE_PROJECT_DIR
+  const project = targets.length === 0 || !projectDir ? undefined : readProject(projectDir)
+  if (project === undefined) process.exit(0)
+
   const fetched = new Set<string>()
-  for (const target of pushTargets(command, payload.cwd ?? process.cwd())) {
-    const message = checkOverlap(target, fetched)
+  for (const target of targets) {
+    const message = checkOverlap(target, project, fetched)
     if (message === undefined) continue
     console.error(message)
     process.exit(2)
