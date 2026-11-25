@@ -1,3 +1,5 @@
+import { readdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { checkConfigWiring } from '../src/config-check'
 import { ParseCache } from '../src/parse-cache'
@@ -56,6 +58,16 @@ describe('checkConfigWiring', () => {
     })])
   })
 
+  test('warns about an unwired navigation, whose builder is not named define*Config', async () => {
+    const results = await run({
+      'config/navigation.ts': "import { defineNavigation } from '@guren/core'\n\nexport default defineNavigation([{ label: 'Home', route: 'home' }])\n",
+      'src/app.ts': entry('{ providers: [] }', ''),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([['config-unwired:config/navigation.ts', 'warn']])
+    expect(results[0].message).toContain('declares the "navigation" config')
+  })
+
   // The deploy plugin reads it while building (RFC 0035 §3); the app never does.
   test('does not report config/cloudflare.ts, a build-time definition', async () => {
     const results = await run({
@@ -96,6 +108,40 @@ describe('checkConfigWiring', () => {
 
     expect(results.map((result) => [result.key, result.status])).toEqual([['config-unreadable:config/cache.ts', 'warn']])
     expect(results[0].message).toContain('failed to import: boom')
+  })
+
+  test('warns about an unwired navigation in an app with no config/env.ts', async () => {
+    await writeWorkspaceFiles(workspace.dir, {
+      'config/navigation.ts': "import { defineNavigation } from '@guren/core'\n\nexport default defineNavigation([{ label: 'Home', route: 'home' }])\n",
+      'src/app.ts': entry('{ providers: [] }', ''),
+    })
+    const results = await checkConfigWiring({ cwd: workspace.dir, cache: new ParseCache() })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([['config-unwired:config/navigation.ts', 'warn']])
+  })
+
+  test('never imports an unlisted module that only names a builder in a comment, a string or a local helper', async () => {
+    const ran = (name: string) => `import { writeFileSync } from 'node:fs'\nwriteFileSync(new URL('./${name}.ran', import.meta.url), '')\n`
+    const results = await run({
+      ...WITH_CACHE,
+      'config/comment.ts': `${ran('comment')}// defineNavigation([...]) lives in navigation.ts\nexport default {}\n`,
+      'config/string.ts': `${ran('string')}export const hint = 'defineSessionConfig(env)'\nexport default {}\n`,
+      'config/helper.ts': `${ran('helper')}function defineLocalConfig(value: object) { return value }\nexport default defineLocalConfig({})\n`,
+      'src/app.ts': entry('{ config: [cache] }'),
+    })
+
+    expect(results.map((result) => result.key)).toEqual(['config-wired'])
+    expect((await readdir(join(workspace.dir, 'config'))).filter((name) => name.endsWith('.ran'))).toEqual([])
+  })
+
+  test('reads a definition held in a const and exported by name, or wrapped in satisfies', async () => {
+    const results = await run({
+      'config/held.ts': `import { defineConfig } from '@guren/core'\n\nconst held = defineConfig({ key: 'held', resolve: () => ({}), bind: () => {} })\n\nexport default held\n`,
+      'config/wrapped.ts': `import { defineConfig as build } from '@guren/core'\n\nexport default build({ key: 'wrapped', resolve: () => ({}), bind: () => {} }) satisfies object\n`,
+      'src/app.ts': entry('{ providers: [] }', ''),
+    })
+
+    expect(results.map((result) => result.key)).toEqual(['config-unwired:config/held.ts', 'config-unwired:config/wrapped.ts'])
   })
 
   test('says nothing about a plain module the config array never lists, and never imports it', async () => {
