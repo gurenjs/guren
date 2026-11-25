@@ -48,6 +48,13 @@ export interface UserProvider<User = Authenticatable> {
    * not carry it (a sanitized one), so the guard reads the stored record.
    */
   credentialFingerprint?(user: User): Promise<string | null | undefined> | string | null | undefined
+  /**
+   * Called by `SessionGuard.validate()` when `retrieveByCredentials()` found no
+   * user: spend the work a wrong password costs, so the response time does not
+   * say whether the account exists. The result is ignored. A provider without
+   * it gets a fixed 100 ms wait instead.
+   */
+  verifyMissingUser?(credentials: AuthCredentials): Promise<unknown> | unknown
 }
 
 /** The conventional credential column names `ModelUserProvider.sanitize()` strips. */
