@@ -335,10 +335,14 @@ keep in view:
   the Workers Paid plan ($5/month) removes the ceiling.
 - **D1 allows 50 queries per Worker invocation on the Free plan** (1,000 on
   Paid), and a whole sweep runs inside one Durable Object invocation. The index
-  call is 1 query and each fresh `tickets.close` costs `findMatch` + `create`,
-  so `MAX_ASKS_PER_SWEEP = 10` puts a full sweep at 1 + 2 × 10 = 21. That is
-  the ceiling this app is sized against; raise the cap and the arithmetic is
-  yours to redo. The rest of the backlog is reported as `deferred` and picked
+  call is 1 query and each fresh `tickets.close` costs one `findMatch` per
+  fingerprint the approval gate tries (under `APP_KEY`, under each
+  `APP_PREVIOUS_KEYS` entry, and unkeyed) plus `create`. The app is sized for
+  at most **one** previous key (`MAX_PREVIOUS_APP_KEYS`), so
+  `MAX_ASKS_PER_SWEEP = 10` puts a full sweep at 1 + 4 × 10 = 41. That is the
+  ceiling this app is sized against; list a second previous key and the sweep
+  reaches 51, so lower the cap first. Raise either and the arithmetic is yours
+  to redo. The rest of the backlog is reported as `deferred` and picked
   up by the next sweep — the summary's `stale` stays the total, so
   `stale = asked + closed + refused + deferred`. One console render spends 6 of
   the 50: the session read and its rolling touch, the operator row, the ticket
@@ -355,6 +359,9 @@ keep in view:
 
 - `wrangler secret put APP_KEY` — the ledger is encrypted with it, and without
   one `agentsPlugin` warns at boot and retries nothing. Never commit `.dev.vars`.
+  Approval fingerprints are keyed under it too: when you rotate it, put the old
+  key in `APP_PREVIOUS_KEYS` (one at most, for the sweep budget above) until the
+  approval window has passed, or every live approval stops matching.
 - `wrangler d1 create guren-example-agents`, then put the id in `wrangler.jsonc` and
   run `wrangler d1 migrations apply guren-example-agents --remote`. Migrations are
   applied out of band; the app never migrates itself on Workers.

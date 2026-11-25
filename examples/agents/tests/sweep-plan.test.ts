@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test'
 
 import {
   MAX_ASKS_PER_SWEEP,
+  MAX_PREVIOUS_APP_KEYS,
   planSweep,
+  QUERIES_PER_ASK,
   STALE_DAYS,
   type TicketSummary,
 } from '../app/Agents/sweep-plan'
@@ -77,8 +79,10 @@ describe('planSweep', () => {
 
     expect(plan.stale).toHaveLength(MAX_ASKS_PER_SWEEP + 5)
     expect(plan.ask).toHaveLength(MAX_ASKS_PER_SWEEP)
-    // 1 index query + 2 per fresh ask, against the Free plan's 50 per invocation.
-    expect(1 + 2 * MAX_ASKS_PER_SWEEP).toBeLessThan(50)
+    // 1 index query + a `findMatch` per fingerprint and a `create` per fresh
+    // ask, against the Free plan's 50 per invocation.
+    expect(QUERIES_PER_ASK).toBe(MAX_PREVIOUS_APP_KEYS + 3)
+    expect(1 + QUERIES_PER_ASK * MAX_ASKS_PER_SWEEP).toBeLessThanOrEqual(50)
   })
 
   test('should treat an unreadable creation date as not yet stale', () => {

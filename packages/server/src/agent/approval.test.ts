@@ -8,6 +8,7 @@ import { describe, test, expect } from 'bun:test'
 import {
   agentApprovalExpiredAt,
   agentApprovalFingerprint,
+  agentApprovalFingerprints,
   agentApprovalPrincipalKey,
   agentApprovalStatusAt,
   agentApprovalUsableAt,
@@ -106,6 +107,55 @@ describe('agentApprovalFingerprint', () => {
     const fingerprint = await agentApprovalFingerprint({ password: 'hunter2' })
     expect(fingerprint).toMatch(/^[0-9a-f]{64}$/)
     expect(fingerprint).not.toContain('hunter2')
+  })
+})
+
+const KEY_A = new Uint8Array(32).fill(1)
+const KEY_B = new Uint8Array(32).fill(2)
+
+describe('agentApprovalFingerprint under a key', () => {
+  test('should differ from the bare hash, so the store alone cannot test a guess', async () => {
+    const input = { id: 5, password: 'hunter2' }
+    expect(await agentApprovalFingerprint(input, KEY_A)).not.toBe(await agentApprovalFingerprint(input))
+  })
+
+  test('should be stable for one key and differ between keys', async () => {
+    const input = { id: 5 }
+    expect(await agentApprovalFingerprint(input, KEY_A)).toBe(await agentApprovalFingerprint(input, KEY_A))
+    expect(await agentApprovalFingerprint(input, KEY_A)).not.toBe(await agentApprovalFingerprint(input, KEY_B))
+  })
+
+  test('should still ignore key order and be a 64-character hex digest', async () => {
+    const fingerprint = await agentApprovalFingerprint({ a: 1, b: 2 }, KEY_A)
+    expect(fingerprint).toBe(await agentApprovalFingerprint({ b: 2, a: 1 }, KEY_A))
+    expect(fingerprint).toMatch(/^[0-9a-f]{64}$/)
+  })
+})
+
+describe('agentApprovalFingerprints', () => {
+  test('should put the current key first, then previous keys, then the bare hash', async () => {
+    const input = { id: 5 }
+    expect(await agentApprovalFingerprints(input, { current: KEY_A, previous: [KEY_B] })).toEqual([
+      await agentApprovalFingerprint(input, KEY_A),
+      await agentApprovalFingerprint(input, KEY_B),
+      await agentApprovalFingerprint(input),
+    ])
+  })
+
+  test('should write with the bare hash when there is no current key', async () => {
+    const input = { id: 5 }
+    expect(await agentApprovalFingerprints(input, { previous: [KEY_B] })).toEqual([
+      await agentApprovalFingerprint(input),
+      await agentApprovalFingerprint(input, KEY_B),
+    ])
+    expect(await agentApprovalFingerprints(input, { previous: [] })).toEqual([
+      await agentApprovalFingerprint(input),
+    ])
+  })
+
+  test('should not repeat a key listed as both current and previous', async () => {
+    const fingerprints = await agentApprovalFingerprints({ id: 5 }, { current: KEY_A, previous: [KEY_A] })
+    expect(fingerprints).toHaveLength(2)
   })
 })
 

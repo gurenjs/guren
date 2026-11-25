@@ -436,7 +436,7 @@ Two limits are worth planning against.
 const MAX_ASKS_PER_SWEEP = 10
 ```
 
-Do the arithmetic against your own tools. In the reference app the index call is one query and each fresh approval costs `findMatch` plus `create`, so a full sweep sits at 1 + 2 × 10 = 21. The same cap serves the per-minute budget: without it a backlog spends the window on its first few items and starves everything behind them. Remember which items are already parked, too, or every sweep re-asks the same question.
+Do the arithmetic against your own tools. In the reference app the index call is one query, and each fresh approval costs a `findMatch` per fingerprint the gate tries (the current `APP_KEY`, each key in `APP_PREVIOUS_KEYS`, and the unkeyed hash) plus `create`. The app is sized for one previous key, so a full sweep sits at 1 + 4 × 10 = 41; a second previous key would take it to 51, past the limit. The same cap serves the per-minute budget: without it a backlog spends the window on its first few items and starves everything behind them. Remember which items are already parked, too, or every sweep re-asks the same question.
 
 The *daily* allowances are a separate ceiling and are not usually the constraint: an hourly sweep with a handful of pending approvals is a few dozen wakes a day.
 

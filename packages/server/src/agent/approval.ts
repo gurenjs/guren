@@ -45,9 +45,10 @@ export interface AgentApprovalRequest {
    */
   input: Record<string, unknown>
   /**
-   * {@link agentApprovalFingerprint} of the *raw* arguments — the hash, never
-   * the canonical string: a store holding a reversible copy of every argument
-   * an agent ever passed would be a second place secrets live.
+   * {@link agentApprovalFingerprint} of the *raw* arguments, keyed under
+   * `APP_KEY` when the app has one. Never the canonical string: a store holding
+   * a reversible copy of every argument an agent ever passed would be a second
+   * place secrets live.
    */
   fingerprint: string
   /** Who asked. `null` for a surface with no verified principal. */
@@ -176,16 +177,51 @@ function canonicalize(value: unknown): string {
 }
 
 /**
- * The fingerprint an approval is bound to: SHA-256 of
- * {@link canonicalizeAgentApprovalInput}, hex. Hashed rather than stored
- * verbatim because these are the **raw** arguments while the record persists
- * and is shown to a human. Async because `crypto.subtle` is — the one digest
- * available unchanged on Bun, Node and Workers.
+ * The fingerprint an approval is bound to, hex: HMAC-SHA256 of
+ * {@link canonicalizeAgentApprovalInput} under `key`, or a bare SHA-256 with
+ * none. The record stores the redacted arguments beside it, so an unkeyed
+ * digest lets anyone reading the store test guesses for a masked value; the
+ * key is what stops that. `crypto.subtle` runs unchanged on Bun, Node and Workers.
  */
-export async function agentApprovalFingerprint(input: Record<string, unknown>): Promise<string> {
+export async function agentApprovalFingerprint(
+  input: Record<string, unknown>,
+  key?: Uint8Array,
+): Promise<string> {
   const bytes = new TextEncoder().encode(canonicalizeAgentApprovalInput(input))
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  const digest = key
+    ? await crypto.subtle.sign(
+        'HMAC',
+        await crypto.subtle.importKey('raw', key as BufferSource, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
+        bytes,
+      )
+    : await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+/** The keys a fingerprint is computed under, already derived for this purpose. */
+export interface AgentApprovalKeys {
+  /** From `APP_KEY`; absent when the app has no valid one. */
+  current?: Uint8Array
+  /** From `APP_PREVIOUS_KEYS`: matched against, never written with. */
+  previous: readonly Uint8Array[]
+}
+
+/**
+ * Every fingerprint a stored record of this call may carry, the one a new
+ * record is written with first: the current key's, else the bare hash. The
+ * rest keep a pending record matching across a key rotation and across the
+ * switch from unkeyed fingerprints.
+ */
+export async function agentApprovalFingerprints(
+  input: Record<string, unknown>,
+  keys: AgentApprovalKeys,
+): Promise<string[]> {
+  const bare = agentApprovalFingerprint(input)
+  const previous = keys.previous.map((key) => agentApprovalFingerprint(input, key))
+  const ordered = keys.current
+    ? [agentApprovalFingerprint(input, keys.current), ...previous, bare]
+    : [bare, ...previous]
+  return [...new Set(await Promise.all(ordered))]
 }
 
 /** What {@link buildAgentApprovalRequest} needs beyond the clock. */
