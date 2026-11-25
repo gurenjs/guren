@@ -444,7 +444,7 @@ bunx guren make:test posts/PostController
 
 計画の振る舞い（フォームに入力して送信し、遷移先のページを確かめる）もブラウザで実行するときは、`--behaviours --agent claude-code` を付けます。エージェントには `codex` も指定でき、エージェントを使わないなら `none` にします。このテストは `bun run test:behaviours` で実行します。CI で実行する `bun run test:behaviours:ci` は記録したステップを再生するだけなので、ログインは要りません。
 
-各コマンドが書き出すファイルとコミットするものは、CLI リファレンスの [`add browser-tests`](./cli.md#add-browser-tests) と[振る舞いの spec](./cli.md#振る舞いの-spec) にまとめてあります。
+導入から CI までの流れは、[ブラウザテスト](./browser-tests.md)で 2 種類のテストを順に説明しています。各コマンドが書き出すファイルとコミットするものは、CLI リファレンスの [`add browser-tests`](./cli.md#add-browser-tests) と[振る舞いの spec](./cli.md#振る舞いの-spec) にまとめてあります。
 
 ## アプリを使わずにコントローラーをテストする（Vitest）
 

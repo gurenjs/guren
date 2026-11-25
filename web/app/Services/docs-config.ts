@@ -90,7 +90,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
   },
   {
     title: { en: 'Testing & Deployment', ja: 'テストとデプロイ' },
-    slugs: ['testing', 'deployment', 'serverless', 'cloudflare', 'operations'],
+    slugs: ['testing', 'browser-tests', 'deployment', 'serverless', 'cloudflare', 'operations'],
   },
   {
     title: { en: 'AI-Native Development', ja: 'AIネイティブ開発' },
