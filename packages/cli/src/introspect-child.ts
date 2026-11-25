@@ -18,6 +18,7 @@ import {
   INTROSPECT_CHILD_BUDGET_MARGIN_MS,
   GRAPH_SCAN_WARNINGS,
   INTROSPECT_GRAPH_ENV,
+  type GraphBindingLookup,
   type GraphRouteEntry,
   type GraphScanWarning,
   type Introspection,
@@ -33,10 +34,13 @@ const LISTEN_GUIDANCE =
   + 'Export the app from src/main.ts (`export default app`, with `export const ready = bootstrap()` if it boots) '
   + 'and call listen() from bin/serve.ts, as the scaffold does.'
 
+type ChildLookup = { key?: string; model?: { name?: string } } | { resolver: (value: string) => unknown }
+
 interface IntrospectableApp {
   introspect?: () => Promise<AppManifest>
   router?: {
     registeredModelBindings?: () => ReadonlyArray<Record<string, { name?: string }>>
+    registeredBindingLookups?: () => ReadonlyArray<Record<string, ChildLookup & { router?: ChildLookup }>>
     definitions?: () => ReadonlyArray<{ schemas?: Partial<Record<string, unknown>> }>
     registeredHandlers?: () => ReadonlyArray<{ index: number; controller?: unknown }>
     hasRoute?: (name: string) => boolean
@@ -226,12 +230,32 @@ async function exportsByIdentity(
   return exportsOf
 }
 
+/** How each route's bound parameters are looked up, where the server says; a router-level model by the export it is. */
+function resolveBindingLookups(manifest: AppManifest, lookups: ReadonlyArray<Record<string, ChildLookup & { router?: ChildLookup }>>, exportsOf: ReadonlyMap<unknown, ExportSite[]>): void {
+  const written = (lookup: ChildLookup): GraphBindingLookup => {
+    if ('resolver' in lookup) return { resolver: true }
+    const model = lookup.model
+    const candidate = model?.name ? pickDeclaringFile(exportsOf.get(model) ?? [], model.name) : undefined
+    return { ...(lookup.key === undefined ? {} : { key: lookup.key }), ...(model ? { source: candidate ? `${candidate.file}#${candidate.exportName}` : (model.name || 'unnamed') } : {}) }
+  }
+  for (const [index, bound] of lookups.entries()) {
+    const route = manifest.routes[index] as GraphRouteEntry | undefined
+    if (!route) continue
+    route.bindingLookups = Object.fromEntries(Object.entries(bound).map(([parameter, lookup]) => [parameter, { ...written(lookup), ...(lookup.router ? { router: written(lookup.router) } : {}) }]))
+  }
+}
+
 async function resolveModelBindings(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
-  const bindings = app.router?.registeredModelBindings?.()
-  if (!bindings) return
-  const wanted = new Set<unknown>(bindings.flatMap((entry) => Object.values(entry)))
-  if (wanted.size === 0) return
-  const exportsOf = await exportsByIdentity(manifest, root, () => discoverModelFiles(root), wanted, 'model-import')
+  const bindings = app.router?.registeredModelBindings?.() ?? []
+  const lookups = app.router?.registeredBindingLookups?.()
+  const models = (lookup: ChildLookup | undefined): unknown[] => (lookup && 'model' in lookup && lookup.model ? [lookup.model] : [])
+  // One scan for both, so a model file that will not import is warned of once.
+  const wanted = new Set<unknown>([
+    ...bindings.flatMap((entry) => Object.values(entry)),
+    ...(lookups ?? []).flatMap((entry) => Object.values(entry).flatMap((lookup) => [...models(lookup), ...models(lookup.router)])),
+  ])
+  const exportsOf = wanted.size > 0 ? await exportsByIdentity(manifest, root, () => discoverModelFiles(root), wanted, 'model-import') : new Map<unknown, ExportSite[]>()
+  if (lookups) resolveBindingLookups(manifest, lookups, exportsOf)
   for (const [index, bound] of bindings.entries()) {
     const route = manifest.routes[index]
     if (!route) continue

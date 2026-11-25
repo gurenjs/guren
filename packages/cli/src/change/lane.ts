@@ -646,7 +646,7 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
       }
     }
     // An action left unread (an inline handler, a class reached by name) compares by what does not cover its imports.
-    const readWhole = (side: SecurityRecords): boolean => (side.skipped ?? []).length === 0 && side.routes.every((route) => !('unread' in route.handler))
+    const readWhole = (side: SecurityRecords): boolean => (side.skipped ?? []).length === 0 && side.routes.every((route) => !('unread' in route.handler) && route.bindingLookups === undefined)
     recordsCoverRoutes = comparison.incomparable.length === 0 && readWhole(compared.base) && readWhole(compared.head)
     if (comparison.incomparable.length > 0) unjudged.push({ reader: 'security-records', reason: `routes whose records cannot be ordered against the base: ${comparison.incomparable.join('; ')}`, lane: 'high', files: files.length > 0 ? files : touched })
     // A skip the change brought in is the change's doing: a route it registers there is not on the list at all.
@@ -654,7 +654,10 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     const added = headSkipped.filter((entry) => !baseSkipped.includes(entry))
     const shared = headSkipped.filter((entry) => baseSkipped.includes(entry))
     if (added.length > 0) unjudged.push({ reader: 'security-records', reason: `the head's introspection skipped ${added.join(', ')}, which the base's did not, so a route registered there was not compared`, lane: 'high', files: files.length > 0 ? files : touched })
-    else if (shared.length > 0 && files.length > 0) unjudged.push({ reader: 'security-records', reason: `introspection skipped ${shared.join(', ')} on both sides, so a route registered there was not compared`, lane: 'medium', files })
+    // A resolver's body may sit in any file (the app entry, a model), so any change the records were read for is held.
+    const lookupsUnread = unreadLookups([...compared.base.routes, ...compared.head.routes])
+    if (lookupsUnread) unjudged.push({ reader: 'security-records', reason: lookupsUnread, lane: 'medium', files: files.length > 0 ? files : touched })
+    if (added.length === 0 && shared.length > 0 && files.length > 0) unjudged.push({ reader: 'security-records', reason: `introspection skipped ${shared.join(', ')} on both sides, so a route registered there was not compared`, lane: 'medium', files })
   } else if (notCompared && (notCompared.lane === 'high' || surface.length > 0)) {
     // A base that cannot be read says nothing against the change; a head the change made unreadable does.
     unjudged.push({ reader: 'security-records', reason: `${notCompared.reason}, so authorization-removed and validation-removed were not judged`, lane: notCompared.lane, files: notCompared.lane === 'high' && files.length === 0 ? touched : files })
@@ -730,6 +733,25 @@ export async function judgeChangeLane(change: ResolvedChange, reader: ChangeRead
     plans: plans.listed,
     policy,
   }
+}
+
+/**
+ * Why the routes whose records say `bindingLookups: 'unread'` were not compared, naming them: a custom resolver, whose
+ * body is not read, or an `@guren/core` too old to say how its parameters are looked up, which upgrading it fixes.
+ */
+function unreadLookups(routes: readonly RouteSecurityRecord[]): string | undefined {
+  const named = (list: readonly RouteSecurityRecord[]): string => {
+    const labels = [...new Set(list.map(describeRoute))]
+    return labels.length > 3 ? `${labels.slice(0, 3).join(', ')} and ${labels.length - 3} more` : labels.join(', ')
+  }
+  const unread = routes.filter((route) => route.bindingLookups === 'unread')
+  const resolved = unread.filter((route) => Object.values(route.bindings ?? {}).some((value) => /(?:^|\+router:)resolver$/u.test(value)))
+  const older = unread.filter((route) => !resolved.includes(route))
+  const reasons = [
+    ...(resolved.length > 0 ? [`${named(resolved)} bind a parameter through a custom resolver, whose body is not read`] : []),
+    ...(older.length > 0 ? [`the installed @guren/core does not say how ${named(older)} look up their parameters (upgrade @guren/core with @guren/cli)`] : []),
+  ]
+  return reasons.length > 0 ? `${reasons.join('; ')}, so what they look up was not compared` : undefined
 }
 
 /** What `schemaResidue()` keeps, each item with the table whose statement alone holds it. */

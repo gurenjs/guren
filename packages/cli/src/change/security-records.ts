@@ -13,7 +13,7 @@ import type { ChangeFact } from './lane'
  * Bumped whenever a field's meaning changes, a digest's inputs included: a stored record of another
  * version is not compared, and a differing `@guren/cli` is only named, so this is the one guard.
  */
-export const SECURITY_RECORD_VERSION = 3
+export const SECURITY_RECORD_VERSION = 4
 
 const CONTRACT_KEYS = CONTRACT_SEGMENTS
 type ContractKey = ContractSegment
@@ -76,8 +76,14 @@ export interface RouteSecurityRecord {
   middleware: MiddlewareRecord[]
   contracts: Partial<Record<ContractKey, ContractRecord>>
   handler: ActionRecord
-  /** Each bound parameter and its model class, as `file#export` where introspection found the class, else by name. The lookup column is not in the manifest. */
+  /**
+   * Each bound parameter and its model class, as `file#export` where introspection found the class, else by name
+   * (`unnamed` without one), with `@<column>` for a lookup column and `+router:` and the router's lookup for a parameter
+   * bound at both levels; a custom resolver as `resolver`.
+   */
   bindings?: Record<string, string>
+  /** Set when a lookup is not read: a custom resolver's body, or a server that did not say (an older `@guren/server`). */
+  bindingLookups?: 'unread'
   /** The `.agent()` metadata as declared, which makes the route a tool. */
   agent?: AgentRouteMetadata
 }

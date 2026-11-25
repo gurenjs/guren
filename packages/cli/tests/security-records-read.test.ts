@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from '
 import { rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
-import { readSecurityRecords } from '../src/change/security-records-read'
+import { bindingsRecord, readSecurityRecords } from '../src/change/security-records-read'
 import { createTempRoot, linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 
 // The records introspect the application in a child, past Bun's 5 s default under a loaded suite.
@@ -95,6 +95,60 @@ async function app(name: string, files: Record<string, string>): Promise<string>
 }
 
 describe('readSecurityRecords', () => {
+  test("records each binding's lookup column, and a router-level resolver as unread", async () => {
+    const dir = await app('lookups', {
+      ...FILES,
+      'app/Models/Post.ts': 'export class Post {\n  static async findOrFail(value: unknown) {\n    return { value }\n  }\n}\n',
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { Post } from '../app/Models/Post.js'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.bind('token', async (value: string) => ({ value }))
+  router.bind('author', [Post, 'slug'])
+  router.get('/posts/:post', { name: 'posts.show', bind: { post: [Post, 'slug'] } }, [PostController, 'update'])
+  router.get('/posts/by-id/:id', { name: 'posts.byId', bind: { id: Post } }, [PostController, 'update'])
+  router.get('/tokens/:token', { name: 'tokens.show' }, [PostController, 'update'])
+  router.get('/authors/:author', { name: 'authors.show', bind: { author: Post } }, [PostController, 'update'])
+  // An inline handler resolves no binding, so the router's resolver does not run for it.
+  router.get('/inline/:token', { name: 'inline.show' }, (c) => c.text('ok'))
+}
+`,
+    })
+
+    const records = await readSecurityRecords(dir)
+
+    if ('unreadable' in records) throw new Error(records.unreadable)
+    expect(records.routes.map((route) => [route.path, route.bindings, route.bindingLookups])).toEqual([
+      ['/posts/:post', { post: 'app/Models/Post.ts#Post@slug' }, undefined],
+      ['/posts/by-id/:id', { id: 'app/Models/Post.ts#Post' }, undefined],
+      ['/tokens/:token', { token: 'resolver' }, 'unread'],
+      // Bound at both levels: the router's model is found by its export in the child, like the route's.
+      ['/authors/:author', { author: 'app/Models/Post.ts#Post+router:app/Models/Post.ts#Post@slug' }, undefined],
+      ['/inline/:token', undefined, undefined],
+    ])
+  })
+
+  test('says the lookup columns are unread when the server does not say them, or a custom resolver binds one', () => {
+    const sources = { post: { file: 'app/Models/Post.ts', exportName: 'Post', name: 'Post' } }
+    expect(bindingsRecord('/posts/:post', { post: 'Post' }, sources, undefined)).toEqual({ bindings: { post: 'app/Models/Post.ts#Post' }, bindingLookups: 'unread' })
+    // A parameter only a router-level resolver fills has no model binding, and is still unread on such a server.
+    expect(bindingsRecord('/tokens/:token', undefined, undefined, undefined)).toEqual({ bindingLookups: 'unread' })
+    expect(bindingsRecord('/health', undefined, undefined, undefined)).toEqual({})
+    expect(bindingsRecord('/posts/:post', { post: 'Post' }, sources, { post: { key: 'slug' } })).toEqual({ bindings: { post: 'app/Models/Post.ts#Post@slug' } })
+    // Bound at both levels, the router's model and column stand beside the route's.
+    expect(bindingsRecord('/posts/:post', { post: 'Post' }, sources, { post: { router: { source: 'app/Models/Comment.ts#Comment', key: 'slug' } } }))
+      .toEqual({ bindings: { post: 'app/Models/Post.ts#Post+router:app/Models/Comment.ts#Comment@slug' } })
+    // A custom resolver's body is not read, at either level.
+    expect(bindingsRecord('/tokens/:token', undefined, undefined, { token: { resolver: true } })).toEqual({ bindings: { token: 'resolver' }, bindingLookups: 'unread' })
+    expect(bindingsRecord('/posts/:post', { post: 'Post' }, sources, { post: { router: { resolver: true } } })).toEqual({ bindings: { post: 'app/Models/Post.ts#Post+router:resolver' }, bindingLookups: 'unread' })
+    // A parameter named `__proto__` stays a key of the record.
+    expect(Object.keys(bindingsRecord('/x/:__proto__', Object.fromEntries([['__proto__', 'Post']]), undefined, Object.fromEntries([['__proto__', { key: 'slug' }]])).bindings ?? {})).toEqual(['__proto__'])
+    // A model the server could not name is still bound, by its column.
+    expect(bindingsRecord('/users/:user', undefined, undefined, { user: { key: 'email' } })).toEqual({ bindings: { user: 'unnamed@email' } })
+  })
+
+
   test('reads the chain, the contract and its export, and the action\'s calls of an introspected route', async () => {
     const dir = await app('plain', FILES)
 

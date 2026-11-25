@@ -632,15 +632,30 @@ describe('declaredRoute', () => {
     expect(await declare(DESTROY, [old, STORE, DESTROY, HOME])).toBeUndefined()
   })
 
-  test('should not declare a route a second open plan names, one the plan alters, or one binding a planned key', async () => {
+  test('should not declare a route a second open plan names, or one the plan alters', async () => {
     expect(await declare(DESTROY, routes, [...only(), { file: 'docs/plans/moderation/plan.json', plan: commentsPlan() }])).toBeUndefined()
     expect(await declare(DESTROY, routes, only(commentsPlan((plan) => {
       plan.routes[1].change = { kind: 'alter' }
     })))).toBeUndefined()
-    // The manifest names a binding's model and not its lookup column.
-    expect(await declare(DESTROY, routes, only(commentsPlan((plan) => {
+  })
+
+  test("should hold a planned key to the record's lookup column, and declare nothing on a record whose columns are unread", async () => {
+    const bySlug = only(commentsPlan((plan) => {
       plan.routes[1].bind[0].key = 'slug'
-    })))).toBeUndefined()
+    }))
+    const column = (suffix: string, unread = false): RouteSecurityRecord => ({
+      ...DESTROY,
+      bindings: Object.fromEntries(Object.entries(DESTROY.bindings ?? {}).map(([parameter, value]) => [parameter, `${value}${suffix}`])),
+      ...(unread ? { bindingLookups: 'unread' as const } : {}),
+    })
+    const declared = (record: RouteSecurityRecord, plans = bySlug) => declare(record, [STORE, record, HOME], plans, { added: [STORE, record] })
+
+    expect(await declared(column('@slug'))).toBe(`${PLAN_FILE}#route.comments.destroy`)
+    expect(await declared(column(''))).toBeUndefined()
+    expect(await declared(column('@slug', true))).toBeUndefined()
+    // Without a planned key the route matches only its primary-key binding, and never one the server did not say.
+    expect(await declared(column(''), only())).toBe(`${PLAN_FILE}#route.comments.destroy`)
+    expect(await declared(column('', true), only())).toBeUndefined()
   })
 
   test("should declare a route's agent tool only as the plan states it", async () => {

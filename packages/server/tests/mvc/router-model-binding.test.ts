@@ -262,3 +262,36 @@ describe('Router-level bind(param, ...)', () => {
     expect(await response.json()).toEqual({ a: 'A:one', b: 'B:two' })
   })
 })
+
+describe('registeredBindingLookups', () => {
+  it('says how each bound parameter is looked up, route-level over router-level', () => {
+    const Post = makeModel()
+    const resolver = async (value: string): Promise<string> => value.toUpperCase()
+    const PostController = controllerFor(Post)
+    const router = new Router()
+    router.bind('token', resolver)
+    router.bind('author', [Post, 'slug'])
+    router.get('/posts/:post', { bind: { post: [Post, 'slug'] } }, [PostController, 'show'])
+    router.get('/posts/by-id/:id', { bind: { id: Post } }, [PostController, 'show'])
+    router.get('/tokens/:token', [PostController, 'show'])
+    router.get('/authors/:author', [PostController, 'show'])
+    router.get('/authors/:author/posts', { bind: { author: Post } }, [PostController, 'show'])
+
+    expect(router.registeredBindingLookups()).toEqual([
+      { post: { key: 'slug' } },
+      { id: {} },
+      { token: { resolver } },
+      { author: { model: Post, key: 'slug' } },
+      // Bound at both levels, both run: the route's model for `this.model()`, the router's value positionally.
+      { author: { router: { model: Post, key: 'slug' } } },
+    ])
+  })
+
+  it('looks nothing up for an inline handler, which resolves no binding', () => {
+    const router = new Router()
+    router.bind('token', async (value: string): Promise<string> => value)
+    router.get('/tokens/:token', (c: Context) => c.text('ok'))
+
+    expect(router.registeredBindingLookups()).toEqual([{}])
+  })
+})
