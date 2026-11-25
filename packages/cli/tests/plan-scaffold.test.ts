@@ -382,10 +382,9 @@ const HTTP_ELEMENTS = ['validator.widget', 'validator.widgetQuery', 'resource.wi
 /**
  * Where the action reader stops: a stub writes no response, since the reader credits the one it
  * names (a resource by mention, a page, a redirect) and none has been written. An empty response
- * has no property. A binding's lookup column is not read.
+ * has no property.
  */
 const ACTION_READER_LIMITS = ['action.widget.index response resource', 'action.widget.store response']
-const MOUNTED_READER_LIMITS = [...ACTION_READER_LIMITS, 'route.widgets.store bind postId key']
 
 const ROUTES = ['route.widgets.index', 'route.widgets.store', 'route.widgets.destroy']
 const ACTIONS = ['action.widget.index', 'action.widget.store', 'action.widget.destroy']
@@ -551,7 +550,7 @@ describe('plan:scaffold', () => {
         const status = await statusOf(dir, plan)
         const wired = [...HTTP_ELEMENTS.slice(0, 2), ...ACTIONS, ...ROUTES]
         expect(status.elements.filter((element) => wired.includes(element.id)).map((element) => [element.id, element.state])).toEqual(wired.map((id) => [id, 'wired']))
-        expect(unmatched(status, [...ACTIONS, ...ROUTES]).sort()).toEqual(MOUNTED_READER_LIMITS.sort())
+        expect(unmatched(status, [...ACTIONS, ...ROUTES]).sort()).toEqual([...ACTION_READER_LIMITS].sort())
         // A side effect is wired by a dispatch, which is the http step's to write.
         expect(status.elements.filter((element) => SIDE_EFFECTS.includes(element.id)).map((element) => element.state)).toEqual(SIDE_EFFECTS.map(() => 'present'))
       })

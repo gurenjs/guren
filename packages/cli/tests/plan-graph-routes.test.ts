@@ -84,12 +84,14 @@ for (const [description, scenario] of Object.entries(scenarios)) {
       const legacy = await legacyReading(workspace.dir, scenario.routesFile)
       expect(Array.isArray(legacy.routes)).toBe(!scenario.unreadable)
       const reading = await readRoutesFileGraph(workspace.dir, scenario.routesFile)
-      const { entries, ...currentReading } = reading
+      const { entries, bindingLookups, ...currentReading } = reading
       expect(currentReading).toEqual(legacy)
+      // The fixture binds no parameter, so every route the router read has an empty lookup table.
+      expect(bindingLookups).toEqual(legacy.definitions?.map(() => ({})))
       for (const [index, entry] of entries.entries()) expect(entry.route).toBe(reading.definitions![index])
       const current = await loadPlanAppState(workspace.dir, { detail: true, impact: true, routesFile: scenario.routesFile })
       const detail = await loadPlanAppDetail({ root: workspace.dir, routesFile: legacy.file, routes: legacy.routes,
-        definitions: legacy.definitions, provenance: legacy.provenance, moduleWarnings: legacy.moduleWarnings,
+        definitions: legacy.definitions, ...(bindingLookups ? { bindingLookups } : {}), provenance: legacy.provenance, moduleWarnings: legacy.moduleWarnings,
         controllers: await parseControllerMethods(workspace.dir).catch((error: unknown) => ({ unreadable: error instanceof Error ? error.message : String(error) })), pages: isUnreadable(current.pages) ? current.pages : appNames(current.pages),
         models: isUnreadable(current.models) ? current.models : undefined, validators: await readValidatorExports(workspace.dir, new ParseCache()),
       })
