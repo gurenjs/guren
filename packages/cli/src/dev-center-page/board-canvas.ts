@@ -441,7 +441,10 @@ export function mountBoardCanvas(
     let dragged = false
     grip.setPointerCapture(event.pointerId)
     gesturing = true
+    // A second finger on the same element reaches these handlers too.
+    const own = (next: PointerEvent) => next.pointerId === event.pointerId
     const move = (next: PointerEvent) => {
+      if (!own(next)) return
       if (!dragged && Math.hypot(next.clientX - start.x, next.clientY - start.y) < DRAG_THRESHOLD) return
       dragged = true
       handlers.move(...delta(next))
@@ -452,12 +455,14 @@ export function mountBoardCanvas(
       grip.removeEventListener('pointercancel', cancel)
       gesturing = false
     }
-    const cancel = () => {
+    const cancel = (next: PointerEvent) => {
+      if (!own(next)) return
       stop()
       stale = false
       render()
     }
     const up = (next: PointerEvent) => {
+      if (!own(next)) return
       stop()
       const redraw = stale
       stale = false
@@ -551,10 +556,12 @@ export function mountBoardCanvas(
     viewport.setPointerCapture(event.pointerId)
     viewport.classList.add('board-panning')
     const move = (next: PointerEvent) => {
+      if (next.pointerId !== event.pointerId) return
       pan = { x: start.pan.x + next.clientX - start.x, y: start.pan.y + next.clientY - start.y }
       applyView()
     }
-    const up = () => {
+    const up = (next: PointerEvent) => {
+      if (next.pointerId !== event.pointerId) return
       viewport.classList.remove('board-panning')
       viewport.removeEventListener('pointermove', move)
       viewport.removeEventListener('pointerup', up)

@@ -121,11 +121,10 @@ function revertList(was: readonly string[], is: readonly string[], current: read
 }
 
 /**
- * Operations that put back what `ops` changed, read from `before`, the board the user saw when
- * they made the edit, and from `now`, the board when it is undone: what the edit did not touch
- * (another writer's rename, a question's other notes) is taken from `now`. A removed note comes
- * back with its section, link, arrows and the questions that were about it; a section's notes are
- * put back where they were.
+ * Operations that put back what `ops` changed, from `before` (the board the edit was made on) and
+ * `now` (the board when it is undone): what the edit did not touch, or touched and changed again
+ * since, is taken from `now`. A removed note comes back with its section, link, arrows and the
+ * questions about it; a moved section's notes go back where they were.
  */
 export function inverseOps(before: Board, after: Board, ops: readonly BoardOp[], now: Board = after): BoardOp[] {
   const { notes, sections, arrows } = touched(ops)
@@ -146,22 +145,32 @@ export function inverseOps(before: Board, after: Board, ops: readonly BoardOp[],
   for (const id of sections) {
     const was = findSection(before, id)
     const is = findSection(after, id)
+    const current = findSection(now, id)
     if (was && !is) {
+      if (current) continue
       sectionsBack.push({ op: 'section', id, title: was.title, at: sectionRect(was) })
-      for (const note of before.notes) if (note.section === id && afterNotes.has(note.id)) edits.push({ op: 'edit', id: note.id, section: id })
+      for (const note of before.notes) {
+        const back = nowNotes.get(note.id)
+        if (note.section !== id || !back || back.section !== undefined) continue
+        // Naming the section places a note that lies outside it, so it is set back where it is.
+        edits.push({ op: 'edit', id: note.id, section: id }, { op: 'move', id: note.id, x: back.x, y: back.y })
+      }
     } else if (!was && is) {
-      unsections.push({ op: 'unsection', id })
-    } else if (was && is) {
-      // Each field is put back only if this edit changed it, so another writer's move or rename since stays.
-      const renamed = was.title !== is.title
-      const at = sameRect(was, is) ? undefined : sectionRect(was)
-      if (!renamed && !at) continue
-      const title = renamed ? was.title : (findSection(now, id)?.title ?? was.title)
+      if (current) unsections.push({ op: 'unsection', id })
+    } else if (was && is && current) {
+      // A field is put back only if this edit changed it and nobody has since, so another writer's move or rename stays.
+      const title = was.title !== is.title && current.title === is.title ? was.title : current.title
+      const at = !sameRect(was, is) && sameRect(current, is) ? sectionRect(was) : undefined
+      if (title === current.title && !at) continue
       sectionsBack.push({ op: 'section', id, title, ...(at ? { at } : {}) })
       if (!at) continue
-      for (const note of before.notes) {
-        const moved = afterNotes.get(note.id)
-        if (note.section === id && moved && (moved.x !== note.x || moved.y !== note.y)) edits.push({ op: 'move', id: note.id, x: note.x, y: note.y })
+      // The section carries every note it holds now; one that another writer added or moved since stays where it is.
+      for (const note of now.notes) {
+        if (note.section !== id) continue
+        const old = beforeNotes.get(note.id)
+        const carried = afterNotes.get(note.id)
+        const spot = old?.section === id && carried?.x === note.x && carried.y === note.y ? old : note
+        edits.push({ op: 'move', id: note.id, x: spot.x, y: spot.y })
       }
     }
   }
@@ -169,12 +178,14 @@ export function inverseOps(before: Board, after: Board, ops: readonly BoardOp[],
   for (const id of notes) {
     const was = beforeNotes.get(id)
     const is = afterNotes.get(id)
+    const current = nowNotes.get(id)
     if (!was && is) {
-      removals.push({ op: 'remove', id })
+      if (current) removals.push({ op: 'remove', id })
       continue
     }
     if (!was) continue
     if (!is) {
+      if (current) continue
       notesBack.push(...readd(was))
       for (const arrow of before.arrows) {
         if (arrow.from === id || arrow.to === id) links.push({ op: 'connect', from: arrow.from, to: arrow.to, ...(arrow.kind ? { kind: arrow.kind } : {}) })
@@ -191,21 +202,27 @@ export function inverseOps(before: Board, after: Board, ops: readonly BoardOp[],
       if (about?.length) edits.push({ op: 'edit', id, about })
       continue
     }
+    if (!current) continue
+    // Each field goes back only if this edit changed it and it still reads as the edit left it,
+    // so a later edit, another writer's or the person's own, is kept.
+    const reverts = (field: 'text' | 'kind' | 'section' | 'link') =>
+      JSON.stringify(is[field]) !== JSON.stringify(was[field]) && JSON.stringify(current[field]) === JSON.stringify(is[field])
     const edit: BoardOp & { op: 'edit' } = { op: 'edit', id }
-    if (is.text !== was.text) edit.text = was.text
-    if (is.kind !== was.kind) edit.kind = was.kind
-    if (is.section !== was.section) edit.section = was.section ?? null
+    if (reverts('text')) edit.text = was.text
+    if (reverts('kind')) edit.kind = was.kind
+    if (reverts('section')) edit.section = was.section ?? null
     if (JSON.stringify(is.about ?? []) !== JSON.stringify(was.about ?? [])) {
-      edit.about = revertList(was.about ?? [], is.about ?? [], nowNotes.get(id)?.about ?? is.about ?? []).filter((target) => nowNotes.has(target))
+      edit.about = revertList(was.about ?? [], is.about ?? [], current.about ?? []).filter((target) => nowNotes.has(target))
     }
-    const moved = is.x !== was.x || is.y !== was.y
-    // The move goes first, so a note whose old place lies in its old section is not placed again.
-    if (moved || edit.section !== undefined) edits.push({ op: 'move', id, x: was.x, y: was.y })
+    const moveBack = (is.x !== was.x || is.y !== was.y) && current.x === is.x && current.y === is.y
+    const spot = moveBack ? was : current
+    // The move goes first, so a note whose place lies in its old section is not placed again.
+    if (moveBack || edit.section !== undefined) edits.push({ op: 'move', id, x: spot.x, y: spot.y })
     if (Object.keys(edit).length > 2) edits.push(edit)
-    // Its old place outside that section: the edit placed it, and this puts it back.
+    // Its place outside that section: the edit placed it, and this puts it back.
     const home = typeof edit.section === 'string' ? findSection(now, edit.section) : undefined
-    if (home && !liesIn(was, home)) edits.push({ op: 'move', id, x: was.x, y: was.y })
-    if (JSON.stringify(is.link) !== JSON.stringify(was.link)) links.push({ op: 'link', id, link: was.link ?? null })
+    if (home && !liesIn(spot, home)) edits.push({ op: 'move', id, x: spot.x, y: spot.y })
+    if (reverts('link')) links.push({ op: 'link', id, link: was.link ?? null })
   }
 
   for (const [id, about] of aboutBack) edits.push({ op: 'edit', id, about })
@@ -214,8 +231,10 @@ export function inverseOps(before: Board, after: Board, ops: readonly BoardOp[],
     const { from, to } = arrowEnds(key)
     const was = before.arrows.find((arrow) => arrow.from === from && arrow.to === to)
     const is = after.arrows.find((arrow) => arrow.from === from && arrow.to === to)
-    if (was && (!is || is.kind !== was.kind)) links.push({ op: 'connect', from, to, ...(was.kind ? { kind: was.kind } : {}) })
-    else if (!was && is) links.push({ op: 'disconnect', from, to })
+    const current = now.arrows.find((arrow) => arrow.from === from && arrow.to === to)
+    const stands = is ? current !== undefined && current.kind === is.kind : !current
+    if (was && stands && (!is || is.kind !== was.kind)) links.push({ op: 'connect', from, to, ...(was.kind ? { kind: was.kind } : {}) })
+    else if (!was && is && current) links.push({ op: 'disconnect', from, to })
   }
 
   return [...removals, ...sectionsBack, ...notesBack, ...edits, ...links, ...unsections]

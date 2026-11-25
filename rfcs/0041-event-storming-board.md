@@ -187,8 +187,9 @@ Center's page bundle already carries zod through the MCP Apps view; the move
 keeps the board's schema modules out of it, not zod's bytes.) One request is in
 flight at a time, and edits made meanwhile wait in a queue (`board-queue.ts`,
 which has no DOM and is tested on its own). Undo replays operations that put
-back only what the edit touched, read from the board before it, so an agent's
-edit made in between survives an undo; a failed save empties the undo history
+back only what the edit touched and nobody has changed since, read from the
+board before it and the board at undo time, so an agent's edit made in between
+survives an undo; a failed save empties the undo history
 with the edits it threw away.
 
 The keyboard reaches notes and sections: Tab moves between notes and section

@@ -262,6 +262,46 @@ describe('createBoardQueue', () => {
     expect(queue.canUndo()).toBe(true)
   })
 
+  test('should keep an edit made after an undo that was waiting for its answer', async () => {
+    const start = applyBoardOps(emptyBoard('Test', 'en'), [NOTE('aa')]).board
+    const server = fakeServer(start)
+    const { queue } = queueOn(server, start)
+
+    queue.submit([{ op: 'edit', id: 'aa', text: 'B' }])
+    await tick()
+    expect(queue.undo()).toBe(true)
+    queue.submit([{ op: 'edit', id: 'aa', text: 'C' }])
+    server.release()
+    await tick()
+    server.release()
+    await queue.settled()
+
+    expect(server.board().notes[0]?.text).toBe('C')
+    expect(queue.canUndo()).toBe(true)
+  })
+
+  test('should not repeat a local refusal once a save the server dropped part of has reported', async () => {
+    const full = applyBoardOps(emptyBoard('Test', 'en'), [
+      NOTE('aa'),
+      ...Array.from({ length: BOARD_MAX_SECTIONS }, (_, n): BoardOp => ({ op: 'section', id: `s${n}`, title: 'S', at: { x: 0, y: 400 + n * 16, width: 8, height: 8 } })),
+    ]).board
+    const server = fakeServer(full)
+    server.setBoard(applyBoardOps(full, [{ op: 'remove', id: 'aa' }]).board)
+    const { queue, statuses } = queueOn(server, full)
+
+    queue.submit([{ op: 'remove', id: 'aa' }, { op: 'section', id: 'extra', title: 'X', at: { x: 800, y: 0, width: 8, height: 8 } }])
+    await tick()
+    server.release()
+    await queue.settled()
+    expect(statuses.at(-1)).toBe('dropped')
+
+    queue.submit([NOTE('bb', 200)])
+    await tick()
+    server.release()
+    await queue.settled()
+    expect(statuses.at(-1)).toBe('saved')
+  })
+
   test('should pass on the outline a save answers with', async () => {
     const start = emptyBoard('Test', 'en')
     const server = fakeServer(start)
@@ -330,6 +370,51 @@ describe('inverseOps after another writer', () => {
     const undone = applyBoardOps(renamed, inverseOps(start, moved, ops, renamed)).board
 
     expect(undone.sections).toEqual([{ id: 'lane', title: 'Agent', x: 0, y: 0, width: 400, height: 200 }])
+  })
+
+  test('should keep a text written after the edit being undone', () => {
+    const start = applyBoardOps(emptyBoard('Test', 'en'), [NOTE('aa')]).board
+    const ops: BoardOp[] = [{ op: 'edit', id: 'aa', text: 'B' }]
+    const edited = applyBoardOps(start, ops).board
+    const later = applyBoardOps(edited, [{ op: 'edit', id: 'aa', text: 'C' }]).board
+
+    expect(inverseOps(start, edited, ops, later)).toEqual([])
+  })
+
+  test('should leave a note where another writer moved it when undoing the removal of its section', () => {
+    const start = applyBoardOps(emptyBoard('Test', 'en'), [
+      { op: 'section', id: 'lane', title: 'Lane', at: { x: 0, y: 0, width: 400, height: 200 } },
+      { op: 'add', id: 'aa', kind: 'event', text: 'A', at: { x: 32, y: 40 }, section: 'lane' },
+      { op: 'move', id: 'aa', x: 0, y: 400 },
+    ]).board
+    const ops: BoardOp[] = [{ op: 'unsection', id: 'lane' }]
+    const removed = applyBoardOps(start, ops).board
+    const undone = applyBoardOps(removed, inverseOps(start, removed, ops)).board
+
+    expect(undone).toEqual(start)
+  })
+
+  test('should leave a note another writer added to a section where it is when undoing the section\'s move', () => {
+    const start = applyBoardOps(emptyBoard('Test', 'en'), [
+      { op: 'section', id: 'lane', title: 'Lane', at: { x: 0, y: 0, width: 400, height: 200 } },
+      { op: 'add', id: 'aa', kind: 'event', text: 'A', at: { x: 32, y: 40 }, section: 'lane' },
+    ]).board
+    const ops: BoardOp[] = [{ op: 'section', id: 'lane', title: 'Lane', at: { x: 400, y: 0, width: 400, height: 200 } }]
+    const moved = applyBoardOps(start, ops).board
+    const later = applyBoardOps(moved, [{ op: 'add', id: 'bb', kind: 'event', text: 'B', at: { x: 480, y: 40 }, section: 'lane' }]).board
+    const undone = applyBoardOps(later, inverseOps(start, moved, ops, later)).board
+
+    expect(undone.sections[0]).toMatchObject({ x: 0, y: 0 })
+    expect(undone.notes.map((note) => [note.id, note.x, note.y])).toEqual([['aa', 32, 40], ['bb', 480, 40]])
+  })
+
+  test('should not bring back a section another writer removed when undoing its rename', () => {
+    const start = applyBoardOps(emptyBoard('Test', 'en'), [{ op: 'section', id: 'lane', title: 'Lane', at: { x: 0, y: 0, width: 400, height: 200 } }]).board
+    const ops: BoardOp[] = [{ op: 'section', id: 'lane', title: 'Renamed' }]
+    const renamed = applyBoardOps(start, ops).board
+    const later = applyBoardOps(renamed, [{ op: 'unsection', id: 'lane' }]).board
+
+    expect(inverseOps(start, renamed, ops, later)).toEqual([])
   })
 
   test('should put a note dragged out of its section back without placing it again', () => {
