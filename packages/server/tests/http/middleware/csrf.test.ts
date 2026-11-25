@@ -462,6 +462,44 @@ describe('createCsrfMiddleware', () => {
     expect((await app.request('/_guren/plans/comments/feedback', { method: 'POST' })).status).toBe(403)
   })
 
+  it('verifies the MCP path when a Router pattern route registered ahead of the endpoint answers it', async () => {
+    process.env.GUREN_MCP = '1'
+    const app = createTestApp()
+    app.post('/:a/:b', markRouterRouteEntry((c: Context) => c.text('pattern')))
+    app.all(MCP_ENDPOINT_PATH, (c) => c.text('jsonrpc'))
+
+    expect((await app.request(MCP_ENDPOINT_PATH, { method: 'POST' })).status).toBe(403)
+  })
+
+  it('keeps the MCP exemption when the only Router route matching the path is of another method', async () => {
+    process.env.GUREN_MCP = '1'
+    const app = createTestApp()
+    app.get('/:a/:b', markRouterRouteEntry((c: Context) => c.text('pattern')))
+    app.all(MCP_ENDPOINT_PATH, (c) => c.text('jsonrpc'))
+
+    expect((await app.request(MCP_ENDPOINT_PATH, { method: 'POST' })).status).toBe(200)
+  })
+
+  it('verifies a Dev Center write route when a Router pattern route registered ahead of it answers', async () => {
+    process.env.GUREN_MCP = '1'
+    const app = createTestApp()
+    app.post('/_guren/:section/:slug/:action', markRouterRouteEntry((c: Context) => c.text('pattern')))
+    app.post('/_guren/plans/:slug/feedback', (c) => c.text('posted'))
+    app.post('/_guren/boards/:slug/ops', (c) => c.text('posted'))
+
+    expect((await app.request('/_guren/plans/comments/feedback', { method: 'POST' })).status).toBe(403)
+    expect((await app.request('/_guren/boards/flow/ops', { method: 'POST' })).status).toBe(403)
+  })
+
+  it('keeps the Dev Center exemption when the write route is the one that answers', async () => {
+    process.env.GUREN_MCP = '1'
+    const app = createTestApp()
+    app.post('/_guren/plans/:slug/feedback', (c) => c.text('posted'))
+    app.post('/_guren/:section/:slug/:action', markRouterRouteEntry((c: Context) => c.text('pattern')))
+
+    expect((await app.request('/_guren/plans/comments/feedback', { method: 'POST' })).status).toBe(200)
+  })
+
   it('exempts a declared cookieless-auth path, and only by exact match', async () => {
     const declared = new Set(['/mcp'])
     const app = new Hono()

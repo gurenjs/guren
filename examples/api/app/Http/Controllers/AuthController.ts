@@ -5,6 +5,18 @@ import { RegisterSchema, LoginSchema } from '../Validators/AuthValidator.js'
 import { UserRegistered } from '../../Events/UserRegistered.js'
 import { getTokenStore } from '../../Providers/ApiTokenProvider.js'
 
+const hash = new Hash()
+let missingUserHash: Promise<string> | undefined
+
+// An unknown address verifies against a hash no password opens, so it costs what a wrong password costs.
+function hashForMissingUser(): Promise<string> {
+  missingUserHash ??= hash.hash(crypto.randomUUID()).catch((error: unknown) => {
+    missingUserHash = undefined
+    throw error
+  })
+  return missingUserHash
+}
+
 export default class AuthController extends Controller {
   async register(): Promise<Response> {
     const { name, email, password } = await this.validateBody(RegisterSchema)
@@ -35,7 +47,9 @@ export default class AuthController extends Controller {
     const { email, password } = await this.validateBody(LoginSchema)
     const user = await User.first({ email })
 
-    if (!user || !(await new Hash().verify(user.passwordHash, password))) {
+    const valid = await hash.verify(user?.passwordHash ?? await hashForMissingUser(), password)
+
+    if (!user || !valid) {
       return this.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 

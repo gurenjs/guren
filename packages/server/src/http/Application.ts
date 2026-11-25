@@ -494,9 +494,9 @@ export class Application {
   /**
    * Asserts that the endpoint at `path` judges `tool:` / `tools:` scopes itself,
    * so a tools-only token authenticates there (through app-wide auth middleware
-   * in front of it) and nowhere else. Call from `boot`, after `mountRoutes()`.
-   * Only an app route at exactly this path is detected: a parameterised or
-   * wildcard route registered ahead of the endpoint would answer here unseen.
+   * in front of it) and nowhere else. Call from `boot`, after `mountRoutes()`,
+   * and mount the endpoint on `hono`: a request a router route answers first,
+   * a parameterised one included, does not accept the token.
    */
   declareAgentEndpoint(path: string): void {
     const collision = this.routeAt(path)

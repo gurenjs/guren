@@ -227,6 +227,10 @@ const ok = await verifyPassword('user-password', stored)
 ```typescript
 import { Controller, Hash } from '@guren/core'
 
+let dummyHash: Promise<string> | undefined
+// Made once; no password opens it.
+const missingUserHash = () => (dummyHash ??= new Hash().hash(crypto.randomUUID()))
+
 export default class AuthController extends Controller {
   private hash = new Hash()
 
@@ -244,8 +248,10 @@ export default class AuthController extends Controller {
     const user = await User.first({ email })
 
     // Stored hash first. `verify(password, user.passwordHash)` type-checks
-    // and is wrong.
-    if (!user || !(await this.hash.verify(user.passwordHash, password))) {
+    // and is wrong. An unknown address verifies against a dummy hash, so its
+    // response time does not reveal that no account holds it.
+    const valid = await this.hash.verify(user?.passwordHash ?? await missingUserHash(), password)
+    if (!user || !valid) {
       return this.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 
