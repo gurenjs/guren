@@ -442,7 +442,7 @@ bunx guren make:test posts/PostController
 
 To run a plan's behaviours in the browser too (fill the form, submit it, check where the page lands), add `--behaviours --agent claude-code`, or `codex`, or `none` for no agent. Run those tests with `bun run test:behaviours`. CI runs `bun run test:behaviours:ci`, which replays the recorded steps and needs no login.
 
-The CLI reference lists the files each command writes and what to commit: see [`add browser-tests`](./cli.md#add-browser-tests) and [Behaviour specs](./cli.md#behaviour-specs).
+[Browser Tests](./browser-tests.md) walks through both kinds of test, from setup to CI. The CLI reference lists the files each command writes and what to commit: see [`add browser-tests`](./cli.md#add-browser-tests) and [Behaviour specs](./cli.md#behaviour-specs).
 
 ## Testing a Controller Without the App (Vitest)
 
