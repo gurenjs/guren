@@ -133,8 +133,10 @@ A token calls only the tools its own `scope` names. A client can narrow one
 by sending `scope` on the token request (the authorization code exchange or a
 refresh), and the token keeps the granted entries that request names, compared
 as written. A refresh that sends the advertised `tools:read` against a grant
-stored as `tool:<name>` entries therefore keeps none: the token response says
-`scope: ""` and the token can call nothing. To refresh without losing what the
+stored as `tool:<name>` entries therefore keeps none.
+`@cloudflare/workers-oauth-provider` 1.2.0 and later refuse that request with
+`invalid_scope`; an older provider returns `scope: ""` and a token that can call
+nothing. To refresh without losing what the
 user consented to, send no `scope`, or the one the token response returned.
 
 ## Approval-gated tools
