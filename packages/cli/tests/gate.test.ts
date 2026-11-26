@@ -153,7 +153,7 @@ describe('runGate', () => {
       const report = await runGate({ cwd: dir, exec })
 
       const lint = calls.find(isOxlint)
-      expect(lint?.slice(2)).toEqual(['--no-error-on-unmatched-pattern', '--format', 'unix'])
+      expect(lint?.slice(2)).toEqual(['--disable-nested-config', '--no-error-on-unmatched-pattern', '--format', 'unix'])
       expect(stage(report, 'lint')).toMatchObject({ status: 'pass', findings: ['lib.ts:1:1: Unexpected debugger statement. [Warning/eslint(no-debugger)]'] })
       expect(report.ok).toBe(true)
     }, { oxlint: true })
