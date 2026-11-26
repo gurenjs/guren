@@ -41,7 +41,7 @@ Start your app with the Dev Center enabled (the scaffolded `bun run dev` already
 
 On a board's page:
 
-- **Add a note** with the buttons named after the kinds, or double-click empty space for another note of the last kind you used.
+- **Add a note** by picking its kind from the **Add a note** menu, or double-click empty space for another note of the last kind you used. **Connect**, **Async** and **Delete** appear beside it while something they apply to is selected.
 - **Drag** a note to move it. Drop it inside a section and it belongs to that section; drag it out and it no longer does. Shift-click selects several notes, which then move together.
 - **Edit** a note's text by double-clicking it, or select it and press Enter.
 - **Connect** two notes: select the first, press C (or **Connect**), then click the second. Select an arrow and press **Async** for a step the caller does not wait for, such as a queued job; the arrow turns dashed.
@@ -51,7 +51,7 @@ On a board's page:
 
 From the keyboard, Tab moves between notes and section titles. The arrow keys move what is selected (hold Shift for larger steps), Enter edits it, and Delete removes it. To connect two notes, press C on the first, Tab to the second and press Enter. Selecting an arrow, selecting several notes and resizing a section need a pointer.
 
-Drag the background to pan, and hold Ctrl or ⌘ while scrolling to zoom. Every edit is saved to the board file as you make it. When you come back to the window, the page reads the file again, so an edit your agent made in the meantime appears.
+Drag the background to pan, and hold Ctrl or ⌘ while scrolling to zoom, or use the buttons in the canvas's bottom-right corner. Every edit is saved to the board file as you make it. When you come back to the window, the page reads the file again, so an edit your agent made in the meantime appears.
 
 ## Let your agent read and edit it
 

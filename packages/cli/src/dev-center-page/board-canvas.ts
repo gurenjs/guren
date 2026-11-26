@@ -81,7 +81,11 @@ export function mountBoardCanvas(
   const noteLayer = el('div', 'board-layer')
   world.append(sectionLayer, arrows, noteLayer)
   viewport.append(world)
-  root.replaceChildren(tools, viewport, status, el('p', 'meta', words('help')))
+  // A sibling of the viewport, so its keys and pointers never reach the canvas handlers.
+  const zoomBar = el('div', 'board-zoom')
+  const stage = el('div', 'board-stage')
+  stage.append(viewport, zoomBar)
+  root.replaceChildren(tools, stage, status, el('p', 'meta', words('help')))
 
   const say = (text: string, tone: '' | 'warning' | 'error' = '') => {
     status.textContent = text
@@ -212,6 +216,8 @@ export function mountBoardCanvas(
     if (selection.arrow) ops.push({ op: 'disconnect', ...arrowEnds(selection.arrow) })
     submit(ops)
     select({ notes: new Set() })
+    // The delete button hides itself, and a removed note took the focus with it.
+    viewport.focus({ preventScroll: true })
   }
 
   const toggleAsync = () => {
@@ -281,23 +287,70 @@ export function mountBoardCanvas(
     return node
   }
 
-  const kindButtons = BOARD_NOTE_KINDS.map((kind) => {
-    const node = button(kindWord(words, kind), () => addNote(kind, viewportCentre()), `g-btn board-kind board-kind-${kind}`)
-    node.title = `${words('tool.add')}: ${kindWord(words, kind)}`
-    return node
+  const addMenu = el('div', 'board-menu')
+  addMenu.setAttribute('role', 'menu')
+  addMenu.hidden = true
+  const closeAddMenu = (refocus = false) => {
+    if (addMenu.hidden) return
+    addMenu.hidden = true
+    addButton.setAttribute('aria-expanded', 'false')
+    if (refocus) addButton.focus()
+  }
+  const kindItems = BOARD_NOTE_KINDS.map((kind) => {
+    const item = button(kindWord(words, kind), () => {
+      closeAddMenu()
+      addNote(kind, viewportCentre())
+    }, 'board-menu-item')
+    item.prepend(el('span', `board-swatch board-kind-${kind}`))
+    item.setAttribute('role', 'menuitem')
+    item.tabIndex = -1
+    return item
   })
+  addMenu.append(...kindItems)
+  const addButton = button(words('tool.add'), () => {
+    if (!addMenu.hidden) return closeAddMenu()
+    addMenu.hidden = false
+    addButton.setAttribute('aria-expanded', 'true')
+    kindItems[0]?.focus()
+  })
+  addButton.append(el('span', 'board-caret', '▾'))
+  addButton.lastElementChild!.setAttribute('aria-hidden', 'true')
+  addButton.setAttribute('aria-haspopup', 'menu')
+  addButton.setAttribute('aria-expanded', 'false')
+  const addWrap = el('div', 'board-add')
+  addWrap.append(addButton, addMenu)
+  // Safari does not focus a clicked button, so a mouse press must not move focus out of the menu.
+  addWrap.addEventListener('mousedown', (event) => event.preventDefault())
+  addWrap.addEventListener('focusout', (event) => {
+    if (!(event.relatedTarget instanceof Node && addWrap.contains(event.relatedTarget))) closeAddMenu()
+  })
+  addMenu.addEventListener('keydown', (event) => {
+    const at = kindItems.indexOf(document.activeElement as HTMLButtonElement)
+    const last = kindItems.length - 1
+    const next = { ArrowDown: at < last ? at + 1 : 0, ArrowUp: at > 0 ? at - 1 : last, Home: 0, End: last }[event.key]
+    if (next !== undefined) {
+      event.preventDefault()
+      kindItems[next]?.focus()
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      closeAddMenu(true)
+    }
+  })
+
   const sectionButton = button(words('tool.section'), addSection)
   const connectButton = button(words('tool.connect'), startConnect)
   const asyncButton = button(words('tool.async'), toggleAsync)
   const deleteButton = button(words('tool.delete'), removeSelected)
-  const undoButton = button(words('tool.undo'), undoLast)
+  const selectionTools = el('div', 'board-tool-context')
+  selectionTools.append(connectButton, asyncButton, deleteButton)
+  const undoButton = button(words('tool.undo'), undoLast, 'g-btn g-btn-secondary board-undo')
+  tools.append(addWrap, sectionButton, selectionTools, undoButton)
+
   const zoomOut = button('−', () => setZoom(zoom / 1.25))
   zoomOut.setAttribute('aria-label', words('tool.zoomOut'))
   const zoomIn = button('+', () => setZoom(zoom * 1.25))
   zoomIn.setAttribute('aria-label', words('tool.zoomIn'))
-  const fitButton = button(words('tool.fit'), fit)
-  tools.append(el('span', 'board-tool-group'), sectionButton, connectButton, asyncButton, deleteButton, undoButton, zoomOut, zoomIn, fitButton)
-  tools.firstElementChild!.append(...kindButtons)
+  zoomBar.append(zoomOut, zoomIn, button(words('tool.fit'), fit))
 
   const noteNodes = new Map<string, HTMLElement>()
   const sectionNodes = new Map<string, HTMLElement>()
@@ -358,15 +411,16 @@ export function mountBoardCanvas(
     }
     for (const [id, node] of sectionNodes) node.classList.toggle('board-selected', selection.section === id)
     for (const [key, node] of arrowNodes) node.classList.toggle('board-selected', selection.arrow === key)
-    const one = selection.notes.size === 1
-    connectButton.disabled = !one
+    connectButton.hidden = selection.notes.size !== 1
     connectButton.classList.toggle('board-on', connecting)
-    asyncButton.disabled = selection.arrow === undefined
+    asyncButton.hidden = selection.arrow === undefined
     const selectedArrow = view.arrows.find((candidate) => arrowKey(candidate) === selection.arrow)
     asyncButton.textContent = selectedArrow?.kind === 'async' ? words('tool.sync') : words('tool.async')
-    deleteButton.disabled = selection.notes.size === 0 && !selection.section && !selection.arrow
+    deleteButton.hidden = selection.notes.size === 0 && !selection.section && !selection.arrow
+    selectionTools.hidden = deleteButton.hidden
     undoButton.disabled = !queue.canUndo()
-    for (const node of kindButtons) node.disabled = view.notes.length >= BOARD_MAX_NOTES
+    addButton.disabled = view.notes.length >= BOARD_MAX_NOTES
+    if (addButton.disabled) closeAddMenu()
   }
 
   const box = (note: BoardNote) => ({ x: note.x, y: note.y, w: NOTE_SIZE.width, h: NOTE_SIZE.height })
