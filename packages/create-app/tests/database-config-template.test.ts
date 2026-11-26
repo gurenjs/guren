@@ -126,6 +126,35 @@ describe('drizzle config templates', () => {
   }
 })
 
+const CONTAINER_PORT = { postgres: '5432', mysql: '3306' } as const
+
+describe('database containers', () => {
+  for (const driver of ['postgres', 'mysql'] as const) {
+    // A port mapping with no host IP binds every interface, which puts the
+    // shared guren/guren superuser on the network the machine is on.
+    it(`publishes the ${driver} port on IPv4 loopback only, where DATABASE_URL points`, async () => {
+      const workspace = await createTempWorkspace(`guren-db-compose-${driver}-`)
+
+      try {
+        const dest = join(workspace.dir, 'test-app')
+        await scaffoldAppBlueprint({ destination: dest, renderingMode: 'spa', database: driver })
+
+        const compose = await readFile(join(dest, 'docker-compose.yml'), 'utf8')
+        const published = [...compose.matchAll(/^\s+- '([^']+)'$/gmu)].map((match) => match[1])
+        const defaultUrl = new URL(DATABASE_DEFAULTS[driver].url)
+
+        expect(defaultUrl.hostname).toBe('127.0.0.1')
+        expect(published).toEqual([`127.0.0.1:${defaultUrl.port}:${CONTAINER_PORT[driver]}`])
+
+        const envExample = await readFile(join(dest, '.env.example'), 'utf8')
+        expect(envExample).toContain(`\nDATABASE_URL=${DATABASE_DEFAULTS[driver].url}\n`)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
+})
+
 describe('shipped database config templates reach published users', () => {
   // The assertions above read the source tree, so none notices a
   // `files`/`.npmignore` narrowing; the packed/npm smokes scaffold sqlite only,

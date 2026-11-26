@@ -557,6 +557,16 @@ CSRF `403` that hides the real reason. Neither skip authenticates anything: both
 ways in are a bearer token and the identity an in-process caller (such as a
 durable agent) installs, and a browser can present neither.
 
+The declaration exempts a request only while the endpoint is what answers it.
+When one of your routes also matches the path, say `router.post('/:slug', …)`
+for a request to `/mcp`, that route is registered first and answers instead, so
+the request is verified like any other. The endpoint cannot be reached there
+either; give it a path of its own with the `path` option. This check reads only
+routes registered through the router. A route you add straight to `app.hono`,
+for example in a `createApp({ boot })` callback, is not seen, and a request it
+answers at the endpoint's path skips CSRF verification. Keep such routes off
+that path.
+
 `bunx guren audit` reports that declaration, and any other package's, under
 **Plugin CSRF exemptions** (the audit's only view into an exemption made from
 inside `node_modules`). It names packages rather than paths: each path is an

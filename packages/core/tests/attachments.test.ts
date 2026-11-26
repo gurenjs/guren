@@ -183,11 +183,42 @@ describe('attachments', () => {
       })
       const record = await Post.attach(1, 'draftPdf', pdf)
       expect(record.contentType).toBe('application/pdf')
+      expect((await storage.disk('media').metadata(record.path))?.contentType).toBe('application/pdf')
       expect(record.width).toBeNull()
       expect(record.height).toBeNull()
       expect(record.placeholder).toBeNull()
       // Even HEIC bytes are fine here — no image pipeline runs at all.
       await Post.attach(2, 'draftPdf', isoBmffHeader('heic'))
+    })
+
+    test('should not write a declared type a browser renders as a page onto the stored object', async () => {
+      for (const [name, type] of [
+        ['evil.html', 'text/html;charset=utf-8'],
+        ['evil.svg', 'image/svg+xml'],
+        ['evil.xsl', 'text/xsl'],
+        ['evil.bin', 'multipart/x-mixed-replace;boundary=x'],
+        ['evil.txt', 'unknown/unknown'],
+        ['evil.csv', 'text/plain, text/html'],
+      ] as const) {
+        const file = new File(['<script>alert(1)</script>'], name, { type })
+        const record = await Post.attach(1, 'draftPdf', file)
+        expect(record.contentType).toBe(file.type)
+        expect(record.path.endsWith(`/${name}`)).toBe(true)
+        expect((await storage.disk('media').metadata(record.path))?.contentType).toBe('application/octet-stream')
+      }
+    })
+
+    test('should write every other declared type onto the stored object as declared', async () => {
+      for (const [name, type] of [
+        ['notes.txt', 'text/plain'],
+        ['app.js', 'text/javascript'],
+        ['data.json', 'application/json'],
+      ] as const) {
+        const file = new File(['console.log(1)'], name, { type })
+        const record = await Post.attach(1, 'draftPdf', file)
+        expect(record.contentType).toBe(file.type)
+        expect((await storage.disk('media').metadata(record.path))?.contentType).toBe(file.type)
+      }
     })
 
     test('should store non-image bytes as opaque on an image: allow collection', async () => {

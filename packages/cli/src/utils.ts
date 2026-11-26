@@ -435,6 +435,15 @@ export function quoteObjectKey(key: string): string {
 // measured at 2.9s for a 16k-char path vs 1.9ms here).
 export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu
 
+/**
+ * No parameter and no `*`: the same test as `isParameterlessPath()` in
+ * `@guren/core/internal/route-path`, which the navigation links by. The browser map
+ * picks a landmark by it and codegen lists the names a navigation entry may use.
+ */
+export function isParameterless(path: string): boolean {
+  return !/(?:^|\/):|\*/u.test(path)
+}
+
 /** Param labels in path order, with constraints and modifiers dropped. */
 export function extractPathParamNames(path: string): string[] {
   return Array.from(path.matchAll(PATH_PARAM_PATTERN), (match) => match[2]!)

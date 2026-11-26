@@ -231,6 +231,13 @@ const ok = await verifyPassword('user-password', stored)
 ```typescript
 import { Controller, Hash } from '@guren/core'
 
+let dummyHash: Promise<string> | undefined
+// 一度だけ作る。どのパスワードでも開かない。失敗したら捨てて次のログインで作り直す
+const missingUserHash = () => (dummyHash ??= new Hash().hash(crypto.randomUUID()).catch((error: unknown) => {
+  dummyHash = undefined
+  throw error
+}))
+
 export default class AuthController extends Controller {
   private hash = new Hash()
 
@@ -248,8 +255,10 @@ export default class AuthController extends Controller {
     const user = await User.first({ email })
 
     // 保存済みのハッシュが第1引数。verify(password, user.passwordHash) は
-    // 型としては通るが誤り
-    if (!user || !(await this.hash.verify(user.passwordHash, password))) {
+    // 型としては通るが誤り。登録のないアドレスもダミーのハッシュで検証するので、
+    // パスワードを間違えたときとほぼ同じ時間がかかる
+    const valid = await this.hash.verify(user?.passwordHash ?? await missingUserHash(), password)
+    if (!user || !valid) {
       return this.json({ error: '認証情報が無効です' }, { status: 401 })
     }
 

@@ -16,7 +16,10 @@ const PAGE_PREFIXES = ['/docs', '/blog', '/start', '/wallpapers']
 export function canonicalPath(pathname: string): string | undefined {
   let path = pathname
   if (path.length > 1 && path.endsWith('/') && PAGE_PREFIXES.some((prefix) => path.startsWith(`${prefix}/`))) {
-    path = path.replace(/\/+$/u, '') || '/'
+    // A `/\/+$/` regex retries from every slash of an inner run, quadratic in the run's length.
+    let end = path.length
+    while (end > 0 && path[end - 1] === '/') end--
+    path = path.slice(0, end) || '/'
   }
 
   if (FEED_ALIASES.has(path)) return FEED_PATH

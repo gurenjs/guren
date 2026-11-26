@@ -216,7 +216,7 @@ const database = createSqliteDatabase({
 テストで作ったデータが、開発サーバーで見ているデータに混ざることはありません。どちらのキーも雛形の `config/env.ts` に宣言してあり、アプリの起動時には検証済みの値が `context` で渡されます（[設定](./configuration.md#データベース接続)を参照）。
 
 > [!WARNING]
-> データベースを切り替えるのは SQLite の雛形だけです。`--db postgres` や `--db mysql` で作ったアプリはテストでも `DATABASE_URL` を読むので、テストで `resetDatabase()` を呼ぶと開発用のデータベースが空になります。テスト用のデータベースを別に作り、`DATABASE_URL=postgres://guren:guren@localhost:54322/guren_test bun test` のようにそちらを指定してテストを実行してください。
+> データベースを切り替えるのは SQLite の雛形だけです。`--db postgres` や `--db mysql` で作ったアプリはテストでも `DATABASE_URL` を読むので、テストで `resetDatabase()` を呼ぶと開発用のデータベースが空になります。テスト用のデータベースを別に作り、`DATABASE_URL=postgres://guren:guren@127.0.0.1:54322/guren_test bun test` のようにそちらを指定してテストを実行してください。
 
 > [!WARNING]
 > `create-guren-app` 1.1.0 以前で生成したアプリは、`NODE_ENV` に関係なく `DATABASE_URL`（または `./data/guren.db`）に書き込みます。そのため、`bun test` が開発サーバーと同じデータベースに書き込んでしまいます。直すには、`filename` オプションを差し替え、`DATABASE_URL` と `TEST_DATABASE_URL` を `config/env.ts` に宣言してください。このファイルがないアプリでは、先に追加します（[設定](./configuration.md#サービスプロバイダを使うアプリ)を参照）。

@@ -1,6 +1,18 @@
 import { describe, test, expect } from 'bun:test'
 
+import type sanitizeHtml from 'sanitize-html'
+
 import { createMarkdownRenderer } from './renderer'
+
+function allowClasses(tag: string, classes: string[]) {
+  return (defaults: sanitizeHtml.IOptions): sanitizeHtml.IOptions => ({
+    ...defaults,
+    allowedClasses: {
+      ...defaults.allowedClasses,
+      [tag]: [...((defaults.allowedClasses?.[tag] as string[] | undefined) ?? []), ...classes],
+    },
+  })
+}
 
 describe('createMarkdownRenderer', () => {
   describe('rendering defaults', () => {
@@ -163,6 +175,33 @@ describe('createMarkdownRenderer', () => {
       expect(html).not.toContain('evil')
     })
 
+    test('should drop foreign class values on span', async () => {
+      const renderer = createMarkdownRenderer()
+      const html = await renderer.render('<span class="fixed evil">x</span>')
+      expect(html).toContain('<span>x</span>')
+      expect(html).not.toContain('fixed')
+      expect(html).not.toContain('evil')
+    })
+
+    test('should keep only the renderer and shiki classes on code and pre', async () => {
+      const renderer = createMarkdownRenderer()
+      const html = await renderer.render(
+        '<code class="inset-0 language-ts">a</code>\n\n<pre class="shiki z-50">b</pre>',
+      )
+      expect(html).toContain('<code class="language-ts">a</code>')
+      expect(html).toContain('<pre class="shiki">b</pre>')
+      expect(html).not.toContain('inset-0')
+      expect(html).not.toContain('z-50')
+    })
+
+    test('should drop classes on pre when a callback replaces allowedClasses', async () => {
+      const renderer = createMarkdownRenderer({
+        sanitize: (defaults) => ({ ...defaults, allowedClasses: { span: ['x'] } }),
+      })
+      const html = await renderer.render('<pre class="fixed">a</pre>')
+      expect(html).toContain('<pre>a</pre>')
+    })
+
     test('should pass raw HTML through when sanitize is false', async () => {
       const renderer = createMarkdownRenderer({ sanitize: false })
       const html = await renderer.render('hello <script>alert(1)</script>')
@@ -213,6 +252,7 @@ describe('createMarkdownRenderer', () => {
 
     test('should emit a complete <pre> block from the highlighter unwrapped', async () => {
       const renderer = createMarkdownRenderer({
+        sanitize: allowClasses('pre', ['hl']),
         highlight: async (code, lang) => `<pre class="hl" data-lang="${lang ?? ''}">${code}</pre>`,
       })
       const html = await renderer.render('```ts\nconst a = 1\n```')
@@ -238,11 +278,21 @@ describe('createMarkdownRenderer', () => {
 
     test('should wrap inner-HTML highlighter results in the default pre/code', async () => {
       const renderer = createMarkdownRenderer({
+        sanitize: allowClasses('span', ['tok']),
         highlight: (code) => `<span class="tok">${code}</span>`,
       })
       const html = await renderer.render('```ts\nconst a = 1\n```')
       expect(html).toContain('<pre><code class="language-ts">')
       expect(html).toContain('class="tok"')
+    })
+
+    test('should drop highlighter classes the allowlist does not name', async () => {
+      const renderer = createMarkdownRenderer({
+        highlight: (code) => `<span class="tok">${code}</span>`,
+      })
+      const html = await renderer.render('```ts\nconst a = 1\n```')
+      expect(html).toContain('<pre><code class="language-ts">')
+      expect(html).not.toContain('tok')
     })
 
     test('should render fences as plain pre/code without a highlighter', async () => {

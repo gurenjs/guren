@@ -183,10 +183,11 @@ describe('check-after-edit hook: oxlint', () => {
     // and the session cwd (here `/`) need not be anywhere near the edited file.
     test("judges a worktree's file from the worktree, running the project's copy", async () => {
       const result = await runAgentHook(template, '.claude/hooks/check-after-edit.ts', { ...edit, cwd: '/' }, async (dir) => {
-        const worktree = join(dir, '.claude', 'worktrees', 'x')
-        mkdirSync(join(worktree, '.claude', 'hooks'), { recursive: true })
-        writeFileSync(join(worktree, '.claude', 'hooks', 'check-after-edit.ts'), readFileSync(template, 'utf8'))
-        await app(worktree)
+        initGitRepo(dir)
+        git(dir, 'add', '-f', '.claude/hooks/check-after-edit.ts')
+        git(dir, 'commit', '-q', '-m', 'init')
+        git(dir, 'worktree', 'add', '-q', '.claude/worktrees/x')
+        await app(join(dir, '.claude', 'worktrees', 'x'))
       }, { subdir: '.claude/worktrees/x/modules/foo' })
 
       expect(contextOf(result)).toContain('After editing modules/foo/lib.ts:')
@@ -244,5 +245,18 @@ export function registerAdminRoutes(router: Router): void {
     )
 
     expect(contextOf(result)).toContain('guren check could not run: @guren/cli is not resolvable')
+  })
+
+  // A tree the agent was let edit runs none of its own code here for carrying a copy of the script.
+  test('passes over a tree holding the script that is no worktree of the app', async () => {
+    const result = await runAgentHook(template, '.claude/hooks/check-after-edit.ts', { tool_input: { file_path: 'routes/web.ts' } }, async (dir) => {
+      const foreign = join(dir, 'vendor', 'foreign')
+      mkdirSync(join(foreign, '.claude', 'hooks'), { recursive: true })
+      writeFileSync(join(foreign, '.claude', 'hooks', 'check-after-edit.ts'), readFileSync(template, 'utf8'))
+      await writeWorkspaceFiles(foreign, { 'routes/web.ts': "console.error('foreign routes ran')\n" })
+    }, { subdir: 'vendor/foreign' })
+
+    expectSilent(result)
+    expect(result.stderr).not.toContain('foreign routes ran')
   })
 })

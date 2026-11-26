@@ -10,6 +10,6 @@ export default defineConfig({
   out: './db/migrations',
   dialect: 'mysql',
   dbCredentials: {
-    url: process.env.DATABASE_URL || 'mysql://guren:guren@localhost:33306/guren',
+    url: process.env.DATABASE_URL || 'mysql://guren:guren@127.0.0.1:33306/guren',
   },
 })

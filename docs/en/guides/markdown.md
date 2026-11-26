@@ -37,10 +37,11 @@ createMarkdownRenderer({
 
 Markdown syntax alone can carry `javascript:` and `data:` URLs into `href` and `src`, so escaping raw HTML is not enough on its own. With the default `sanitize: true`, the rendered HTML passes a `sanitize-html` allowlist before it is returned:
 
-- structural tags only; raw HTML like `<script>` is escaped, not silently dropped
+- structural tags only; raw HTML like `<script>` is escaped, not silently dropped. An allowed tag written as raw HTML is kept, with only its allowed attributes
 - `href`/`src` restricted to `http`, `https`, and `mailto`; protocol-relative URLs (`//host/path`) are rejected
 - inline styles limited to the declarations shiki emits (colors and the `--shiki-dark` custom properties), so highlighted code survives sanitization intact
 - heading `id`s and the alert markup are admitted by exact value
+- `class` values limited to the ones the renderer and `createShikiHighlight` emit: the alert classes, marked's `language-*` on code fences, and shiki's `shiki`, `shiki-themes`, bundled theme names and `line`. Any other class, such as `fixed inset-0` written as raw HTML, is dropped
 
 The result is safe to inject with `dangerouslySetInnerHTML`.
 
@@ -137,6 +138,21 @@ Never import the full `shiki` entry in code that ends up in a Workers bundle: it
 ### Custom highlighters
 
 `highlight` is just a function `(code, lang) => string | Promise<string>`. A result that begins with `<pre` is treated as a complete code block and emitted as-is (shiki's shape); anything else is wrapped in the default `<pre><code>`.
+
+The default sanitizer cannot tell a highlighter's markup from raw HTML in the source, so it drops any class it does not list, the highlighter's included. A highlighter that emits other classes (highlight.js's `hljs-*` token spans, or a shiki theme loaded under a name shiki does not bundle) needs them added to `allowedClasses` through the `sanitize` callback. A `*` in an entry matches any run of characters. Whatever you add is admitted in raw HTML too, so list only the names or prefix the highlighter emits:
+
+```ts
+createMarkdownRenderer({
+  highlight,
+  sanitize: (defaults) => ({
+    ...defaults,
+    allowedClasses: {
+      ...defaults.allowedClasses,
+      span: [...((defaults.allowedClasses?.span as string[] | undefined) ?? []), 'hljs-*'],
+    },
+  }),
+})
+```
 
 ## Styling
 

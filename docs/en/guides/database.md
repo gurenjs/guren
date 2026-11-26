@@ -68,7 +68,7 @@ const database = createPostgresDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
   connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL
-    ?? 'postgres://guren:guren@localhost:54322/guren',
+    ?? 'postgres://guren:guren@127.0.0.1:54322/guren',
 })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
@@ -112,7 +112,7 @@ const database = createMySqlDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
   connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL
-    ?? 'mysql://guren:guren@localhost:33306/guren',
+    ?? 'mysql://guren:guren@127.0.0.1:33306/guren',
 })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database

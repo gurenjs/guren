@@ -20,7 +20,7 @@ const html = await renderer.render('# Hello\n\n> [!NOTE]\n> Sanitized by default
 
 Defaults (all overridable):
 
-- **`sanitize: true`** — output passes a `sanitize-html` allowlist tuned for markdown plus shiki's inline styles: `javascript:`/`data:`/protocol-relative URLs are dropped, raw HTML is escaped, only shiki-shaped style declarations survive. The rendered HTML is safe to inject with `dangerouslySetInnerHTML`. Pass `false` for trusted content, or a callback to extend the allowlist:
+- **`sanitize: true`** — output passes a `sanitize-html` allowlist tuned for markdown plus shiki's inline styles: `javascript:`/`data:`/protocol-relative URLs are dropped, raw HTML outside the allowlist is escaped (an allowed tag written as raw HTML keeps only its allowed attributes), only shiki-shaped style declarations survive, and `class` keeps only the values the renderer and `createShikiHighlight` emit (the alert classes, `language-*`, shiki's wrapper, theme and line classes). A custom highlighter's classes must be added to `allowedClasses` through the callback below. The rendered HTML is safe to inject with `dangerouslySetInnerHTML`. Pass `false` for trusted content, or a callback to extend the allowlist:
 
   ```typescript
   createMarkdownRenderer({

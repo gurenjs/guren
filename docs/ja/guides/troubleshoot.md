@@ -68,7 +68,7 @@ bun run codegen --force
 
 ### データベースへの "Connection refused"
 
-`bun run db:migrate` が `cannot connect to the database at localhost:54322 (ECONNREFUSED)` というエラーで失敗するケースです。
+`bun run db:migrate` が `cannot connect to the database at 127.0.0.1:54322 (ECONNREFUSED)` というエラーで失敗するケースです。
 
 **原因:** Postgres コンテナが起動していないか、ポートがホストに公開されていないか、`DATABASE_URL` のホストやポートが間違っています。
 
@@ -85,7 +85,7 @@ bun run codegen --force
 2. `.env` の接続文字列を確認します。
 
    ```dotenv
-   DATABASE_URL=postgres://guren:guren@localhost:54322/guren
+   DATABASE_URL=postgres://guren:guren@127.0.0.1:54322/guren
    ```
 
    デフォルトのポートは、システムに入っている Postgres とぶつからないよう、標準の `5432` ではなく `54322` にしています。
@@ -96,7 +96,7 @@ bun run codegen --force
    docker compose port postgres 5432
    ```
 
-   `0.0.0.0:54322` と表示されれば正常です。`docker compose ps` で `Up` になっていても、このコマンドが何も返さなければポートの公開に失敗しています。Docker Desktop を再起動したあとなどに起こります。次のようにコンテナを作り直してください。名前付きボリュームは残るので、データは消えません。
+   `127.0.0.1:54322` と表示されれば正常です。`docker compose ps` で `Up` になっていても、このコマンドが何も返さなければポートの公開に失敗しています。Docker Desktop を再起動したあとなどに起こります。次のようにコンテナを作り直してください。名前付きボリュームは残るので、データは消えません。
 
    ```bash
    docker compose down && docker compose up -d

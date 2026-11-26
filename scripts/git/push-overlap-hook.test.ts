@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -20,10 +20,12 @@ function commit(cwd: string, path: string, body: string, message: string): void 
   git(cwd, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', message)
 }
 
-/** Runs the hook process in `cwd` on `command`, with the payload `cwd` the Bash tool would report. */
-function runHook(cwd: string, command = 'git push', payloadCwd = cwd): { code: number; err: string } {
+/** Runs the hook process in `cwd` on `command`, with the payload `cwd` and project dir Claude Code would pass. */
+function runHook(cwd: string, command: string, payloadCwd: string, projectDir: string | undefined): { code: number; err: string } {
   const stdin = Buffer.from(JSON.stringify({ cwd: payloadCwd, tool_input: { command } }))
-  const r = Bun.spawnSync(['bun', HOOK], { cwd, stdin })
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: projectDir }
+  if (projectDir === undefined) delete env.CLAUDE_PROJECT_DIR
+  const r = Bun.spawnSync(['bun', HOOK], { cwd, stdin, env })
   return { code: r.exitCode, err: r.stderr.toString() }
 }
 
@@ -122,6 +124,15 @@ describe('push-overlap-hook', () => {
 
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
+  const hook = (cwd: string, command = 'git push', payloadCwd = cwd): { code: number; err: string } =>
+    runHook(cwd, command, payloadCwd, clone)
+
+  /** A repository whose origin fetch runs a command that leaves `marker` behind. */
+  function trap(repo: string, marker: string): void {
+    git(repo, 'config', 'remote.origin.url', repo)
+    git(repo, 'config', 'remote.origin.uploadpack', `touch '${marker}'; git-upload-pack`)
+  }
+
   /** A branch on `clone` whose one file main then rewrites. */
   function overlap(): void {
     git(clone, 'checkout', '-q', '-b', 'feature')
@@ -132,7 +143,7 @@ describe('push-overlap-hook', () => {
   test('blocks when main rewrote a file the branch also changes, naming the commit', () => {
     overlap()
 
-    const { code, err } = runHook(clone)
+    const { code, err } = hook(clone)
 
     expect(code).toBe(2)
     expect(err).toContain('src/app.ts')
@@ -144,7 +155,7 @@ describe('push-overlap-hook', () => {
     commit(clone, 'src/other.ts', 'export const b = 1\n', 'mine')
     commit(origin, 'src/app.ts', 'export const a = 3\n', 'theirs on main')
 
-    expect(runHook(clone).code).toBe(0)
+    expect(hook(clone).code).toBe(0)
   })
 
   test('defeats a stale origin/main, which is the check that fails open', () => {
@@ -152,7 +163,7 @@ describe('push-overlap-hook', () => {
     // The ref on disk still predates the overlap; only the hook's own fetch sees it.
     expect(Bun.spawnSync(['git', 'rev-list', '--count', 'HEAD..origin/main'], { cwd: clone }).stdout.toString().trim()).toBe('0')
 
-    expect(runHook(clone).code).toBe(2)
+    expect(hook(clone).code).toBe(2)
   })
 
   test('reports rather than passes when the fetch cannot run', () => {
@@ -160,7 +171,7 @@ describe('push-overlap-hook', () => {
     commit(clone, 'src/app.ts', 'export const a = 2\n', 'mine')
     git(clone, 'remote', 'set-url', 'origin', join(dir, 'gone'))
 
-    const { code, err } = runHook(clone)
+    const { code, err } = hook(clone)
 
     expect(code).toBe(2)
     expect(err).toContain('unchecked')
@@ -171,7 +182,7 @@ describe('push-overlap-hook', () => {
     commit(clone, '.changeset/mine.md', 'mine\n', 'mine')
     commit(origin, '.changeset/mine.md', 'theirs\n', 'theirs on main')
 
-    expect(runHook(clone).code).toBe(0)
+    expect(hook(clone).code).toBe(0)
   })
 
   test('judges the worktree a `cd <dir> &&` push runs in, not the one the hook process runs in', () => {
@@ -184,24 +195,89 @@ describe('push-overlap-hook', () => {
     git(clone, 'checkout', '-q', '-b', 'clean', 'origin/main')
     commit(clone, 'src/other.ts', 'export const b = 1\n', 'clean')
 
-    expect(runHook(session).code).toBe(2)
-    expect(runHook(session, `cd ${clone} && git push origin clean`).code).toBe(0)
+    expect(hook(session).code).toBe(2)
+    expect(hook(session, `cd ${clone} && git push origin clean`).code).toBe(0)
   })
 
   test('starts from the payload cwd, which follows the Bash tool across calls', () => {
     overlap()
 
-    expect(runHook(dir, 'git push', clone).code).toBe(2)
-    expect(runHook(clone, 'git push', dir).code).toBe(0)
+    expect(hook(dir, 'git push', clone).code).toBe(2)
+    expect(hook(clone, 'git push', dir).code).toBe(0)
   })
 
   test('honours `git -C <dir>`, and reports a directory git cannot run in', () => {
     overlap()
 
-    expect(runHook(dir, `git -C ${clone} push --force-with-lease`).code).toBe(2)
-    const missing = runHook(dir, `git -C ${join(dir, 'missing')} push`)
+    expect(hook(dir, `git -C ${clone} push --force-with-lease`).code).toBe(2)
+    const missing = hook(dir, `git -C ${join(clone, 'missing')} push`)
     expect(missing.code).toBe(2)
     expect(missing.err).toContain('cannot run git')
+  })
+
+  test('judges a subdirectory, a symlinked path and a linked worktree as the worktree they lead to', () => {
+    overlap()
+    mkdirSync(join(clone, 'src', 'deep'))
+    const link = join(dir, 'link')
+    symlinkSync(clone, link)
+    const linked = join(dir, 'linked')
+    git(clone, 'worktree', 'add', '-q', '-b', 'linked', linked, 'feature~1')
+    commit(linked, 'src/app.ts', 'export const a = 4\n', 'linked')
+
+    expect(hook(join(clone, 'src', 'deep')).code).toBe(2)
+    expect(hook(dir, `cd ${link}/src && git push`).code).toBe(2)
+    expect(hook(dir, 'git push -u origin HEAD', linked).code).toBe(2)
+    expect(hook(dir, 'git push origin @', linked).code).toBe(2)
+  })
+
+  test('skips without running git when no project dir is given', () => {
+    overlap()
+
+    expect(runHook(clone, 'git push', clone, undefined).code).toBe(0)
+  })
+
+  test('runs no git in a repository outside the project, before the command is approved', () => {
+    const evil = join(dir, 'evil')
+    const marker = join(dir, 'ran')
+    mkdirSync(evil)
+    git(evil, 'init', '-q', '-b', 'feat')
+    commit(evil, 'a.txt', 'a\n', 'init')
+    trap(evil, marker)
+
+    expect(hook(clone, `cd ${evil} && git push origin feat`).code).toBe(0)
+    expect(hook(clone, `git -C ${evil} push origin feat`).code).toBe(0)
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  test('runs no git in a repository nested inside the project', () => {
+    const nested = join(clone, 'vendor', 'evil')
+    const marker = join(dir, 'ran')
+    mkdirSync(nested, { recursive: true })
+    git(nested, 'init', '-q', '-b', 'feat')
+    commit(nested, 'a.txt', 'a\n', 'init')
+    trap(nested, marker)
+
+    expect(hook(clone, 'cd vendor/evil && git push origin feat').code).toBe(0)
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  test("reads a worktree's HEAD from the project, not from the `.git` file it holds", () => {
+    overlap()
+    const linked = join(dir, 'linked')
+    git(clone, 'worktree', 'add', '-q', '-b', 'linked', linked, 'feature~1')
+    commit(linked, 'src/app.ts', 'export const a = 4\n', 'linked')
+    const evil = join(dir, 'evil')
+    const marker = join(dir, 'ran')
+    mkdirSync(evil)
+    git(evil, 'init', '-q', '-b', 'feat')
+    commit(evil, 'a.txt', 'a\n', 'init')
+    trap(evil, marker)
+    writeFileSync(join(linked, '.git'), `gitdir: ${join(evil, '.git')}\n`)
+
+    const { code, err } = hook(dir, `cd ${linked} && git push`)
+    expect(existsSync(marker)).toBe(false)
+    expect(code).toBe(2)
+    expect(err).toContain('(linked)')
   })
 
   test('checks the branches the command pushes, not the one checked out', () => {
@@ -209,17 +285,17 @@ describe('push-overlap-hook', () => {
     git(clone, 'checkout', '-q', '-b', 'clean', 'origin/main')
     commit(clone, 'src/other.ts', 'export const b = 1\n', 'clean')
 
-    expect(runHook(clone).code).toBe(0)
-    const { code, err } = runHook(clone, 'git push origin clean feature')
+    expect(hook(clone).code).toBe(0)
+    const { code, err } = hook(clone, 'git push origin clean feature')
     expect(code).toBe(2)
     expect(err).toContain('(feature)')
-    expect(runHook(clone, 'git push origin no-such-branch').code).toBe(0)
+    expect(hook(clone, 'git push origin no-such-branch').code).toBe(0)
   })
 
   test('leaves main itself alone', () => {
     commit(clone, 'src/app.ts', 'export const a = 2\n', 'mine')
     commit(origin, 'src/app.ts', 'export const a = 3\n', 'theirs on main')
 
-    expect(runHook(clone).code).toBe(0)
+    expect(hook(clone).code).toBe(0)
   })
 })

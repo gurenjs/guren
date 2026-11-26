@@ -7,7 +7,7 @@
  * Then, while `guren plan:next` has marked a plan step, verify it and block until it
  * is verified or the hook gives up (RFC 0030 §7), which it says on stderr.
  */
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 interface HookInput {
@@ -39,18 +39,54 @@ try {
   process.exit(2)
 }
 
+const installed = resolve(import.meta.dir, '../..')
+
+/** Both sides resolved: on macOS a temp dir's real path is `/private/var/...` while the cwd may read `/var/...`. */
+function real(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
+
+/** `undefined` when git is missing, fails, or `installed` is in no repository. */
+function gitOutput(args: string[]): string | undefined {
+  try {
+    const run = Bun.spawnSync(['git', ...args], { cwd: installed, stdout: 'pipe', stderr: 'ignore' })
+    return run.exitCode === 0 ? run.stdout.toString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** This app's directory in each worktree of its repository; a monorepo app is not the git root. */
+function worktreeApps(): Set<string> {
+  const prefix = gitOutput(['rev-parse', '--show-prefix'])?.replace(/\r?\n$/, '')
+  const list = gitOutput(['worktree', 'list', '--porcelain'])
+  if (prefix === undefined || list === undefined) return new Set()
+  return new Set(list.split(/\r?\n/)
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => real(join(line.slice('worktree '.length), prefix))))
+}
+
 /**
- * The app to gate: the nearest ancestor of the session cwd holding this script at
- * its own path, else the script's grandparent (`<app>/.claude/hooks/`, `.codex/hooks/`).
- * Claude Code runs the project dir's copy while the cwd may be a subdirectory or a
- * worktree it entered, whose tree is the one to judge; a monorepo app is not the git root.
+ * The app to gate: the nearest ancestor of the session cwd holding this script that is this
+ * app or its place in another worktree of the repository, else the script's grandparent
+ * (`<app>/.claude/hooks/`, `.codex/hooks/`). Claude Code runs the project dir's copy while the
+ * cwd may be a subdirectory or a worktree it entered, whose tree is the one to judge. Another
+ * tree holding the script is passed over: its package.json scripts would run here.
  */
 function appRoot(cwd: unknown): string {
-  const installed = resolve(import.meta.dir, '../..')
   const self = relative(installed, import.meta.path)
   if (typeof cwd === 'string' && isAbsolute(cwd)) {
+    let worktrees: Set<string> | undefined
     for (let dir = cwd; ; dir = dirname(dir)) {
-      if (existsSync(join(dir, self))) return dir
+      if (existsSync(join(dir, self))) {
+        if (real(dir) === real(installed)) return dir
+        worktrees ??= worktreeApps()
+        if (worktrees.has(real(dir))) return dir
+      }
       if (dirname(dir) === dir) break
     }
   }

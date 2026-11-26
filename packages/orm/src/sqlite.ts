@@ -127,10 +127,12 @@ const CONNECTION_URI = /^(?!file:)[a-z][a-z0-9+.-]+:\/\//i
  * checked, not the option, so an ambient `DATABASE_URL` is covered too.
  */
 function assertNotConnectionUri(dbPath: string, source: string): void {
-  if (!CONNECTION_URI.test(dbPath)) return
+  const scheme = CONNECTION_URI.exec(dbPath)?.[0]
+  if (scheme === undefined) return
 
+  // The scheme alone: the rest of the value is another database's URI and can carry its password.
   throw new Error(
-    `createSqliteDatabase() received a connection URI where it expects a file path: ${dbPath} (from ${source}). ` +
+    `createSqliteDatabase() received a ${scheme} connection URI where it expects a file path (from ${source}). ` +
       'Left alone it would be created as a directory tree and migrated into silently. ' +
       'Pass a path such as "./data/guren.db", or ":memory:".',
   )

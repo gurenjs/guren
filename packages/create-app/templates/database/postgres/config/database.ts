@@ -11,7 +11,7 @@ const database = createPostgresDatabase({
   // outside one, where report mode reads the schema without requiring the keys
   // only the web process needs (APP_KEY and APP_URL in production).
   connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL
-    ?? 'postgres://guren:guren@localhost:54322/guren',
+    ?? 'postgres://guren:guren@127.0.0.1:54322/guren',
 })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
