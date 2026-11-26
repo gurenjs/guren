@@ -67,6 +67,7 @@ import { introspectRunner, type Introspection, type IntrospectOption } from './i
 import { INTROSPECTION_UNAVAILABLE, INTROSPECTION_UNAVAILABLE_FIX, introspectionUnavailableMessage, NO_SOURCE_CHANGED_REASON, ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { checkConfigWiring } from './config-check'
+import { checkNavigation } from './navigation-check'
 import { runSpecCheck } from './spec-check'
 import { checkPlans, isPlanInput } from './plan-check'
 import { changesSource, getChangedFiles } from './changed-files'
@@ -727,6 +728,13 @@ async function collectCheckReport(options: RunCheckOptions): Promise<CheckReport
     // definitions, so a run that changed no source must not execute them again.
     if (sourceChanged) {
       checks.push(...(await checkConfigWiring({ cwd, cache })))
+    }
+
+    // 8.6d. Navigation entries (RFC 0040 §5): each entry's route against the introspected app
+    // (a provider's routes included), then what the route does against when the entry is shown.
+    // Content-activated on config/navigation.ts; gated like 8.6c, since it introspects.
+    if (sourceChanged) {
+      checks.push(...(await checkNavigation({ cwd, cache, definitions: graph?.definitions, routesFile: routeGraphFile, introspect: routeIntrospect })))
     }
 
     // 8.65. The attachments disk rooted inside the statically served public/
