@@ -15,6 +15,19 @@ flowchart LR
   recording --> ci[CI replays it]
 ```
 
+## Why an Agent Performs the Step
+
+A plan states a behaviour as a route, an input and an outcome. How the page takes that input is not in it: which control holds the title, how a date control gets its value, which button sends the form. A browser test written by hand answers that in code, and someone keeps the code in step with the markup. In a behaviour spec the agent answers it once, on the real page, and the recording takes the place of the code.
+
+| | A browser test written by hand | A behaviour spec |
+|---|---|---|
+| The steps | You write each selector and click | The instruction comes from the plan, and the agent finds the controls on the page |
+| A control the plan does not spell out, such as a date control | You script how it takes its value | The agent operates it |
+| After a page changes | You edit the steps the change broke | You run `bun run test:behaviours` again and commit the new recording |
+| What decides the result | The assertions you wrote | Locators generated from the plan, never the model |
+
+The agent is the Claude Code or Codex you already use, on its own login, so there is no API key to issue. A model is called the first time a step runs and after its page changes. Every other run, CI included, replays the recording.
+
 ## What the Specs Check
 
 | Spec | One test per | What it checks |
