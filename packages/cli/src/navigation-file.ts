@@ -2,8 +2,9 @@
  * `config/navigation.ts` read by its syntax, never imported (RFC 0040 §5): the one reading
  * `guren check` judges entries by, and the one a writer or a change fact is to read through.
  * Every value is written in place: a spread, a computed key, a call (a translated label), a
- * name for anything but an entry list or a `can` model, or a key `defineNavigation()` does not
- * take makes the file unreadable, with the line, rather than an entry read in part.
+ * name for anything but an entry list or a `can` model, or a key `show` does not take makes the
+ * file unreadable, with the line, rather than an entry read in part. Another key of an entry is
+ * passed over, as `defineNavigation()` passes it over.
  */
 import type { File, Node } from '@babel/types'
 
@@ -109,8 +110,8 @@ function topLevelConstants(ast: File): Map<string, Node> {
   return constants
 }
 
-/** The object's keys and values, refusing a spread, a computed key, a method and a key outside `allowed`. */
-function properties(node: Node, allowed: ReadonlySet<string>, what: string): Map<string, Node> {
+/** The object's keys and values, refusing a spread, a computed key and a method; a key outside `allowed` is refused, or skipped when `others` is `'skip'`. */
+function properties(node: Node, allowed: ReadonlySet<string>, what: string, others: 'refuse' | 'skip' = 'refuse'): Map<string, Node> {
   if (node.type !== 'ObjectExpression') refuse(node, `${what} is not an object written in place`)
   const read = new Map<string, Node>()
   for (const property of node.properties) {
@@ -118,7 +119,10 @@ function properties(node: Node, allowed: ReadonlySet<string>, what: string): Map
     if (property.type !== 'ObjectProperty' || property.computed) refuse(property, `${what} has a computed key or a method`)
     const key = memberKeyName(property)
     if (key === undefined) refuse(property, `${what} has a key that is not a name`)
-    if (!allowed.has(key)) refuse(property, `${what} has "${key}", which defineNavigation() does not take`)
+    if (!allowed.has(key)) {
+      if (others === 'skip') continue
+      refuse(property, `${what} has "${key}", which defineNavigation() does not take`)
+    }
     read.set(key, unwrapTypeAssertion(property.value as Node))
   }
   return read
@@ -131,7 +135,7 @@ function text(node: Node, what: string): string {
 }
 
 function readEntry(node: Node, context: ReadContext): NavigationFileEntry {
-  const fields = properties(node, ENTRY_KEYS, 'an entry')
+  const fields = properties(node, ENTRY_KEYS, 'an entry', 'skip')
   const line = lineOf(node) ?? 1
   const labelNode = fields.get('label')
   const routeNode = fields.get('route')

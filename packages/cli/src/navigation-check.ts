@@ -13,9 +13,11 @@ import type { AppManifest, RouteDefinition, RouteEntry } from '@guren/server'
 import { modelPatterns, policyBindings, type PolicyBinding } from './authorization-audit'
 import { advisory, type CheckResult } from './check-result'
 import {
+  AUTHORIZE_CALL_PATTERN,
   collisionsReachedByName,
   CONTROLLER_MEMBER_KINDS,
   controllerMethodFor,
+  INERTIA_CALL_PATTERN,
   literalAuthorizationCalls,
   manifestRouteTargets,
   parseControllerMethods,
@@ -58,7 +60,7 @@ interface Routes {
 
 const TITLE = (entry: NavigationFileEntry): string => `Navigation entry "${entry.label}"`
 
-const INERTIA_CALL = /\bthis\s*\.\s*inertia\s*\(/u
+const AUTHORIZE_CALLS = new RegExp(AUTHORIZE_CALL_PATTERN.source, 'g')
 const THIS_CALL = /\bthis\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/gu
 
 export async function checkNavigation(options: NavigationCheckOptions): Promise<CheckResult[]> {
@@ -86,7 +88,7 @@ export async function checkNavigation(options: NavigationCheckOptions): Promise<
   const context = new EntryContext(options, routes)
   const results: CheckResult[] = []
   for (const entry of reading.entries) results.push(...(await context.judge(entry)))
-  if (!routes.manifest) results.push(...signInUnverified(reading.entries.filter((entry) => context.linked.has(entry.route)), routes.reason))
+  if (!routes.manifest) results.push(...routesUnverified(reading.entries.filter((entry) => context.linked.has(entry.route)), routes.reason))
   return results
 }
 
@@ -101,15 +103,19 @@ async function navigationRoutes({ cwd, cache, definitions, routesFile, introspec
   return { routes: definitions ?? [], ...(reason ? { reason } : {}) }
 }
 
-/** The entries a guest may see whose sign-in the manifest would have judged: one line, not one per entry. */
-function signInUnverified(entries: NavigationFileEntry[], reason: string | undefined): CheckResult[] {
+/** What only the introspected app says of the routes the routes file links entries to: one line, not one per entry. */
+function routesUnverified(entries: NavigationFileEntry[], reason: string | undefined): CheckResult[] {
+  if (entries.length === 0) return []
+  const quoted = (list: NavigationFileEntry[]): string => list.map((entry) => `"${entry.route}"`).join(', ')
   const shown = entries.filter(shownToGuests)
-  if (shown.length === 0) return []
+  const signIn = shown.length > 0
+    ? ` ${shown.length === 1 ? 'The entry of' : 'The entries of'} ${quoted(shown)} ${shown.length === 1 ? 'is' : 'are'} shown to guests, and only the resolved middleware says whether a guest can open their routes.`
+    : ''
   return [unverifiedResult(
-    'navigation-sign-in-unverified', 'Navigation',
-    `Whether the routes of ${shown.map((entry) => `"${entry.route}"`).join(', ')} require sign-in`,
+    'navigation-routes-unverified', 'Navigation',
+    `Whether the app mounts the routes of ${quoted(entries)}`,
     reason,
-    { detail: 'Their entries are shown to guests, and only the resolved middleware says whether a guest can open them.', filePath: NAVIGATION_CONFIG_FILE },
+    { detail: `The routes file registers them, and createApp() may not mount it.${signIn}`, filePath: NAVIGATION_CONFIG_FILE },
   )]
 }
 
@@ -147,8 +153,10 @@ class EntryContext {
       this.linked.add(entry.route)
       findings.push(...(await this.routeFindings(entry, route)))
     }
-    if (findings.length > 0) return findings
-    return [advisory(`navigation:${entry.route}`, TITLE(entry), 'pass', `Links route "${entry.route}" (GET ${route?.path}), which renders a page.`, undefined, NAVIGATION_CONFIG_FILE)]
+    if (findings.length > 0 || !route) return findings
+    const linked = this.routes.manifest ? `Links route "${entry.route}"` : `Links route "${entry.route}" as the routes file registers it`
+    const renders = route.prototype ? 'a prototype route whose fixture entry is not read' : 'which renders a page'
+    return [advisory(`navigation:${entry.route}`, TITLE(entry), 'pass', `${linked} (GET ${route.path}), ${renders}.`, undefined, NAVIGATION_CONFIG_FILE)]
   }
 
   /** The route the runtime links the entry to, or `undefined` with why it would not, or why that is not known. */
@@ -194,7 +202,7 @@ class EntryContext {
     const action = await this.action(entry, route)
     if ('unread' in action) return [...findings, action.unread]
     const { info } = action
-    if (!INERTIA_CALL.test(info.body)) {
+    if (!INERTIA_CALL_PATTERN.test(info.body)) {
       const helper = helperCall(info.body)
       findings.push(helper
         ? advisory(`navigation-action:${entry.route}`, TITLE(entry), 'warn', `Whether route "${entry.route}" renders a page is unverified: its action calls this.${helper}(), which is not read.`, undefined, info.filePath)
@@ -221,12 +229,14 @@ class EntryContext {
   /** The action's `this.authorize()` calls an entry could name, against the entry's `can`. */
   private async abilityFindings(entry: NavigationFileEntry, info: ControllerMethodInfo): Promise<CheckResult[]> {
     const key = `navigation-ability:${entry.route}`
+    const unverified = (why: string): CheckResult[] => [advisory(key, TITLE(entry), 'warn', `What route "${entry.route}" authorizes is unverified: ${why}.`, undefined, info.filePath)]
     const calls = literalAuthorizationCalls(info.body, info.rawBody).filter((call) => call.member === 'authorize')
+    if (calls.some((call) => call.templated)) return unverified('its action builds an ability name at request time')
+    if ([...info.body.matchAll(AUTHORIZE_CALLS)].length > calls.length) return unverified('its action calls this.authorize() with an ability that is not a string written in place')
     if (calls.length === 0) return []
-    if (calls.some((call) => call.templated)) {
-      return [advisory(key, TITLE(entry), 'warn', `What route "${entry.route}" authorizes is unverified: its action builds an ability name at request time.`, undefined, info.filePath)]
-    }
-    const nameable = await this.nameableCalls(calls.map((call) => ({ ability: call.ability, subject: call.subject })), info)
+    const resolved = await this.nameableCalls(calls.map((call) => ({ ability: call.ability, subject: call.subject })), info)
+    if ('ambiguous' in resolved) return unverified(`${resolved.ambiguous} names a model more than one app root declares a policy for`)
+    const nameable = uniqueCalls(resolved.calls)
     if (nameable.length === 0) return []
     const named = nameable.map((call) => `'${call.ability}' on ${call.binding.model}`).join(', ')
     if (!entry.can) {
@@ -242,7 +252,17 @@ class EntryContext {
     const asked = entry.can
     const paired = await this.canBinding(asked)
     if ('unread' in paired) return []
-    if (nameable.some((call) => call.ability === asked.ability && call.binding === paired.binding)) return []
+    const covers = (call: NameableCall): boolean => call.ability === asked.ability && call.binding === paired.binding
+    if (nameable.some(covers)) {
+      const uncovered = nameable.filter((call) => !covers(call))
+      if (uncovered.length === 0) return []
+      return [advisory(
+        key, TITLE(entry), 'warn',
+        `The action of route "${entry.route}" (${info.filePath}:${info.line}) authorizes ${named}, and the entry asks only '${asked.ability}', so a user the policy allows that and denies ${uncovered.map((call) => `'${call.ability}'`).join(', ')} sees a link that answers 403.`,
+        'Ask in show.can the ability that admits the fewest users, or authorize one ability in the action.',
+        NAVIGATION_CONFIG_FILE,
+      )]
+    }
     return [advisory(
       key, TITLE(entry), 'warn',
       `The entry asks '${asked.ability}' on ${asked.model.expression}, and the action of route "${entry.route}" (${info.filePath}:${info.line}) authorizes ${named}, so the link and the page can disagree.`,
@@ -251,20 +271,31 @@ class EntryContext {
     )]
   }
 
-  /** Calls whose subject is exactly a model with a policy, on an ability that takes the user alone. */
-  private async nameableCalls(calls: Array<{ ability: string; subject: string }>, info: ControllerMethodInfo): Promise<NameableCall[]> {
+  /**
+   * Calls whose subject is exactly a model with a policy, on an ability that takes the user alone.
+   * The subject is the model the controller imports it from; a bare name only when no import names
+   * it, and then `ambiguous` when two app roots' models share it.
+   */
+  private async nameableCalls(calls: Array<{ ability: string; subject: string }>, info: ControllerMethodInfo): Promise<{ calls: NameableCall[] } | { ambiguous: string }> {
     const bindings = await this.policies()
-    if (bindings.length === 0) return []
+    if (bindings.length === 0) return { calls: [] }
     const { cwd, cache } = this.options
     const patterns = await modelPatterns(cwd, resolve(cwd, info.filePath), bindings, cache)
     const nameable: NameableCall[] = []
     for (const call of calls) {
-      const binding = bindings.find((candidate) => patterns.get(candidate)!.some((pattern) => wholly(pattern, call.subject)))
+      const matching = (imported: boolean): PolicyBinding[] => bindings.filter((candidate) => {
+        const [bare, ...imports] = patterns.get(candidate)!
+        return (imported ? imports : [bare!]).some((pattern) => wholly(pattern, call.subject))
+      })
+      const imported = matching(true)
+      const candidates = imported.length > 0 ? imported : matching(false)
+      if (candidates.length > 1) return { ambiguous: call.subject }
+      const binding = candidates[0]
       if (!binding) continue
       const parameters = await this.parameters(binding, call.ability)
       if (Array.isArray(parameters) && parameters.length <= 1 && !parameters.includes('rest')) nameable.push({ ability: call.ability, binding })
     }
-    return nameable
+    return { calls: nameable }
   }
 
   private async parameters(binding: PolicyBinding, ability: string): Promise<ReturnType<typeof readPolicyAbilityParameters>> {
@@ -295,7 +326,7 @@ class EntryContext {
     if (!binding) {
       return [advisory(
         key, TITLE(entry), 'warn',
-        `No app/Policies/${can.model.className}Policy.ts pairs with ${can.model.expression}, so the gate asks a gate.define('${can.ability}') ability, and with none denies everyone and hides the entry.`,
+        `No app/Policies/${can.model.className}Policy.ts pairs with ${can.model.expression}. Unless a gate.policy() call registers another policy for it, the gate asks a gate.define('${can.ability}') ability, and with none denies everyone and hides the entry.`,
         `Write the policy with bunx guren make:policy ${can.model.className}, or define the ability with gate.define('${can.ability}', …).`,
         NAVIGATION_CONFIG_FILE,
       )]
@@ -305,10 +336,15 @@ class EntryContext {
     if (!parsed) return unverified(`${policyFile} does not parse`)
     const abilities = readPolicyAbilities(parsed.ast, binding.policy)
     if ('unreadable' in abilities) return unverified(abilities.unreadable)
+    const missing = !abilities.declared.includes(can.ability)
+    if (missing && abilities.declared.includes('before')) return unverified(`${binding.policy} declares no '${can.ability}', and its before() may answer first`)
+    if (abilities.exposes && missing && abilities.exposes.includes(can.ability)) {
+      return [advisory(key, TITLE(entry), 'warn', `${binding.policy} is a definePolicy() policy given no '${can.ability}', so its class's ${can.ability}() returns false, the gate denies everyone and the entry is hidden.`, `Give definePolicy() a ${can.ability} callback in ${policyFile}.`, NAVIGATION_CONFIG_FILE)]
+    }
     if (abilities.exposes && !abilities.exposes.includes(can.ability)) {
       return [advisory(key, TITLE(entry), 'warn', `${binding.policy} is a definePolicy() policy, whose class has no '${can.ability}', so the gate never asks it and the entry is hidden unless a gate.define('${can.ability}') allows it.`, `Name one of ${abilities.exposes.join(', ')}.`, NAVIGATION_CONFIG_FILE)]
     }
-    if (!abilities.declared.includes(can.ability)) {
+    if (missing) {
       if (abilities.fields.includes(can.ability)) return unverified(`${binding.policy}.${can.ability} is not a function written in place`)
       if (abilities.open) return unverified(`${binding.policy} may declare it: ${abilities.open}`)
       return [advisory(key, TITLE(entry), 'warn', `${binding.policy} declares no '${can.ability}', so the gate asks a gate.define('${can.ability}') ability, and with none denies everyone and hides the entry.`, `Add ${can.ability}(user) to ${policyFile}.`, NAVIGATION_CONFIG_FILE)]
@@ -356,6 +392,11 @@ function helperCall(body: string): string | undefined {
     if (!Object.hasOwn(CONTROLLER_MEMBER_KINDS, match[1]!)) return match[1]
   }
   return undefined
+}
+
+/** One per ability and policy: an action that authorizes the same thing twice asks it once. */
+function uniqueCalls(calls: NameableCall[]): NameableCall[] {
+  return calls.filter((call, index) => calls.findIndex((other) => other.ability === call.ability && other.binding === call.binding) === index)
 }
 
 function wholly(pattern: RegExp, subject: string): boolean {

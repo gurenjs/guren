@@ -104,10 +104,12 @@ When the app boots, each entry is linked to its route. An entry whose route is n
 | `navigation-route:<route>` | the route is not registered, is not a `GET` or has a path parameter (the three the boot hides), or two routes share the name |
 | `navigation-page:<route>` | the route's action makes no `this.inertia()` call, so the link leads to no page |
 | `navigation-sign-in:<route>` | the entry is shown to guests (no `auth: 'required'`, `where` or `can`) and the route's middleware requires sign-in |
-| `navigation-ability:<route>` | the action calls `this.authorize()` with a literal ability and the bare model class, on a policy method that takes the user alone, and the entry does not name that ability in `can`, or names another one |
-| `navigation-can:<route>` | the `can` model has no policy, the policy has no such ability, or the ability's method requires a second parameter |
+| `navigation-ability:<route>` | the action calls `this.authorize()` with a literal ability and the bare model class, on a policy method that takes the user alone, and the entry does not name that ability in `can`, names another one, or names one of two the action authorizes |
+| `navigation-can:<route>` | the `can` model has no policy, the policy has no such ability (a `definePolicy()` policy given no callback for it denies everyone), or the ability's method requires a second parameter |
 
-Write the file as plain data for the check to read it: a label and a route as strings, `where` values as literals, and the `can` model as a class imported from its own file. A spread, a computed key or a translated label makes the whole file unreadable, and the check says so on one line. What it cannot follow is reported as unverified rather than passed: an inline handler, a helper the action calls, an ability built at request time, or a model imported through a barrel.
+Write the file as plain data for the check to read it: a label and a route as strings, `where` values as literals, and the `can` model as a class imported from its own file. A spread, a computed key or a translated label makes the whole file unreadable, and the check says so on one line. What it cannot follow is reported as unverified rather than passed: an inline handler, a helper the action calls, an ability that is not a string written in place, a model imported through a barrel, a model name two app roots share, or a policy whose `before()` may answer first. A prototype route passes without its fixture entry being read. When the app cannot be introspected, the routes come from the routes file, and one `navigation-routes-unverified` line names the entries whose mounting, and sign-in for those shown to guests, that leaves unknown.
+
+A model's policy is the one in `app/Policies/<Model>Policy.ts`, the file `guren audit` pairs it by. A policy registered under another name through `gate.policy()` is not read, so keep the file name `make:policy` writes.
 
 ## Next steps
 

@@ -40,10 +40,15 @@ describe('readNavigationFile', () => {
       .toEqual({ status: 'read', entries: [{ label: 'A', route: 'a', line: 5, can: { ability: 'viewAny', model: { expression: 'Models.Job', className: 'Job', module: '/app/app/Models' } } }] })
   })
 
+  test('passes over an entry key defineNavigation() does not read, as the runtime does', () => {
+    expect(read("export default defineNavigation([{ label: 'A', route: 'a', icon: 'x' }])"))
+      .toEqual({ status: 'read', entries: [{ label: 'A', route: 'a', line: 5 }] })
+  })
+
   test.each([
     ['a spread list', "const more = [{ label: 'B', route: 'b' }]\nexport default defineNavigation([{ label: 'A', route: 'a' }, ...more])", 'the list spreads another list'],
     ['a translated label', "export default defineNavigation([{ label: t('nav.jobs'), route: 'jobs.index' }])", 'a label is not a string written in place'],
-    ['a key the runtime does not take', "export default defineNavigation([{ label: 'A', route: 'a', icon: 'x' }])", 'an entry has "icon", which defineNavigation() does not take'],
+    ['a show key the runtime does not take', "export default defineNavigation([{ label: 'A', route: 'a', show: { role: 'admin' } }])", 'show has "role", which defineNavigation() does not take'],
     ['an auth value the runtime refuses', "export default defineNavigation([{ label: 'A', route: 'a', show: { auth: 'admin' } }])", 'show.auth is "admin"; it takes any, required or guest'],
     ['a route named twice', "export default defineNavigation([{ label: 'A', route: 'a' }, { label: 'B', route: 'a' }])", 'route "a" is named twice, which defineNavigation() refuses'],
     ['a where value held in a name', "const role = 'admin'\nexport default defineNavigation([{ label: 'A', route: 'a', show: { where: { role } } }])", 'show.where.role is not a string, number, boolean or null written in place'],
@@ -220,8 +225,12 @@ describe('checkNavigation', () => {
     const results = await run(APP, { definitions })
     expect(results.find((result) => result.key === 'navigation-route:billing.portal')).toMatchObject({ status: 'warn', evidence: 'none' })
     expect(results.find((result) => result.key === 'navigation-sign-in:settings')).toBeUndefined()
-    expect(results.find((result) => result.key === 'navigation-sign-in-unverified')?.message)
-      .toStartWith('Whether the routes of "jobs.index", "settings", "logout.page" require sign-in is unverified')
+    const unverified = results.find((result) => result.key === 'navigation-routes-unverified')
+    expect(unverified).toMatchObject({ status: 'warn', evidence: 'none' })
+    expect(unverified?.message).toStartWith('Whether the app mounts the routes of "jobs.index", "jobs.create", "dashboard"')
+    expect(unverified?.message).toContain('The entries of "jobs.index", "settings", "logout.page" are shown to guests')
+    expect(results.find((result) => result.key === 'navigation:jobs.index')?.message)
+      .toBe('Links route "jobs.index" as the routes file registers it (GET /jobs), which renders a page.')
   })
 
   test('leaves a name two routes share unchecked, since the order .name() ran in is not read', async () => {
@@ -254,6 +263,65 @@ export const JobPolicy = definePolicy({ publish: (user: unknown) => user !== nul
     const navigation = NAVIGATION.replace("show: { can: ['create', Job] }", "show: { can: ['publish', Job] }")
     const definedResults = await run({ ...APP, 'config/navigation.ts': navigation, 'app/Policies/JobPolicy.ts': defined }, { routes: ROUTES })
     expect(definedResults.find((result) => result.key === 'navigation-can:jobs.create')?.message).toContain("whose class has no 'publish'")
+  })
+
+  test('reads a typed inertia() call as a page, and an ability that is no literal as unverified', async () => {
+    const navigation = `import { defineNavigation } from '@guren/core'
+import { Job } from '@/app/Models/Job'
+export default defineNavigation([
+  { label: 'Jobs', route: 'jobs.index' },
+  { label: 'Post a job', route: 'jobs.create', show: { auth: 'required' } },
+])
+`
+    const jobs = `import { Controller } from '@guren/core'
+import { Job } from '@/app/Models/Job'
+import { pages } from '@/.guren/pages.gen'
+const ability = 'create'
+export class JobController extends Controller {
+  async index() { return this.inertia<{ jobs: [] }>(pages.jobs.Index, { jobs: [] }) }
+  async create() { await this.authorize(ability, Job); return this.inertia(pages.jobs.Create, {}) }
+}
+`
+    const results = await run({ ...APP, 'config/navigation.ts': navigation, 'app/Http/Controllers/JobController.ts': jobs }, { routes: ROUTES })
+    expect(verdicts(results)).toEqual([['navigation:jobs.index', 'pass'], ['navigation-ability:jobs.create', 'warn']])
+    expect(results[1]!.message).toContain('calls this.authorize() with an ability that is not a string written in place')
+  })
+
+  test('warns on an entry that asks one of the two abilities its action authorizes', async () => {
+    const jobs = APP['app/Http/Controllers/JobController.ts'].replace(
+      "async create() { await this.authorize('create', Job);",
+      "async create() { await this.authorize('viewAny', Job); await this.authorize('create', Job);",
+    )
+    const results = await run({ ...APP, 'app/Http/Controllers/JobController.ts': jobs }, { routes: ROUTES })
+    expect(results.find((result) => result.key === 'navigation-ability:jobs.create')?.message)
+      .toContain("the entry asks only 'create', so a user the policy allows that and denies 'viewAny' sees a link that answers 403")
+  })
+
+  test('reads a definePolicy() ability given no callback as a denial, and a before() as unverified', async () => {
+    const defined = `import { definePolicy } from '@guren/core'
+export const JobPolicy = definePolicy({ viewAny: (user: unknown) => user !== null })
+`
+    const results = await run({ ...APP, 'app/Policies/JobPolicy.ts': defined }, { routes: ROUTES })
+    expect(results.find((result) => result.key === 'navigation-can:jobs.create')?.message)
+      .toContain("JobPolicy is a definePolicy() policy given no 'create', so its class's create() returns false")
+
+    const before = `import { Policy } from '@guren/core'
+export class JobPolicy extends Policy {
+  before(user: unknown) { return user ? true : undefined }
+  viewAny(user: unknown) { return user !== null }
+}
+`
+    const beforeResults = await run({ ...APP, 'app/Policies/JobPolicy.ts': before }, { routes: ROUTES })
+    expect(beforeResults.find((result) => result.key === 'navigation-can:jobs.create')?.message)
+      .toContain("JobPolicy declares no 'create', and its before() may answer first")
+  })
+
+  test('says a prototype route\'s fixture entry is not read', async () => {
+    const navigation = `import { defineNavigation } from '@guren/core'
+export default defineNavigation([{ label: 'Jobs', route: 'jobs.index' }])
+`
+    const results = await run({ ...APP, 'config/navigation.ts': navigation }, { routes: [{ ...route('GET', '/jobs', 'jobs.index'), prototype: true }] })
+    expect(results.map((result) => result.message)).toEqual(['Links route "jobs.index" (GET /jobs), a prototype route whose fixture entry is not read.'])
   })
 
   test('warns once on a file it cannot read and checks no entry', async () => {
