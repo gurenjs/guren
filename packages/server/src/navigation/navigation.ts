@@ -32,18 +32,19 @@ export interface NavigationShow {
 }
 
 /**
- * Registry `guren codegen` merges a `routes` map into, once the app has
- * `config/navigation.ts`: the named `GET` routes with no path parameter. Left
- * empty, a navigation entry accepts any route name.
+ * The route names a navigation entry may use, keyed by name. `guren codegen` writes the
+ * named `GET` routes with no path parameter once the app has `config/navigation.ts`; a
+ * route a provider registers, which codegen does not read, is added by merging a key here.
  */
 export interface GurenNavigationRoutes {}
 
-type RegisteredNavigationRoutes = GurenNavigationRoutes extends { routes: infer R extends object } ? R : never
+/** Codegen sets `generated: true` beside the names it writes; until then any name passes. */
+export interface GurenNavigationRegistry {}
 
-/** A route name a navigation entry accepts: one codegen listed, or any string before codegen has run. */
-export type NavigationRouteName = [RegisteredNavigationRoutes] extends [never]
-  ? string
-  : keyof RegisteredNavigationRoutes & string
+/** A route name a navigation entry accepts: one the registry lists, or any string before codegen has run. */
+export type NavigationRouteName = GurenNavigationRegistry extends { generated: true }
+  ? keyof GurenNavigationRoutes & string
+  : string
 
 export interface NavigationEntry {
   readonly label: string

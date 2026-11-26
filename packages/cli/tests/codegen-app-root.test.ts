@@ -104,7 +104,7 @@ describe('codegen resolves against appRoot rather than process.cwd()', () => {
 
     await writeWorkspaceFiles(appRoot, { 'config/navigation.ts': 'export default []\n' })
     await generateRouteTypes({ appRoot, force: true })
-    expect(await readFile(routesModule, 'utf8')).toContain("interface GurenNavigationRoutes {\n    routes: {\n      'posts.index': true\n    }\n  }")
+    expect(await readFile(routesModule, 'utf8')).toContain("interface GurenNavigationRoutes {\n    'posts.index': true\n  }")
   })
 
   it('leaves no generated output in the directory the process is actually in', async () => {

@@ -205,7 +205,8 @@ ${entries.join('\n')}
 /**
  * The `GurenNavigationRoutes` registry `defineNavigation()` checks an entry's route
  * against: a name every definition of which is a `GET` with no path parameter, so
- * the runtime links it whichever of them `Router.route()` gives.
+ * the runtime links it whichever of them `Router.route()` gives. The names are a
+ * mergeable interface so an app can add a route a provider registers.
  */
 function buildNavigationAugmentation(definitions: Array<RouteDefinition & { name: string }>): string {
   const linkable = new Map<string, boolean>()
@@ -213,14 +214,16 @@ function buildNavigationAugmentation(definitions: Array<RouteDefinition & { name
     const fits = definition.method === 'GET' && isParameterless(definition.path)
     linkable.set(definition.name, (linkable.get(definition.name) ?? true) && fits)
   }
-  const entries = [...linkable].filter(([, fits]) => fits).map(([name]) => `      ${quoteObjectKey(name)}: true`)
-  const routes = entries.length > 0 ? `{\n${entries.join('\n')}\n    }` : '{}'
+  const entries = [...linkable].filter(([, fits]) => fits).map(([name]) => `    ${quoteObjectKey(name)}: true`)
+  const routes = entries.length > 0 ? `{\n${entries.join('\n')}\n  }` : '{}'
 
   return `
 declare module '@guren/core' {
-  interface GurenNavigationRoutes {
-    routes: ${routes}
+  interface GurenNavigationRegistry {
+    generated: true
   }
+
+  interface GurenNavigationRoutes ${routes}
 }
 `
 }

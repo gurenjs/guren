@@ -32,6 +32,20 @@ An entry is plain data: a label, a route name and an optional `show`. The route 
 
 Once `config/navigation.ts` exists, `guren codegen` writes the route names an entry may use into `.guren/routes.gen.ts`, so a name that is not a parameterless `GET` route fails the type check. A name that two routes share is listed only when both are parameterless `GET` routes. Until codegen has run, any name type-checks, and the boot warning below is what catches one.
 
+Codegen reads the routes file, so it does not see a route that a provider or plugin registers. To link one, add its name to the registry in any file the app's `tsconfig.json` covers:
+
+```ts
+declare module '@guren/core' {
+  interface GurenNavigationRoutes {
+    'billing.portal': true
+  }
+}
+
+export {}
+```
+
+The reverse also slips through: a module under `modules/` that `createApp()` does not mount still has its route names listed. The boot warning hides that entry.
+
 ## Who sees an entry
 
 `show` takes up to three conditions, and every one you give must hold:
