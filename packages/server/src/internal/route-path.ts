@@ -17,6 +17,14 @@
 export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu
 
 /**
+ * No parameter (a `:` opening a segment, as {@link PATH_PARAM_PATTERN} reads one) and
+ * no `*` anywhere; `isParameterless()` in the CLI's `browser-map.ts` is the same test.
+ */
+export function isParameterlessPath(path: string): boolean {
+  return !/(?:^|\/):|\*/u.test(path)
+}
+
+/**
  * Param labels in path order, exactly as Hono registers them: constraints
  * dropped, a trailing `*` kept (part of the name), a trailing `?` dropped.
  */

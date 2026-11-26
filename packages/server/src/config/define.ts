@@ -15,6 +15,7 @@ import type { StorageConfig } from '../storage/types'
 import { createOAuthManager, type OAuthManagerOptions, type OAuthProviderConfig } from '../auth/oauth'
 import type { HostAuthorizationOptions } from '../http/middleware/host-authorization'
 import type { AppEnv } from './env'
+import type { NavigationConfig } from '../navigation/navigation'
 
 export interface HttpConfig {
   /** DNS rebinding protection, mounted ahead of every app middleware. Absent or `false` disables it. */
@@ -32,6 +33,7 @@ export interface ConfigDefinitions {
   cache: CacheConfig
   http: HttpConfig
   mail: MailConfig
+  navigation: NavigationConfig
   oauth: OAuthConfig
   queue: QueueConfig
   storage: StorageConfig

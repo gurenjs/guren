@@ -124,6 +124,7 @@ export default defineCacheConfig((env) => ({
 | `defineQueueConfig` | `queue` | `QueueConfig` |
 | `defineStorageConfig` | `storage` | `StorageConfig` |
 | `defineOAuthConfig` | `oauth` | `providers` と、任意で `stateStore` |
+| `defineNavigation(entries)` | `navigation` | レイアウトのリンク（[ナビゲーション](./navigation.md) を参照） |
 
 `createApp()` は、アプリのプロバイダより前に `ConfigServiceProvider` を登録します。このプロバイダは `register()` で env を検証して各定義のマネージャをバインドし、`boot()` ではほかのどのプロバイダよりも先に、定義の起動処理（データベース接続）を実行します。そのため、アプリのプロバイダは自分の `register()` の中で `cache` や `mail` を解決できますし、`config` 配列の並び順を気にする必要もありません。
 
