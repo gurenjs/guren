@@ -44,6 +44,13 @@ describe('isSafeRedirectUrl', () => {
     }
   })
 
+  test('should reject a value with a scheme that does not parse on its own', () => {
+    const current = 'http://example.com/current'
+    for (const value of ['http:xn--a.evil.com/phish', 'http:evil.com:99999/phish', ' http:xn--a.evil.com', '\x01http:xn--a.evil.com']) {
+      expect(isSafeRedirectUrl(value, current)).toBe(false)
+    }
+  })
+
   test('should still allow relative paths and a scheme with no // naming the request host', () => {
     expect(isSafeRedirectUrl('other', requestUrl)).toBe(true)
     expect(isSafeRedirectUrl('?page=2', requestUrl)).toBe(true)

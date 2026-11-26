@@ -64,18 +64,23 @@ export function isSafeRedirectUrl(
 }
 
 /**
- * A value with a scheme is read without a base. Against an `http:` request URL
- * (TLS ended at a proxy) `http:evil.com` resolves to a path on the request host,
- * while a browser on `https:` reads it as the host `evil.com`. Only a value with
- * no scheme, such as `//evil.com` or `next`, resolves against `requestUrl`.
+ * A value with a scheme is read without a base, and one that does not parse is unsafe.
+ * Against an `http:` request URL (TLS ended at a proxy) `http:evil.com` resolves to a
+ * path on the request host, while a browser on `https:` reads it as the host `evil.com`.
+ * Only a value with no scheme, such as `//evil.com` or `next`, resolves against `requestUrl`.
  */
 function redirectTargetUrl(value: string, requestUrl: string): URL {
-  try {
-    return new URL(value)
-  } catch {
-    return new URL(value, requestUrl)
-  }
+  return hasScheme(value) ? new URL(value) : new URL(value, requestUrl)
 }
+
+/** Leading C0 controls and spaces are skipped first, as the URL parser skips them. */
+function hasScheme(value: string): boolean {
+  let start = 0
+  while (start < value.length && value.charCodeAt(start) <= 0x20) start++
+  return SCHEME_PREFIX.test(value.slice(start))
+}
+
+const SCHEME_PREFIX = /^[a-z][a-z0-9+.-]*:/i
 
 /**
  * The path of a `Referer` on one of `acceptedHosts` (as `URL.host` spells them,
