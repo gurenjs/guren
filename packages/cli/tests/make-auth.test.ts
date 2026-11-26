@@ -842,7 +842,7 @@ export const users = mysqlTable('users', {
       expect(await readFile(join(workspace.dir, 'config/mail.ts'), 'utf8'))
         .toBe(await readFile(resolve(import.meta.dir, '../templates/scaffold/mail/definition/config/mail.ts'), 'utf8'))
       const app = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
-      expect(app.match(/config: \[([^\]]*)\]/)?.[1]).toBe('session, mail')
+      expect(app.match(/config: \[([^\]]*)\]/)?.[1]).toBe('session, mail, navigation')
       expect(app).not.toContain('MailProvider')
       expect(app).not.toContain('MailServiceProvider')
       expect(await readFile(join(workspace.dir, 'config/env.ts'), 'utf8')).toContain('SMTP_PORT: Env.port().default(587),')
