@@ -1,5 +1,7 @@
 import { mail, type MailManager } from '@guren/core'
 
+import { escapeHtml } from '../Support/html.js'
+
 interface RegistrationMailData {
   email: string
   name: string
@@ -10,7 +12,7 @@ export async function sendRegistrationMail(manager: MailManager, data: Registrat
     .to(data.email)
     .subject('Welcome to the API!')
     .html(`
-      <h1>Welcome, ${data.name}!</h1>
+      <h1>Welcome, ${escapeHtml(data.name)}!</h1>
       <p>Thank you for registering for our API service.</p>
       <p>You can now use your API token to access all endpoints.</p>
       <h2>Getting Started</h2>
