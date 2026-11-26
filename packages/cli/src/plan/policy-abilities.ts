@@ -84,10 +84,8 @@ export function readPolicyAbilityParameters(ast: File, className: string, abilit
   }
   for (const { member, name } of classActionMembers(policy.declaration)) {
     if (name !== ability || member.static) continue
-    if (member.type === 'ClassMethod') {
-      if (member.kind !== 'method') return { unreadable: `${className}.${ability} is an accessor` }
-      return parameterKinds(member.params)
-    }
+    if ('kind' in member && member.kind !== 'method') return { unreadable: `${className}.${ability} is an accessor` }
+    if ('params' in member) return parameterKinds(member.params)
     const value = member.value
     if (value && (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression')) return parameterKinds(value.params)
   }
