@@ -265,8 +265,12 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
   async validate(credentials: AuthCredentials): Promise<User | null> {
     const user = await this.provider.retrieveByCredentials(credentials)
     if (!user) {
-      // Constant-time delay to prevent timing attacks (don't call provider with fake user)
-      await new Promise(resolve => setTimeout(resolve, 100))
+      // Never validateCredentials() with a made-up user: custom providers break on one.
+      if (this.provider.verifyMissingUser) {
+        await this.provider.verifyMissingUser(credentials)
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
       return null
     }
 

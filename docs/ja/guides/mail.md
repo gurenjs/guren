@@ -143,7 +143,7 @@ const app = createApp({ env, config: [mail] })
 
 コールバックが読むキーは、すべて `config/env.ts` で宣言しておく必要があります。`guren add mail` が宣言するのは `MAIL_MAILER`、`MAIL_FROM_ADDRESS`、`MAIL_FROM_NAME` と `SMTP_*` です。上の `resend` のように自分で足したトランスポートのキーは、手で宣言してください（`RESEND_API_KEY: Env.string().secret().optional()`）。変数の宣言方法は[設定ガイド](./configuration.md)で説明しています。
 
-`MAIL_MAILER=log` にすると、送ったメールがサーバーの出力に書き出されるので、開発中はこれで足ります。本番ではコードを変えずに、`MAIL_MAILER` を `smtp` や `resend` に切り替えてください。メールごとにトランスポートを指定することもできます。
+`MAIL_MAILER=log` にすると、送ったメールがサーバーの出力に書き出されるので、開発中はこれで足ります。`NODE_ENV=production` では、クエリパラメーター `token` と `signature` の値を `[redacted]` に置き換えて書き出します。パスワードリセットやメール確認、署名付きのリンクは、ログを読めればだれでも使えてしまうためです。それ以外の部分は、書かれたとおりに出力します。本番ではコードを変えずに、`MAIL_MAILER` を `smtp` や `resend` に切り替えてください。メールごとにトランスポートを指定することもできます。
 
 ```ts
 // デフォルトトランスポートを使用
@@ -188,6 +188,8 @@ await mail(mailManager)
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
 | `logger` | `console.log` | 送信の代わりに、整形したメッセージを受け取る関数 |
+
+`NODE_ENV=production` では、整形したメッセージの中の `token` と `signature` パラメーターの値が `[redacted]` に置き換わります。
 
 **Memory Transport（テスト用）:**
 | オプション | デフォルト | 説明 |

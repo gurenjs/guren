@@ -68,7 +68,7 @@ The `--force` flag bypasses the cache and regenerates all manifests from scratch
 
 ### "Connection refused" when accessing the database
 
-`bun run db:migrate` fails with `cannot connect to the database at localhost:54322 (ECONNREFUSED)`.
+`bun run db:migrate` fails with `cannot connect to the database at 127.0.0.1:54322 (ECONNREFUSED)`.
 
 **Cause:** The Postgres container is not running, its port is not published to the host, or `DATABASE_URL` points to the wrong host or port.
 
@@ -85,7 +85,7 @@ The `--force` flag bypasses the cache and regenerates all manifests from scratch
 2. Verify the connection string in `.env`:
 
    ```dotenv
-   DATABASE_URL=postgres://guren:guren@localhost:54322/guren
+   DATABASE_URL=postgres://guren:guren@127.0.0.1:54322/guren
    ```
 
    The default port is `54322` (not the standard `5432`) to avoid conflicts with system Postgres.
@@ -96,7 +96,7 @@ The `--force` flag bypasses the cache and regenerates all manifests from scratch
    docker compose port postgres 5432
    ```
 
-   You should see `0.0.0.0:54322`. If `docker compose ps` reports `Up` but this command prints nothing, publishing failed (this happens after a Docker Desktop restart). Recreate the container — the named volume survives, so no data is lost:
+   You should see `127.0.0.1:54322`. If `docker compose ps` reports `Up` but this command prints nothing, publishing failed (this happens after a Docker Desktop restart). Recreate the container — the named volume survives, so no data is lost:
 
    ```bash
    docker compose down && docker compose up -d

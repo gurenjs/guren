@@ -1,6 +1,7 @@
 import { mail, type MailManager } from '@guren/core'
 import type { PostRecord } from '../Models/Post.js'
 import type { UserRecord } from '../Models/User.js'
+import { escapeHtml } from '../Support/html.js'
 
 export async function sendNewPostMail(
   manager: MailManager,
@@ -13,9 +14,9 @@ export async function sendNewPostMail(
     .to(subscriber.email)
     .subject(`New Post: ${post.title}`)
     .html(`
-      <h1>New Post from ${author.name}</h1>
-      <h2>${post.title}</h2>
-      <p>${body.substring(0, 200)}${body.length > 200 ? '...' : ''}</p>
+      <h1>New Post from ${escapeHtml(author.name)}</h1>
+      <h2>${escapeHtml(post.title)}</h2>
+      <p>${escapeHtml(body.substring(0, 200))}${body.length > 200 ? '...' : ''}</p>
       <p><a href="/posts/${post.id}">Read More</a></p>
     `)
     .text(`

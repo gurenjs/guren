@@ -463,11 +463,11 @@ export class Application {
   }
 
   /**
-   * Asserts that `path` resolves its principal without ever reading a session
-   * cookie, so it refuses on its own terms and CSRF has no ambient authority to
-   * defend there. Only for an endpoint whose own code establishes that; an app
-   * exempting a path it chose wants `csrfOptions.exclude`. Call from `boot`,
-   * after `mountRoutes()` — at `register` the collision check sees no routes.
+   * Asserts that `path` resolves its principal without reading a session cookie,
+   * so CSRF has no ambient authority to defend there; an app exempting a path it
+   * chose wants `csrfOptions.exclude`. Call from `boot`, after `mountRoutes()`,
+   * and mount the endpoint on `hono`: a request a router route answers first,
+   * the endpoint's own included, is CSRF-verified.
    */
   declareCookielessAuthPath(path: string): void {
     // The app's route is registered first and answers there, so honouring a

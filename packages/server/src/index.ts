@@ -166,6 +166,7 @@ export {
   AGENT_APPROVAL_CONFIG_KEY,
   agentApprovalExpiredAt,
   agentApprovalFingerprint,
+  agentApprovalFingerprints,
   agentApprovalPrincipalKey,
   agentApprovalStatusAt,
   agentApprovalUsableAt,
@@ -175,6 +176,7 @@ export {
   DEFAULT_AGENT_APPROVAL_TTL_MS,
 } from './agent/approval'
 export type {
+  AgentApprovalKeys,
   AgentApprovalMatch,
   AgentApprovalRequest,
   AgentApprovalRequestInput,
@@ -188,6 +190,8 @@ export { AgentApprovalRequested } from './agent/AgentApprovalRequested'
 // surface dispatching without these bypasses scopes, approvals and the trail.
 // Absent from `@guren/server/agent`, the browser-safe half.
 export {
+  AGENT_APPROVAL_KEY_PURPOSE,
+  agentApprovalKeysFromEnv,
   DEFAULT_APPROVAL_CONFIGURE_HINT,
   DEFAULT_SCOPE_SUBJECT,
   gateApproval,

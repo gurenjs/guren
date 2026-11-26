@@ -311,6 +311,54 @@ describe('SessionGuard', () => {
       // Should NOT call validateCredentials with a fake user (breaks custom providers)
       expect(validateCalled).toBe(false)
     })
+
+    test('hands an unknown address to verifyMissingUser in place of the fixed delay', async () => {
+      const missing: AuthCredentials[] = []
+      let validateCalled = false
+      const hookProvider: UserProvider<MockUser> = {
+        ...provider,
+        async validateCredentials() {
+          validateCalled = true
+          return true
+        },
+        async verifyMissingUser(credentials: AuthCredentials) {
+          missing.push(credentials)
+          return true
+        },
+      }
+      const delays: unknown[] = []
+      const realSetTimeout = globalThis.setTimeout
+      globalThis.setTimeout = ((handler: () => void, delay?: number, ...rest: unknown[]) => {
+        delays.push(delay)
+        return realSetTimeout(handler, delay, ...rest)
+      }) as typeof setTimeout
+
+      try {
+        const credentials = { email: 'nobody@test.com', password: 'x' }
+        const result = await createGuard({ provider: hookProvider }).validate(credentials)
+
+        expect(result).toBeNull()
+        expect(missing).toEqual([credentials])
+        expect(validateCalled).toBe(false)
+        expect(delays).not.toContain(100)
+      } finally {
+        globalThis.setTimeout = realSetTimeout
+      }
+    })
+
+    test('leaves verifyMissingUser alone when the address is known', async () => {
+      let hookCalled = false
+      const hookProvider: UserProvider<MockUser> = {
+        ...provider,
+        verifyMissingUser() {
+          hookCalled = true
+        },
+      }
+
+      await createGuard({ provider: hookProvider }).validate({ email: 'user@test.com', password: 'wrong' })
+
+      expect(hookCalled).toBe(false)
+    })
   })
 
   describe('remember token flow', () => {

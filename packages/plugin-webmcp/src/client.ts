@@ -39,6 +39,8 @@ const CSRF_SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS'
  */
 export interface WebMcpToolSource {
   readonly toolName: string
+  /** Sent with `method` and `path` in `X-Guren-Agent-Route`, which the server's misroute guard reads. */
+  readonly routeName?: string
   readonly method: string
   readonly path: string
   readonly description?: string

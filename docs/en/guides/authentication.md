@@ -74,7 +74,7 @@ The file is yours to edit: change a limit, or pass `store: new RedisRateLimitSto
 "Forgot your password?" on the login page leads through `ForgotPasswordController` and `ResetPasswordController`, built on the framework's `createPasswordResetToken` / `completePasswordReset` (see [Password Reset](./password-reset.md)).
 
 - The token is kept by the generated `app/Auth/PasswordResetStore.ts`, an in-memory store. Swap it for a Redis-backed store in production or any multi-instance deployment.
-- The link is mailed through the generated `config/mail.ts`, which defaults to the `log` driver: links print to the console, so the flow works with no setup in development. Set `MAIL_MAILER=smtp` and the `SMTP_*` variables to send real email.
+- The link is mailed through the generated `config/mail.ts`, which defaults to the `log` driver: links print to the console, so the flow works with no setup in development. Under `NODE_ENV=production` the `log` driver writes `token=[redacted]` in place of the link's token, and it never delivers mail. Set `MAIL_MAILER=smtp` and the `SMTP_*` variables to send real email.
 
 ### Email verification
 
@@ -381,6 +381,8 @@ Optional means optional: a caller may still pass `passwordHash` and it will type
 Leave `requireOnCreate` off when accounts can also arrive without a password — an OAuth-only sign-up, for instance — so `password` stays optional.
 
 A credential column holding something that is not a password hash means the account cannot authenticate with one. `ModelUserProvider` treats a null column, an empty string, and a sentinel such as `'oauth:...'` alike: the login is denied, and the same hashing work is spent as on a real verification so the response is not distinguishable by time. A value that *claims* a hash format and fails to satisfy it still throws. That is a corrupt or truncated column, and denying it in silence would leave nothing to notice it by. A nullable column is the clearer choice for a passwordless account; `make:auth --oauth` scaffolds one.
+
+A login for an address no account holds costs the same verification: `ModelUserProvider` checks the submitted password against a dummy hash made once by the same hasher, so the response time does not say whether the account exists. A custom user provider gets this by implementing the optional `verifyMissingUser(credentials)` method on `UserProvider`, which `SessionGuard` calls when `retrieveByCredentials()` finds nobody. Without it, `SessionGuard` waits a fixed 100 ms instead.
 
 `createApp()` registers a default `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `auth.registerGuard('api', factory)` inside the provider and set it as default via `auth.setDefaultGuard('api')` when appropriate.
 

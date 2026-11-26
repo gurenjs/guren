@@ -1476,6 +1476,19 @@ function renderOAuthProvider(mcpPath: string, defaultEntry: string): string {
   defaultHandler: ${defaultEntry},
   authorizeEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.authorize)},
   tokenEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.token)},
+  // apiHandler sees the props stored with a token, never the token's own scope,
+  // so a token narrowed by a \`scope\` on its token request carries the narrowed
+  // list in those props too. accessTokenProps only: newProps would rewrite the
+  // grant, and no later refresh could widen back. A shape this cannot read is
+  // left as it is for mcpOAuthPropsToAuth to refuse.
+  tokenExchangeCallback({ scope, requestedScope, props }) {
+    if (!Array.isArray(requestedScope) || !props || !Array.isArray(props.scopes)) return
+    if (Array.isArray(scope) && scope.every((entry) => requestedScope.includes(entry))) return
+    if (props.scopes.some((entry) => typeof entry !== 'string')) return
+    const scopes = props.scopes.filter((entry) => requestedScope.includes(entry))
+    if (scopes.length === props.scopes.length) return
+    return { accessTokenProps: { ...props, scopes } }
+  },
   // Dynamic client registration (RFC 7591). Deprecated in the MCP
   // 2026-07-28 line in favour of Client ID Metadata Documents, but it is
   // what shipping MCP SDK 1.x clients use to register themselves today.

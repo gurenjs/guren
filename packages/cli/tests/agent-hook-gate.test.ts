@@ -174,10 +174,8 @@ describe('gate-on-stop hook (Claude Code / Codex contract)', () => {
         git(dir, 'init', '-q')
         git(dir, 'add', '-A')
         git(dir, 'commit', '-q', '-m', 'init')
+        git(dir, 'worktree', 'add', '-q', '.claude/worktrees/x')
         const worktree = join(dir, '.claude/worktrees/x')
-        await mkdir(join(worktree, '.claude/hooks'), { recursive: true })
-        await writeFile(join(worktree, '.claude/hooks/gate-on-stop.ts'), await readFile(template, 'utf8'))
-        initGitRepo(worktree)
         await failingApp(worktree)
         await mkdir(join(worktree, 'app'), { recursive: true })
       },
@@ -186,5 +184,29 @@ describe('gate-on-stop hook (Claude Code / Codex contract)', () => {
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain('guren gate: typecheck failed')
+  })
+
+  // A tree the agent was let edit runs none of its package.json scripts here for carrying a copy of the script.
+  test('passes over a tree holding the script that is no worktree of the app, gating the app', async () => {
+    const result = await runAgentHook(
+      template,
+      '.claude/hooks/gate-on-stop.ts',
+      ACTIVE,
+      async (dir) => {
+        await writeFile(join(dir, '.gitignore'), 'vendor/\nnode_modules/\n')
+        git(dir, 'init', '-q')
+        git(dir, 'add', '-A')
+        git(dir, 'commit', '-q', '-m', 'init')
+        const foreign = join(dir, 'vendor/foreign')
+        await mkdir(join(foreign, '.claude/hooks'), { recursive: true })
+        await writeFile(join(foreign, '.claude/hooks/gate-on-stop.ts'), await readFile(template, 'utf8'))
+        initGitRepo(foreign)
+        await failingApp(foreign)
+      },
+      { subdir: 'vendor/foreign' },
+    )
+
+    expect(result.stderr).toBe('')
+    expect(result.exitCode).toBe(0)
   })
 })

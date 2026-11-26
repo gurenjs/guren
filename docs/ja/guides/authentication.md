@@ -76,7 +76,7 @@ bunx guren make:auth
 ログインページの「Forgot your password?」を押すと、`ForgotPasswordController` と `ResetPasswordController` が扱うリセットの流れに入ります。内部ではフレームワークの `createPasswordResetToken` / `completePasswordReset` を使っています（[パスワードリセット](./password-reset.md)を参照）。
 
 - トークンは、生成される `app/Auth/PasswordResetStore.ts` に保存されます。これはインメモリのストアなので、本番や複数インスタンスの構成では Redis ベースのストアに差し替えてください。
-- リンクは、生成される `config/mail.ts` を通じて送られます。既定の `log` ドライバーではリンクがコンソールに出力されるので、開発環境では何も設定せずに動きます。実際にメールを送るには、`MAIL_MAILER=smtp` と `SMTP_*` の環境変数を設定してください。
+- リンクは、生成される `config/mail.ts` を通じて送られます。既定の `log` ドライバーではリンクがコンソールに出力されるので、開発環境では何も設定せずに動きます。`NODE_ENV=production` では、リンクのトークンの部分が `token=[redacted]` に置き換わって出力されます。どちらの場合もメールは届きません。実際にメールを送るには、`MAIL_MAILER=smtp` と `SMTP_*` の環境変数を設定してください。
 
 ### メール確認
 
@@ -389,6 +389,10 @@ OAuth だけでサインアップする場合など、パスワードなしで�
 一方、ハッシュの形式を名乗っているのに中身がそれを満たさない値には、これまでどおり例外を投げます。これはカラムの破損や切り詰めなので、黙って拒否すると気付く手がかりがなくなってしまうためです。
 
 パスワードを持たないアカウントには nullable なカラムを使うほうが分かりやすく、`make:auth --oauth` もそちらを生成します。
+
+どのアカウントにもないメールアドレスでログインした場合も、検証にかかる手間は変わりません。`ModelUserProvider` は、同じハッシャーで一度だけ作ったダミーのハッシュに対して、送られたパスワードを検証します。このため、アカウントがあるかどうかは応答時間からは分かりません。
+
+独自のユーザープロバイダーでは、`UserProvider` の省略可能なメソッド `verifyMissingUser(credentials)` を実装すると同じ動きになります。`SessionGuard` は、`retrieveByCredentials()` がユーザーを見つけられなかったときにこのメソッドを呼びます。実装していなければ、代わりに 100 ミリ秒待ってから応答します。
 
 `createApp()` は、`users` プロバイダーを使う既定の `web` ガードを登録します。別のガード（たとえばトークンベースの API 用）が必要なら、プロバイダーの中で `auth.registerGuard('api', factory)` を呼び、必要に応じて `auth.setDefaultGuard('api')` で既定のガードを切り替えます。
 

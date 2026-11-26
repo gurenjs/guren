@@ -17,6 +17,7 @@ import {
   MemorySessionStore,
 } from '../../../src/http/middleware/session'
 import { installAgentPrincipal } from '../../../src/internal/agent-principal'
+import { markRouterRouteEntry } from '../../../src/internal/dispatched-request'
 
 function createTestApp(csrfOptions?: Parameters<typeof createCsrfMiddleware>[0]) {
   const app = new Hono()
@@ -474,6 +475,55 @@ describe('createCsrfMiddleware', () => {
     // A declared path is one route, so no prefix or pattern is implied.
     expect((await app.request('/mcp/tools', { method: 'POST' })).status).toBe(403)
     expect((await app.request('/comments', { method: 'POST' })).status).toBe(403)
+  })
+
+  it('verifies a declared path that a Router pattern route ahead of the endpoint answers', async () => {
+    const declared = new Set(['/mcp'])
+    const app = new Hono()
+    app.use(createSessionMiddleware())
+    app.use(createCsrfMiddleware(undefined, () => declared))
+    app.post('/:slug', markRouterRouteEntry((c: Context) => c.text('slug')))
+    app.all('/mcp', (c) => c.text('jsonrpc'))
+
+    expect((await app.request('/mcp', { method: 'POST' })).status).toBe(403)
+  })
+
+  it('ignores a Router route of another method, which never answers the request', async () => {
+    const declared = new Set(['/mcp'])
+    const app = new Hono()
+    app.use(createSessionMiddleware())
+    app.use(createCsrfMiddleware(undefined, () => declared))
+    app.get('/:slug', markRouterRouteEntry((c: Context) => c.text('slug')))
+    app.all('/mcp', (c) => c.text('jsonrpc'))
+
+    expect((await app.request('/mcp', { method: 'POST' })).status).toBe(200)
+  })
+
+  it('keeps the exemption past a per-method pass-through middleware added straight to Hono', async () => {
+    const declared = new Set(['/mcp'])
+    const app = new Hono()
+    app.use(createSessionMiddleware())
+    app.use(createCsrfMiddleware(undefined, () => declared))
+    app.post('*', async (_c, next) => {
+      await next()
+    })
+    app.all('/mcp', (c) => c.text('jsonrpc'))
+
+    expect((await app.request('/mcp', { method: 'POST' })).status).toBe(200)
+  })
+
+  it('verifies when a Router route sits between a path-scoped middleware and the endpoint', async () => {
+    const declared = new Set(['/mcp'])
+    const app = new Hono()
+    app.use(createSessionMiddleware())
+    app.use(createCsrfMiddleware(undefined, () => declared))
+    app.use('/mcp', async (_c, next) => {
+      await next()
+    })
+    app.post('/:slug', markRouterRouteEntry((c: Context) => c.text('slug')))
+    app.all('/mcp', (c) => c.text('jsonrpc'))
+
+    expect((await app.request('/mcp', { method: 'POST' })).status).toBe(403)
   })
 
   it('reads declared paths per request, not at middleware creation', async () => {

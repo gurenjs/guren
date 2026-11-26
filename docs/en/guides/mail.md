@@ -144,7 +144,7 @@ const app = createApp({ env, config: [mail] })
 
 Every key the callback reads must be declared in `config/env.ts`. `guren add mail` declares `MAIL_MAILER`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` and the `SMTP_*` keys; a transport you add yourself, such as `resend` above, needs its key declared by hand (`RESEND_API_KEY: Env.string().secret().optional()`). See the [configuration guide](./configuration.md) for declaring variables.
 
-`MAIL_MAILER=log` prints outgoing mail to the server output, which is enough in development. Set `MAIL_MAILER=smtp` or `resend` in production without changing code, or name a transport per message:
+`MAIL_MAILER=log` prints outgoing mail to the server output, which is enough in development. Under `NODE_ENV=production` it replaces the values of `token` and `signature` query parameters with `[redacted]`, since a password reset, verification or signed link works for whoever reads the log; the rest of the message is printed as written. Set `MAIL_MAILER=smtp` or `resend` in production without changing code, or name a transport per message:
 
 ```ts
 // Use the default transport
@@ -187,6 +187,8 @@ Without `secure`, the connection is encrypted only when the server's EHLO reply 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `logger` | `console.log` | Receives each formatted message instead of sending it |
+
+Under `NODE_ENV=production` the formatted message carries `[redacted]` in place of each `token` and `signature` parameter value.
 
 **Memory Transport (Testing):**
 | Option | Default | Description |

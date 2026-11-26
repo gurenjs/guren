@@ -1,7 +1,9 @@
 import { describe, test, expect } from 'bun:test'
+import { bundledThemesInfo } from 'shiki'
 import type { ThemeInput } from 'shiki/core'
 
 import { createMarkdownRenderer } from './renderer'
+import { defaultSanitizeOptions } from './sanitize'
 import { createShikiHighlight } from './shiki'
 
 const THEMES = { light: 'rose-pine-dawn', dark: 'rose-pine-moon' } as const
@@ -43,13 +45,20 @@ describe('createShikiHighlight', () => {
     const html = await renderer.render('```typescript\nconst a = 1\n```')
 
     // The sanitizer must keep shiki's wrapper, classes, and color styles.
-    expect(html).toContain('shiki')
+    expect(html).toContain('<pre class="shiki shiki-themes rose-pine-dawn rose-pine-moon"')
+    expect(html).toContain('<span class="line">')
     expect(html).toContain('color:#')
     expect(html).toContain('--shiki-dark')
     // shiki returns a complete <pre> block; the renderer must emit it as-is
     // instead of nesting it inside marked's default <pre><code>.
     expect(html.startsWith('<pre')).toBe(true)
     expect(html).not.toContain('<pre><code class="language-')
+  })
+
+  test('should admit every bundled theme id on pre under the default sanitizer', () => {
+    const pre = defaultSanitizeOptions().allowedClasses?.pre as string[]
+    const missing = bundledThemesInfo.map((theme) => theme.id).filter((id) => !pre.includes(id))
+    expect(missing).toEqual([])
   })
 
   test('should retry after a transient highlighter load failure', async () => {
