@@ -773,7 +773,7 @@ describe('a tool call that crossed a socket', () => {
 
   test('should ignore a route header longer than any tool route needs', async () => {
     const { app, reached } = await bootApp({ routes: postsRoutes() })
-    const header = encodeURIComponent(JSON.stringify({ method: 'GET', path: `/posts/:id${'/:a'.repeat(700)}`, name: 'x' }))
+    const header = encodeURIComponent(JSON.stringify({ method: 'GET', path: `/posts/:id${'/:a'.repeat(700)}`, name: 'posts.show' }))
 
     const response = await app.fetch(new Request('http://localhost/posts/new', { headers: { 'X-Guren-Agent-Route': header } }))
 

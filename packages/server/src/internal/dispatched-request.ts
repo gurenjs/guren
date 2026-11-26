@@ -78,8 +78,31 @@ export function encodeAgentRouteHeader(route: DispatchedToolRoute): string {
   return encodeURIComponent(JSON.stringify({ method: route.method, path: route.path, name: route.name }))
 }
 
+/** Both guards read the header of one request; `null` keeps an unreadable one from being parsed twice. */
+const claimedRoutes = new WeakMap<Request, ClaimedToolRoute | null>()
+
+/** Filled from registered routes only, never from a header, so it stays the size of the route tables. */
+const registeredShapes = new Map<string, string>()
+
+function registeredShape(path: string): string {
+  let shape = registeredShapes.get(path)
+  if (shape === undefined) {
+    shape = routePathShape(path)
+    registeredShapes.set(path, shape)
+  }
+  return shape
+}
+
 /** The route `request`'s {@link AGENT_ROUTE_HEADER} names, or `undefined` when it is absent or unreadable. */
 export function readAgentRouteHeader(request: Request): ClaimedToolRoute | undefined {
+  const cached = claimedRoutes.get(request)
+  if (cached !== undefined) return cached ?? undefined
+  const claimed = parseAgentRouteHeader(request)
+  claimedRoutes.set(request, claimed ?? null)
+  return claimed
+}
+
+function parseAgentRouteHeader(request: Request): ClaimedToolRoute | undefined {
   const raw = request.headers.get(AGENT_ROUTE_HEADER)
   if (raw === null || raw.length > MAX_AGENT_ROUTE_HEADER_LENGTH) return undefined
   let parsed: unknown
@@ -106,7 +129,7 @@ export function readAgentRouteHeader(request: Request): ClaimedToolRoute | undef
  */
 export function isClaimedRoute(claimed: ClaimedToolRoute, route: { method: string; path: string; name?: string }): boolean {
   if (claimed.name !== undefined && claimed.name === route.name) return true
-  return claimed.method === route.method.toUpperCase() && claimed.shape === routePathShape(route.path)
+  return claimed.method === route.method.toUpperCase() && claimed.shape === registeredShape(route.path)
 }
 
 /**
