@@ -72,8 +72,8 @@ export function registerWebRoutes(router: Router): void {
 
       const created = await makeAuth({ install: true, force: true })
 
-      // 29 auth files plus the session blueprint's config and provider.
-      expect(created).toHaveLength(31)
+      // 31 auth files (navigation and its labels included) plus the session blueprint's config and provider.
+      expect(created).toHaveLength(33)
       expect(created).toEqual(expect.arrayContaining([
         expect.stringContaining('AppUrl.ts'),
         expect.stringContaining('app/Http/Middleware/AuthThrottle.ts'),
@@ -284,8 +284,8 @@ export type AppSchema = typeof schema
 
       const created = await makeAuth({ force: true, minimal: true })
 
-      // 15 auth files plus the session blueprint's config and provider.
-      expect(created).toHaveLength(17)
+      // 17 auth files plus the session blueprint's config and provider.
+      expect(created).toHaveLength(19)
       expect(created).not.toEqual(expect.arrayContaining([
         expect.stringContaining('RegisterController.ts'),
         expect.stringContaining('RegisterValidator.ts'),
@@ -329,6 +329,90 @@ export type AppSchema = typeof schema
 
       expect(created.join('\n')).not.toContain('lang/en/auth.json')
       expect(await readFile(join(workspace.dir, 'lang/en/auth.json'), 'utf8')).toBe(published)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('writes the navigation with a Home entry and wires it into createApp()', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-navigation-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'db/schema.ts': `export const posts = 'posts'\n`,
+        'src/app.ts': "import { createApp } from '@guren/core'\nimport { registerWebRoutes } from '../routes/web.js'\n\nconst app = createApp({ routes: registerWebRoutes })\n\nexport default app\n",
+        'routes/web.ts': "import { Router } from '@guren/core'\n\nexport function registerWebRoutes(router: Router): void {\n  router.get('/', () => 'home').name('home')\n}\n",
+      })
+
+      const created = await makeAuth({ install: true, force: true, minimal: true })
+
+      expect(created.join('\n')).toContain('config/navigation.ts')
+      expect(created.join('\n')).toContain('lang/en/layout.json')
+      expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8'))
+        .toBe(await readFile(resolve(import.meta.dir, '../templates/scaffold/auth/config/navigation.ts'), 'utf8'))
+      const entry = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
+      expect(entry).toMatch(/import navigation from '\.\.\/config\/navigation(\.js)?'/)
+      expect(entry).toMatch(/config: \[navigation\]/)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('leaves the Home entry out when no route is named home', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-navigation-unnamed-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'db/schema.ts': `export const posts = 'posts'\n`,
+        'routes/web.ts': "import { Router } from '@guren/core'\n\nexport function registerWebRoutes(router: Router): void {\n  router.get('/', () => 'home')\n}\n",
+      })
+
+      await makeAuth({ force: true, minimal: true })
+
+      const navigation = await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')
+      expect(navigation).not.toContain("route: 'home'")
+      expect(navigation).toContain("{ label: 'Dashboard', route: 'dashboard', show: { auth: 'required' } },")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('keeps an existing config/navigation.ts and lang/en/layout.json even under --force', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-navigation-kept-')
+    try {
+      const navigation = "import { defineNavigation } from '@guren/core'\n\nexport default defineNavigation([])\n"
+      const labels = '{\n  "sign_in": "Log in"\n}\n'
+      await writeWorkspaceFiles(workspace.dir, {
+        'db/schema.ts': `export const posts = 'posts'\n`,
+        'config/navigation.ts': navigation,
+        'lang/en/layout.json': labels,
+      })
+
+      const created = await makeAuth({ force: true, minimal: true })
+
+      expect(created.join('\n')).not.toContain('config/navigation.ts')
+      expect(created.join('\n')).not.toContain('lang/en/layout.json')
+      expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe(navigation)
+      expect(await readFile(join(workspace.dir, 'lang/en/layout.json'), 'utf8')).toBe(labels)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('renders the shared navigation and lets a page widen itself', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-layout-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': `export const posts = 'posts'\n` })
+
+      await makeAuth({ force: true, minimal: true })
+
+      const layout = await readFile(join(workspace.dir, 'resources/js/components/Layout.tsx'), 'utf8')
+      expect(layout).toContain('props.navigation ?? []')
+      expect(layout).toContain("aria-current={item.current ? 'page' : undefined}")
+      expect(layout).toContain("href={navigation[0]?.path ?? '/'}")
+      expect(layout).toContain('props.app?.name')
+      expect(layout).toContain("wide ? 'max-w-5xl' : 'max-w-2xl'")
+      expect(layout).not.toContain('href="/dashboard"')
+      expect(JSON.parse(await readFile(join(workspace.dir, 'lang/en/layout.json'), 'utf8')))
+        .toEqual({ sign_in: 'Sign in', log_out: 'Log out', profile: 'Profile' })
     } finally {
       await workspace.cleanup()
     }
@@ -993,8 +1077,8 @@ export const posts = pgTable('posts', {
 
       // Pinned so a new scaffold file cannot slip into the passwordless
       // variant: the negative assertions below cover only known files.
-      // 13 auth files plus the session blueprint's config and provider.
-      expect(created).toHaveLength(15)
+      // 15 auth files plus the session blueprint's config and provider.
+      expect(created).toHaveLength(17)
       expect(created).toEqual(expect.arrayContaining([
         expect.stringContaining('LoginController.ts'),
         expect.stringContaining('OAuthController.ts'),

@@ -34,6 +34,7 @@ import { isHotReloadRuntime } from '../hot-reload/hot-disposables'
 import { adoptDefaultApplication } from './default-application'
 import { CONTAINER_CONTEXT_KEY } from './request-container'
 import type { InertiaDocumentOptions, InertiaSsrRenderer } from '../mvc/inertia/InertiaEngine'
+import { appNameSharedProps } from '../mvc/inertia/app-name'
 import { shareInertiaProps, type SharedInertiaPropsResolver } from '../mvc/inertia/shared'
 import type { EnvSchema } from '../config/env'
 import type { ConfigDefinition } from '../config/define'
@@ -352,6 +353,10 @@ export class Application {
     }
     if (options.inertia?.ssrRenderer) {
       this.container.instance('inertia.ssrRenderer', options.inertia.ssrRenderer)
+    }
+    // Ahead of the app's own share, which wins on an `app` key it also sets.
+    if (options.env) {
+      shareInertiaProps(() => appNameSharedProps(this.container), this.container)
     }
     if (options.inertia?.share) {
       shareInertiaProps(options.inertia.share, this.container)

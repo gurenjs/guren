@@ -91,6 +91,30 @@ export function Navigation() {
 
 この prop は lazy です。通常の訪問では解決されますが、`navigation` を求めない部分リロードでは、ゲートへの問い合わせごと飛ばされます。
 
+## `guren add auth` が書くレイアウト
+
+`guren add auth` は `config/navigation.ts` を書き、`createApp()` の `config` 配列に加えます。中身は Home のエントリーと、サインインしたユーザーにだけ見せる Dashboard のエントリーです。Home のエントリーには `home` という名前のルートが要り、スターターの `/` のルートにはこの名前が付いています。どのルートファイルにも `home` がなければ、Dashboard だけを書きます。`config/navigation.ts` が既にあるときは、`--force` を付けても書き換えません。
+
+あわせて書くレイアウト `resources/js/components/Layout.tsx` は、`navigation` prop を描画し、現在のエントリーに `aria-current` を付けます。エントリーでは表せないアカウントの操作は、レイアウトに残っています。ゲストには Sign in を、サインインしたユーザーには名前をラベルにした `/profile` へのリンクと、`POST` で送る Log out を出します。これらのラベルは `lang/en/layout.json` から読みます。このファイルは `guren add auth` が一度だけ書き、その後は置き換えません。
+
+ヘッダーの左端のブランドにはアプリの名前が出て、ユーザーに見える最初のエントリーへリンクします。見えるエントリーがなければ `/` へのリンクになります。名前は `app` という共有 prop で、`config/env.ts` が `APP_NAME` を宣言していれば、サーバーがすべてのページに送ります。`createApp({ inertia: { share } })` で独自の `app` prop を共有しているアプリでは、そちらの値が使われます。
+
+ページの幅はページ側で選びます。何も渡さなければフォームに合わせた狭い幅になり、表やボードのページでは `wide` を渡します。
+
+```tsx
+import Layout from '../../components/Layout.js'
+
+export default function JobsIndex() {
+  return (
+    <Layout wide>
+      {/* ... */}
+    </Layout>
+  )
+}
+```
+
+ヘッダーの幅はどのページでも同じなので、ページを移ってもヘッダーの位置は変わりません。
+
 ## 起動時に隠れるエントリー
 
 アプリが起動すると、各エントリーがルートに結び付けられます。ルートが登録されていない、`GET` でない、パスのパラメーターを持つ、のどれかに当たるエントリーは隠れ、起動時にエントリーと理由を書いた警告が出ます。ほかのエントリーはそのまま描画されます。存在しないルート名をそのまま使うと、すべてのページが 500 を返してしまうためです。

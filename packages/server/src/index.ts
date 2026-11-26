@@ -1125,6 +1125,7 @@ export {
 export type { ConfigDefinition, ConfigDefinitions, HttpConfig, OAuthConfig } from './config/define'
 export { defineNavigation } from './navigation/navigation'
 export type { GurenNavigationRegistry, GurenNavigationRoutes, NavigationAuth, NavigationConfig, NavigationEntry, NavigationFieldValue, NavigationItem, NavigationModel, NavigationRouteName, NavigationShow } from './navigation/navigation'
+export type { AppSharedProp } from './mvc/inertia/app-name'
 export type { InertiaI18nProps } from './providers/I18nServiceProvider'
 // Queue: SQS adapter
 export { SqsDriver, createSqsAdapter } from './queue/drivers/SqsDriver'
