@@ -13,7 +13,7 @@ import { readMarkedLines, spliceMarkedBlock, type MarkerSyntax } from './marker-
 import { routeTarget } from './plan/app-targets'
 import type { Plan, PlanAcceptance, PlanView } from './plan/schema'
 import { compareStrings } from './spec-artifact'
-import { slugifyProse } from './utils'
+import { isParameterless, slugifyProse } from './utils'
 
 export const BROWSER_MAP_DIR = 'docs/browser'
 export const BROWSER_MAP_INDEX = `${BROWSER_MAP_DIR}/README.md`
@@ -99,10 +99,7 @@ function featureFile(name: string): string {
   return `${BROWSER_MAP_DIR}/${slugifyProse(name, '-', 'feature')}.md`
 }
 
-/** The same test as `isParameterlessPath()` in `@guren/core/internal/route-path`, which the navigation links by. */
-export function isParameterless(path: string): boolean {
-  return !/(?:^|\/):|\*/u.test(path)
-}
+export { isParameterless }
 
 export function buildBrowserMap(
   graph: GurenApplicationGraph,

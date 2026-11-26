@@ -252,6 +252,107 @@ describe('route contract registry', () => {
   })
 })
 
+const NAVIGATION_DEFINITIONS: RouteDefinition[] = [
+  { method: 'GET', path: '/', name: 'home' },
+  { method: 'GET', path: '/jobs', name: 'jobs.index' },
+  { method: 'GET', path: '/status/foo:bar', name: 'status' },
+  { method: 'GET', path: '/jobs/:id', name: 'jobs.show' },
+  { method: 'GET', path: '/files/*', name: 'files' },
+  { method: 'POST', path: '/jobs', name: 'jobs.store' },
+  { method: 'GET', path: '/unnamed' },
+]
+
+describe('navigation route registry', () => {
+  it('lists each name every definition of which is a parameterless GET', () => {
+    const content = buildRouteModuleContent(NAVIGATION_DEFINITIONS, { source: 'routes/web.ts', navigation: true })
+    const augmentation = content.slice(content.indexOf('interface GurenNavigationRoutes'))
+
+    expect(augmentation).toStartWith(`interface GurenNavigationRoutes {
+    home: true
+    'jobs.index': true
+    status: true
+  }`)
+    expect(content).toContain('interface GurenNavigationRegistry {\n    generated: true\n  }')
+  })
+
+  it('leaves out a name one of whose routes does not fit, whichever Router.route() gives', () => {
+    const content = buildRouteModuleContent([
+      { method: 'GET', path: '/twice', name: 'twice' },
+      { method: 'POST', path: '/twice', name: 'twice' },
+      { method: 'GET', path: '/jobs', name: 'jobs.index' },
+    ], { source: 'routes/web.ts', navigation: true })
+
+    expect(content).toContain("interface GurenNavigationRoutes {\n    'jobs.index': true\n  }")
+  })
+
+  it('writes an empty registry when no route fits, so no name passes', () => {
+    const content = buildRouteModuleContent([{ method: 'GET', path: '/jobs/:id', name: 'jobs.show' }], { source: 'routes/web.ts', navigation: true })
+
+    expect(content).toContain('interface GurenNavigationRoutes {}')
+    expect(content).toContain('generated: true')
+  })
+
+  it('emits no registry for an app without config/navigation.ts', () => {
+    const content = buildRouteModuleContent(NAVIGATION_DEFINITIONS, { source: 'routes/web.ts' })
+    expect(content).not.toContain('GurenNavigationRoutes')
+    expect(content).not.toContain('GurenNavigationRegistry')
+  })
+
+  async function navigationTypeErrors(files: Record<string, string>): Promise<string[]> {
+    const dir = await mkdtemp(join(tmpdir(), 'guren-navigation-routes-'))
+    try {
+      for (const [name, content] of Object.entries(files)) await writeFile(join(dir, name), content, 'utf8')
+      return checkTypes([join(dir, 'probe.ts')], {
+        ...GENERATED_MODULE_COMPILER_OPTIONS,
+        paths: { '@guren/core': [resolve(import.meta.dir, '../../core/dist/index.d.ts')] },
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('types a navigation entry\'s route from the registry against @guren/core', async () => {
+    expect(await navigationTypeErrors({
+      'routes.gen.ts': buildRouteModuleContent(NAVIGATION_DEFINITIONS, { source: 'routes/web.ts', navigation: true }),
+      'probe.ts': NAVIGATION_USAGE_PROBE,
+    })).toEqual([])
+  }, TSC_TIMEOUT)
+
+  it('accepts a name the app merges into the registry beside the generated ones', async () => {
+    expect(await navigationTypeErrors({
+      'routes.gen.ts': buildRouteModuleContent(NAVIGATION_DEFINITIONS, { source: 'routes/web.ts', navigation: true }),
+      'provider-routes.ts': NAVIGATION_APP_AUGMENTATION,
+      'probe.ts': `import './provider-routes'\n${NAVIGATION_USAGE_PROBE}\nexport const added: NavigationRouteName = 'billing.portal'\n`,
+    })).toEqual([])
+  }, TSC_TIMEOUT)
+
+  it('passes only the merged name over an empty generated registry', async () => {
+    expect(await navigationTypeErrors({
+      'routes.gen.ts': buildRouteModuleContent([{ method: 'GET', path: '/jobs/:id', name: 'jobs.show' }], { source: 'routes/web.ts', navigation: true }),
+      'provider-routes.ts': NAVIGATION_APP_AUGMENTATION,
+      'probe.ts': `import './routes.gen'
+import './provider-routes'
+import type { NavigationRouteName } from '@guren/core'
+
+export const added: NavigationRouteName = 'billing.portal'
+// @ts-expect-error codegen listed no route
+export const generated: NavigationRouteName = 'jobs.show'
+`,
+    })).toEqual([])
+  }, TSC_TIMEOUT)
+
+  it('passes any name before codegen has written the registry', async () => {
+    expect(await navigationTypeErrors({
+      'provider-routes.ts': NAVIGATION_APP_AUGMENTATION,
+      'probe.ts': `import './provider-routes'
+import type { NavigationRouteName } from '@guren/core'
+
+export const names: NavigationRouteName[] = ['billing.portal', 'jobs.show', 'missing']
+`,
+    })).toEqual([])
+  }, TSC_TIMEOUT)
+})
+
 describe('buildRouteModuleContent', () => {
   it('generates a runtime manifest and route helpers for named routes', () => {
     const definitions: RouteDefinition[] = [
@@ -434,4 +535,32 @@ export class PostController extends Controller {
     return [id, title, undeclared, asWire]
   }
 }
+`
+
+const NAVIGATION_APP_AUGMENTATION = `declare module '@guren/core' {
+  interface GurenNavigationRoutes {
+    home: true
+    'billing.portal': true
+  }
+}
+
+export {}
+`
+
+const NAVIGATION_USAGE_PROBE = `import './routes.gen'
+import { defineNavigation, type NavigationRouteName } from '@guren/core'
+
+export default defineNavigation([
+  { label: 'Home', route: 'home' },
+  { label: 'Jobs', route: 'jobs.index', show: { auth: 'required' } },
+  // @ts-expect-error a route with a path parameter
+  { label: 'Job', route: 'jobs.show' },
+  // @ts-expect-error a POST route
+  { label: 'Post', route: 'jobs.store' },
+  // @ts-expect-error a name no route carries
+  { label: 'Missing', route: 'missing' },
+])
+
+const names: NavigationRouteName[] = ['home', 'jobs.index', 'status']
+export { names }
 `

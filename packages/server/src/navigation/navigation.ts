@@ -31,10 +31,25 @@ export interface NavigationShow {
   readonly where?: Readonly<Record<string, NavigationFieldValue>>
 }
 
+/**
+ * The route names a navigation entry may use, keyed by name. `guren codegen` writes the
+ * named `GET` routes with no path parameter once the app has `config/navigation.ts`; a
+ * route a provider registers, which codegen does not read, is added by merging a key here.
+ */
+export interface GurenNavigationRoutes {}
+
+/** Codegen sets `generated: true` beside the names it writes; until then any name passes. */
+export interface GurenNavigationRegistry {}
+
+/** A route name a navigation entry accepts: one the registry lists, or any string before codegen has run. */
+export type NavigationRouteName = GurenNavigationRegistry extends { generated: true }
+  ? keyof GurenNavigationRoutes & string
+  : string
+
 export interface NavigationEntry {
   readonly label: string
   /** A named `GET` route with no path parameter. */
-  readonly route: string
+  readonly route: NavigationRouteName
   /** Every condition given must hold. */
   readonly show?: NavigationShow
 }
