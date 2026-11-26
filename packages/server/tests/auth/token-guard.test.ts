@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'bun:test'
+import { Hono, type Context } from 'hono'
 import { TokenGuard } from '../../src/auth/TokenGuard'
 import {
   API_TOKEN_KEY,
@@ -8,6 +9,7 @@ import {
 } from '../../src/auth/api-token'
 import type { UserProvider } from '../../src/auth/types'
 import { markAgentDispatch } from '../../src/internal/agent-principal'
+import { markRouterRouteEntry } from '../../src/internal/dispatched-request'
 
 import { fakeContext } from '../support/fake-context'
 
@@ -230,6 +232,24 @@ describe('TokenGuard', () => {
 
       const elsewhere = fakeContext({ headers, raw: new Request('http://localhost/mcp/notes') })
       expect(await new TokenGuard({ store, ctx: elsewhere, agentEndpoints }).check()).toBe(false)
+    })
+
+    test('should refuse it on the endpoint\'s path when a Router pattern route registered ahead answers', async () => {
+      const store = new MemoryApiTokenStore()
+      const { plainTextToken } = await issueToken(store, { abilities: ['tools:*'] })
+      const agentEndpoints = () => new Set(['/mcp'])
+      const checked = async (c: Context) => c.text(String(await new TokenGuard({ store, ctx: c, agentEndpoints }).check()))
+      const request = () => new Request('http://localhost/mcp', { method: 'POST', headers: { Authorization: `Bearer ${plainTextToken}` } })
+
+      const shadowed = new Hono()
+      shadowed.post('/:slug', markRouterRouteEntry((c: Context) => checked(c)))
+      shadowed.post('/mcp', checked)
+      expect(await (await shadowed.fetch(request())).text()).toBe('false')
+
+      const answered = new Hono()
+      answered.post('/mcp', checked)
+      answered.post('/:slug', markRouterRouteEntry((c: Context) => checked(c)))
+      expect(await (await answered.fetch(request())).text()).toBe('true')
     })
 
     test('should keep authenticating a token that grants an ability besides agent tools', async () => {
