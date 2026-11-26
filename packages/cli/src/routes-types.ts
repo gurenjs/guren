@@ -208,13 +208,19 @@ ${entries.join('\n')}
  * the runtime links it whichever of them `Router.route()` gives. The names are a
  * mergeable interface so an app can add a route a provider registers.
  */
-function buildNavigationAugmentation(definitions: Array<RouteDefinition & { name: string }>): string {
+/** The route names a navigation entry may use: every route of the name is a `GET` with no path parameter. */
+export function navigationRouteNames(definitions: readonly RouteDefinition[]): string[] {
   const linkable = new Map<string, boolean>()
   for (const definition of definitions) {
+    if (!definition.name) continue
     const fits = definition.method === 'GET' && isParameterless(definition.path)
     linkable.set(definition.name, (linkable.get(definition.name) ?? true) && fits)
   }
-  const entries = [...linkable].filter(([, fits]) => fits).map(([name]) => `    ${quoteObjectKey(name)}: true`)
+  return [...linkable].filter(([, fits]) => fits).map(([name]) => name)
+}
+
+function buildNavigationAugmentation(definitions: Array<RouteDefinition & { name: string }>): string {
+  const entries = navigationRouteNames(definitions).map((name) => `    ${quoteObjectKey(name)}: true`)
   const routes = entries.length > 0 ? `{\n${entries.join('\n')}\n  }` : '{}'
 
   return `

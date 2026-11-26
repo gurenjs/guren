@@ -342,6 +342,7 @@ export type AppSchema = typeof schema
         'src/app.ts': "import { createApp } from '@guren/core'\nimport { registerWebRoutes } from '../routes/web.js'\n\nconst app = createApp({ routes: registerWebRoutes })\n\nexport default app\n",
         'routes/web.ts': "import { Router } from '@guren/core'\n\nexport function registerWebRoutes(router: Router): void {\n  router.get('/', () => 'home').name('home')\n}\n",
       })
+      await linkWorkspaceCore(workspace.dir)
 
       const created = await makeAuth({ install: true, force: true, minimal: true })
 
@@ -357,19 +358,44 @@ export type AppSchema = typeof schema
     }
   })
 
-  it('leaves the Home entry out when no route is named home', async () => {
+  it.each([
+    ['no route is named home', "  router.get('/', () => 'home')\n"],
+    ['only a comment names it', "  // router.get('/').name('home')\n  router.get('/', () => 'home')\n"],
+    ['the route named home is a POST', "  router.post('/', () => 'home').name('home')\n"],
+    ['the route named home has a path parameter', "  router.get('/:slug', () => 'home').name('home')\n"],
+  ])('leaves the Home entry out when %s', async (_label, routes) => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-navigation-unnamed-')
     try {
       await writeWorkspaceFiles(workspace.dir, {
         'db/schema.ts': `export const posts = 'posts'\n`,
-        'routes/web.ts': "import { Router } from '@guren/core'\n\nexport function registerWebRoutes(router: Router): void {\n  router.get('/', () => 'home')\n}\n",
+        'routes/web.ts': `import { Router } from '@guren/core'\n\nexport function registerWebRoutes(router: Router): void {\n${routes}}\n`,
       })
+      await linkWorkspaceCore(workspace.dir)
 
       await makeAuth({ force: true, minimal: true })
 
       const navigation = await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')
       expect(navigation).not.toContain("route: 'home'")
       expect(navigation).toContain("{ label: 'Dashboard', route: 'dashboard', show: { auth: 'required' } },")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('wires a navigation definition already in config/ that createApp() does not list', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-navigation-unwired-')
+    try {
+      const navigation = "import { defineNavigation } from '@guren/core'\n\nexport default defineNavigation([])\n"
+      await writeWorkspaceFiles(workspace.dir, {
+        'db/schema.ts': `export const posts = 'posts'\n`,
+        'src/app.ts': "import { createApp } from '@guren/core'\n\nconst app = createApp({})\n\nexport default app\n",
+        'config/navigation.ts': navigation,
+      })
+
+      await makeAuth({ install: true, force: true, minimal: true })
+
+      expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe(navigation)
+      expect(await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')).toMatch(/config: \[navigation\]/)
     } finally {
       await workspace.cleanup()
     }

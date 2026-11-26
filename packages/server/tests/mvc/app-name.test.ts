@@ -2,11 +2,12 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { Hono } from 'hono'
 import { defineEnv, Env } from '../../src/config/env'
 import { createApp } from '../../src/http/Application'
-import { ensureSharedInertiaPropsRegistry } from '../../src/mvc/inertia/shared'
+import { resolveSharedInertiaProps, setInertiaSharedProps, shareInertiaProps } from '../../src/mvc/inertia/shared'
 
 const original = process.env.APP_NAME
 
 afterEach(() => {
+  setInertiaSharedProps(null)
   if (original === undefined) delete process.env.APP_NAME
   else process.env.APP_NAME = original
 })
@@ -14,11 +15,10 @@ afterEach(() => {
 async function sharedProps(options: Parameters<typeof createApp>[0]): Promise<Record<string, unknown>> {
   const app = createApp(options)
   await app.boot()
-  const registry = ensureSharedInertiaPropsRegistry(app.container)
   let props: Record<string, unknown> = {}
   const hono = new Hono()
   hono.get('/', async (ctx) => {
-    props = await registry.resolve(ctx)
+    props = await resolveSharedInertiaProps(ctx, app.container)
     return ctx.text('')
   })
   await hono.request('/')
@@ -55,5 +55,13 @@ describe('the app shared prop', () => {
     })
 
     expect(props.app).toEqual({ name: 'Mine', version: 2 })
+  })
+
+  test('gives way to an app key shared without a container before the app was created', async () => {
+    process.env.APP_NAME = 'Job Board'
+    shareInertiaProps(() => ({ app: { name: 'Global', version: 3 } }))
+    const props = await sharedProps({ env: defineEnv({ APP_NAME: Env.string().default('Guren') }) })
+
+    expect(props.app).toEqual({ name: 'Global', version: 3 })
   })
 })

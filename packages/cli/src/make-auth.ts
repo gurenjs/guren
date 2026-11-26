@@ -1,4 +1,5 @@
-import { readdir, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
 import { assertCwdUnsupported, writeRoot, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
@@ -16,7 +17,11 @@ import {
 } from './patch-helpers'
 import { readIfExists } from './discovery'
 import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireConfig, wireProvider } from './provider-registrar'
-import { wireRouteRegistrar } from './route-registrar'
+import { loadRouteDefinitions } from './load-routes'
+import { DEFAULT_ROUTES_FILE, wireRouteRegistrar } from './route-registrar'
+import { navigationRouteNames } from './routes-types'
+import { parseSourceFile } from './parse-cache'
+import { definitionBuilderCall } from './resolved-config'
 import { addSession, appConfiguresSessions } from './add-session'
 import { appendOAuthStateTable } from './oauth-state-table'
 import { registerConsoleCommand } from './console-registrar'
@@ -40,21 +45,28 @@ function authFile(path: string): ScaffoldFileEntry {
   return scaffoldTemplateFile('auth', path)
 }
 
-/** The starter's entries; Home only when a routes file names a route `home`, since the boot hides an entry it cannot link. */
+/** The starter's entries; Home only when an entry may name `home`, since the boot hides one it cannot link. */
 async function navigationFile(cwd: string): Promise<ScaffoldFileEntry> {
   const file = authFile(NAVIGATION_FILE)
-  if (await routesNameHome(cwd)) return file
-  consola.info(`No route is named "home", so ${NAVIGATION_FILE} lists Dashboard alone; name your / route home and add its entry.`)
+  if (await linksHome(cwd)) return file
+  consola.info(`No GET route with no path parameter is named "home", so ${NAVIGATION_FILE} lists Dashboard alone; name your / route home and add its entry.`)
   return { ...file, contents: file.contents.replace(HOME_ENTRY, '') }
 }
 
-async function routesNameHome(cwd: string): Promise<boolean> {
-  const names = await readdir(resolve(cwd, 'routes')).catch(() => [] as string[])
-  for (const name of names.filter((entry) => /\.[cm]?[jt]sx?$/.test(entry))) {
-    const source = await readIfExists(cwd, `routes/${name}`)
-    if (source !== null && /\.name\(\s*(['"`])home\1\s*\)/.test(source)) return true
+function definesNavigation(source: string): boolean {
+  const ast = parseSourceFile(source, NAVIGATION_FILE)
+  return ast !== null && definitionBuilderCall(ast)?.builder === 'defineNavigation'
+}
+
+/** By the rule codegen types entries by, on the routes file it reads; a file that does not load names nothing. */
+async function linksHome(cwd: string): Promise<boolean> {
+  const routesFile = resolve(cwd, DEFAULT_ROUTES_FILE)
+  if (!existsSync(routesFile)) return false
+  try {
+    return navigationRouteNames(await loadRouteDefinitions(routesFile, cwd)).includes('home')
+  } catch {
+    return false
   }
-  return false
 }
 
 /** The page heading with the ember tick — the one structural device, once per
@@ -1487,8 +1499,10 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   ]
 
   // Never replaced, even under --force: they hold the app's own entries and labels.
-  const navigationWritten = (await readIfExists(process.cwd(), NAVIGATION_FILE)) === null
-  if (navigationWritten) files.push(await navigationFile(process.cwd()))
+  const existingNavigation = await readIfExists(process.cwd(), NAVIGATION_FILE)
+  if (existingNavigation === null) files.push(await navigationFile(process.cwd()))
+  // The layout renders nothing without the definition, so one already there is wired too.
+  const wireNavigation = existingNavigation === null || definesNavigation(existingNavigation)
   if ((await readIfExists(process.cwd(), LAYOUT_LANG_FILE)) === null) files.push(authFile(LAYOUT_LANG_FILE))
 
   if (includePassword) {
@@ -1584,14 +1598,14 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   )
 
   if (options.install) {
-    await installAuth(features, { migrationGenerated, oauthStateTable, mailSetup, oauthDefinition, navigationWritten })
+    await installAuth(features, { migrationGenerated, oauthStateTable, mailSetup, oauthDefinition, wireNavigation })
   } else {
     consola.info('Next steps:')
     consola.info(CODEGEN_STEP)
     consola.info('  • Register AuthProvider in your createApp() providers array')
     consola.info('  • Enable sessions and CSRF by adding `auth: {}` to your createApp() options')
     consola.info('  • Import registerAuthRoutes from routes/auth.ts and call it from your routes/web.ts registrar')
-    if (navigationWritten) {
+    if (wireNavigation) {
       consola.info('  • Add the default export of config/navigation.ts to your createApp() config array (the layout\'s links)')
     }
     if (mailSetup !== null) {
@@ -1628,7 +1642,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
 async function installAuth(
   { includePassword, oauthProviders }: AuthFeatures,
-  { migrationGenerated, oauthStateTable, mailSetup, oauthDefinition, navigationWritten }: { migrationGenerated: boolean; oauthStateTable: boolean; mailSetup: MailSetup | null; oauthDefinition: boolean; navigationWritten: boolean },
+  { migrationGenerated, oauthStateTable, mailSetup, oauthDefinition, wireNavigation }: { migrationGenerated: boolean; oauthStateTable: boolean; mailSetup: MailSetup | null; oauthDefinition: boolean; wireNavigation: boolean },
 ): Promise<void> {
   consola.info('Installing authentication configuration...')
 
@@ -1658,7 +1672,7 @@ async function installAuth(
     await wireAppProvider('MailProvider', wiring)
   }
 
-  if (navigationWritten) {
+  if (wireNavigation) {
     await wireConfig('navigation', wiring)
   }
 

@@ -93,11 +93,11 @@ export function Navigation() {
 
 ## `guren add auth` が書くレイアウト
 
-`guren add auth` は `config/navigation.ts` を書き、`createApp()` の `config` 配列に加えます。中身は Home のエントリーと、サインインしたユーザーにだけ見せる Dashboard のエントリーです。Home のエントリーには `home` という名前のルートが要り、スターターの `/` のルートにはこの名前が付いています。どのルートファイルにも `home` がなければ、Dashboard だけを書きます。`config/navigation.ts` が既にあるときは、`--force` を付けても書き換えません。
+`guren add auth` は `config/navigation.ts` を書き、`createApp()` の `config` 配列に加えます。中身は Home のエントリーと、サインインしたユーザーにだけ見せる Dashboard のエントリーです。Home のエントリーには、パスパラメーターのない `GET` の `home` という名前のルートが要ります。スターターの `/` のルートがこれに当たります。ルートファイルがそのルートを登録していなければ、Dashboard だけを書きます。`config/navigation.ts` が既にあるときは、`--force` を付けても書き換えません。それが `defineNavigation()` の定義なら、`config` 配列への追加だけは行います。
 
 あわせて書くレイアウト `resources/js/components/Layout.tsx` は、`navigation` prop を描画し、現在のエントリーに `aria-current` を付けます。エントリーでは表せないアカウントの操作は、レイアウトに残っています。ゲストには Sign in を、サインインしたユーザーには名前をラベルにした `/profile` へのリンクと、`POST` で送る Log out を出します。これらのラベルは `lang/en/layout.json` から読みます。このファイルは `guren add auth` が一度だけ書き、その後は置き換えません。
 
-ヘッダーの左端のブランドにはアプリの名前が出て、ユーザーに見える最初のエントリーへリンクします。見えるエントリーがなければ `/` へのリンクになります。名前は `app` という共有 prop で、`config/env.ts` が `APP_NAME` を宣言していれば、サーバーがすべてのページに送ります。`createApp({ inertia: { share } })` で独自の `app` prop を共有しているアプリでは、そちらの値が使われます。
+ヘッダーの左端のブランドにはアプリの名前が出て、ユーザーに見える最初のエントリーへリンクします。見えるエントリーがなければ `/` へのリンクになります。名前は `app` という共有 prop で、`config/env.ts` が `APP_NAME` を宣言していれば、サーバーがすべてのページに送ります。`createApp({ inertia: { share } })` や `shareInertiaProps()` で独自の `app` prop を共有しているアプリでは、そちらの値が使われます。
 
 ページの幅はページ側で選びます。何も渡さなければフォームに合わせた狭い幅になり、表やボードのページでは `wide` を渡します。
 
