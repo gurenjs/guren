@@ -14,32 +14,47 @@ bunx guren --help
 
 コマンドは `bunx guren make:controller UserController` のように、サブコマンドの形で指定します。
 
+## コマンドの探し方
+
+| やりたいこと | 使うコマンド | 詳しい説明 |
+|--------------|--------------|------------|
+| スターターアプリにある機能(認証、キュー、メールなど)を足す | `add <feature>` | [高レベルスキャフォールド](#高レベルスキャフォールド) |
+| ファイルを 1 つ生成する(コントローラー、モデル、Policy など) | `make:*` | [主要コマンド](#主要コマンド) |
+| 変更が終わったかを確かめる | `gate` | [`gate`](#gate) |
+| 配線、セキュリティ、プロジェクトの状態を調べる | `check`、`audit`、`doctor` | [検査・監査コマンド](#検査監査コマンド) |
+| プルリクエストのレビューのレーンを判定する | `change:*` | [変更のレビュー](./change-review.md) |
+| 本物のブラウザでページをテストする | `add browser-tests`、`browser:map` | [ブラウザテスト](./browser-tests.md) |
+| 書く前に変更を設計する | `plan`、`plan:*` | [実装計画](./implementation-plans.md) |
+| エージェントに渡るツールを見る、呼ぶ | `tool:*` | [エージェントツールコマンド](#エージェントツールコマンド) |
+| データベースのマイグレーションとシードを行う | `db:*` | [データベースコマンド](#データベースコマンド) |
+| デプロイ用のファイルを書き出す | `deploy` | [デプロイレシピ生成](#デプロイレシピ生成) |
+
 ## 高レベルスキャフォールド
 
 `bunx guren add <feature>` は、スターターアプリと同じ形で機能を追加します。必要なプロバイダー、設定、ランタイムのファイルを生成し、それを使うように `src/app.ts` を書き換えます。個々のファイルを作る `make:*` より先に、こちらを検討してください。
 
-```bash
-bunx guren add auth
-bunx guren add admin
-bunx guren add resource posts --fields "title:string,body:text"
-bunx guren add queue
-bunx guren add mail
-bunx guren add events
-bunx guren add cache
-bunx guren add notifications
-bunx guren add storage
-bunx guren add attachments
-bunx guren add session
-bunx guren add broadcasting
-bunx guren add schedule
-bunx guren add lint
-bunx guren add prototype
-bunx guren add ai --provider anthropic
-bunx guren add oauth
-bunx guren add browser-tests
-bunx guren add review
-bunx guren add ui
-```
+| 機能 | コマンド | ガイド |
+|------|----------|--------|
+| 認証 | `bunx guren add auth` | [認証ガイド](./authentication.md) |
+| 管理画面 | `bunx guren add admin` | [後述](#add-admin) |
+| CRUD のリソース | `bunx guren add resource posts --fields "title:string,body:text"` | [後述](#add-resource) |
+| ジョブのキュー | `bunx guren add queue` | [キューガイド](./queue.md) |
+| メール | `bunx guren add mail` | [メールガイド](./mail.md) |
+| イベントとリスナー | `bunx guren add events` | [イベントガイド](./events.md) |
+| キャッシュ | `bunx guren add cache` | [キャッシュガイド](./cache.md) |
+| 通知 | `bunx guren add notifications` | [通知ガイド](./notifications.md) |
+| ファイルストレージ | `bunx guren add storage` | [ストレージガイド](./storage.md) |
+| モデルへのファイル添付 | `bunx guren add attachments` | [アタッチメントガイド](./attachments.md) |
+| データベースのセッション | `bunx guren add session` | [セッション](./sessions.md) |
+| ブロードキャスティング | `bunx guren add broadcasting` | [ブロードキャスティングガイド](./broadcasting.md) |
+| タスクのスケジュール | `bunx guren add schedule` | [タスクスケジューリングガイド](./scheduling.md) |
+| Guren のルート入りの oxlint | `bunx guren add lint` | [後述](#add-lint) |
+| プロトタイプモード | `bunx guren add prototype` | [後述](#add-prototype) |
+| インプロセスの AI エージェント | `bunx guren add ai --provider anthropic` | [後述](#add-ai) |
+| OAuth のサインイン | `bunx guren add oauth` | [OAuthガイド](./oauth.md) |
+| ブラウザテスト | `bunx guren add browser-tests` | [ブラウザテスト](./browser-tests.md) |
+| Change のレビューのワークフロー | `bunx guren add review` | [変更のレビュー](./change-review.md) |
+| UI コンポーネント | `bunx guren add ui` | [後述](#add-ui) |
 
 まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリが育つのに合わせてほかの機能を足していってください。
 
@@ -77,23 +92,15 @@ bunx guren add admin --public
 
 ### `add prototype`
 
-`add prototype` は、プロトタイプモード([プロトタイプファースト](./prototype-first.md))を導入するコマンドです。実行すると、シードデータで Inertia の visit に応答する `resources/js/prototype/` の fixture、`dev:prototype` と `build:prototype` のスクリプト、`resources/js/app.tsx` と `src/app.ts` に入るローダー 2 行が追加されます。`--remove` を付けると、スクリプトとローダーを取り除きます。
+`add prototype` は、プロトタイプモードを導入するコマンドです。実行すると、シードデータで Inertia の visit に応答する `resources/js/prototype/` の fixture、`dev:prototype` と `build:prototype` のスクリプト、`resources/js/app.tsx` と `src/app.ts` に入るローダー 2 行が追加されます。`--remove` を付けると、スクリプトとローダーを取り除きます。
 
-続けて `make:feature <Entity> --fields "…" --prototype` を実行すると、機能のうち画面に見える部分(ページ、バリデーター、ページデータ型、fixture のエントリ)を書き出し、`prototype` ハンドラーで登録するルートを表示します。
-
-ページデータ型（`resources/js/types/<Entity>.ts`）ができたあとで、同じコマンドをフラグなしで実行すると昇格になります。モデル、Resource、コントローラーが書き出され、Resource はページデータ型に合わせて型付けされます。ページとバリデーターには手を付けません。
-
-`bun run build:prototype` は Vite の前に `check --prototype` を実行するので、fixture にエントリがないルートは、顧客がクリックしたときではなくビルドの時点で失敗します。
+続けて `make:feature <Entity> --fields "…" --prototype` を実行すると、機能のうち画面に見える部分を書き出します。同じコマンドをフラグなしで実行すると、昇格になります。`bun run build:prototype` は Vite の前に `check --prototype` を実行するので、fixture にエントリがないルートはビルドの時点で失敗します。流れは[プロトタイプファースト](./prototype-first.md)で説明しています。
 
 ### `add ai`
 
-`add ai` は、`@guren/plugin-ai` を使ったインプロセスの AI エージェントを導入します。プロバイダを 1 つ(`--provider anthropic`、`openai`、`gateway` のいずれか)選ぶと、そのプロバイダ用の `config/ai.ts` を書き出し、API キーを `config/env.ts` と env ファイルに宣言し、設定と `aiPlugin()` を `createApp()` に登録します。そのあとプラグイン、`ai`、プロバイダーのパッケージ（`gateway` では不要）を `bun add` します。`--no-install` を付けると、実行するコマンドを表示するだけになります。
+`add ai` は、`@guren/plugin-ai` を使ったインプロセスの AI エージェントを導入します。プロバイダを 1 つ(`--provider anthropic`、`openai`、`gateway` のいずれか)選ぶと、そのプロバイダ用の `config/ai.ts`、`config/env.ts` に宣言する API キー、`createApp()` への `aiPlugin()` の登録を書き出します。`db/schema.ts` があるアプリでは会話を保存するテーブルも追加します(`--no-conversations` で省けます)。
 
-キーは任意なので、設定していなくてもアプリは起動し、最初のプロンプトを送った時点で失敗します。
-
-このコマンドを使うには `config/env.ts` が必要です。`db/schema.ts` があるアプリでは、`ai_conversations` と `ai_messages` の 2 つのテーブルを追加してマイグレーションを生成し、会話をそこに保存するよう `config/ai.ts` を設定します。`--no-conversations` を付けると、この処理を省きます。テーブルには、ツールの結果も含めてモデルが見た会話がそのまま残るので、機密データとして扱ってください。
-
-エージェントクラスは、そのあと `make:ai-agent <Name>` で `app/Ai/Agents` に書き出します。`--tools` に指定したエージェントツールは、ルートから導出できることを確かめたうえでエージェントに渡されます。`--output` を付けると構造化出力のスキーマの雛形が加わり、`--test` を付けると `app.fakeAi()` でモデルの応答を台本にしたテストが書き出されます。`--chat` を付けると、ストリーミングするチャットのページとそのコントローラ、ルートも書き出されます。スコープ、会話、ストリーミング、キューについては [AI エージェント](./ai-agents.md) で説明しています。
+このコマンドを使うには `config/env.ts` が必要です。`--no-install` を付けると、`bun add` を実行せずにコマンドを表示します。エージェントクラスは、そのあと `make:ai-agent <Name>` で `app/Ai/Agents` に書き出します。各手順が書き出すものは [AI エージェント](./ai-agents.md#インストール)で説明しています。
 
 ### `add lint`
 
@@ -118,110 +125,15 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 
 ### `add review`
 
-`add review` は Change ワークフローを入れます。このワークフローは、すべてのプルリクエストと `main` への push で `bunx guren change:evidence` を実行します。GitHub はリポジトリの直下にあるワークフローしか読まないので、対象はリポジトリの直下にあるアプリケーションで、その下の階層にあるアプリケーションでは実行を断ります。書き出すファイルは 6 つで(ハーネスに Cursor が入っているアプリでは `APPROVAL_POLICY.md` と `.cursor/BUGBOT.md` を加えた 8 つ)、どれも 1 回だけ書き、すでにあるファイルは `--force` を付けない限り再実行しても変えません。`--force` を付けても `REVIEW.md` だけは置き換えません。
-
-- `guren.review.ts`(レビューのポリシー。後述)。
-- `REVIEW.md`。Claude Code Review が読むファイルで、レビューする人に向けたルールと、`bunx guren change:policy` がアプリケーションから生成するブロックが入ります。ブロックに並ぶのは、`change:lane` が常に `high` にするもの、機密の列を持つモデル、データを変えるルートと通るミドルウェアやアクションが名前を出す Policy(Policy が実際に確認されている保証ではなく、どこを読むかの手がかりです)、エージェントが呼べるルートと公開先です。一度できたら、書き換わるのは `change:policy` が生成するブロックだけです。アプリケーションを読み込めないときは書きません。何も読めていないブロックが、最新の内容のように見えてしまうためです。
-- `.github/workflows/change.yml` は、プルリクエストの head のコミット(GitHub のマージコミットではない)を履歴ごとチェックアウトし、どのブランチにも残っていない base(force push の後など)も取得して証拠を集めます。プルリクエストの base を付け替えたときも実行し直します。マージベースの記録は、既定のブランチへの push で走った実行が保存したものだけを `actions: read` の権限でダウンロードし、`--base-record` に渡します。プルリクエストはこの記録を書けないからです。そのうえで`evidence.md` をジョブの要約に足し、`record.json` を `guren-record-<head の SHA>` としてアップロードします。ジョブが失敗するのは gate が失敗したときだけです。失敗したときも要約と記録は残り、アップロードの失敗でジョブは失敗しません。ランナーから npm のレジストリに届かないときは、証拠のステップに `--no-deps` を足します。
-- `.github/pull_request_template.md` は、issue と計画を求め、プルリクエストに表示される文で、レビューする人に `lane:` ラベルを 1 つ付けてもらいます。付けるのは、レビューする人自身が必要だと考えたレビューの重さで、ワークフローが出した下限とは別に選びます。`gh pr create --body` で作ったプルリクエストはテンプレートを使わないので、ジョブの要約にも同じ依頼を出します。
-- `.github/ISSUE_TEMPLATE/feature.md` と `defect.md`。
-- エージェントのハーネスに Cursor が入っているアプリ(`bunx guren agent:init --target cursor`)では `APPROVAL_POLICY.md` も書きます。Cursor の PR Routing & Approval が読むファイルで、Change の証拠が `eligible for low` のプルリクエストだけを承認するように指示します。このとき `change:policy` は `.cursor/BUGBOT.md` も保ちます。Bugbot がレビューのたびに読み込むファイルで、中身は REVIEW.md と同じブロックです。書いたルールも含めたファイル全体が Bugbot の読む 30,000 文字を超えるときは、常に人が読むものだけに絞ります。それでも超えるときはどちらのファイルも書かずに止まります。
-
-ラベルは先に作っておかないと選べないので、コマンドは `gh label create` の 3 行を出力します。Change ワークフローは scaffold の `ci.yml` と同じ gate を実行します。`ci.yml` に `bunx guren gate` のステップが残っているときはそのことを知らせるので、Change ワークフローがプルリクエストで通ったら、そのステップは消してかまいません。
-
-ルート、Policy、モデル、教訓、`guren.review.ts` を変えたら `bunx guren change:policy` を実行します。`--check` を付けると何も書かず、ブロックが古いときは終了コード 1 で終わります。アプリケーションを読み込めないときは、どちらも書かずに終了コード 1 で終わります。ブロックの内容は、アプリケーションを env ファイル(`.env` など、Bun が読み込み、git に入れないファイル)なしで登録した結果なので、手元でも CI でも同じになります。アプリケーションのディレクトリと、コマンドを実行したディレクトリにある env ファイルが設定する値は、どの `NODE_ENV` のものでも外します。シェルが別の値で export した変数はそのまま効きます。ただし、env ファイルが別の変数を展開して作る値(`${PORT}` など)は、展開した結果にかかわらず外します。`change:evidence` も `REVIEW.md` があれば同じ確認を行い、ブロックが古いとき(`review-doc-stale`)と、確認のためにアプリケーションを読み込めないとき(`review-doc-unchecked`)は変更を保留にします。workflow は失敗させません。`change:lane` は、生成されたブロックも含めて `REVIEW.md` の編集をすべて `high` にします(`BUGBOT.md`、`APPROVAL_POLICY.md`、`.cursor/approval-policies/` も同じです)。レビューする人はファイル全体を読み、変更の中でブロックをアプリケーションと照らし合わせるものがないためです。
-
-#### レビューのポリシー
-
-`guren.review.ts` を置くと、`change:lane` と `change:evidence` が変更に付けるレーンを調整できます。
-
-```ts manual
-import { defineReviewPolicy } from '@guren/cli/review'
-
-export default defineReviewPolicy({
-  approvals: { low: 0, medium: 1, high: 2 },
-  paths: { high: ['app/Billing/**', 'config/session.ts'], medium: 'config/**' },
-  facts: { 'agent-tool': 'high', 'schema-changed': 'low' },
-  identities: 'auto',
-  merge: { low: 'person' },
-})
-```
-
-- `paths` は、一致するパスに触れた変更の下限を決めます。パスはアプリケーションのルートからの相対で、`*` は 1 階層の中、`**` は何階層でも一致し、どちらも含まない glob は CODEOWNERS と同じくファイルかディレクトリを指します。それ以外の書き方(空の区切り、`.` や `..` の区切り、波かっこ、角かっこ、`?`、`@(a|b)` のような extglob)は、何にも一致しないまま受け入れるのではなく、ポリシーを読めないものとして扱います。一致した glob ごとに `review-path` の事実が 1 つ付きます。
-- `facts` は事実ごとのレーンを決めます。上げるのはどの事実でもできます。下げられるのは計画で宣言できる事実だけで、宣言したときと同じところまでです。`schema-changed`、`migration`、`file-added`(ソースファイルの追加と、計画による追加として読んだ編集。後者には `source-edited` に設定した引き上げも効く)、`policy-added`、`file-removed`(計画が宣言した削除。`source-removed` に設定した引き上げも効く)、ルートの事実(`route-added`、`route-changed`、`route-removed`、`agent-tool`)、アプリケーションのエントリの配列の事実(`provider-added`、`config-added`)、`env-added` は `low` まで、`policy-changed` と `dependencies-changed` は `medium` までしか下げられません。常に high の事実(gate の入力、破壊的なマイグレーション、受け入れテストの編集、audit の失敗など)、それ以外の既存のソースの編集、ソースでないファイルの追加、スキーマのテーブルの中の関数とテーブル以外のコードの変更は下げられません。ポリシーで変えた事実には、レポートで `lowered by guren.review.ts` か `raised by guren.review.ts` と表示されます。
-- `approvals`、`review`、`identities`、`merge` は、レーンごとの承認とマージの仕方を書く項目です。まだ強制はしません。`evidence.md` には、下限のレーンで必要になる承認の数が出ます。
-
-適用するのはマージベースにあるポリシーです。`guren.review.ts` を編集するプルリクエストは編集前のポリシーで判定され、編集した内容はマージした後から効きます(gate の入力なので、その変更自体は `high` です)。このファイルは実行せずにデータとして読むので、値はすべてその場に書きます。変数、スプレッド、関数の呼び出し、知らないキー、許されていない引き下げが 1 つでもあると、ファイル全体を読めないものとして扱います。読めないポリシーは一切適用されず、変更は `high` に保留され、理由が「Not judged」に出ます。ポリシーが上げているレーンを見落とさないためです。
+`add review` は Change ワークフローを入れます。このワークフローは、すべてのプルリクエストと `main` への push で `bunx guren change:evidence` を実行します。あわせて `guren.review.ts`、`REVIEW.md`、プルリクエストと issue のテンプレートも書き出します。書き出すファイルの一覧、レビューのポリシー、`change:*` コマンドは[変更のレビュー](./change-review.md)で説明しています。
 
 ### `add browser-tests`
 
-`add browser-tests` は、Playwright のブラウザテストを導入します。テストはアプリを `bunx guren browser:serve` 経由で起動するので、本番環境や、ローカルだと確かめられないデータベースでは起動しません。このコマンドは `playwright.browser.config.ts`(アプリを `127.0.0.1:4317` で、その Vite dev サーバーをポート 4318 から起動する設定)と `tests/browser/support.ts` を書き出してから `bunx guren browser:map` を実行します。Vite のポートは、`GUREN_VITE_PORT` を設定していなければ `browser:serve` がアプリのポートの次の番号にします。以後は `browser:map` が、`tests/browser/generated/` の下に次の 2 種類の spec を保ちます。
-
-- `smoke.browser.ts`: ブラウザマップの機能ごとに 1 つのテストで、パスパラメーターのない最初のページが 200 を返し、ルートが描画するはずのコンポーネントを表示することを確かめます
-- `plans/<plan>.browser.ts`: ビューを持つ承認済みの計画ごとに 1 つのファイルで、計画がビューに定めたフォームのラベルとアクション名が、そのビューを描画するパスパラメーターのない最初のページに表示されることを確かめます
-
-計画のラベルはアプリの既定ロケールで書かれるので、設定ファイルは Playwright の `locale` をその既定ロケールにします。既定ロケールは `createApp({ i18n })` から読み取ります(`fallback`、なければ `supported` の先頭で、読み取れなければ警告を出して `en`)。設定しないと、サーバーはブラウザの `Accept-Language` からロケールを選んでしまいます。セットアッププロジェクトはサインイン済みのセッションを保存する前に `locale` cookie を消します。各計画の spec はラベルを探す前に、ページの `_i18n.locale` が `_i18n.fallbackLocale` と一致するかを確かめます。別のロケールで描画されたページでは、直すべき設定の行を示すメッセージで spec が失敗するので、ラベルが見つからない理由をすぐに見分けられます。アプリの既定ロケールを変えたときは、`playwright.browser.config.ts` の `LOCALE` も変えてください。
-
-開けないページ(どのルートもパラメーターを取る、まだ描画するルートがない、アプリが用意できないサインイン済みのユーザーが要る)は、理由を書いた `test.fixme` になります。結果ではスキップとして表示され、合格にはなりません。計画を承認したら `bunx guren browser:map` をもう一度実行してください。生成した spec が古いあいだ、`--check` は終了コード 1 を返します。どの機能や計画からも生成されなくなった spec は削除されます。生成ヘッダーのないファイルが `tests/browser/generated/` にあると上書きを拒むので、自分で書く spec はこのディレクトリの外に置いてください。
-
-パスワードでサインインするアプリ(`make:auth` が書き出す `users` テーブルと `POST /login` ルートがあるアプリ)では、セットアッププロジェクトの `tests/browser/auth.setup.ts` と、シーダーの `db/seeders/browser-account.ts` も書き出します。シーダーは `browser:serve` がアプリを起動したときに `BROWSER_TEST_PASSWORD` のパスワードで `browser@example.test` を作り、それ以外の起動や本番環境では何もしません。初回の実行までに `.env` の `BROWSER_TEST_PASSWORD` を設定してください。シーダーは起動時のシードで動くので、`config/database.ts` で `defineDatabaseConfig()` に `seedOnBoot` を渡しておく必要があります。渡していなければ、コマンドが警告します。
-
-あわせて `test:browser` スクリプト(`playwright test -c playwright.browser.config.ts`)を追加し、`@playwright/test` を devDependency に加えます。`--no-install` を付けると、`bun add` のコマンドを表示するだけになります。`test-results/`、`playwright-report/`、`tests/browser/.auth/` は `.gitignore` に追加されます。別のコマンドを実行する `test:browser` スクリプトがすでにあれば、何も書かずに中断します(`--force` で置き換えます)。`bunx playwright install chromium` でブラウザを入れてから、`bun run test:browser` で実行します。Playwright は Node 上で動くので、`PATH` に Node 20.12 以降が必要です。
-
-`bun test` は `*.spec.ts` も集めてしまうため、spec のファイル名は `.browser.ts` で終わります。ブラウザテストは `guren gate` では実行されません。
+`add browser-tests` は、アプリを `bunx guren browser:serve` 経由で起動する Playwright のブラウザテストを導入します。生成した spec は `bunx guren browser:map` が最新に保ちます。使い方は[ブラウザテスト](./browser-tests.md)で、書き出すファイルとオプションの一覧は[リファレンス](./browser-tests.md#リファレンス-add-browser-tests)で説明しています。
 
 ### 振る舞いの spec
 
-`add browser-tests --behaviours --agent claude-code` は、承認済みの計画の振る舞いをブラウザで実行するテストを導入します。テストは振る舞いの開始ページを開き、通信が落ち着いてハイドレーションが済むのを待ってから、振る舞いを実行します。触る操作がすべて計画に書かれている場合は、ロケーターで入力して実行するので、モデルは呼びません。具体的には、入力がどれもフォームのラベル付きのテキスト・数値・チェックボックス・セレクトのフィールドで、ルートを送るアクションの名前も計画にある場合です。それ以外の場合は、計画から組み立てた指示(`set "Title" to {title}, then submit the form`)を 1 つコーディングエージェントに渡して操作させます。どちらの場合も、結果は通常のロケーターで確かめます。確かめる対象は、リダイレクト先、遷移先のページのラベルとアクション、計画がエラーを見込むフィールドの `aria-invalid` です。テストは [e2e](https://github.com/e2e-inc/e2e) ランナーで動き、エージェントの操作はステップごとに記録されます。記録のあるステップはモデルを呼ばずに再生されます。エージェントのログインは、ステップを初めて実行するときと、ページが変わって記録が合わなくなったときにだけ使われます。
-
-`--agent` は必須で、既定値はありません。どのエージェントのログインでステップを実行するかを、`claude-code` か `codex` で指定します。一方のエージェントで作った記録は、もう一方でも再生されます。`--agent none` を指定すると、エージェントなしでランナーを導入します。インストールされるのは `e2e` と `@e2e-dev/web` だけです。触る操作がすべて計画に書かれた振る舞いはロケーターで実行されるので、ログインも記録も要りません。agent のステップが必要な振る舞いは、その理由を書いた skip のテストになります。あとからエージェントを変えるときは、`--force` を付けてもう一度実行してください。設定ファイルは書き直され、`given.ts` と記録はそのまま残ります。この方法で `--agent none` に切り替えると、`@e2e-dev/acp` とエージェントのアダプターも削除します(`--no-install` を付けると、代わりに `bun remove` のコマンドを表示します)。`browser:map` が agent のステップを書くのは、`e2e.browser.config.ts` が `@e2e-dev/acp` から executor を import していて、アプリがそのパッケージを依存に持つときだけです。コマンドは次のファイルを一度だけ書き出します。
-
-- `e2e.browser.config.ts`: アプリを `bunx guren browser:serve` 経由で `127.0.0.1:4319` に起動する設定です。すでに動いているサーバーには接続しません
-- `tests/browser/behaviours/given.ts`: 利用者が編集するファイルです(後述)
-- `tests/browser/behaviours/auth.setup.e2e.ts`: パスワードでサインインするアプリでだけ書き出します。Playwright のセットアップと同じシード済みのアカウントでサインインし、テストが使うセッションを保存します
-
-あわせて `test:behaviours` と `test:behaviours:ci` のスクリプトを追加し、`e2e`、`@e2e-dev/web`、`@e2e-dev/acp` を固定のバージョンで、選んだエージェント用のアダプターと一緒にインストールします。`--no-install` を付けると、`bun add` のコマンドを表示するだけになります。`.gitignore` には `.e2e/*` と `!.e2e/cache/` が追加されます。以後は `bunx guren browser:map` が、振る舞いごとに 1 つのテストを `tests/browser/behaviours/generated/<plan>.e2e.ts` に保ちます。
-
-種類が `success` か `validation` で、ルートが `GET` 以外の振る舞いがテストになります。ただし、計画のビューがそのルートへフォームを送信するか、そのルートのアクションを持っている場合に限ります。それ以外の振る舞いはスキップされるテストになり、タイトルに理由が入ります。たとえば、`TestApp` でしか確かめられない種類(未サインイン、権限のないユーザー、存在しないレコード)、実行後にブラウザで確かめられるものが残らない振る舞い、フォームのコントロールがリクエストの前に止めてしまう入力値です。開始ページがパスパラメーターを取る振る舞い(`/posts/:id/edit`)には、`given.ts` のエントリーが必要です。エントリーではレコードを作り、パラメーターの値を返します。エントリーがないテストは実行時にスキップされ、足りないエントリーが理由に示されます。
-
-```ts
-export const given: Record<string, (fixtures: GivenFixtures) => Promise<Record<string, string> | void>> = {
-  'AC-posts-update-1': async ({ browser }) => {
-    await browser.goto('/posts/create', { waitUntil: 'networkidle' })
-    await browser.locator('input[name="title"]').fill('Given post')
-    await browser.locator('button[type="submit"]').tap()
-    await browser.waitForURL(/\/posts\/\d+$/u)
-    return { id: new URL(await browser.url()).pathname.split('/').at(-1)! }
-  },
-}
-```
-
-実行には 2 つのスクリプトを使います。
-
-```bash
-bun run test:behaviours       # 記録のあるステップは再生し、残りはモデルで実行して記録する
-bun run test:behaviours:ci    # 再生だけを行う(--strict-cache)
-```
-
-計画を承認したあとやページを変えたあとに `bun run test:behaviours` を実行し、`.e2e/cache/` をコミットしてください。記録はテストデータなので、その差分はページを変えたコミットに含めます。小さなアプリで計測したところ、モデルでの実行は 1 ステップあたり、Claude Code(`sonnet`)で約 10 秒、4 万 1 千トークン、Codex で約 17 秒、6 万 5 千トークンでした。どちらもトークンの 85% 以上はキャッシュの読み出しです。記録済みのテスト 4 件の再生は 7 秒でした。初回の実行では、ランナーが固定している Chromium が、Playwright のものとは別にダウンロードされます。
-
-`browser:map` がテストを作り直すとタイトルが変わり、新しいタイトルで記録し直されます。古い記録は `.e2e/cache/` に残ります。ランナーには、なくなったテストの記録だけを消すコマンドがないためです。古い記録を消すときは、`bunx e2e cache clear` を実行してから `bun run test:behaviours` を実行します。agent のステップはすべてモデルでもう一度実行され、記録されます。ロケーターで実行するテストには記録がないので、古い記録も残りません。
-
-記録は空のデータベースに対して作ってください。CI は空のデータベースから始まるためです。記録には、ステップが終わった時点でページに表示されていた内容も含まれます。以前の実行の行が一覧に残った状態で作った記録は、空のデータベースでは合わなくなりました(`REPLAY_STALE`)。空のデータベースで作った記録は、どちらの状態でも再生されました。開発用のデータベースを使わずに済ませるには、専用のデータベースを用意します。`e2e.browser.config.ts` の `args` に `'--database-url', './data/behaviours.db'`(ほかのローカルのデータベースの URL でも構いません)を足し、`DATABASE_URL=./data/behaviours.db bunx guren db:migrate` でマイグレーションを適用してください。記録を作る前には、そのデータベースを削除してマイグレーションをやり直します。
-
-CI では `bun run test:behaviours:ci` を実行します。ログインも API キーも要りません。macOS で作った記録は Linux でも再生されます(Debian のコンテナで計測)。最小構成の Linux イメージでは、先に `bunx playwright-core install-deps chromium` で Chromium のシステムライブラリを入れてください。入っていないとブラウザが起動せず、終了コード 3 で終わります。何が起きたかは終了コードで分かります。
-
-| 終了コード | 意味 | 対応 |
-|------------|------|------|
-| 0 | すべてのステップを再生した | 不要 |
-| 1 | テストが失敗した | ステップのあとの確認が通っていません。ページの動きが計画と違っています |
-| 2 | `REPLAY_STALE`(記録がいまのページに合わない) | 手元で `bun run test:behaviours` を実行します。通ったら新しい記録をコミットします。失敗するなら、ページの動きが計画と違っています。失敗した実行は合わなくなった記録を削除するので、ページか計画を直すまで `.e2e/cache/` はコミットしないでください |
-| 2 | `MODEL_UNAVAILABLE`(agent のステップを持つテストがあるのに、設定ファイルにエージェントがない) | `bunx guren browser:map` を実行します。`e2e.browser.config.ts` が `@e2e-dev/acp` から executor を import していなければ、その振る舞いは skip のテストとして書き直されます。import は残っていて `agents` だけがない場合は、`bunx guren add browser-tests --behaviours --agent <agent> --force` でエージェントを指定し直すか、`--agent none --force` で取り除いてください |
-| 3 | ステップを実行できなかった | 記録のないステップがモデルを呼ぼうとして、ログインがないために失敗しています(`MODEL_PROVIDER_FAILED`)。手元で `bun run test:behaviours` を実行し、記録をコミットしてください。計画が変わって `browser:map` が作り直したテストはタイトルが変わるので、まだ記録がありません。アプリを起動できなかったときも同じコードになります |
-
-エージェントにはステップ用のツールだけが渡され、シェルもファイルも MCP サーバーも使えません。生成される形のステップを、Claude Code で 65 回、Codex で 52 回モデルに実行させた計測では、エージェントが自前のツールを使おうとして拒否される `POLICY_DENIED` は 1 度も起きませんでした(95% の信頼度で発生率はそれぞれ 4.6% 未満、5.8% 未満)。env ファイルに書かれた変数は、`BROWSER_TEST_PASSWORD` も含めて、設定ファイルがすべて空文字にしてエージェントへ渡します。そうしないと、Bun が env ファイルをエージェントのプロセスにも読み込むためです。`.env` に `ANTHROPIC_API_KEY` や `OPENAI_API_KEY` があっても同じように空になり、エージェントは自身のログインで動きました。パスワードはランナーが入力するので、エージェントには渡りません。シェルだけで `export` している変数はエージェントに届くので、テストを実行するシェルでは秘密の値を `export` しないでください。起動したあとのエージェントのプロセスが何を読むかまでは確かめていません。
-
-`BROWSER_TEST_PASSWORD` が未設定のときは、サインインのセットアップが変数名を示して失敗し、サインインが必要なテストはスキップされます。`--force` は設定ファイルとセットアップを書き直しますが、`given.ts` は書き換えません。インストール済みの `@playwright/test` がランナーの固定する `playwright-core` より古いと、`tests/browser/generated/a11y.browser.ts` が型チェックに通らなくなることがあります。その場合はコマンドが警告し、バージョンを上げる `bun add` のコマンドを表示します。これらのテストも `guren gate` では実行されません。
+`add browser-tests --behaviours --agent claude-code` を実行すると、承認済みの計画の振る舞いをブラウザで実行するテストも導入されます。操作は一度記録して、CI では再生します。[計画の振る舞いを実行する](./browser-tests.md#計画の振る舞いを実行する)と[リファレンス](./browser-tests.md#リファレンス-振る舞いの-spec)を参照してください。終了コードの一覧と、この実行に専用のデータベースを持たせる方法もリファレンスにあります。
 
 ### API 専用アプリの場合
 
@@ -271,7 +183,7 @@ CI では `bun run test:behaviours:ci` を実行します。ログインも API 
 | `make:agent <Name>` | 永続エージェントを `app/Agents` に生成し、`config/agents.ts` に登録し、モデルや ORM から遠ざける `guren.arch.ts` のルールを追加し、クラスが必要とする `config/bindings.ts` と tsconfig の `types` エントリも書き出す([永続エージェント](./durable-agents.md)参照) | `bunx guren make:agent Triager` |
 | `make:validator <Name>` | Zodバリデーションスキーマ(ルートパラメータ・一覧クエリ・ペイロード)を `app/Http/Validators` に生成。`--fields` は `make:feature` と同じ構文 | `bunx guren make:validator Post --fields "title:string,body:text"` |
 | `make:adr "<Title>"` | アーキテクチャ意思決定を採番付きファイルとして `docs/adr/` に記録(リンク可能なfrontmatter付き)。`--entity <Model>` で `entities:`/`related:` を自動補完、`--issue <ref>`(カンマ区切りで複数可)でGitHubのIssue/PRへの `issues:` リンクを記入 | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412` |
-| `make:lesson "<Title>"` | 教訓を採番付きファイルとして `docs/lessons/` に記録する。frontmatter にはルールを 1 行だけ書く(`rule:`。`--rule` を省くとタイトルを使う)。最初は `status: draft` で、まだ誰にも届かない。人が `stable` にしてマージすると、`guren context <Entity>` が、名前の挙がったエンティティごとに Lessons の見出しの下にルールを出す。`--entity` で `entities:` を、`--paths` でエンティティを持たない教訓が対象にする glob を埋め、`--from <commit\|pr>` で出どころを記録する(`source:`。種類は `--kind` で `review-finding`、`escaped-defect`、`revert`、`stall`、`waiver`、`declined-finding` から選ぶ)。チェックで捕まえられるようになったら、`--enforced-by <file>#<name>` でそのチェックを書く(手で `enforcedBy:` を足してもよい)。`--from <commit>` に不具合を取り除いたコミットを渡すと、そのコミットと親でテストを実行して `reproduced` を記録する。`[<name>]` を題に含むテストが親で失敗し、そのコミットで通れば `true`、親で通れば `false`、それ以外は `not-run` になり、理由は `reproducedBecause` に残る(`--no-reproduce` で実行を省く)。テストは今の環境変数のまま動く。`guren check --docs` は、160 文字を超えるルールと、ファイルに書かれていない `enforcedBy` を失敗にし、`review:` の日付を過ぎた教訓には警告を出す | `bunx guren make:lesson "Load a comment through its post" --entity Comment --from 412` |
+| `make:lesson "<Title>"` | 教訓を採番付きファイルとして `docs/lessons/` に記録する。最初は `status: draft` になる。フラグは[教訓](./change-review.md#教訓)を参照 | `bunx guren make:lesson "Load a comment through its post" --entity Comment --from 412` |
 
 > **Note:** `make:*` は既存ファイルを上書きしません。必要なら `--force` を付けてください。
 
@@ -292,11 +204,9 @@ CI では `bun run test:behaviours:ci` を実行します。ログインも API 
 | `docs:graph` | OKF docs のリレーショングラフ。文書・エンティティ・コードパスがノードで、検証済みのリレーションがエッジになる。`--entity <Model>` / `--path <file>` で周辺だけに絞れるので、リネームの前に「これを規定している docs はどれか」を調べられる | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
 | `deps:why <name>` | `bun.lock` から、そのパッケージのインストール済みの版をすべて出力する。版ごとに、どの直接の依存からどの経路で入ったかと、`bun install --production` でも入るかを示す。アプリにそのパッケージがないときや、lockfile を最後まで読めないときは exit 1 | `bunx guren deps:why hono` |
 | `deps:exposure` | インストールされている各パッケージについて、それを import しているアプリのファイル (それを持ち込む直接の依存を import しているファイルを含む)、そのファイルが動く場所 (server、client、SSR、build、test)、Application Graph をたどって届くルートを出力する。`@guren` のパッケージだけが持ち込むものは `framework` として 1 回だけ示す。`--package <name>` で絞り込み、`--json` で版付きの文書を出力する。出力の最後に、結果が確かめずに頼っているものを並べる (JSON では `trustBoundary`)。読み取りが 1 つでも不完全なら exit 1 | `bunx guren deps:exposure --package marked` |
-| `change:lane` | 2 つのコミットの間の変更から事実を読み取り、レビューのレーンの下限(`low`、`medium`、`high`)を出力する。作業ツリーは読まず、git のオブジェクトから gate の入力、計画の記録、マイグレーション、スキーマのテーブル、受け入れテスト、Policy、依存を読む。`--base` と `--head` にはコミットの SHA を渡し、両者のマージベースから先を変更として扱う。変更の両側で audit も実行し、base に無かったものを報告する。対象は、audit の失敗、レスポンスに出る機密の列、CSRF の免除、無効にされたセキュリティの既定値、変更が編集したモデルで新しく出たか、新しい列を挙げるモデルの規則の警告(`mass-assignment`、`owner-fillable`、`hidden-columns`)、抑制された指摘。そのために各コミットを一時ディレクトリに展開し、手元の install を使って `guren audit` を走らせるので、コマンドを実行したシェルの環境変数のもとでアプリケーションのコードが読み込まれる。コミットの lockfile がインストール済みのものと違うとき、何もインストールされていないとき、リポジトリ内のパッケージがインストールされているとき(ワークスペースのメンバー、`link:` や `file:` の依存)、コミットがアプリケーション内に symlink を持つときは audit を行わない。`--no-audit` でこの手順を省ける。承認済みの計画が宣言している事実は、宣言どおりのレーンになる。計画が今のハッシュで承認されていて閉じておらず、変更が計画の記録を書いていなければ、次の 2 つが `low` になり、事実の横に計画と要素が表示される(`declared by docs/plans/comments/plan.json#model.comment`)。1 つは、計画が追加する要素のために `plan:scaffold` が書くソースファイルの追加で、そのパスにあり、scaffold 自身の出力と同じ名前を export しているもの。Policy の Provider は scaffold が書くものと同じでなければならず、Policy とコントローラのファイルは import、型、クラスだけを持ち、クラスは scaffold が import する基底クラスを継承し、計画した ability やアクション以外のメンバーを持たないこと。もう 1 つは、計画が追加するモデルのテーブルの追加で、列、デフォルト値、キー、インデックスを含めて、scaffold がそのスキーマに書くとおりに宣言されているもの。この場合、テーブルの中にあってスキーマの読み取りが追わないコード(`sql` のデフォルト値、インデックスのコールバック)も scaffold が書いたものとして扱い、それだけで `db/schema.ts` が `medium` になることはない。テーブルを並べたオブジェクトにそのテーブルを足しても同じだが、そこからテーブルを外すと `medium` になる。追加したマイグレーションも、計画が追加するテーブルを drizzle-kit が書く形の文で作るだけなら `low` になる。ファイル全体としても、drizzle の migrator が `--> statement-breakpoint` で切り分けたときの各部分としても読む。条件は、各 `CREATE TABLE` が計画どおりの列だけを持ち、各列の型、NULL の可否、キー、デフォルト値も scaffold の builder が書くとおりであること。計画した一意制約、インデックス、外部キー(削除時の動作を含む)はそれぞれのテーブルの後にちょうど 1 回ずつ書かれ、それ以外は書かれていないこと。さらに、フォルダには `migration.sql` と `snapshot.json` があってそれ以外はなく、snapshot が前のマイグレーションの snapshot に SQL が作るものを足しただけになっていること。両側のセキュリティ記録を比べられたとき(後述)は、ルートの変化も事実になる。head が登録していて base に対応するルートがないものは `route-added`、どの head のルートとも対応しない base のルートは `route-removed`、対応したルートで記録のどこかが変わったものは `route-changed`、`.agent()` が付いた、変わった、外れたルートは `agent-tool` で、どれも `medium` になる。追加したルートは、計画がプロジェクトのルートに同じメソッド、パス、名前で追加していて、記録が計画どおりなら `low` になる。記録が計画どおりとは、アクションが scaffold の書くコントローラのファイルが export する計画どおりのもので、middleware が名前で計画どおり(`auth` はユーザーを必須にするもの)であり、バインディング(モデルのファイルと export で比べる)と agent のメタデータも計画どおりで、各契約が計画したモデルの validator ファイルにある計画どおりの export で、描画したスキーマのキー、型、必須の指定、ルールが `plan:status` の判定で計画どおりであり、計画した Policy の ability をその Policy のモデルについて `authorize()` に渡していて(アクションへのルートがどれも 1 件のレコードをバインドするなら `[Model, record]`、そうでなければそれかクラスそのもの)、その呼び出しがアクション本体の文として await されていて、コントローラがそのモデルを同じ名前のままモデルのファイルから import し、ほかでその名前を束縛していないこと。登録済みの別のルートと同じ名前を持つルートは宣言しない。`--mount` は scaffold のルートを先に登録するので、後に登録された、この変更が追加したのではない同じメソッドか `ALL` のルートに、同じリクエストが当たりうるパスがあれば宣言しない。バインディングは検索列まで読むので、計画した `key` はその列と照合し、計画にない列の指定はルートの変更として出る。古い `@guren/core` では列が読めないので、バインディングは宣言しない。scaffold が書くルートファイルは、head のモデルと validator のファイルを前提に scaffold が書くとおりなら `low` になる。ルートのエントリの編集は、`plan:scaffold --mount` が書くとおりで、マウントしたファイルが scaffold の書いたままであり、変更のルートの事実がすべてそのファイルのルートの宣言済みの追加で、それぞれ 1 回ずつであれば、それだけで変更を `medium` にすることはない。ただし、マウントしたファイルが設定する alias を別のルートが直接またはグループ経由で使っていて、エントリの registrar の最上位の文が呼び出しの後でその router に同じ alias を設定していないときは、編集を残す。`authorize()` の呼び出しは、アクションの本体の文として await され、その前に return しうる文がないものに限る。エントリは書かれたとおりに読むので、実行されないエントリの文も同じように読める。宣言したルートがあるときは、レポートにそのことを書き添える。別の開いている計画も同じファイルやテーブルを対象にしているときは、レーンを変えない。アプリケーションのエントリ(`src/app.ts`、なければ `app.ts`)の編集が、`createApp()`(`@guren/core` から import してモジュールの最上位で呼ぶもの)のオブジェクトの `providers` と `config` の配列に名前を足し、それを束縛する import を足すだけなら、足した項目ごとに `provider-added` か `config-added` の事実になり、どれも `medium` になる。ファイルのほかの部分も変わっていれば `source-edited` のまま。オブジェクトにスプレッド、計算されたキー、`__proto__`、配列と同じ名前のメソッドやアクセサがあるときと、足した import がファイルのほかの箇所で読んでいる名前を束縛するときも `source-edited` のまま。Provider は、エントリが `plan:scaffold` が 1 つの scaffold ステップの Provider について書くとおりで、Provider とそれが登録する Policy が計画どおり(Provider はファイル全体、Policy は計画した ability)なら `low` になる。宣言したファイルの隣に拡張子だけ違うファイル(`P.ts` に対する `P.js` など。Bun はこちらを実行する)があるときは、宣言どおりとは扱わない。開いている計画の `providers` や `config` の要素が足す項目は、それが要素のファイル(`app/Providers/<className>`、`config/<name>`)の default import で、足す計画が 1 つだけなら `low` になる([Provider と config](./implementation-plan-format.md#provider-と-config))。`config/env.ts` の `defineEnv()` に足したキーは `env-added`(`medium`)で、開いている計画の `env` の要素がそれを足していて、宣言が要素の書いたとおりなら `low` になる([環境変数](./implementation-plan-format.md#環境変数))。開いている計画の `make:*` コマンドが書いた追加ファイルは、ジェネレーターが書いたままなら `low` になる。そのクラスを、コマンドと同じモジュールで計画が追加する要素が受け持つなら、その要素の検査を通れば `low` になる。Provider とルートファイルは、いつもジェネレーターが書いたままであることを求める([コマンド](./implementation-plan-format.md#コマンド))。開いた計画の `alter` や `drop` のルートが述べる範囲を超えたルートの変更と削除、それ以外のことをするマイグレーション、既存のテーブルの変更、開いた計画の `drop` 要素が受け持たないファイルの削除、ブループリントや複数のファイルを書くジェネレーターが書いたもの、Policy の編集は、今のところ `medium` のまま。同じ計画の前のタスクが追加したモデルとコントローラーのファイルの編集は、計画の承認の記録を足したコミットにそのファイルが無く、すべてのルートのセキュリティ記録を比べられたときに、その計画による追加として読む。マージベースに `guren.review.ts` があれば、[レビューのポリシー](#レビューのポリシー)に従って事実のレーンを上げ下げする。依存に触れた変更では、変わったファイルごとにそれを管理する `bun.lock` を探し、両側で `bun audit` も実行する。インストールはせず、問い合わせるレジストリは base の `.npmrc` が指すものにし(環境変数によるレジストリの上書きは外す)、両側とも今日時点の脆弱性情報で比べる。head にあって base に無い脆弱性情報は `dependency-advisory` として常に `high` で報告する。`--no-deps` でこの手順を省ける。`bun.lock` が変わっていないマニフェストの変更、バイナリの `bun.lockb`、依存があるのに `bun.lock` が無い base、`bun audit` が警告を出したスキャン(問い合わせを飛ばしたレジストリがある)は判定できないものとして並べる。`.npmrc` は、インストール先のレジストリを決めるので、どこにあっても gate の入力として扱う。同じ 2 つの展開先でルートごとのセキュリティ記録(`guren change:records`)も読み、base と head をルートごとに比べる。ルートはコントローラのアクションで、見つからなければメソッドとパスで対応させる。middleware の鎖からガードが外れたとき、アクションから `authorize()`/`can()` や `auth.userOrFail()` の呼び出しが消えたとき、`authorize()` がアクションのたびには実行されなくなったとき(条件の下、return しうる文の後、`try` の中、`void` や `.catch()` の後ろ、ヘルパーの中に移ったとき)は `authorization-removed`(もとからそうでなかった呼び出しは、後の文が呼び出しや拒否の扱いを決めることがあるので、アクション全体で比べる)、契約のスキーマや validate の呼び出しが消えたときは `validation-removed` になり、どちらも常に `high` になる。base と比べて強弱を決められない記録(鎖の順番の入れ替え、capability を持たない middleware の削除、別の ability や対象(対象のクラスは import と再 export をたどって宣言しているファイルまで読むので、別のファイルの同名クラスは別の対象になる)、別の validator への差し替え、キーや制約が減ったスキーマ、アクションが validate に使うスキーマの宣言の変更、読めなかったアクション)は判定できないものとして `high` で並べる。変更のせいで head が読めなくなった場合も `high` になる。名前を決められない呼び出し(実行時に組み立てる ability、手で問い合わせる gate、その場で書いたスキーマ)は、アクションの本文とその引数から辿れる宣言のダイジェストで比べるので、そのソースが変わったときだけ強弱を決められない扱いになる。引数がアクション内のローカル変数のときは本文が参照するもの全部に、継承したアクションは `extends` で辿れるクラス文に広げて比べる。そのため、ガードが変わっていなくても、それらが変われば強弱を決められない扱いになることがある。継承したアクションが別のファイルで参照するスキーマや ability は辿らない。`./` と `@/` 以外の別名を通した import は、指定子の文字列だけで比べる。インラインのルートハンドラの中身は読まない。ガードや制約が増えただけの記録は事実にならない。この install から base を組み直せないときは、`--base-record <file>` に、以前の `change:evidence` がマージベースについて書いた `record.json` を渡せる。その記録と、head だけを読んだ記録とを比べる。別のコミット、別の形式、別のデプロイ先、別の `NODE_ENV` の記録は比べずに判定しなかったものとして並べ、比べられる記録を書くにはどの実行をやり直せばよいかも示す。別のバージョンの `@guren/cli` やフレームワークが書いた記録は比べたうえで、そのバージョンを結果に添える。読まないもの(この install から base を組み直せず、保存された記録もないときの記録、スキャンできなかった脆弱性情報、audit できなかった側)は「Not judged」に並び、下限は `medium` 以上になる。レーンが何であっても終了コードは 0 で、`--json` を付けるとバージョン付きのレポートを出力する | `bunx guren change:lane --base 9f2c1ab --head 4e7d0c3` |
-| `change:evidence` | CI で gate の代わりに実行するコマンド。`guren gate --deps` を実行し、`change:lane` と同じ判定をしたうえで、`evidence.json`、要約した `record.json`、ジョブの要約用の `evidence.md` をアプリケーションの `.guren/evidence/` (または、コマンドを実行した場所から見た `-o <dir>`) に書き出す。失敗するのは gate が失敗したときだけで、書き出せなかったファイルは標準エラーに出すだけで終了コードを変えない。証拠から確かめられなかったことは保留として記録する。対象は、失敗した gate、`--head` にない、gate の実行中に移動した、または追跡中のファイルに未コミットの変更があるチェックアウト、gate の codegen が書き換えたコミット済みのファイル、読めなかった変更(浅いクローン)、コミットを含まない変更(base より古い head)。このバージョンでは、閉じていない計画がひとつでもあるときの計画の証拠と、ページ、ルートファイル、翻訳カタログを変える変更のブラウザの証拠も保留になる。`REVIEW.md` があるときは、`change:policy --check` でブロックが古いと分かった場合と、その確認のためにアプリケーションを読み込めなかった場合も保留になる。下限が low で保留がなければ low の対象になる。失敗したコマンドが出力した認証情報(URL のユーザー情報、秘密を表す名前の `NAME=value`)は、どのファイルでも伏せ字にする。`--routes` は gate に、`--base-record` は `change:lane` に渡し、`--no-deps` と `--no-audit` で依存の走査(gate のものと両側の脆弱性情報)と両側の audit を省ける。audit を省かなければ、変更がどこに触れていても `record.json` に head のセキュリティ記録が入り、後の変更はこれを基準の記録として読む。`guren add review` が書くワークフローは、既定のブランチへの push で走った実行がマージベースについて保存した記録だけを取ってきて渡すので、別のブランチに積んだプルリクエストには読める記録がない | `bunx guren change:evidence --base 9f2c1ab --head 4e7d0c3` |
-| `change:records` | `change:lane` が比べる、ルートごとのセキュリティ記録を出力する。中身は、鎖に載っている middleware とそれぞれが宣言する capability(認証、認可)、契約のスキーマとその元になった validator の export、バインディングと `.agent()` のメタデータ、アクションの `authorize()`・`can()`・`auth.userOrFail()`・validate の呼び出し。env ファイルを読まずにアプリケーションを introspect するので、アプリケーションのコードが動く。provider が例外を投げたときは何も読まない。introspect が飛ばした処理(`createApp({ boot })` のコールバックや provider の `introspect()` フック)は記録と一緒に並べ、`change:lane` は両側に並ぶルートを比べたうえで、それを `medium` として報告する。`--json` でバージョン付きの形を出力し、アプリケーションを読めなければ終了コード 1 で終わる | `bunx guren change:records --json` |
-| `change:policy` | `REVIEW.md` のうち、レビューで必ず読むものを並べたブロックを、登録されたアプリケーションから作り直す(`browser:map` と同じくアプリを introspect する)。`REVIEW.md` が無ければ作る。`paths` を持ちエンティティを持たない stable な教訓もここに載せ、入っているエージェントごとに `lessons` というルール(`.claude/rules/lessons.md`、`.agents/rules/lessons.md`、`.cursor/rules/lessons.mdc`、`.github/instructions/lessons.instructions.md`)に書き出す。ルールの対象は教訓の glob に絞る。glob はアプリケーションのルートからの相対で、モジュールの教訓も同じ。Cursor と Copilot は一覧をカンマでつなぐので、`{a,b}` の波かっこは展開して書く。該当する教訓がなくなったら消す。同じ名前で自分が書いたものではないファイルがあれば止まり、書く教訓がないあいだはそのまま残す。`guren:review` のマーカーの外は書いた人のものなので残し、安全に書き換えられないマーカーがあれば何も書かずに止まる。`--check` を付けると何も書かず、保つファイルのどれかが無いか古いときは終了コード 1 で終わる | `bunx guren change:policy --check` |
 | `spec:generate` | `docs/spec/` にある導出スペックビュー(ER 図・ドメインモデル・画面一覧・モジュールマップ)を生成し直す。詳しくは[スペックアンカード開発](./spec-anchored.md)を参照 | `bunx guren spec:generate` |
+
+レビューのためのコマンド(`change:lane`、`change:evidence`、`change:records`、`change:policy`)は[変更のレビュー](./change-review.md)で説明しています。
 
 `audit` は、名前付きミドルウェアで保護したルート(例: `router.middleware('auth').group(...)`)を保護済みとして扱い、`/login` や `/register` などのゲスト向けのフローを認証チェックの対象から外します。
 
@@ -327,26 +237,11 @@ bunx guren check --prototype  # prototype ハンドラーのルートに名前�
 
 ### `--fix` で生成し直す
 
-指摘の中には、ファイルを生成し直せば消えるものもあります。`.guren/*.gen.ts` マニフェストがない場合(`guren codegen`)と、`docs/spec/` のビューが古い場合(`guren spec:generate`)です。`check --json` は、こうした指摘に `fix` フィールドを付けます。中身は `{ "kind": "command", "args": ["codegen"] }` のような、`guren` に続く引数です。
-
-`--fix` を付けると、重複を除いた fix を 1 回ずつ実行してからもう一度チェックし、2 回目の結果を報告します。実行したコマンドは `fixes` に入ります。どれかのコマンドが失敗したときや、コマンドは成功したのに消えるはずの指摘が残ったときは、非ゼロで終了します。
-
-`--ci` と `--fix` は同時に指定できません。ゲートが古いファイルを自分で生成し直すと、いつでも通ってしまうからです。`--fix` は手元で実行し、書き換わったファイルをコミットしてください。コードの修正や判断が必要な指摘には `fix` が付かず、`suggestion` の文章だけが付きます。
+`check --fix` は、ファイルを生成し直せば消える指摘について、そのためのコマンド(`guren codegen`、`guren spec:generate`)を実行してから、もう一度チェックします。`--ci` とは同時に指定できません。`doctor --fix` は、doctor が指摘した生成ファイルについて同じことをします。詳しくは[`--fix` で生成し直す](./cli-checks.md#fix-で生成し直す)を参照してください。
 
 ```bash
 bunx guren check --fix          # 指摘が示すファイルを再生成して、もう一度チェック
-bunx guren check --spec --fix   # 同じことをスペックビューに限って行う
-```
-
-`doctor --fix` はdoctorが指摘した不足・古い生成ファイルを再生成し、別のプロセスでもう一度doctorを実行します。`routes/api.ts` を含むアプリのルートエントリを選び、同じ生成コマンドは1回だけ実行します。
-
-`doctor --json` では実行可能な修復を `repair: { kind: 'command', args }` として返し、`--fix` を付けた結果には実行記録の `fixes` も入ります。生成コマンドが失敗した場合、再確認で修復対象の指摘が解消しなかった場合、再確認自体ができなかった場合は非ゼロで終了します。ほかの警告はレポートに残り、`--strict` を付けると警告・失敗も終了コードに反映します。
-
-`canAutofix` が示す設定の自動修正は引き続き `guren upgrade` の対象です。このフラグは生成ファイルだけを書き換えます。
-
-```bash
 bunx guren doctor --fix --next
-bunx guren doctor --fix --json
 ```
 
 ### `gate`
@@ -592,7 +487,7 @@ bunx guren tool:call posts.index --as user:42 --json
 
 呼び出しの結果がエラーだった場合、コマンドは 0 以外で終了します。スクリプトが 422 や 403 を成功と読み違えないようにするためです。[エージェントインターフェース: 自分でツールを呼ぶ](./agent-interface.md#自分でツールを呼ぶ)も参照してください。
 
-起動したアプリケーションに[監査ログ](./agent-tool-governance.md#監査ログ)が設定されていれば、この呼び出しも `surface: 'cli'` として記録されます。書き込み先も引数のマスクも MCP からの呼び出しの記録とまったく同じで、同じファイルに並びます。この経路での呼び出しは `--as` で指定したユーザーとして、何も検証されずに実行されるので、あとから確認できるようにしておく意味があります。監査ログを設定していないアプリケーションでは何も記録されず、呼び出しの動きも変わりません。
+アプリケーションに[監査ログ](./agent-tool-governance.md#監査ログ)を設定していれば、この呼び出しも `surface: 'cli'` として記録されます。
 
 `tool:dev` は、アプリ自身のエンドポイントをそのまま立ち上げます。[`@guren/plugin-mcp`](./agent-interface.md) をインストールして登録しておく必要があり、エンドポイントが応答しない場合はそのことを報告します。発行されるトークンはそのプロセスのメモリ上にしかなく、アプリのトークンストアには何も書き込みません。コマンドを止めればトークンも無効になります。`NODE_ENV=production` のときは実行を拒否します。
 
@@ -809,8 +704,6 @@ bunx guren console
 - コンソールの起動中に追加したモデルは、`reloadModels()` で検出し直せます。
 - `:load path/to/script.ts` で、ファイルの内容を今のセッションに読み込めます。
 - 素の Bun REPL が欲しいときは、`bun repl`(または `bun repl --inspect`)を使ってください。
-
-専用の `guren repl` ができるのを待たなくても、これらの使い方で試行錯誤しながら開発を進められます。
 
 ## アプリ構造と実行時エラーの取得
 

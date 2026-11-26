@@ -1,6 +1,6 @@
 # チェックと監査の詳細
 
-`check`、`audit`、`gate`、`introspect`、`doctor` の一覧は [CLI リファレンス](./cli.md#検査監査コマンド)にあります。このページには、その裏にある規則をまとめています。`audit` の Policy ルールが見るもの、`audit` の指摘の抑制方法、`introspect` が実行するもの、エージェント向けのルートとインプロセスエージェントに追加される規則、アーキテクチャ境界、チェックが登録済み（起動はしていない）アプリから読む事実です。
+`check`、`audit`、`gate`、`introspect`、`doctor` の一覧は [CLI リファレンス](./cli.md#検査監査コマンド)にあります。このページには、その裏にある規則をまとめています。`audit` の Policy ルールが見るもの、`--fix` が生成し直すもの、`audit` の指摘の抑制方法、`introspect` が実行するもの、エージェント向けのルートとインプロセスエージェントに追加される規則、アーキテクチャ境界、チェックが登録済み（起動はしていない）アプリから読む事実です。
 
 ## `audit` の Policy ルール
 
@@ -18,6 +18,30 @@
 関連するモデルのルールとして、`owner-fillable:<Model>` があります。users テーブル(`AuthenticatableModel` を土台にしたモデルのテーブル)を参照する列、たとえば `authorId` をモデルが `fillable` に入れていると警告します。リクエストからレコードの持ち主を選べてしまうためです。その列は `fillable` から外し、`create(data, { set: { authorId: user.id } })` のようにサーバー側で設定してください。担当者のように利用者が意図して選ぶ列は、意図した例外として `config/audit.ts` に記録します。
 
 `exposure-sensitive-column:<Model>.<column>:<file>:<where>` は、アクションがレスポンスに載せる値を追います。対象は `this.inertia()` の props、`this.json()` に渡す値、Resource の `toArray()` が返す値です。レコードはただのオブジェクトなので、レコードをそのまま渡すと `hidden` の列も含めてすべての列が載ります。`Model.serialize()` を通した値には `visible` と `hidden` を当てたあとの列が、`auth.user()` にはモデルのプロバイダーがパスワードのハッシュ、remember token、`hidden` の列を外したあとの列が載ります。モデルが `hidden` に入れている列と、名前に `password`、`token`、`secret`、`hash`、`apiKey`、`otp` を camelCase か snake_case の区切りとして含む列を、機密の列として扱います。警告には、アクション、そこに届くルート、そのルートのミドルウェアの連なりに認可があるかが入ります。audit が追えなかった値（ヘルパーの戻り値や、ライブラリを通した値など）は、レポートの最後の節に読めなかった値として並び、`--json` では `dataExposure` に入ります。`auth.user()` は、introspection がモデルのプロバイダーを 1 つだけ報告したときにしか判定しません。`--no-introspect` で実行したときや独自のプロバイダーを使っているときは、読めなかった値として扱います。意図して載せている値は、その値を渡す行かその上の行に `// guren-audit-ignore` を書けば受け入れられます。
+
+## `--fix` で生成し直す
+
+指摘の中には、ファイルを生成し直せば消えるものもあります。`.guren/*.gen.ts` マニフェストがない場合(`guren codegen`)と、`docs/spec/` のビューが古い場合(`guren spec:generate`)です。`check --json` は、こうした指摘に `fix` フィールドを付けます。中身は `{ "kind": "command", "args": ["codegen"] }` のような、`guren` に続く引数です。
+
+`--fix` を付けると、重複を除いた fix を 1 回ずつ実行してからもう一度チェックし、2 回目の結果を報告します。実行したコマンドは `fixes` に入ります。どれかのコマンドが失敗したときや、コマンドは成功したのに消えるはずの指摘が残ったときは、非ゼロで終了します。
+
+`--ci` と `--fix` は同時に指定できません。ゲートが古いファイルを自分で生成し直すと、いつでも通ってしまうからです。`--fix` は手元で実行し、書き換わったファイルをコミットしてください。コードの修正や判断が必要な指摘には `fix` が付かず、`suggestion` の文章だけが付きます。
+
+```bash
+bunx guren check --fix          # 指摘が示すファイルを再生成して、もう一度チェック
+bunx guren check --spec --fix   # 同じことをスペックビューに限って行う
+```
+
+`doctor --fix` はdoctorが指摘した不足・古い生成ファイルを再生成し、別のプロセスでもう一度doctorを実行します。`routes/api.ts` を含むアプリのルートエントリを選び、同じ生成コマンドは1回だけ実行します。
+
+`doctor --json` では実行可能な修復を `repair: { kind: 'command', args }` として返し、`--fix` を付けた結果には実行記録の `fixes` も入ります。生成コマンドが失敗した場合、再確認で修復対象の指摘が解消しなかった場合、再確認自体ができなかった場合は非ゼロで終了します。ほかの警告はレポートに残り、`--strict` を付けると警告・失敗も終了コードに反映します。
+
+`canAutofix` が示す設定の自動修正は引き続き `guren upgrade` の対象です。このフラグは生成ファイルだけを書き換えます。
+
+```bash
+bunx guren doctor --fix --next
+bunx guren doctor --fix --json
+```
 
 ## `audit` の指摘を抑制する
 
