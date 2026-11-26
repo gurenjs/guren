@@ -2,7 +2,7 @@
 // Run `guren codegen` to regenerate.
 
 export const routeManifest = {
-
+  'home': { method: 'GET', path: '/' },
 } as const
 
 export type RouteManifest = typeof routeManifest
@@ -51,7 +51,7 @@ export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<T
 }
 
 export const routes = {
-
+  home: (query?: RouteQuery) => route('home', query)
 } as const
 
 function hasPathParams(path: string): boolean {

@@ -91,6 +91,30 @@ export function Navigation() {
 
 The prop is lazy. A full visit resolves it, and a partial reload that does not ask for `navigation` skips it, along with its gate checks.
 
+## The layout `guren add auth` writes
+
+`guren add auth` writes `config/navigation.ts` with a Home entry and a Dashboard entry shown only to signed-in users, and adds it to the `config` array of `createApp()`. The Home entry needs a parameterless `GET` route named `home`, which the starter's `/` route is; when the routes file registers none, the file lists Dashboard alone. An existing `config/navigation.ts` is kept, `--force` included, and still added to the `config` array when it is a `defineNavigation()` definition.
+
+The layout it writes, `resources/js/components/Layout.tsx`, renders the `navigation` prop and marks the current entry with `aria-current`. It keeps the account controls, which no entry can hold: Sign in for a guest, and for a signed-in user a link to `/profile` labelled with their name and Log out, which is a `POST`. Their labels come from `lang/en/layout.json`, which `guren add auth` writes once and never replaces.
+
+The brand at the left of the header shows the application's name and links to the first entry the user sees, or to `/` when they see none. The name is the `app` shared prop, which the server sends on every page once `config/env.ts` declares `APP_NAME`. An app that shares its own `app` prop, through `createApp({ inertia: { share } })` or `shareInertiaProps()`, keeps its value.
+
+A page chooses its width. Every page keeps the narrow measure, sized for a form, unless it passes `wide` for a table or a board:
+
+```tsx
+import Layout from '../../components/Layout.js'
+
+export default function JobsIndex() {
+  return (
+    <Layout wide>
+      {/* ... */}
+    </Layout>
+  )
+}
+```
+
+The header keeps one measure on every page, so it does not move from one visit to the next.
+
 ## When an entry is hidden at boot
 
 When the app boots, each entry is linked to its route. An entry whose route is not registered, is not a `GET` or has a path parameter is hidden, and the boot prints a warning naming the entry and the reason. The rest of the navigation still renders: a missing route name would otherwise make every page answer 500.
