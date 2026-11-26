@@ -288,7 +288,10 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
           pending = setTimeout(attempt, 16)
         }
       }
-      attempt()
+      // Inertia's own anchor scroll (core 3.11) looks the hash up undecoded, misses
+      // a non-ASCII id such as a Japanese heading's, and scrolls to the top in a
+      // timeout queued before this event; the first attempt has to land after it.
+      pending = setTimeout(attempt)
     }
 
     scrollToFragment()
