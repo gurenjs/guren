@@ -10,7 +10,7 @@ import type { InertiaPagePayload } from '../mvc/inertia/InertiaEngine'
 import { PATH_PARAM_PATTERN } from '../internal/route-path'
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
 import { AGENT_SURFACE_HEADER } from '../internal/agent-request'
-import { markDispatchedToolRequest } from '../internal/dispatched-request'
+import { AGENT_ROUTE_HEADER, encodeAgentRouteHeader, markDispatchedToolRequest } from '../internal/dispatched-request'
 
 /** How many characters of a non-JSON response body survive into the result. */
 const TEXT_RESPONSE_CAP = 50_000
@@ -199,16 +199,14 @@ export function buildToolRequest(
     headers.set('Content-Type', 'application/json')
   }
 
+  // `routeName`, not `toolName`: the router answers by the route's own name.
+  const route = { method, path: tool.path, name: tool.routeName }
+  // The mark is lost on a socket (a WebMCP page's fetch); the header is what crosses it.
+  headers.set(AGENT_ROUTE_HEADER, encodeAgentRouteHeader(route))
+
   const qs = query.toString()
   const url = `${origin}${path}${qs ? `?${qs}` : ''}`
-  // `routeName`, not `toolName`: the router answers by the route's own name.
-  return {
-    request: markDispatchedToolRequest(new Request(url, { method, headers, body }), {
-      method,
-      path: tool.path,
-      name: tool.routeName,
-    }),
-  }
+  return { request: markDispatchedToolRequest(new Request(url, { method, headers, body }), route) }
 }
 
 /**

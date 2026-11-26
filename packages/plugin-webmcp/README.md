@@ -137,7 +137,8 @@ any other trial your app already serves rather than replacing it.
 3. For an unsafe method the `XSRF-TOKEN` cookie is copied into `X-XSRF-TOKEN`,
    the header Guren's CSRF middleware reads.
 4. The request goes out with `mode: 'same-origin'` and `redirect: 'manual'`,
-   carrying the page's cookies and `X-Guren-Agent-Surface: webmcp`.
+   carrying the page's cookies, `X-Guren-Agent-Surface: webmcp`, and
+   `X-Guren-Agent-Route`, which names the tool's route.
 5. The response becomes an MCP tool result: `structuredContent` when the route
    binds an `output` schema, `isError` for a 4xx/5xx carrying the body your
    exception handler produced.
@@ -149,6 +150,16 @@ anywhere in your app could replay the request body and the token to another
 host. A route that answers with a 3xx therefore reports that the client did not
 follow it; the target is not readable from the page. If a tool needs to redirect,
 give the route a JSON response for the agent instead.
+
+**A path argument cannot pick another route.** An argument equal to an earlier
+route's literal segment (`{ id: 'all' }` on `DELETE /notifications/:id`, behind
+`DELETE /notifications/all`) would otherwise run that route instead of the tool's.
+The server reads `X-Guren-Agent-Route` and answers 400, running nothing, when the
+route the request reached matches the tool's route on neither name nor method and
+path (parameter labels aside). A page built before a deploy keeps working: a
+renamed parameter or route still matches on the other, and a header naming no
+route the app registers is let through. The header can only cause a refusal, so
+sending a false one gains a caller nothing.
 
 Your route's authorization is what authorizes the call. The MCP `annotations` in
 the manifest are hints for client UX and enforce nothing. They are passed to the

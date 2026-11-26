@@ -463,11 +463,11 @@ export class Application {
   }
 
   /**
-   * Asserts that `path` resolves its principal without ever reading a session
-   * cookie, so it refuses on its own terms and CSRF has no ambient authority to
-   * defend there. Only for an endpoint whose own code establishes that; an app
-   * exempting a path it chose wants `csrfOptions.exclude`. Call from `boot`,
-   * after `mountRoutes()` — at `register` the collision check sees no routes.
+   * Asserts that `path` resolves its principal without reading a session cookie,
+   * so CSRF has no ambient authority to defend there; an app exempting a path it
+   * chose wants `csrfOptions.exclude`. Call from `boot`, after `mountRoutes()`,
+   * and mount the endpoint on `hono`: a request a router route answers first,
+   * the endpoint's own included, is CSRF-verified.
    */
   declareCookielessAuthPath(path: string): void {
     // The app's route is registered first and answers there, so honouring a
@@ -494,9 +494,9 @@ export class Application {
   /**
    * Asserts that the endpoint at `path` judges `tool:` / `tools:` scopes itself,
    * so a tools-only token authenticates there (through app-wide auth middleware
-   * in front of it) and nowhere else. Call from `boot`, after `mountRoutes()`.
-   * Only an app route at exactly this path is detected: a parameterised or
-   * wildcard route registered ahead of the endpoint would answer here unseen.
+   * in front of it) and nowhere else. Call from `boot`, after `mountRoutes()`,
+   * and mount the endpoint on `hono`: a request a router route answers first,
+   * a parameterised one included, does not accept the token.
    */
   declareAgentEndpoint(path: string): void {
     const collision = this.routeAt(path)

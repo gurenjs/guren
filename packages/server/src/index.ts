@@ -166,6 +166,7 @@ export {
   AGENT_APPROVAL_CONFIG_KEY,
   agentApprovalExpiredAt,
   agentApprovalFingerprint,
+  agentApprovalFingerprints,
   agentApprovalPrincipalKey,
   agentApprovalStatusAt,
   agentApprovalUsableAt,
@@ -175,6 +176,7 @@ export {
   DEFAULT_AGENT_APPROVAL_TTL_MS,
 } from './agent/approval'
 export type {
+  AgentApprovalKeys,
   AgentApprovalMatch,
   AgentApprovalRequest,
   AgentApprovalRequestInput,
@@ -188,6 +190,8 @@ export { AgentApprovalRequested } from './agent/AgentApprovalRequested'
 // surface dispatching without these bypasses scopes, approvals and the trail.
 // Absent from `@guren/server/agent`, the browser-safe half.
 export {
+  AGENT_APPROVAL_KEY_PURPOSE,
+  agentApprovalKeysFromEnv,
   DEFAULT_APPROVAL_CONFIGURE_HINT,
   DEFAULT_SCOPE_SUBJECT,
   gateApproval,
@@ -1120,7 +1124,7 @@ export {
 } from './config/define'
 export type { ConfigDefinition, ConfigDefinitions, HttpConfig, OAuthConfig } from './config/define'
 export { defineNavigation } from './navigation/navigation'
-export type { NavigationAuth, NavigationConfig, NavigationEntry, NavigationFieldValue, NavigationItem, NavigationModel, NavigationShow } from './navigation/navigation'
+export type { GurenNavigationRegistry, GurenNavigationRoutes, NavigationAuth, NavigationConfig, NavigationEntry, NavigationFieldValue, NavigationItem, NavigationModel, NavigationRouteName, NavigationShow } from './navigation/navigation'
 export type { InertiaI18nProps } from './providers/I18nServiceProvider'
 // Queue: SQS adapter
 export { SqsDriver, createSqsAdapter } from './queue/drivers/SqsDriver'

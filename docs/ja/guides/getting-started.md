@@ -79,8 +79,8 @@ bun run db:up
 
 デフォルトの接続文字列は次のとおりです。
 
-- PostgreSQL: `postgres://guren:guren@localhost:54322/guren`
-- MySQL: `mysql://guren:guren@localhost:33306/guren`
+- PostgreSQL: `postgres://guren:guren@127.0.0.1:54322/guren`
+- MySQL: `mysql://guren:guren@127.0.0.1:33306/guren`
 
 使い終わったら `bun run db:down` でコンテナを停止します。
 

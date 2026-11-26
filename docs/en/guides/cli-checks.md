@@ -1,6 +1,6 @@
 # Checks and Audits in Depth
 
-The [CLI Reference](./cli.md#inspection-audit-commands) lists `check`, `audit`, `gate`, `introspect` and `doctor`. This page holds the rules behind them: what the audit's policy rule looks for, how to suppress an audit finding, what `introspect` runs, the extra rules for agent routes and in-process agents, architecture boundaries, and which facts the checks read from the registered (but never booted) app.
+The [CLI Reference](./cli.md#inspection-audit-commands) lists `check`, `audit`, `gate`, `introspect` and `doctor`. This page holds the rules behind them: what the audit's policy rule looks for, what `--fix` regenerates, how to suppress an audit finding, what `introspect` runs, the extra rules for agent routes and in-process agents, architecture boundaries, and which facts the checks read from the registered (but never booted) app.
 
 ## The audit's policy rule
 
@@ -48,6 +48,42 @@ the list under `dataExposure`. `auth.user()` is judged only when introspection r
 model provider, so `--no-introspect` and a custom provider leave it unread.
 Put `// guren-audit-ignore` on the line that sends the value, or the line
 above it, to accept one.
+
+## Regenerating Generated Files
+
+Some findings clear by regenerating files: a missing `.guren/*.gen.ts`
+manifest (`guren codegen`) and a drifted `docs/spec/` view
+(`guren spec:generate`). `check --json` gives each of these a `fix`
+field, `{ "kind": "command", "args": ["codegen"] }`, holding the
+arguments after `guren`. `--fix` runs every distinct fix once, then
+checks again and reports that second run, with what it ran under
+`fixes`. It exits non-zero when one of the commands fails, or exits 0
+while the findings it was meant to clear are still reported. `--fix`
+is refused under `--ci`: a gate that regenerated the drift it checks
+for would always pass, so run it locally and commit what it writes. A
+finding that needs a code change or a decision has no `fix`, only the
+`suggestion` text.
+
+```bash
+bunx guren check --fix          # regenerate what the findings name, then check again
+bunx guren check --spec --fix   # the same, limited to the spec views
+```
+
+`doctor --fix` regenerates the missing or stale generated manifests reported
+by doctor, then runs doctor again in a fresh process. It selects the app's
+route entry, including `routes/api.ts`, and runs each distinct generator once.
+`doctor --json` exposes these repairs as `repair: { kind: 'command', args }`;
+with `--fix`, the final report also includes `fixes`. A failed command or a
+repair finding that does not pass recheck makes the command exit nonzero.
+An unavailable recheck also counts as failure. Other warnings remain in the
+report; `--strict` makes those warnings and failures set the exit code.
+Configuration autofixes marked `canAutofix` still belong to `guren upgrade`.
+This flag only rewrites generated files.
+
+```bash
+bunx guren doctor --fix --next
+bunx guren doctor --fix --json
+```
 
 ## Suppressing audit findings
 

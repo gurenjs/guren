@@ -41,17 +41,44 @@ if (filePath === '') {
   process.exit(0)
 }
 
+const installed = resolve(import.meta.dir, '../..')
+
+/** `undefined` when git is missing, fails, or `installed` is in no repository. */
+function gitOutput(args: string[]): string | undefined {
+  try {
+    const run = Bun.spawnSync(['git', ...args], { cwd: installed, stdout: 'pipe', stderr: 'ignore' })
+    return run.exitCode === 0 ? run.stdout.toString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** This app's directory in each worktree of its repository; a monorepo app is not the git root. */
+function worktreeApps(): Set<string> {
+  const prefix = gitOutput(['rev-parse', '--show-prefix'])?.replace(/\r?\n$/, '')
+  const list = gitOutput(['worktree', 'list', '--porcelain'])
+  if (prefix === undefined || list === undefined) return new Set()
+  return new Set(list.split(/\r?\n/)
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => real(join(line.slice('worktree '.length), prefix))))
+}
+
 /**
- * The app to check: the nearest ancestor of the edited file holding this script at its
- * own path, else the script's grandparent (`<app>/.claude/hooks/`). The command runs the
- * project dir's copy while the file may sit in a worktree Claude entered, and every path
- * below is judged from the app root, never from the cwd, which follows the agent's `cd`.
+ * The app to check: the nearest ancestor of the edited file holding this script that is this
+ * app or its place in another worktree of the repository (the command runs the project dir's
+ * copy while the file may sit in a worktree Claude entered), else the script's grandparent.
+ * Another tree holding the script is passed over: its routes and oxlint would run here. Paths
+ * below are judged from the app root, never from the cwd, which follows the agent's `cd`.
  */
 function appRoot(file: string): string {
-  const installed = resolve(import.meta.dir, '../..')
   const self = relative(installed, import.meta.path)
+  let worktrees: Set<string> | undefined
   for (let dir = dirname(file); ; dir = dirname(dir)) {
-    if (existsSync(join(dir, self))) return dir
+    if (existsSync(join(dir, self))) {
+      if (real(dir) === real(installed)) return dir
+      worktrees ??= worktreeApps()
+      if (worktrees.has(real(dir))) return dir
+    }
     if (dirname(dir) === dir) return installed
   }
 }

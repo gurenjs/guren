@@ -1,6 +1,7 @@
 import { Listener, type BroadcastManager, type NotificationManager, type Notifiable, type StorageManager } from '@guren/core'
 import { PostCreated } from '../Events/PostCreated.js'
 import { NewPostPublishedNotification } from '../Notifications/NewPostPublishedNotification.js'
+import { printable } from '../Support/printable.js'
 
 export class SendNewPostNotification extends Listener<PostCreated> {
   static override event = PostCreated
@@ -39,7 +40,7 @@ export class SendNewPostNotification extends Listener<PostCreated> {
     await this.broadcast.broadcast(`posts.${post.id}`, 'post.created', payload)
 
     console.log(
-      `[Notification] New post "${post.title}" created by ${author.name}`
+      `[Notification] New post "${printable(post.title)}" created by ${printable(author.name)}`
     )
   }
 
@@ -49,7 +50,7 @@ export class SendNewPostNotification extends Listener<PostCreated> {
 
   async failed(event: PostCreated, error: Error): Promise<void> {
     console.error(
-      `[Notification] Failed to send notification for post "${event.post.title}":`,
+      `[Notification] Failed to send notification for post "${printable(event.post.title)}":`,
       error.message
     )
   }

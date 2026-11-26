@@ -25,12 +25,16 @@ export const DEV_CENTER_WRITE_ROUTES = [
 ] as const
 
 /**
- * What the CSRF middleware exempts. The page posts without an `XSRF-TOKEN`: an app with no auth
+ * The Dev Center write route `path` reaches, which the CSRF middleware exempts unless a Router route
+ * answers first. The page posts without an `XSRF-TOKEN`: an app with no auth
  * issues none. The CLI handler requires the request's own `Origin` instead, behind the loopback
  * guard, and the routes exist only while {@link isMcpEndpointEnabled} holds.
  */
-export function isDevCenterWriteRequest(path: string): boolean {
-  return (DEV_CENTER_FEEDBACK_PATH.test(path) || DEV_CENTER_BOARD_OPS_PATH.test(path)) && isMcpEndpointEnabled()
+export function devCenterWriteRoute(path: string): string | undefined {
+  if (!isMcpEndpointEnabled()) return undefined
+  if (DEV_CENTER_FEEDBACK_PATH.test(path)) return DEV_CENTER_FEEDBACK_ROUTE
+  if (DEV_CENTER_BOARD_OPS_PATH.test(path)) return DEV_CENTER_BOARD_OPS_ROUTE
+  return undefined
 }
 
 /**

@@ -38,13 +38,14 @@ export type OxlintRun =
 /**
  * oxlint over `files` (everything the config covers when empty), through the shim
  * under Bun so no Node is needed. A file the config ignores is "no files to lint",
- * not a failure.
+ * not a failure. Nested configs stay off: a directory inside the app (a vendored
+ * checkout, a scaffolded example) could otherwise name JS plugins oxlint would load.
  */
 export async function runOxlint(cwd: string, files: string[], exec: CapturedExec = runCaptured): Promise<OxlintRun> {
   const shim = resolveOxlint(cwd)
   if (shim === null) return { kind: 'not-installed' }
   const result = await exec(
-    [bunExecutable(), shim, '--no-error-on-unmatched-pattern', '--format', 'unix', ...files],
+    [bunExecutable(), shim, '--disable-nested-config', '--no-error-on-unmatched-pattern', '--format', 'unix', ...files],
     cwd,
   )
   const findings = result.stdout.split('\n').filter((line) => /^[^\s:]+:\d+:\d+:/u.test(line))

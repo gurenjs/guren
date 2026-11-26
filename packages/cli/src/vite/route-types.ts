@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { basename, dirname, extname, resolve } from 'node:path'
 import type { ConfigEnv, HmrContext, Logger, Plugin, ResolvedConfig, UserConfig, ViteDevServer } from 'vite'
-import { IMPORTABLE_EXTENSIONS, MODELS_DIR, RESOURCES_DIR, toPosixRelative, VALIDATORS_DIR } from '../discovery'
+import { IMPORTABLE_EXTENSIONS, MODELS_DIR, NAVIGATION_CONFIG_FILE, RESOURCES_DIR, toPosixRelative, VALIDATORS_DIR } from '../discovery'
 import { MODULE_ENTRY_FILE, MODULE_ROUTES_FILE } from '../import-resolution'
 import { escapeRegExp } from '../utils'
 import { cliEntry } from '../cli-entry'
@@ -188,6 +188,8 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
 
     if (
       changedFile === watchFile ||
+      // Its presence decides whether routes.gen.ts lists the navigation's route names.
+      changedFile === resolve(root, NAVIGATION_CONFIG_FILE) ||
       (routesDir !== root && changedFile.startsWith(`${routesDir}/`) && IMPORTABLE_EXTENSIONS.has(extname(changedFile))) ||
       changedFile.startsWith(`${pagesDir}/`) || changedFile === pagesDir ||
       changedFile.startsWith(`${resourcesDir}/`) || changedFile === resourcesDir ||

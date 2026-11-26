@@ -34,20 +34,71 @@ export const DEFINE_POLICY_ABILITIES = ['viewAny', 'view', 'create', 'update', '
 
 /** Reads the abilities of `className` from its parsed file, or why it could not. */
 export function readPolicyAbilities(ast: File, className: string): PlanAppPolicyAbilities | PlanAppUnreadable {
+  const policy = findPolicy(ast, className)
+  if ('unreadable' in policy) return policy
+  return 'declaration' in policy ? classAbilities(policy.declaration, policy.imports) : objectAbilities(policy.definition)
+}
+
+type FoundPolicy =
+  | { declaration: ClassDeclaration; imports: Map<string, ImportEntry> }
+  | { definition: ObjectExpression }
+  | PlanAppUnreadable
+
+function findPolicy(ast: File, className: string): FoundPolicy {
   const imports = importsByLocal(ast.program.body)
   let defaultClass: ClassDeclaration | undefined
   for (const node of ast.program.body) {
     const declaration = extractClassDeclaration(node)
-    if (declaration?.id?.name === className) return classAbilities(declaration, imports)
+    if (declaration?.id?.name === className) return { declaration, imports }
     if (declaration && node.type === 'ExportDefaultDeclaration') defaultClass = declaration
     for (const declarator of topLevelDeclaration(node)?.declarations ?? []) {
       if (declarator.id.type !== 'Identifier' || declarator.id.name !== className || !declarator.init) continue
       const definition = definePolicyObject(declarator.init, imports)
-      return definition ? objectAbilities(definition) : { unreadable: `${className} is not a class, and not a definePolicy({ … }) object literal` }
+      return definition ? { definition } : { unreadable: `${className} is not a class, and not a definePolicy({ … }) object literal` }
     }
   }
-  if (defaultClass) return classAbilities(defaultClass, imports)
+  if (defaultClass) return { declaration: defaultClass, imports }
   return { unreadable: `the file declares no class ${className}` }
+}
+
+/** How an ability's parameter after the user is declared: what the gate would call it without, for a bare class. */
+export type PolicyParameter = 'required' | 'optional' | 'rest'
+
+/**
+ * The parameters of one ability's function, the user included, as the gate calls it: a class
+ * method or function field, or a `definePolicy({ … })` key. `undefined` when the policy declares
+ * no such function; why it is unread when the name is a field or the policy is not read.
+ */
+export function readPolicyAbilityParameters(ast: File, className: string, ability: string): PolicyParameter[] | PlanAppUnreadable | undefined {
+  const policy = findPolicy(ast, className)
+  if ('unreadable' in policy) return policy
+  if ('definition' in policy) {
+    for (const property of policy.definition.properties) {
+      if (property.type === 'SpreadElement' || memberKeyName(property) !== ability) continue
+      if (property.type === 'ObjectMethod') return parameterKinds(property.params)
+      const value = unwrapTypeAssertion(property.value as Node)
+      if (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression') return parameterKinds(value.params)
+      return { unreadable: `${className}.${ability} is not a function written in place` }
+    }
+    return undefined
+  }
+  for (const { member, name } of classActionMembers(policy.declaration)) {
+    if (name !== ability || member.static) continue
+    if ('kind' in member && member.kind !== 'method') return { unreadable: `${className}.${ability} is an accessor` }
+    if ('params' in member) return parameterKinds(member.params)
+    const value = member.value
+    if (value && (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression')) return parameterKinds(value.params)
+  }
+  return undefined
+}
+
+function parameterKinds(params: readonly Node[]): PolicyParameter[] {
+  return params.map((param) => {
+    const node = param.type === 'TSParameterProperty' ? param.parameter : param
+    if (node.type === 'RestElement') return 'rest'
+    if (node.type === 'AssignmentPattern') return 'optional'
+    return 'optional' in node && node.optional ? 'optional' : 'required'
+  })
 }
 
 function classAbilities(declaration: ClassDeclaration, imports: Map<string, ImportEntry>): PlanAppPolicyAbilities {

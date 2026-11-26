@@ -180,7 +180,7 @@ export interface AgentToolClientOptions {
   runtime: AgentRuntime
   /** The `config/agents.ts` key. */
   agentName: string
-  /** The Durable Object instance name — `Agent.name` on the SDK side. */
+  /** The name the Durable Object was addressed by (`idFromName`), never the SDK's decoded `Agent.name`. */
   instanceId: string
   /** Injectable clock for the budget window, in milliseconds. Tests only. */
   now?: () => number

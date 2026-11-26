@@ -28,9 +28,14 @@ function createController(ctx: Context): TokenController {
   return controller
 }
 
-function authenticatedContext(url: string, init: RequestInit = {}): Context {
+function authenticatedContext(
+  url: string,
+  init: RequestInit = {},
+  caller: { abilities?: string[]; expiresAt?: Date } = {},
+): Context {
+  const { abilities = ['*'], expiresAt } = caller
   return createControllerContext(url, init, {
-    'guren:api-token': { userId: 1, abilities: ['*'], token: {} },
+    'guren:api-token': { userId: 1, abilities, token: expiresAt ? { abilities, expiresAt } : {} },
   }) as unknown as Context
 }
 
@@ -83,7 +88,7 @@ describe('TokenController', () => {
         method: 'POST',
         body: JSON.stringify({
           name: 'My Token',
-          abilities: ['read'],
+          abilities: ['tasks:read'],
         }),
         headers: { 'Content-Type': 'application/json' },
       })
@@ -95,6 +100,40 @@ describe('TokenController', () => {
       const json = await response.json()
       expect(json.token).toBeDefined()
       expect(json.tokenId).toBeDefined()
+    })
+
+    it('refuses a caller whose token does not grant *', async () => {
+      const ctx = authenticatedContext('http://api.test/api/auth/tokens', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Escalated' }),
+        headers: { 'Content-Type': 'application/json' },
+      }, { abilities: ['tasks:read', 'tokens:manage'] })
+
+      const controller = createController(ctx)
+      const response = await controller.store()
+
+      expect(response.status).toBe(403)
+      const json = await response.json()
+      expect(json.token).toBeUndefined()
+    })
+
+    it('caps the new token at the caller token expiry', async () => {
+      const callerExpiresAt = new Date(Date.now() + 60 * 60 * 1000)
+      const request = (body: Record<string, unknown>) => authenticatedContext('http://api.test/api/auth/tokens', {
+        method: 'POST',
+        body: JSON.stringify(body),
+        headers: { 'Content-Type': 'application/json' },
+      }, { expiresAt: callerExpiresAt })
+
+      for (const body of [{ name: 'Longer', expiresInDays: 30 }, { name: 'Unbounded' }]) {
+        const response = await createController(request(body)).store()
+
+        expect(response.status).toBe(201)
+        const json = await response.json()
+        expect(json.expiresAt).not.toBeNull()
+        // createApiToken reads the clock again after the controller does, so allow that gap.
+        expect(new Date(json.expiresAt).getTime()).toBeLessThanOrEqual(callerExpiresAt.getTime() + 1000)
+      }
     })
 
     it('throws validation errors for missing name', async () => {

@@ -85,6 +85,18 @@ describe('GurenAgent.tools inside a Durable Object', () => {
     expect((await probe()).principals).toEqual(['agent:triager:inbox%3A1'])
   })
 
+  it('should build the principal from the routed name, not the SDK-decoded one', async () => {
+    // `Agent.name` reads this root object's name as `inbox-a`, which would hand
+    // it the principal of the separate instance actually named `inbox-a`.
+    await setRouting('absent')
+
+    await runInDurableObject(testAgent('cf-agents:v2:inbox-a:x'), (agent) =>
+      agent.tools.call('posts.index', {}))
+    await new Promise((settle) => setTimeout(settle, 0))
+
+    expect((await probe()).principals).toEqual(['agent:triager:cf-agents%3Av2%3Ainbox-a%3Ax'])
+  })
+
   it('should throw for a class config/agents.ts never registered', async () => {
     const stray = bindings.STRAY_AGENT.get(bindings.STRAY_AGENT.idFromName('stray'))
     await expect(

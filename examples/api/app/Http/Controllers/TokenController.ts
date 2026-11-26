@@ -20,9 +20,16 @@ export default class TokenController extends Controller {
   }
 
   async store(): Promise<Response> {
-    const { userId } = this.apiToken()
+    const { userId, abilities: callerAbilities, token: caller } = this.apiToken()
+    // Reserved for `*` tokens: a token minted by a scoped one would outlive the scoped one's revocation.
+    if (!callerAbilities.includes('*')) {
+      return this.json({ error: 'Token lacks required abilities', required: ['*'] }, { status: 403 })
+    }
+
     const { name, abilities, expiresInDays } = await this.validateBody(CreateTokenSchema)
-    const expiresIn = expiresInDays ? expiresInDays * 24 * 60 * 60 * 1000 : null
+    const requested = expiresInDays ? expiresInDays * 24 * 60 * 60 * 1000 : null
+    const remaining = caller.expiresAt ? caller.expiresAt.getTime() - Date.now() : null
+    const expiresIn = remaining === null ? requested : Math.min(requested ?? remaining, remaining)
 
     const { plainTextToken, token } = await createApiToken(getTokenStore(), {
       name,

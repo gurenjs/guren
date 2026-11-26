@@ -240,6 +240,23 @@ describe('tools-only tokens and declared agent endpoints', () => {
     expect((await app.fetch(new Request('http://localhost/other', { headers }))).status).toBe(401)
   })
 
+  it('should refuse one on a declared agent endpoint that an application pattern route answers first', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken } = await createApiToken(store, { name: 'mcp', userId: 1, abilities: ['tools:*'] })
+    const app = new Application()
+    app.hono.use('*', createBearerTokenMiddleware({ store }))
+    app.router.post('/:slug', () => 'slug')
+    await app.boot()
+    app.declareAgentEndpoint('/agent')
+    app.hono.post('/agent', (c) => c.text('agent'))
+
+    const response = await app.fetch(new Request('http://localhost/agent', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${plainTextToken}` },
+    }))
+    expect(response.status).toBe(401)
+  })
+
   it('should not accept one on a path that is only exempt from CSRF', async () => {
     const store = new MemoryApiTokenStore()
     const { plainTextToken } = await createApiToken(store, { name: 'mcp', userId: 1, abilities: ['tools:*'] })

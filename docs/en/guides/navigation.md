@@ -30,6 +30,22 @@ export const app = createApp({
 
 An entry is plain data: a label, a route name and an optional `show`. The route must be a named `GET` route with no path parameter, since a link has nothing to fill one with. One entry per route.
 
+Once `config/navigation.ts` exists, `guren codegen` writes the route names an entry may use into `.guren/routes.gen.ts`, so a name that is not a parameterless `GET` route fails the type check. A name that two routes share is listed only when both are parameterless `GET` routes. Until codegen has run, any name type-checks, and the boot warning below is what catches one.
+
+Codegen reads the routes file, so it does not see a route that a provider or plugin registers. To link one, add its name to the registry in any file the app's `tsconfig.json` covers:
+
+```ts
+declare module '@guren/core' {
+  interface GurenNavigationRoutes {
+    'billing.portal': true
+  }
+}
+
+export {}
+```
+
+The reverse also slips through: a module under `modules/` that `createApp()` does not mount still has its route names listed. The boot warning hides that entry, and `guren check` reports it (see [Checking the entries](#checking-the-entries)).
+
 ## Who sees an entry
 
 `show` takes up to three conditions, and every one you give must hold:
@@ -78,6 +94,22 @@ The prop is lazy. A full visit resolves it, and a partial reload that does not a
 ## When an entry is hidden at boot
 
 When the app boots, each entry is linked to its route. An entry whose route is not registered, is not a `GET` or has a path parameter is hidden, and the boot prints a warning naming the entry and the reason. The rest of the navigation still renders: a missing route name would otherwise make every page answer 500.
+
+## Checking the entries
+
+`guren check` reads `config/navigation.ts` by its syntax, without running it, and judges each entry against the app as it registers (the introspected app, so a provider's routes count). Every result is advisory, so `guren check --ci` and `guren gate` do not fail on them.
+
+| Key | Reported when |
+|---|---|
+| `navigation-route:<route>` | the route is not registered, is not a `GET` or has a path parameter (the three the boot hides), or two routes share the name |
+| `navigation-page:<route>` | the route's action makes no `this.inertia()` call, so the link leads to no page |
+| `navigation-sign-in:<route>` | the entry is shown to guests (no `auth: 'required'`, `where` or `can`) and the route's middleware requires sign-in |
+| `navigation-ability:<route>` | the action calls `this.authorize()` with a literal ability and the bare model class, on a policy method that takes the user alone, and the entry does not name that ability in `can`, names another one, or names one of two the action authorizes |
+| `navigation-can:<route>` | the `can` model has no policy, the policy has no such ability (a `definePolicy()` policy given no callback for it denies everyone), or the ability's method requires a second parameter |
+
+Write the file as plain data for the check to read it: a label and a route as strings, `where` values as literals, and the `can` model as a class imported from its own file. A spread, a computed key or a translated label makes the whole file unreadable, and the check says so on one line. What it cannot follow is reported as unverified rather than passed: an inline handler, a helper the action calls, an ability that is not a string written in place, a model imported through a barrel, a model name two app roots share, or a policy whose `before()` may answer first. A prototype route passes without its fixture entry being read. When the app cannot be introspected, the routes come from the routes file, and one `navigation-routes-unverified` line names the entries whose mounting, and sign-in for those shown to guests, that leaves unknown.
+
+A model's policy is the one in `app/Policies/<Model>Policy.ts`, the file `guren audit` pairs it by. A policy registered under another name through `gate.policy()` is not read, so keep the file name `make:policy` writes.
 
 ## Next steps
 

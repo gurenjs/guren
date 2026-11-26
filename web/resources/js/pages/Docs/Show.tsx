@@ -172,6 +172,7 @@ function activeSectionKey(categories: DocCategoryGroup[], active: ActiveDoc | un
 // closed by hand live here. Written only from a click, never on the server; the
 // section holding the current page opens on its own and is not remembered.
 let rememberedSections: ReadonlySet<string> = new Set()
+let fullLoadHandled = false
 
 function rememberToggle(key: string, open: boolean): void {
   rememberedSections = withSection(rememberedSections, key, open)
@@ -269,6 +270,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
   // document differ only by fragment.
   useEffect(() => {
     let pending: ReturnType<typeof setTimeout> | undefined
+    let frame: ReturnType<typeof requestAnimationFrame> | undefined
 
     const scrollToFragment = () => {
       const id = decodeFragment(window.location.hash.slice(1))
@@ -288,13 +290,30 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
           pending = setTimeout(attempt, 16)
         }
       }
-      attempt()
+      // Inertia's own anchor scroll (core 3.11) looks the hash up undecoded, misses
+      // a non-ASCII id such as a Japanese heading's, and scrolls to the top in a
+      // timeout queued before this event, which on Firefox with smooth scrolling
+      // defers that reset by a frame. The first attempt runs in the frame after it.
+      pending = setTimeout(() => {
+        frame = requestAnimationFrame(attempt)
+      })
     }
 
-    scrollToFragment()
-    const stop = router.on('navigate', scrollToFragment)
+    // Back, Forward and reload restore the saved scroll position in a frame; a
+    // fragment scroll landing after it would take the reader back to the heading.
+    // The page remounts on a visit between docs, so only the first mount is the
+    // full load the navigation entry describes; it also stands in for `initial`.
+    if (!fullLoadHandled) {
+      fullLoadHandled = true
+      const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+      if (navigation?.type !== 'back_forward' && navigation?.type !== 'reload') scrollToFragment()
+    }
+    const stop = router.on('navigate', (event: CustomEvent<{ type: string }>) => {
+      if (event.detail.type === 'visit') scrollToFragment()
+    })
     return () => {
       clearTimeout(pending)
+      if (frame !== undefined) cancelAnimationFrame(frame)
       stop()
     }
   }, [])

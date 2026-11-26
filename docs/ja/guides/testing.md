@@ -216,7 +216,7 @@ const database = createSqliteDatabase({
 テストで作ったデータが、開発サーバーで見ているデータに混ざることはありません。どちらのキーも雛形の `config/env.ts` に宣言してあり、アプリの起動時には検証済みの値が `context` で渡されます（[設定](./configuration.md#データベース接続)を参照）。
 
 > [!WARNING]
-> データベースを切り替えるのは SQLite の雛形だけです。`--db postgres` や `--db mysql` で作ったアプリはテストでも `DATABASE_URL` を読むので、テストで `resetDatabase()` を呼ぶと開発用のデータベースが空になります。テスト用のデータベースを別に作り、`DATABASE_URL=postgres://guren:guren@localhost:54322/guren_test bun test` のようにそちらを指定してテストを実行してください。
+> データベースを切り替えるのは SQLite の雛形だけです。`--db postgres` や `--db mysql` で作ったアプリはテストでも `DATABASE_URL` を読むので、テストで `resetDatabase()` を呼ぶと開発用のデータベースが空になります。テスト用のデータベースを別に作り、`DATABASE_URL=postgres://guren:guren@127.0.0.1:54322/guren_test bun test` のようにそちらを指定してテストを実行してください。
 
 > [!WARNING]
 > `create-guren-app` 1.1.0 以前で生成したアプリは、`NODE_ENV` に関係なく `DATABASE_URL`（または `./data/guren.db`）に書き込みます。そのため、`bun test` が開発サーバーと同じデータベースに書き込んでしまいます。直すには、`filename` オプションを差し替え、`DATABASE_URL` と `TEST_DATABASE_URL` を `config/env.ts` に宣言してください。このファイルがないアプリでは、先に追加します（[設定](./configuration.md#サービスプロバイダを使うアプリ)を参照）。
@@ -444,7 +444,7 @@ bunx guren make:test posts/PostController
 
 計画の振る舞い（フォームに入力して送信し、遷移先のページを確かめる）もブラウザで実行するときは、`--behaviours --agent claude-code` を付けます。エージェントには `codex` も指定でき、エージェントを使わないなら `none` にします。このテストは `bun run test:behaviours` で実行します。CI で実行する `bun run test:behaviours:ci` は記録したステップを再生するだけなので、ログインは要りません。
 
-各コマンドが書き出すファイルとコミットするものは、CLI リファレンスの [`add browser-tests`](./cli.md#add-browser-tests) と[振る舞いの spec](./cli.md#振る舞いの-spec) にまとめてあります。
+導入から CI までの流れは、[ブラウザテスト](./browser-tests.md)で 2 種類のテストを順に説明しています。各コマンドが書き出すファイルとコミットするものは、CLI リファレンスの [`add browser-tests`](./cli.md#add-browser-tests) と[振る舞いの spec](./cli.md#振る舞いの-spec) にまとめてあります。
 
 ## アプリを使わずにコントローラーをテストする（Vitest）
 
