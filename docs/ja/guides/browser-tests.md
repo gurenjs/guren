@@ -131,7 +131,7 @@ bun run test:behaviours:ci    # 再生だけを行う(--strict-cache)
 
 小さなアプリで計測したところ、モデルでの実行は 1 ステップあたり、Claude Code(`sonnet`)で約 10 秒、4 万 1 千トークンでした。トークンの 85% 以上はキャッシュの読み出しです。記録のあるステップはモデルを呼ばずに再生されます。エージェントのログインは、ステップを初めて実行するときと、ページが変わって記録が合わなくなったときにだけ使われます。Claude Code で作った記録は Codex でも再生され、逆も同じです。
 
-記録は空のデータベースに対して作ってください。CI は空のデータベースから始まるためです。この実行に専用のデータベースを持たせる方法は、[CLI リファレンス](./cli.md#振る舞いの-spec)にあります。
+記録は空のデータベースに対して作ってください。CI は空のデータベースから始まるためです。この実行に専用のデータベースを持たせる方法は、[後半のリファレンス](#リファレンス-振る舞いの-spec)にあります。
 
 ## ページを変えたとき
 
@@ -144,7 +144,7 @@ bun run test:behaviours:ci    # 再生だけを行う(--strict-cache)
 | 2 | `REPLAY_STALE`(記録がいまのページに合わない) | 手元で `bun run test:behaviours` を実行します。通ったら新しい記録をコミットします。失敗するなら、ページの動きが計画と違っています |
 | 3 | 記録のないステップがあり、CI にはそれを実行するログインがない。アプリを起動できなかったときも同じコードになる | 手元で `bun run test:behaviours` を実行し、記録をコミットします |
 
-実行が失敗したあとは、ページか計画を直すまで `.e2e/cache/` をコミットしないでください。終了コードの全体は、[CLI リファレンス](./cli.md#振る舞いの-spec)の表にあります。
+実行が失敗したあとは、ページか計画を直すまで `.e2e/cache/` をコミットしないでください。終了コードの全体は、[後半のリファレンス](#リファレンス-振る舞いの-spec)の表にあります。
 
 ## エージェントに渡るもの
 
@@ -162,8 +162,81 @@ bunx guren add browser-tests --behaviours --agent none
 
 触る操作がすべて計画に書かれた振る舞いはロケーターで実行されるので、ログインも記録も要りません。agent のステップが必要な振る舞いは、その理由を書いたスキップのテストになります。あとからエージェントを足すときは、`--agent claude-code --force` を付けてもう一度実行してください。設定ファイルは書き直され、`given.ts` と記録はそのまま残ります。
 
+## リファレンス: `add browser-tests`
+
+コマンドが書き出すファイルとオプションの一覧です。ここまでの説明で足りないところを確かめるときに使ってください。
+
+`add browser-tests` は、Playwright のブラウザテストを導入します。テストはアプリを `bunx guren browser:serve` 経由で起動するので、本番環境や、ローカルだと確かめられないデータベースでは起動しません。このコマンドは `playwright.browser.config.ts`(アプリを `127.0.0.1:4317` で、その Vite dev サーバーをポート 4318 から起動する設定)、`tests/browser/support.ts`、`tests/browser/a11y.ts`(axe の設定で、自由に編集できます)を書き出してから `bunx guren browser:map` を実行します。Vite のポートは、`GUREN_VITE_PORT` を設定していなければ `browser:serve` がアプリのポートの次の番号にします。以後は `browser:map` が、`tests/browser/generated/` の下に次の 3 種類の spec を保ちます。
+
+- `smoke.browser.ts`: ブラウザマップの機能ごとに 1 つのテストで、パスパラメーターのない最初のページが 200 を返し、ルートが描画するはずのコンポーネントを表示することを確かめます
+- `plans/<plan>.browser.ts`: ビューを持つ承認済みの計画ごとに 1 つのファイルで、計画がビューに定めたフォームのラベルとアクション名が、そのビューを描画するパスパラメーターのない最初のページに表示されることを確かめます
+- `a11y.browser.ts`: 上の 2 つが開くページごとに 1 つのテストで、axe が WCAG 2.0 から 2.2 の A と AA の違反を見つけないことを確かめます
+
+計画のラベルはアプリの既定ロケールで書かれるので、設定ファイルは Playwright の `locale` をその既定ロケールにします。既定ロケールは `createApp({ i18n })` から読み取ります(`fallback`、なければ `supported` の先頭で、読み取れなければ警告を出して `en`)。設定しないと、サーバーはブラウザの `Accept-Language` からロケールを選んでしまいます。セットアッププロジェクトはサインイン済みのセッションを保存する前に `locale` cookie を消します。各計画の spec はラベルを探す前に、ページの `_i18n.locale` が `_i18n.fallbackLocale` と一致するかを確かめます。別のロケールで描画されたページでは、直すべき設定の行を示すメッセージで spec が失敗するので、ラベルが見つからない理由をすぐに見分けられます。アプリの既定ロケールを変えたときは、`playwright.browser.config.ts` の `LOCALE` も変えてください。
+
+開けないページ(どのルートもパラメーターを取る、まだ描画するルートがない、アプリが用意できないサインイン済みのユーザーが要る)は、理由を書いた `test.fixme` になります。結果ではスキップとして表示され、合格にはなりません。計画を承認したら `bunx guren browser:map` をもう一度実行してください。生成した spec が古いあいだ、`--check` は終了コード 1 を返します。どの機能や計画からも生成されなくなった spec は削除されます。生成ヘッダーのないファイルが `tests/browser/generated/` にあると上書きを拒むので、自分で書く spec はこのディレクトリの外に置いてください。
+
+パスワードでサインインするアプリ(`make:auth` が書き出す `users` テーブルと `POST /login` ルートがあるアプリ)では、セットアッププロジェクトの `tests/browser/auth.setup.ts` と、シーダーの `db/seeders/browser-account.ts` も書き出します。シーダーは `browser:serve` がアプリを起動したときに `BROWSER_TEST_PASSWORD` のパスワードで `browser@example.test` を作り、それ以外の起動や本番環境では何もしません。初回の実行までに `.env` の `BROWSER_TEST_PASSWORD` を設定してください。シーダーは起動時のシードで動くので、`config/database.ts` で `defineDatabaseConfig()` に `seedOnBoot` を渡しておく必要があります。渡していなければ、コマンドが警告します。
+
+あわせて `test:browser` スクリプト(`playwright test -c playwright.browser.config.ts`)を追加し、`@playwright/test` と `@axe-core/playwright` を devDependency に加えます。`--no-install` を付けると、`bun add` のコマンドを表示するだけになります。`test-results/`、`playwright-report/`、`tests/browser/.auth/` は `.gitignore` に追加されます。別のコマンドを実行する `test:browser` スクリプトがすでにあれば、何も書かずに中断します(`--force` で置き換えます)。`bunx playwright install chromium` でブラウザを入れてから、`bun run test:browser` で実行します。Playwright は Node 上で動くので、`PATH` に Node 20.12 以降が必要です。
+
+`bun test` は `*.spec.ts` も集めてしまうため、spec のファイル名は `.browser.ts` で終わります。ブラウザテストは `guren gate` では実行されません。
+
+## リファレンス: 振る舞いの spec
+
+`add browser-tests --behaviours --agent claude-code` は、承認済みの計画の振る舞いをブラウザで実行するテストを導入します。テストは振る舞いの開始ページを開き、通信が落ち着いてハイドレーションが済むのを待ってから、振る舞いを実行します。触る操作がすべて計画に書かれている場合は、ロケーターで入力して実行するので、モデルは呼びません。具体的には、入力がどれもフォームのラベル付きのテキスト・数値・チェックボックス・セレクトのフィールドで、ルートを送るアクションの名前も計画にある場合です。それ以外の場合は、計画から組み立てた指示(`set "Title" to {title}, then submit the form`)を 1 つコーディングエージェントに渡して操作させます。どちらの場合も、結果は通常のロケーターで確かめます。確かめる対象は、リダイレクト先、遷移先のページのラベルとアクション、計画がエラーを見込むフィールドの `aria-invalid` です。テストは [e2e](https://github.com/e2e-inc/e2e) ランナーで動き、エージェントの操作はステップごとに記録されます。記録のあるステップはモデルを呼ばずに再生されます。エージェントのログインは、ステップを初めて実行するときと、ページが変わって記録が合わなくなったときにだけ使われます。
+
+`--agent` は必須で、既定値はありません。どのエージェントのログインでステップを実行するかを、`claude-code` か `codex` で指定します。一方のエージェントで作った記録は、もう一方でも再生されます。`--agent none` を指定すると、エージェントなしでランナーを導入します。インストールされるのは `e2e` と `@e2e-dev/web` だけです。触る操作がすべて計画に書かれた振る舞いはロケーターで実行されるので、ログインも記録も要りません。agent のステップが必要な振る舞いは、その理由を書いた skip のテストになります。あとからエージェントを変えるときは、`--force` を付けてもう一度実行してください。設定ファイルは書き直され、`given.ts` と記録はそのまま残ります。この方法で `--agent none` に切り替えると、`@e2e-dev/acp` とエージェントのアダプターも削除します(`--no-install` を付けると、代わりに `bun remove` のコマンドを表示します)。`browser:map` が agent のステップを書くのは、`e2e.browser.config.ts` が `@e2e-dev/acp` から executor を import していて、アプリがそのパッケージを依存に持つときだけです。コマンドは次のファイルを一度だけ書き出します。
+
+- `e2e.browser.config.ts`: アプリを `bunx guren browser:serve` 経由で `127.0.0.1:4319` に起動する設定です。すでに動いているサーバーには接続しません
+- `tests/browser/behaviours/given.ts`: 利用者が編集するファイルです(後述)
+- `tests/browser/behaviours/auth.setup.e2e.ts`: パスワードでサインインするアプリでだけ書き出します。Playwright のセットアップと同じシード済みのアカウントでサインインし、テストが使うセッションを保存します
+
+あわせて `test:behaviours` と `test:behaviours:ci` のスクリプトを追加し、`e2e`、`@e2e-dev/web`、`@e2e-dev/acp` を固定のバージョンで、選んだエージェント用のアダプターと一緒にインストールします。`--no-install` を付けると、`bun add` のコマンドを表示するだけになります。`.gitignore` には `.e2e/*` と `!.e2e/cache/` が追加されます。以後は `bunx guren browser:map` が、振る舞いごとに 1 つのテストを `tests/browser/behaviours/generated/<plan>.e2e.ts` に保ちます。
+
+種類が `success` か `validation` で、ルートが `GET` 以外の振る舞いがテストになります。ただし、計画のビューがそのルートへフォームを送信するか、そのルートのアクションを持っている場合に限ります。それ以外の振る舞いはスキップされるテストになり、タイトルに理由が入ります。たとえば、`TestApp` でしか確かめられない種類(未サインイン、権限のないユーザー、存在しないレコード)、実行後にブラウザで確かめられるものが残らない振る舞い、フォームのコントロールがリクエストの前に止めてしまう入力値です。開始ページがパスパラメーターを取る振る舞い(`/posts/:id/edit`)には、`given.ts` のエントリーが必要です。エントリーではレコードを作り、パラメーターの値を返します。エントリーがないテストは実行時にスキップされ、足りないエントリーが理由に示されます。
+
+```ts
+export const given: Record<string, (fixtures: GivenFixtures) => Promise<Record<string, string> | void>> = {
+  'AC-posts-update-1': async ({ browser }) => {
+    await browser.goto('/posts/create', { waitUntil: 'networkidle' })
+    await browser.locator('input[name="title"]').fill('Given post')
+    await browser.locator('button[type="submit"]').tap()
+    await browser.waitForURL(/\/posts\/\d+$/u)
+    return { id: new URL(await browser.url()).pathname.split('/').at(-1)! }
+  },
+}
+```
+
+実行には 2 つのスクリプトを使います。
+
+```bash
+bun run test:behaviours       # 記録のあるステップは再生し、残りはモデルで実行して記録する
+bun run test:behaviours:ci    # 再生だけを行う(--strict-cache)
+```
+
+計画を承認したあとやページを変えたあとに `bun run test:behaviours` を実行し、`.e2e/cache/` をコミットしてください。記録はテストデータなので、その差分はページを変えたコミットに含めます。小さなアプリで計測したところ、モデルでの実行は 1 ステップあたり、Claude Code(`sonnet`)で約 10 秒、4 万 1 千トークン、Codex で約 17 秒、6 万 5 千トークンでした。どちらもトークンの 85% 以上はキャッシュの読み出しです。記録済みのテスト 4 件の再生は 7 秒でした。初回の実行では、ランナーが固定している Chromium が、Playwright のものとは別にダウンロードされます。
+
+`browser:map` がテストを作り直すとタイトルが変わり、新しいタイトルで記録し直されます。古い記録は `.e2e/cache/` に残ります。ランナーには、なくなったテストの記録だけを消すコマンドがないためです。古い記録を消すときは、`bunx e2e cache clear` を実行してから `bun run test:behaviours` を実行します。agent のステップはすべてモデルでもう一度実行され、記録されます。ロケーターで実行するテストには記録がないので、古い記録も残りません。
+
+記録は空のデータベースに対して作ってください。CI は空のデータベースから始まるためです。記録には、ステップが終わった時点でページに表示されていた内容も含まれます。以前の実行の行が一覧に残った状態で作った記録は、空のデータベースでは合わなくなりました(`REPLAY_STALE`)。空のデータベースで作った記録は、どちらの状態でも再生されました。開発用のデータベースを使わずに済ませるには、専用のデータベースを用意します。`e2e.browser.config.ts` の `args` に `'--database-url', './data/behaviours.db'`(ほかのローカルのデータベースの URL でも構いません)を足し、`DATABASE_URL=./data/behaviours.db bunx guren db:migrate` でマイグレーションを適用してください。記録を作る前には、そのデータベースを削除してマイグレーションをやり直します。
+
+CI では `bun run test:behaviours:ci` を実行します。ログインも API キーも要りません。macOS で作った記録は Linux でも再生されます(Debian のコンテナで計測)。最小構成の Linux イメージでは、先に `bunx playwright-core install-deps chromium` で Chromium のシステムライブラリを入れてください。入っていないとブラウザが起動せず、終了コード 3 で終わります。何が起きたかは終了コードで分かります。
+
+| 終了コード | 意味 | 対応 |
+|------------|------|------|
+| 0 | すべてのステップを再生した | 不要 |
+| 1 | テストが失敗した | ステップのあとの確認が通っていません。ページの動きが計画と違っています |
+| 2 | `REPLAY_STALE`(記録がいまのページに合わない) | 手元で `bun run test:behaviours` を実行します。通ったら新しい記録をコミットします。失敗するなら、ページの動きが計画と違っています。失敗した実行は合わなくなった記録を削除するので、ページか計画を直すまで `.e2e/cache/` はコミットしないでください |
+| 2 | `MODEL_UNAVAILABLE`(agent のステップを持つテストがあるのに、設定ファイルにエージェントがない) | `bunx guren browser:map` を実行します。`e2e.browser.config.ts` が `@e2e-dev/acp` から executor を import していなければ、その振る舞いは skip のテストとして書き直されます。import は残っていて `agents` だけがない場合は、`bunx guren add browser-tests --behaviours --agent <agent> --force` でエージェントを指定し直すか、`--agent none --force` で取り除いてください |
+| 3 | ステップを実行できなかった | 記録のないステップがモデルを呼ぼうとして、ログインがないために失敗しています(`MODEL_PROVIDER_FAILED`)。手元で `bun run test:behaviours` を実行し、記録をコミットしてください。計画が変わって `browser:map` が作り直したテストはタイトルが変わるので、まだ記録がありません。アプリを起動できなかったときも同じコードになります |
+
+エージェントにはステップ用のツールだけが渡され、シェルもファイルも MCP サーバーも使えません。生成される形のステップを、Claude Code で 65 回、Codex で 52 回モデルに実行させた計測では、エージェントが自前のツールを使おうとして拒否される `POLICY_DENIED` は 1 度も起きませんでした(95% の信頼度で発生率はそれぞれ 4.6% 未満、5.8% 未満)。env ファイルに書かれた変数は、`BROWSER_TEST_PASSWORD` も含めて、設定ファイルがすべて空文字にしてエージェントへ渡します。そうしないと、Bun が env ファイルをエージェントのプロセスにも読み込むためです。`.env` に `ANTHROPIC_API_KEY` や `OPENAI_API_KEY` があっても同じように空になり、エージェントは自身のログインで動きました。パスワードはランナーが入力するので、エージェントには渡りません。シェルだけで `export` している変数はエージェントに届くので、テストを実行するシェルでは秘密の値を `export` しないでください。起動したあとのエージェントのプロセスが何を読むかまでは確かめていません。
+
+`BROWSER_TEST_PASSWORD` が未設定のときは、サインインのセットアップが変数名を示して失敗し、サインインが必要なテストはスキップされます。`--force` は設定ファイルとセットアップを書き直しますが、`given.ts` は書き換えません。インストール済みの `@playwright/test` がランナーの固定する `playwright-core` より古いと、`tests/browser/generated/a11y.browser.ts` が型チェックに通らなくなることがあります。その場合はコマンドが警告し、バージョンを上げる `bun add` のコマンドを表示します。これらのテストも `guren gate` では実行されません。
+
 ## 次のステップ
 
-- CLI リファレンスの [`add browser-tests`](./cli.md#add-browser-tests) と[振る舞いの spec](./cli.md#振る舞いの-spec): コマンドが書き出すファイルとオプションの一覧
+- [CLI リファレンス](./cli.md): ほかのコマンドの一覧
 - [実装計画](./implementation-plans.md): spec のもとになる計画の書き方と進め方
 - [テストガイド](./testing.md): ブラウザに現れないものを確かめる `TestApp`

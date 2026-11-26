@@ -120,6 +120,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'troubleshoot',
       'cli',
       'cli-checks',
+      'change-review',
       'plugins',
       'support-matrix',
       'upgrading',
