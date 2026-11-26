@@ -259,7 +259,7 @@ path the agent harness's [edit hook](./agent-harness.md#hooks) uses.
 
 ### Regenerating with `--fix`
 
-`check --fix` runs the commands that clear the findings regenerating files can fix (`guren codegen`, `guren spec:generate`), then checks again; it is refused under `--ci`. `doctor --fix` does the same for the generated files doctor reports. [Regenerating with `--fix`](./cli-checks.md#regenerating-with-fix) has the details.
+`check --fix` runs the commands that clear the findings regenerating files can fix (`guren codegen`, `guren spec:generate`), then checks again; it is refused under `--ci`. `doctor --fix` does the same for the generated files doctor reports. [Regenerating Generated Files](./cli-checks.md#regenerating-generated-files) has the details.
 
 ```bash
 bunx guren check --fix          # regenerate what the findings name, then check again

@@ -49,7 +49,7 @@ model provider, so `--no-introspect` and a custom provider leave it unread.
 Put `// guren-audit-ignore` on the line that sends the value, or the line
 above it, to accept one.
 
-## Regenerating with `--fix`
+## Regenerating Generated Files
 
 Some findings clear by regenerating files: a missing `.guren/*.gen.ts`
 manifest (`guren codegen`) and a drifted `docs/spec/` view

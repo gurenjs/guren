@@ -237,7 +237,7 @@ bunx guren check --prototype  # prototype ハンドラーのルートに名前�
 
 ### `--fix` で生成し直す
 
-`check --fix` は、ファイルを生成し直せば消える指摘について、そのためのコマンド(`guren codegen`、`guren spec:generate`)を実行してから、もう一度チェックします。`--ci` とは同時に指定できません。`doctor --fix` は、doctor が指摘した生成ファイルについて同じことをします。詳しくは[`--fix` で生成し直す](./cli-checks.md#fix-で生成し直す)を参照してください。
+`check --fix` は、ファイルを生成し直せば消える指摘について、そのためのコマンド(`guren codegen`、`guren spec:generate`)を実行してから、もう一度チェックします。`--ci` とは同時に指定できません。`doctor --fix` は、doctor が指摘した生成ファイルについて同じことをします。詳しくは[生成ファイルを生成し直す](./cli-checks.md#生成ファイルを生成し直す)を参照してください。
 
 ```bash
 bunx guren check --fix          # 指摘が示すファイルを再生成して、もう一度チェック

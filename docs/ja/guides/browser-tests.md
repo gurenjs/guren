@@ -153,10 +153,11 @@ bunx guren add browser-tests --behaviours --agent none
 
 コマンドが書き出すファイルとオプションの一覧です。ここまでの説明で足りないところを確かめるときに使ってください。
 
-`add browser-tests` は、Playwright のブラウザテストを導入します。テストはアプリを `bunx guren browser:serve` 経由で起動するので、本番環境や、ローカルだと確かめられないデータベースでは起動しません。このコマンドは `playwright.browser.config.ts`(アプリを `127.0.0.1:4317` で、その Vite dev サーバーをポート 4318 から起動する設定)と `tests/browser/support.ts` を書き出してから `bunx guren browser:map` を実行します。Vite のポートは、`GUREN_VITE_PORT` を設定していなければ `browser:serve` がアプリのポートの次の番号にします。以後は `browser:map` が、`tests/browser/generated/` の下に次の 2 種類の spec を保ちます。
+`add browser-tests` は、Playwright のブラウザテストを導入します。テストはアプリを `bunx guren browser:serve` 経由で起動するので、本番環境や、ローカルだと確かめられないデータベースでは起動しません。このコマンドは `playwright.browser.config.ts`(アプリを `127.0.0.1:4317` で、その Vite dev サーバーをポート 4318 から起動する設定)、`tests/browser/support.ts`、`tests/browser/a11y.ts`(axe の設定で、自由に編集できます)を書き出してから `bunx guren browser:map` を実行します。Vite のポートは、`GUREN_VITE_PORT` を設定していなければ `browser:serve` がアプリのポートの次の番号にします。以後は `browser:map` が、`tests/browser/generated/` の下に次の 3 種類の spec を保ちます。
 
 - `smoke.browser.ts`: ブラウザマップの機能ごとに 1 つのテストで、パスパラメーターのない最初のページが 200 を返し、ルートが描画するはずのコンポーネントを表示することを確かめます
 - `plans/<plan>.browser.ts`: ビューを持つ承認済みの計画ごとに 1 つのファイルで、計画がビューに定めたフォームのラベルとアクション名が、そのビューを描画するパスパラメーターのない最初のページに表示されることを確かめます
+- `a11y.browser.ts`: 上の 2 つが開くページごとに 1 つのテストで、axe が WCAG 2.0 から 2.2 の A と AA の違反を見つけないことを確かめます
 
 計画のラベルはアプリの既定ロケールで書かれるので、設定ファイルは Playwright の `locale` をその既定ロケールにします。既定ロケールは `createApp({ i18n })` から読み取ります(`fallback`、なければ `supported` の先頭で、読み取れなければ警告を出して `en`)。設定しないと、サーバーはブラウザの `Accept-Language` からロケールを選んでしまいます。セットアッププロジェクトはサインイン済みのセッションを保存する前に `locale` cookie を消します。各計画の spec はラベルを探す前に、ページの `_i18n.locale` が `_i18n.fallbackLocale` と一致するかを確かめます。別のロケールで描画されたページでは、直すべき設定の行を示すメッセージで spec が失敗するので、ラベルが見つからない理由をすぐに見分けられます。アプリの既定ロケールを変えたときは、`playwright.browser.config.ts` の `LOCALE` も変えてください。
 
@@ -164,7 +165,7 @@ bunx guren add browser-tests --behaviours --agent none
 
 パスワードでサインインするアプリ(`make:auth` が書き出す `users` テーブルと `POST /login` ルートがあるアプリ)では、セットアッププロジェクトの `tests/browser/auth.setup.ts` と、シーダーの `db/seeders/browser-account.ts` も書き出します。シーダーは `browser:serve` がアプリを起動したときに `BROWSER_TEST_PASSWORD` のパスワードで `browser@example.test` を作り、それ以外の起動や本番環境では何もしません。初回の実行までに `.env` の `BROWSER_TEST_PASSWORD` を設定してください。シーダーは起動時のシードで動くので、`config/database.ts` で `defineDatabaseConfig()` に `seedOnBoot` を渡しておく必要があります。渡していなければ、コマンドが警告します。
 
-あわせて `test:browser` スクリプト(`playwright test -c playwright.browser.config.ts`)を追加し、`@playwright/test` を devDependency に加えます。`--no-install` を付けると、`bun add` のコマンドを表示するだけになります。`test-results/`、`playwright-report/`、`tests/browser/.auth/` は `.gitignore` に追加されます。別のコマンドを実行する `test:browser` スクリプトがすでにあれば、何も書かずに中断します(`--force` で置き換えます)。`bunx playwright install chromium` でブラウザを入れてから、`bun run test:browser` で実行します。Playwright は Node 上で動くので、`PATH` に Node 20.12 以降が必要です。
+あわせて `test:browser` スクリプト(`playwright test -c playwright.browser.config.ts`)を追加し、`@playwright/test` と `@axe-core/playwright` を devDependency に加えます。`--no-install` を付けると、`bun add` のコマンドを表示するだけになります。`test-results/`、`playwright-report/`、`tests/browser/.auth/` は `.gitignore` に追加されます。別のコマンドを実行する `test:browser` スクリプトがすでにあれば、何も書かずに中断します(`--force` で置き換えます)。`bunx playwright install chromium` でブラウザを入れてから、`bun run test:browser` で実行します。Playwright は Node 上で動くので、`PATH` に Node 20.12 以降が必要です。
 
 `bun test` は `*.spec.ts` も集めてしまうため、spec のファイル名は `.browser.ts` で終わります。ブラウザテストは `guren gate` では実行されません。
 
