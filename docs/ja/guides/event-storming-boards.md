@@ -92,14 +92,56 @@ bunx guren board:apply post-notifications --ops ops.json
 
 ## ボードから計画へ
 
-ボードが落ち着いたら、ボードを示して計画を頼みます。
+ボードが落ち着いたら、ボードを含めた計画用のプロンプトを表示して、エージェントに渡します。
 
-```text
-Read the board with `bunx guren board:show post-notifications` and write an implementation plan from it.
-Every event and reaction becomes a side effect, every command a route and an action, and every open question a plan question.
+```bash
+bunx guren plan --from-board post-notifications --print-prompt
 ```
 
-その先は計画の検査、レビューのページ、承認の流れになります。[実装計画](./implementation-plans.md)を参照してください。
+プロンプトには依頼の後にボードのアウトラインが引用されます。引用符で囲んで自分の依頼を書き足すこともできます。付箋が計画のどの要素になるかも、プロンプトでエージェントに伝わります。
+
+| 付箋 | 計画での扱い |
+|---|---|
+| `event`、`reaction` | 副作用。きっかけは、その付箋に入ってくる矢印から書かれます |
+| `command` | ルートと、それが呼ぶアクション |
+| `aggregate` | モデル |
+| `view` | ビュー |
+| `question` | 計画の問い。対象の付箋から作られた要素が影響先になります |
+| 囲み | フロー |
+
+変更に要らないと分かった付箋は、計画の対象外（non-goals）に入ります。その先は計画の検査、レビューのページ、承認の流れになります。[実装計画](./implementation-plans.md)を参照してください。
+
+計画が `plan:render` を通ったら、エージェントは `link` 操作で、どの付箋がどの要素になったかを記録します。link は計画と同じ名前で要素を指します。モデルはクラス名、ルートは名前、アクションは `Class.action`、ビューはページ、副作用はクラス名です。
+
+```json
+[{ "op": "link", "id": "post_published", "link": { "kind": "event", "name": "PostPublished" } }]
+```
+
+計画からボードへの参照はないので、ボードを消しても付箋を動かしても、計画とその承認はそのまま残ります。
+
+## 付箋の行き先を確かめる
+
+`board:status` を実行すると、link のある付箋ごとに、その要素があるかどうかが表示されます。
+
+```bash
+bunx guren board:status post-notifications
+```
+
+```text
+Board: Post notifications  (docs/boards/post-notifications.board.json)
+Plans: docs/plans/post-notifications/plan.json (open)
+
+Linked notes:
+  present   [aggregate post] Post  = model Post
+  planned   [event post_published] Post was published  = event PostPublished  (docs/plans/post-notifications/plan.json)
+  missing   [command publish_post] Publish a post  = route posts.publish
+
+Lead nowhere (2):
+  [actor author] Author  (no link)
+  [command publish_post] Publish a post  = route posts.publish (missing)
+```
+
+`present` はアプリに要素があること、`planned` は承認済みの計画がその要素を足すこと、`missing` はどちらにもないことを表します。**Lead nowhere** には、`missing` の link と、問い以外で link のない付箋が並びます。既定では、承認済みでまだ閉じていない計画を読みます。承認前の計画を確かめるときは `--plan docs/plans/post-notifications/plan.json` を付けます。エージェントが自分の付けた link を確かめるのもこの形です。アプリは `plan:status` と同じように読むので、`db/schema.ts` とバリデーターが読み込まれます。結果を表示するだけで、終了コードは常に 0 です。
 
 ## 上限
 

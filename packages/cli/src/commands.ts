@@ -40,7 +40,7 @@ import { changeEvidenceCommand, changeLaneCommand, changePolicyCommand, changeRe
 import { browserDoctorCommand, browserMapCommand, browserRecordCommand, browserServeCommand } from './commands/browser'
 import { runtimeErrorsCommand } from './commands/runtime-errors'
 import { planCommand, planRenderCommand, planStatusCommand, planVerifyCommand, planNextCommand, planScaffoldCommand, planApproveCommand, planWaiveCommand, planReviseCommand, planCloseCommand } from './commands/plan'
-import { boardApplyCommand, boardNewCommand, boardShowCommand } from './commands/board'
+import { boardApplyCommand, boardNewCommand, boardShowCommand, boardStatusCommand } from './commands/board'
 import { toolListCommand, toolInspectCommand, toolCallCommand, toolLogCommand, tokenIssueCommand, toolDevCommand } from './commands/tools'
 import { assertDestructiveCommandAllowed } from './commands/destructive-guard'
 import { checkCommand, auditCommand, gateCommand } from './commands/diagnostics'
@@ -1818,6 +1818,7 @@ export const builtinSubCommands = {
   'board:new': boardNewCommand,
   'board:show': boardShowCommand,
   'board:apply': boardApplyCommand,
+  'board:status': boardStatusCommand,
   'make:auth': makeAuthCommand,
   'make:agent': makeAgentCommand,
   'make:ai-agent': makeAiAgentCommand,

@@ -92,14 +92,56 @@ The operations are `add`, `edit`, `move`, `remove`, `connect`, `disconnect`, `li
 
 ## From a board to a plan
 
-When the board has settled, ask your agent for a plan and point it at the board:
+When the board has settled, print the planning prompt with the board in it and give it to your agent:
 
-```text
-Read the board with `bunx guren board:show post-notifications` and write an implementation plan from it.
-Every event and reaction becomes a side effect, every command a route and an action, and every open question a plan question.
+```bash
+bunx guren plan --from-board post-notifications --print-prompt
 ```
 
-The plan's own checks, review page and approval then take over, as described in [Implementation Plans](./implementation-plans.md).
+The prompt quotes the board's outline after your request, and you can add a request of your own in quotes. It tells the agent how notes become plan elements:
+
+| Note | In the plan |
+|---|---|
+| `event`, `reaction` | a side effect, whose trigger comes from the arrows into the note |
+| `command` | a route and the action it calls |
+| `aggregate` | a model |
+| `view` | a view |
+| `question` | a plan question, about the elements its notes became |
+| a section | a flow |
+
+A note the change turns out not to need goes into the plan's non-goals. The plan's own checks, review page and approval then take over, as described in [Implementation Plans](./implementation-plans.md).
+
+Once the plan passes `plan:render`, the agent records which note became which element with `link` operations. A link names the element as the plan does: a model's class, a route's name, `Class.action` for an action, a view's page, a side effect's class.
+
+```json
+[{ "op": "link", "id": "post_published", "link": { "kind": "event", "name": "PostPublished" } }]
+```
+
+The plan never mentions the board, so deleting the board or moving a note leaves the plan and its approval as they were.
+
+## See where each note went
+
+`board:status` reports, for every linked note, whether its element exists:
+
+```bash
+bunx guren board:status post-notifications
+```
+
+```text
+Board: Post notifications  (docs/boards/post-notifications.board.json)
+Plans: docs/plans/post-notifications/plan.json (open)
+
+Linked notes:
+  present   [aggregate post] Post  = model Post
+  planned   [event post_published] Post was published  = event PostPublished  (docs/plans/post-notifications/plan.json)
+  missing   [command publish_post] Publish a post  = route posts.publish
+
+Lead nowhere (2):
+  [actor author] Author  (no link)
+  [command publish_post] Publish a post  = route posts.publish (missing)
+```
+
+`present` means your app has the element, `planned` that an open plan adds it, and `missing` that neither does. **Lead nowhere** lists the missing links and the notes with no link at all, questions aside. By default the command reads the plans that are approved and not yet closed. Pass `--plan docs/plans/post-notifications/plan.json` to check a plan before it is approved, which is how your agent checks its links. The command reads your app as `plan:status` does, so it loads `db/schema.ts` and your validators. It only reports and always exits 0.
 
 ## Limits
 

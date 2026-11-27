@@ -89,6 +89,36 @@ export const boardShowCommand = defineCommand({
   },
 })
 
+export const boardStatusCommand = defineCommand({
+  meta: {
+    name: 'board:status',
+    description:
+      'Per note, whether its link names an element the application has (present), one a plan adds (planned), or neither (missing), and the notes that lead nowhere (RFC 0041 §3). Judged against the open plans, or the --plan file whether or not it is approved. Reads the application as plan:status does, importing db/schema.ts and the validator files. Advisory: exits 0.',
+  },
+  args: {
+    board: boardArg,
+    plan: {
+      type: 'string',
+      description: 'A plan file to judge the links against in place of the open plans, approved or not.',
+      valueHint: 'docs/plans/post-notifications/plan.json',
+    },
+    app: appArg,
+    json: {
+      type: 'boolean',
+      description: 'Print the report as JSON.',
+      default: false,
+    },
+  },
+  async run({ args }) {
+    const slug = boardSlug(args.board)
+    if (args.plan === '') throw new CliError('--plan needs a plan file.')
+    const appRoot = resolve(args.app ?? process.cwd())
+    const [{ boardStatus, formatBoardStatus }, { loadPlanAppState }] = await Promise.all([import('../board/status'), import('../plan/app-state')])
+    const report = await boardStatus(appRoot, slug, { plan: args.plan, app: () => loadPlanAppState(appRoot, { detail: true }) })
+    console.log(args.json ? JSON.stringify(report, null, 2) : formatBoardStatus(report))
+  },
+})
+
 export const boardApplyCommand = defineCommand({
   meta: {
     name: 'board:apply',
