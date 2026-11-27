@@ -76,7 +76,24 @@ describe('judgeBoardStatus', () => {
       store: 'planned',
     })
     expect(report.notes.find((entry) => entry.id === 'comment')?.plannedIn).toEqual(['docs/plans/comments/plan.json'])
-    expect(report.leadsNowhere).toEqual(['author', 'reply'])
+    expect(report.leadsNowhere).toEqual(['reply'])
+  })
+
+  test('should read a link unknown, never missing, while a plan or a module\'s routes did not read', () => {
+    const notes = [note('reply', 'command', { kind: 'route', name: 'comments.reply' }), note('index', 'command', { kind: 'route', name: 'posts.index' })]
+    const unreadPlan = judgeBoardStatus({ slug: 'comments', board: board(notes), plans, unreadPlans: [{ file: 'docs/plans/old/plan.json', reason: 'not JSON' }], app: planAppState() })
+    expect(unreadPlan.notes.map((entry) => [entry.id, entry.state, entry.reason])).toEqual([
+      ['index', 'present', undefined],
+      ['reply', 'unknown', 'docs/plans/old/plan.json could not be read'],
+    ])
+    expect(unreadPlan.leadsNowhere).toEqual([])
+
+    const detail = { routesIncomplete: 'modules/billing/routes.ts threw' } as unknown as PlanAppDetail
+    const incomplete = judgeBoardStatus({ slug: 'comments', board: board(notes), plans: [], unreadPlans: [], app: planAppState({ detail }) })
+    expect(incomplete.notes.map((entry) => [entry.id, entry.state, entry.reason])).toEqual([
+      ['index', 'present', undefined],
+      ['reply', 'unknown', 'modules/billing/routes.ts threw'],
+    ])
   })
 
   test('should match a model in its module and a route across modules', () => {
@@ -113,12 +130,17 @@ describe('judgeBoardStatus', () => {
     expect(report.leadsNowhere).toEqual([])
   })
 
-  test('should print each linked note with its state and the notes that lead nowhere', () => {
+  test('should print each linked note with its state and the notes that lead nowhere, actors aside', () => {
     const report = judgeBoardStatus({
       slug: 'comments',
-      board: board([note('comment', 'aggregate', { kind: 'model', name: 'Comment' }), note('reply', 'command', { kind: 'route', name: 'comments.reply' }), note('author', 'actor')]),
+      board: board([
+        note('comment', 'aggregate', { kind: 'model', name: 'Comment' }),
+        note('reply', 'command', { kind: 'route', name: 'comments.reply' }),
+        note('author', 'actor'),
+        note('tell', 'reaction'),
+      ]),
       plans,
-      unreadPlans: [{ file: 'docs/plans/old/plan.json', reason: 'not JSON' }],
+      unreadPlans: [],
       app: planAppState(),
     })
 
@@ -126,15 +148,14 @@ describe('judgeBoardStatus', () => {
       [
         'Board: Comments  (docs/boards/comments.board.json)',
         'Plans: docs/plans/comments/plan.json (given)',
-        '  not read: docs/plans/old/plan.json: not JSON',
         '',
         'Linked notes:',
         '  planned   [aggregate comment] comment text  = model Comment  (docs/plans/comments/plan.json)',
         '  missing   [command reply] reply text  = route comments.reply',
         '',
         'Lead nowhere (2):',
-        '  [actor author] author text  (no link)',
         '  [command reply] reply text  = route comments.reply (missing)',
+        '  [reaction tell] tell text  (no link)',
       ].join('\n'),
     )
   })

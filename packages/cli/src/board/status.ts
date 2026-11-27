@@ -46,9 +46,12 @@ export interface BoardStatusReport {
   /** Plans and plan directories that would not read, so a link they add reads `missing`. */
   unreadPlans: Array<{ file: string; reason: string }>
   notes: BoardNoteStatus[]
-  /** A note no element answers: a `missing` link, or no link on a note that is not a question. */
+  /** A note no element answers: a `missing` link, or no link on a note of a kind an element can stand for. */
   leadsNowhere: string[]
 }
+
+/** A question becomes a plan question and an actor is context: no link kind names either. */
+const UNLINKABLE_KINDS: ReadonlySet<BoardNote['kind']> = new Set(['question', 'actor'])
 
 type Scope = string | null
 
@@ -91,25 +94,33 @@ export function planAdds(plan: PlanDraft, kind: BoardLink['kind']): Named[] {
   }
 }
 
-type AppSection = Named[] | PlanAppUnreadable
+/** What the application has of a kind; `unread` says why an absence from `names` proves nothing. */
+export interface AppSection {
+  names: Named[]
+  unread?: string
+}
 
 /** What the application has of `kind`, as `loadPlanAppState({ detail: true })` read it. */
 export function appElements(app: PlanAppState | PlanAppUnreadable, kind: BoardLink['kind']): AppSection {
-  if ('unreadable' in app) return app
-  const names = (section: PlanAppName[] | PlanAppUnreadable): AppSection => section
+  if ('unreadable' in app) return { names: [], unread: app.unreadable }
+  const of = (section: PlanAppName[] | PlanAppUnreadable): AppSection => (isUnreadable(section) ? { names: [], unread: section.unreadable } : { names: section })
   switch (kind) {
     case 'model':
-      return names(app.models)
+      return of(app.models)
     case 'action':
-      return names(app.actions)
+      return of(app.actions)
     case 'page':
-      return names(app.pages)
-    case 'route':
-      return isUnreadable(app.routes) ? app.routes : app.routes.flatMap((route) => (route.name === undefined ? [] : [{ name: route.name, module: null }]))
+      return of(app.pages)
+    case 'route': {
+      if (isUnreadable(app.routes)) return { names: [], unread: app.routes.unreadable }
+      const names = app.routes.flatMap((route) => (route.name === undefined ? [] : [{ name: route.name, module: null }]))
+      // A module whose routes did not load leaves the list a lower bound.
+      return app.detail?.routesIncomplete ? { names, unread: app.detail.routesIncomplete } : { names }
+    }
     default: {
       const section = app.detail?.sideEffects[kind]
-      if (section === undefined) return { unreadable: 'the application was read without its side-effect classes' }
-      return isUnreadable(section) ? section : section.map((effect) => ({ name: effect.className, module: effect.module }))
+      if (section === undefined) return { names: [], unread: 'the application was read without its side-effect classes' }
+      return isUnreadable(section) ? { names: [], unread: section.unreadable } : { names: section.map((effect) => ({ name: effect.className, module: effect.module })) }
     }
   }
 }
@@ -127,15 +138,18 @@ export function judgeBoardStatus(input: {
   unreadPlans: BoardStatusReport['unreadPlans']
   app: PlanAppState | PlanAppUnreadable
 }): BoardStatusReport {
+  const unreadPlans = input.unreadPlans.length === 0 ? undefined : `${input.unreadPlans.map((entry) => entry.file).join(', ')} could not be read`
   const notes = [...input.board.notes].sort((a, b) => compareIds(a.id, b.id)).map((note): BoardNoteStatus => {
     const base = { id: note.id, kind: note.kind, text: note.text, ...(note.section === undefined ? {} : { section: note.section }) }
     const link = note.link
     if (!link) return { ...base, state: 'unlinked' }
     const app = appElements(input.app, link.kind)
-    if (!isUnreadable(app) && app.some((entry) => sameElement(link, entry))) return { ...base, link, state: 'present' }
+    if (app.names.some((entry) => sameElement(link, entry))) return { ...base, link, state: 'present' }
     const plannedIn = input.plans.filter(({ plan }) => planAdds(plan, link.kind).some((entry) => sameElement(link, entry))).map(({ file }) => file)
     if (plannedIn.length > 0) return { ...base, link, state: 'planned', plannedIn }
-    if (isUnreadable(app)) return { ...base, link, state: 'unknown', reason: app.unreadable }
+    if (app.unread !== undefined) return { ...base, link, state: 'unknown', reason: app.unread }
+    // A plan that did not read may be the one adding it, so its absence proves nothing.
+    if (unreadPlans) return { ...base, link, state: 'unknown', reason: unreadPlans }
     return { ...base, link, state: 'missing' }
   })
   return {
@@ -144,7 +158,7 @@ export function judgeBoardStatus(input: {
     plans: input.plans.map(({ file, source }) => ({ file, source })),
     unreadPlans: input.unreadPlans,
     notes,
-    leadsNowhere: notes.filter((note) => note.state === 'missing' || (note.state === 'unlinked' && note.kind !== 'question')).map((note) => note.id),
+    leadsNowhere: notes.filter((note) => note.state === 'missing' || (note.state === 'unlinked' && !UNLINKABLE_KINDS.has(note.kind))).map((note) => note.id),
   }
 }
 

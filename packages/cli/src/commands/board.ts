@@ -93,7 +93,7 @@ export const boardStatusCommand = defineCommand({
   meta: {
     name: 'board:status',
     description:
-      'Per note, whether its link names an element the application has (present), one a plan adds (planned), or neither (missing), and the notes that lead nowhere (RFC 0041 §3). Judged against the open plans, or the --plan file whether or not it is approved. Reads the application as plan:status does, importing db/schema.ts and the validator files. Advisory: exits 0.',
+      'Per note, whether its link names an element the application has (present), one a plan adds (planned), or neither (missing), and the notes that lead nowhere (RFC 0041 §3). Judged against the open plans, or the --plan file whether or not it is approved. Reads the application as plan:status does, importing db/schema.ts and the validator files. Advisory: once the board and a --plan file read, exits 0.',
   },
   args: {
     board: boardArg,

@@ -111,7 +111,7 @@ bunx guren plan --from-board post-notifications --print-prompt
 
 変更に要らないと分かった付箋は、計画の対象外（non-goals）に入ります。その先は計画の検査、レビューのページ、承認の流れになります。[実装計画](./implementation-plans.md)を参照してください。
 
-計画が `plan:render` を通ったら、エージェントは `link` 操作で、どの付箋がどの要素になったかを記録します。link は計画と同じ名前で要素を指します。モデルはクラス名、ルートは名前、アクションは `Class.action`、ビューはページ、副作用はクラス名です。
+計画が `plan:render` を通ったら、エージェントは `link` 操作で、どの付箋がどの要素になったかを記録します。link は計画と同じ名前で要素を指します。モデルはクラス名、ルートは名前、アクションは `Class.action`、ビューはページ、副作用はクラス名です。コマンドの付箋はルートに link し、アクターと問いには link を付けません。
 
 ```json
 [{ "op": "link", "id": "post_published", "link": { "kind": "event", "name": "PostPublished" } }]
@@ -124,12 +124,12 @@ bunx guren plan --from-board post-notifications --print-prompt
 `board:status` を実行すると、link のある付箋ごとに、その要素があるかどうかが表示されます。
 
 ```bash
-bunx guren board:status post-notifications
+bunx guren board:status post-notifications --plan docs/plans/post-notifications/plan.json
 ```
 
 ```text
 Board: Post notifications  (docs/boards/post-notifications.board.json)
-Plans: docs/plans/post-notifications/plan.json (open)
+Plans: docs/plans/post-notifications/plan.json (given)
 
 Linked notes:
   present   [aggregate post] Post  = model Post
@@ -137,11 +137,11 @@ Linked notes:
   missing   [command publish_post] Publish a post  = route posts.publish
 
 Lead nowhere (2):
-  [actor author] Author  (no link)
   [command publish_post] Publish a post  = route posts.publish (missing)
+  [reaction tell_subscribers] When published, tell subscribers  (no link)
 ```
 
-`present` はアプリに要素があること、`planned` は承認済みの計画がその要素を足すこと、`missing` はどちらにもないことを表します。**Lead nowhere** には、`missing` の link と、問い以外で link のない付箋が並びます。既定では、承認済みでまだ閉じていない計画を読みます。承認前の計画を確かめるときは `--plan docs/plans/post-notifications/plan.json` を付けます。エージェントが自分の付けた link を確かめるのもこの形です。アプリは `plan:status` と同じように読むので、`db/schema.ts` とバリデーターが読み込まれます。結果を表示するだけで、終了コードは常に 0 です。
+`present` はアプリに要素があること、`planned` は計画がその要素を足すこと、`missing` はどちらにもないことを表します。`unknown` は、アプリか計画の一部を読めず判断できなかったことを表します。**Lead nowhere**（行き先のない付箋）には、`missing` の link と、link を付けられるのに付いていない付箋が並びます。アクターと問いは含みません。`--plan` を付けないときは、承認済みでまだ閉じていない計画を読みます。付けると、承認の有無にかかわらずその計画を 1 つだけ読みます。人がレビューする前に、エージェントが自分の付けた link を確かめるのはこの形です。アプリは `plan:status` と同じように読むので、`db/schema.ts` とバリデーターが読み込まれます。結果を表示するだけなので、ボードと計画を読めれば終了コードは 0 です。
 
 ## 上限
 

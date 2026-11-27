@@ -111,7 +111,7 @@ The prompt quotes the board's outline after your request, and you can add a requ
 
 A note the change turns out not to need goes into the plan's non-goals. The plan's own checks, review page and approval then take over, as described in [Implementation Plans](./implementation-plans.md).
 
-Once the plan passes `plan:render`, the agent records which note became which element with `link` operations. A link names the element as the plan does: a model's class, a route's name, `Class.action` for an action, a view's page, a side effect's class.
+Once the plan passes `plan:render`, the agent records which note became which element with `link` operations. A link names the element as the plan does: a model's class, a route's name, `Class.action` for an action, a view's page, a side effect's class. A command note links to its route, and actors and questions get no link.
 
 ```json
 [{ "op": "link", "id": "post_published", "link": { "kind": "event", "name": "PostPublished" } }]
@@ -124,12 +124,12 @@ The plan never mentions the board, so deleting the board or moving a note leaves
 `board:status` reports, for every linked note, whether its element exists:
 
 ```bash
-bunx guren board:status post-notifications
+bunx guren board:status post-notifications --plan docs/plans/post-notifications/plan.json
 ```
 
 ```text
 Board: Post notifications  (docs/boards/post-notifications.board.json)
-Plans: docs/plans/post-notifications/plan.json (open)
+Plans: docs/plans/post-notifications/plan.json (given)
 
 Linked notes:
   present   [aggregate post] Post  = model Post
@@ -137,11 +137,11 @@ Linked notes:
   missing   [command publish_post] Publish a post  = route posts.publish
 
 Lead nowhere (2):
-  [actor author] Author  (no link)
   [command publish_post] Publish a post  = route posts.publish (missing)
+  [reaction tell_subscribers] When published, tell subscribers  (no link)
 ```
 
-`present` means your app has the element, `planned` that an open plan adds it, and `missing` that neither does. **Lead nowhere** lists the missing links and the notes with no link at all, questions aside. By default the command reads the plans that are approved and not yet closed. Pass `--plan docs/plans/post-notifications/plan.json` to check a plan before it is approved, which is how your agent checks its links. The command reads your app as `plan:status` does, so it loads `db/schema.ts` and your validators. It only reports and always exits 0.
+`present` means your app has the element, `planned` that a plan adds it, and `missing` that neither does. `unknown` means part of your app or a plan could not be read, so the command cannot tell. **Lead nowhere** lists the missing links and the notes with no link that could have one, so actors and questions are left out. Without `--plan`, the command reads the plans that are approved and not yet closed. With it, it reads that one plan whether or not it is approved, which is how your agent checks its links before you review the plan. The command reads your app as `plan:status` does, so it loads `db/schema.ts` and your validators. It only reports: once the board and the plan are read, it exits 0.
 
 ## Limits
 

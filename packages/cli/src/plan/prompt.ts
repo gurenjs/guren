@@ -66,7 +66,7 @@ Each line is a note, \`[kind id] text\`. \`-> id\` is an arrow to another note a
 Write the plan from it:
 
 - Every \`event\` and \`reaction\` note becomes a \`sideEffects\` entry: an event as \`kind: "event"\`, a reaction as the \`listener\`, \`job\`, \`mail\` or \`notification\` it is. Every \`command\` note becomes a route and the action it calls, every \`aggregate\` note a model, and every \`view\` note a view. A note of these kinds the change does not need goes in \`scope.nonGoals\` as its text.
-- \`actor\` and \`external\` notes are context: they become nodes of a flow, and the middleware or the side effect they imply, not elements of their own.
+- \`actor\` and \`external\` notes become nodes of a flow, and the middleware or the side effect they imply, not elements of their own.
 - Write a side effect's \`trigger\` from the arrows into its note, naming the elements the notes they leave become.
 - Every \`question\` note becomes a \`questions\` entry. A note holds one line, so write its \`options\` and their \`consequence\` yourself. \`affects\` holds the ids of the elements made from the notes it is about.
 - Every section becomes one \`flows\` entry, its notes mapped onto the node kinds a flow has. A flow has no event node: an event appears as the job or the external system that follows it, on an \`async\` edge where the board's arrow is async.
@@ -80,7 +80,7 @@ Once \`plan:render\` reports no failing check, record on the board which note be
 [{ "op": "link", "id": "<note id>", "link": { "kind": "model", "name": "Comment" } }]
 \`\`\`
 
-\`kind\` is \`model\`, \`route\`, \`action\`, \`page\`, \`event\`, \`listener\`, \`job\`, \`mail\` or \`notification\`. \`name\` is the name the plan gives the element: a model's class, a route's \`name\`, \`Class.action\` for an action, a view's \`page\`, a side effect's class. Add \`"module"\` for an element in an application module, never for a page. Then run \`bunx guren board:status ${slug} --plan docs/plans/<slug>/plan.json\` and fix every link it reports as \`missing\`. The plan itself never mentions the board.`
+\`kind\` is \`model\`, \`route\`, \`action\`, \`page\`, \`event\`, \`listener\`, \`job\`, \`mail\` or \`notification\`. \`name\` is the name the plan gives the element: a model's class, a route's \`name\`, \`Class.action\` for an action, a view's \`page\`, a side effect's class. Add \`"module"\` for an element in an application module, never for a page. A \`command\` note links to its route. An \`external\` note links to the job, mail or notification that reaches the system, where the plan has one. An \`actor\` and a \`question\` get no link. Then run \`bunx guren board:status ${slug} --plan docs/plans/<slug>/plan.json\` and fix every link it reports as \`missing\`. The plan itself never mentions the board.`
 }
 
 const INTRO = `You are writing an implementation plan for a change to a Guren application (RFC 0030). A plan is a design document, written as JSON before any code exists. Guren checks it against the application and renders it as a page a person reviews. Once that person approves it, Guren derives the implementation steps from it and reads the progress from the code. Write the plan; do not implement it.`
