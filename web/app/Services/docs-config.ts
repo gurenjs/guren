@@ -97,6 +97,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
     slugs: [
       'spec-anchored',
       'prototype-first',
+      'event-storming-boards',
       'implementation-plans',
       'implementation-plan-format',
       'implementation-plan-scaffolding',

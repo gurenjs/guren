@@ -5,19 +5,22 @@
  * pushes what lies below that section down by the same amount.
  */
 
-import { BOARD_EXTENT, BOARD_MAX_SECTIONS, type Board, type BoardNote, type BoardSection } from './schema'
+import { BOARD_EXTENT, BOARD_MAX_SECTIONS, liesIn, NOTE_SIZE, SECTION_INSET } from './geometry'
+import type { Board, BoardNote, BoardSection } from './schema'
 
-/** The space a note is given when placed: the page draws it smaller, with the rest as the gap. */
-export const NOTE_SIZE = { width: 160, height: 96 }
 const CELL = { width: 176, height: 112 }
 
-/** The room a section keeps around its notes; the top holds its title. */
-export const SECTION_INSET = { top: 40, side: 16, bottom: 16 }
 const SECTION_COLUMNS = 5
 const SECTION_GAP = 32
 const BOARD_MARGIN = 16
 
 export const UNSORTED_SECTION = { id: 'unsorted', title: 'Unsorted' }
+
+/** A new section's size: a row of five notes. The canvas gives a section it adds the same. */
+export const DEFAULT_SECTION_SIZE = {
+  width: 2 * SECTION_INSET.side + SECTION_COLUMNS * CELL.width,
+  height: SECTION_INSET.top + CELL.height + SECTION_INSET.bottom,
+}
 
 export interface Placement {
   x: number
@@ -29,12 +32,6 @@ function overlaps(note: BoardNote, x: number, y: number): boolean {
   return note.x < x + NOTE_SIZE.width && x < note.x + NOTE_SIZE.width && note.y < y + NOTE_SIZE.height && y < note.y + NOTE_SIZE.height
 }
 
-/** By its centre, so a note a person dropped across a section's edge counts as inside. */
-export function liesIn(note: BoardNote, section: BoardSection): boolean {
-  const x = note.x + NOTE_SIZE.width / 2
-  const y = note.y + NOTE_SIZE.height / 2
-  return x >= section.x && x <= section.x + section.width && y >= section.y && y <= section.y + section.height
-}
 
 /** What can take a cell of `section`: its notes, and any other note drawn inside it. What lies below is pushed down as it grows. */
 function blockersIn(draft: Board, section: BoardSection, except?: BoardNote): BoardNote[] {
@@ -114,8 +111,7 @@ export function placeSection(draft: Board): Pick<BoardSection, 'x' | 'y' | 'widt
   const rect = {
     x: BOARD_MARGIN,
     y: bottom === 0 ? BOARD_MARGIN : bottom + SECTION_GAP,
-    width: 2 * SECTION_INSET.side + SECTION_COLUMNS * CELL.width,
-    height: SECTION_INSET.top + CELL.height + SECTION_INSET.bottom,
+    ...DEFAULT_SECTION_SIZE,
   }
   return rect.y + rect.height <= BOARD_EXTENT ? rect : undefined
 }
