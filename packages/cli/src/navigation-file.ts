@@ -71,21 +71,23 @@ function refuse(node: Node, reason: string): never {
 
 export const NAVIGATION_CONFIG_FILE = 'config/navigation.ts'
 
-/** The entries of an app root's `config/navigation.ts` on disk: none when the file is absent, why when it does not read. */
+/**
+ * The entries of an app root's `config/navigation.ts` on disk: none when the file is absent, why when it does not read.
+ * Never throws, since every plan command reads it whether or not the plan states an entry.
+ */
 export async function readNavigationEntries(cwd: string): Promise<NavigationFileEntry[] | { unreadable: string }> {
   const file = resolve(cwd, NAVIGATION_CONFIG_FILE)
   if (!existsSync(file)) return []
-  let ast: File | null
   try {
-    ast = parseSourceFile(await readFile(file, 'utf8'), file)
+    const ast = parseSourceFile(await readFile(file, 'utf8'), file)
+    if (ast === null) return { unreadable: `${NAVIGATION_CONFIG_FILE} does not parse` }
+    const reading = readNavigationFile(ast, { cwd, file })
+    if (reading.status === 'not-a-definition') return { unreadable: `${NAVIGATION_CONFIG_FILE} is no defineNavigation() definition` }
+    if (reading.status === 'unreadable') return { unreadable: `${NAVIGATION_CONFIG_FILE}${reading.line ? `:${reading.line}` : ''} cannot be read as data (${reading.reason})` }
+    return reading.entries
   } catch (error) {
     return { unreadable: `${NAVIGATION_CONFIG_FILE} could not be read (${error instanceof Error ? error.message : String(error)})` }
   }
-  if (ast === null) return { unreadable: `${NAVIGATION_CONFIG_FILE} does not parse` }
-  const reading = readNavigationFile(ast, { cwd, file })
-  if (reading.status === 'not-a-definition') return { unreadable: `${NAVIGATION_CONFIG_FILE} is no defineNavigation() definition` }
-  if (reading.status === 'unreadable') return { unreadable: `${NAVIGATION_CONFIG_FILE}${reading.line ? `:${reading.line}` : ''} cannot be read as data (${reading.reason})` }
-  return reading.entries
 }
 
 /** `file` is absolute, so an import of the `can` model resolves from it; `cwd` is the app root `@/` names. */

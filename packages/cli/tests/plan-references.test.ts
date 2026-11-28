@@ -45,6 +45,7 @@ describe('PLAN_REFERENCES', () => {
       'providers[].id',
       'config[].id',
       'env[].id',
+      'navigation[].id',
       'flows[].id',
       'commands[].id',
       'tasks[].id',
