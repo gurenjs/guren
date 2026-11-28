@@ -184,6 +184,7 @@ bunx guren add ui button --force  # 手元のコピーを現在のテンプレ�
 | `make:validator <Name>` | Zodバリデーションスキーマ(ルートパラメータ・一覧クエリ・ペイロード)を `app/Http/Validators` に生成。`--fields` は `make:feature` と同じ構文 | `bunx guren make:validator Post --fields "title:string,body:text"` |
 | `make:adr "<Title>"` | アーキテクチャ意思決定を採番付きファイルとして `docs/adr/` に記録(リンク可能なfrontmatter付き)。`--entity <Model>` で `entities:`/`related:` を自動補完、`--issue <ref>`(カンマ区切りで複数可)でGitHubのIssue/PRへの `issues:` リンクを記入 | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412` |
 | `make:lesson "<Title>"` | 教訓を採番付きファイルとして `docs/lessons/` に記録する。最初は `status: draft` になる。フラグは[教訓](./change-review.md#教訓)を参照 | `bunx guren make:lesson "Load a comment through its post" --entity Comment --from 412` |
+| `nav:add "<Label>" --route <name>` / `nav:remove <route>` | `config/navigation.ts` にエントリーを足す、または外す。誰に見せるかは `--auth required\|guest` と `--can <ability>:<Model>` で指定する。[ナビゲーション](./navigation.md#コマンドでエントリーを足す)を参照 | `bunx guren nav:add "Jobs" --route jobs.index --auth required` |
 
 > **Note:** `make:*` は既存ファイルを上書きしません。必要なら `--force` を付けてください。
 

@@ -61,6 +61,8 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'make:lang': 'generator',
   'make:feature': 'generator',
   'lang:publish': 'generator',
+  'nav:add': 'generator',
+  'nav:remove': 'generator',
   'add admin': 'generator',
   'add attachments': 'generator',
   'add broadcasting': 'generator',

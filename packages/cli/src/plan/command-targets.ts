@@ -218,6 +218,17 @@ export const PLAN_GENERATOR_TARGETS: Readonly<Record<string, PlanGeneratorRule |
     },
   },
   'lang:publish': "the framework's translation catalogs, which no plan section declares",
+  // The model a --can names is imported by config/navigation.ts, which the application loads at start.
+  'nav:add': {
+    valueFlags: ['route', 'auth', 'can'],
+    positional: true,
+    targets: (call) => {
+      const can = call.flags.get('can')
+      const model = typeof can === 'string' && can.includes(':') ? can.slice(can.lastIndexOf(':') + 1) : undefined
+      return { writes: [], imports: model === undefined || model === '' ? [] : [{ section: 'models', names: [model] }] }
+    },
+  },
+  'nav:remove': 'removes a navigation entry, which no plan section declares',
   'add admin': { ...BLUEPRINT, targets: () => writes({ section: 'controllers', names: [declared({ path: ADMIN_DASHBOARD_CONTROLLER_PATH })] }) },
   // It prints a `db:make` hint rather than generating the migration.
   'add attachments': { ...BLUEPRINT, targets: () => writes({ section: 'tables', names: ['attachments'], migration: false }) },
