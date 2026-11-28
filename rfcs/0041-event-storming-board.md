@@ -352,8 +352,10 @@ reactions and external systems, then questions.
 **Amended in implementation (M3c):** the second stage also adds the
 aggregate each command changes and the view its actor uses, since no other
 stage would. The skill reads the board again before every stage, so the
-person's canvas edits are what it builds on, and passes operations on standard
-input, leaving no file in the tree for `plan:approve` to refuse. In a session
+person's canvas edits are what it builds on, and writes operations to a file
+outside the repository, leaving none in the tree for `plan:approve` to refuse.
+It does not pass them on standard input: Claude Code's shell check refuses a
+heredoc holding JSON, which every measured session hit on its first try. In a session
 nobody can answer in, it goes through the stages in one pass and stops at the
 board. Its hand-off runs `plan --from-board`, records the links, and checks
 them with `board:status --plan` before the person reviews the plan. The board

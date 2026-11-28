@@ -26,17 +26,19 @@ Write the notes in the language the person writes in; `board:new` takes the
 app's default locale, and `--locale ja` sets another. Tell the person where to
 see it: with the dev server running, `/_guren/boards/<slug>` on its port.
 
-You edit the board through `board:apply`, with the operations on standard
-input, so no operations file is left in the repository (`plan:approve` refuses
-a tree with an untracked file):
+You edit the board through `board:apply`. Write the operations as a JSON
+file outside the repository (your scratchpad or a temp directory), since
+`plan:approve` refuses a tree with an untracked file, and pass its path:
 
-```bash
-bunx guren board:apply <slug> --ops - <<'EOF'
+```json
 [
   { "op": "section", "id": "publishing", "title": "Publishing" },
   { "op": "add", "id": "post_published", "kind": "event", "text": "Post was published", "section": "publishing" }
 ]
-EOF
+```
+
+```bash
+bunx guren board:apply <slug> --ops <path to the file>
 ```
 
 - You name every note: an id is lowercase letters, digits and `_`, starting
