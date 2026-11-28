@@ -720,5 +720,51 @@ To measure during phase 1:
    `SkillsExtension.load()` over an in-memory record took a median of 1.2 ms
    for 10 skills in 30 files (120 kB) and 8.7 ms for 100 skills in 400 files
    (1.6 MB), on Bun 1.4.5 and Apple silicon. Both numbers come from an
-   SDK-only fixture; the plugin's own bundle through wrangler, and the cold
-   start on workerd itself, remain to be measured.
+   SDK-only fixture.
+   **The plugin's bundle, measured through wrangler.** The probe is a worker
+   that boots `createApp()` with `mcpPlugin()` behind `createWorkersHandler()`.
+   Its `@guren/*` packages are vendored from `dist` and the rest installed from
+   npm, as `wrangler-bundle.test.ts` assembles its probe, with
+   `cloudflare:build`'s stubs and defines. Each variant was bundled by
+   `wrangler deploy --dry-run` (4.141.0, not minified), with skills of prose cut
+   from the guides so that gzip sees real text:
+
+   | Variant | Uncompressed | Gzipped |
+   | --- | --- | --- |
+   | `ext/skills` stubbed out | 1663.4 KiB | 364.7 KiB |
+   | `ext/skills`, no `skills` option | 1729.0 KiB | 381.9 KiB |
+   | 10 skills, 30 files, 120 kB | 1850.2 KiB | 423.4 KiB |
+   | 100 skills, 400 files, 1.6 MB | 3343.3 KiB | 908.5 KiB |
+
+   The extension adds 65.6 KiB (17.2 KiB gzipped) whether or not an app has a
+   skill, and the skills themselves add about their own size. Workers counts
+   only the uncompressed size, against 64 MiB.
+
+   **The cold start, measured on workerd.** Each bundle was started in workerd
+   through Miniflare 5.20260801.1-alpha, 20 times per variant with the variants
+   interleaved, on Apple silicon with the machine otherwise quiet (a one-minute
+   load average of about 5 on 8 cores). Timed from outside: the start (until
+   the runtime is ready, which includes spawning workerd), the first request
+   (which boots the app and builds the catalog) and a second one. Medians, with
+   the range:
+
+   | Variant | Start | First request | Second request |
+   | --- | --- | --- | --- |
+   | `ext/skills` stubbed out | 78.4 ms (77.4–122.4) | 7.6 ms (7.2–9.5) | 1.0 ms |
+   | No `skills` option | 80.9 ms (77.9–168.0) | 7.5 ms (7.3–13.0) | 1.0 ms |
+   | 10 skills | 81.2 ms (78.6–149.5) | 11.2 ms (10.8–15.5) | 1.0 ms |
+   | 100 skills | 89.9 ms (87.6–120.0) | 29.5 ms (28.7–39.6) | 1.1 ms |
+
+   An app that carries the extension and no skill pays nothing measurable. The
+   skills cost twice: the larger bundle takes about 9 ms more to start with
+   100 skills, and the catalog is built in the first request, about 4 ms longer
+   for 10 skills and about 22 ms longer for 100. Later requests do not pay
+   again. The first request is where `createWorkersHandler()` boots the app,
+   inside the fetch handler, so the catalog is not global-scope work and does
+   not count against the one-second startup limit. These are wall times on a
+   local machine, not CPU time on Cloudflare's edge; the Workers limits page
+   counts CPU time spent in handler code and allows 10 ms per request on the
+   Free plan. On these numbers, a Free-plan app with dozens of skills may
+   exceed it on the first request after each cold start, which only a deployed
+   worker can confirm. A paid plan's limit (30 s by default) is far above any
+   of them.
