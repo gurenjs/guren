@@ -349,6 +349,22 @@ The harness template gains an `event-storming` skill under
 stops for the person after each: events only, then commands and actors, then
 reactions and external systems, then questions.
 
+**Amended in implementation (M3c):** the second stage also adds the
+aggregate each command changes and the view its actor uses, since no other
+stage would. The skill reads the board again before every stage, so the
+person's canvas edits are what it builds on, and writes operations to a file
+outside the repository, leaving none in the tree for `plan:approve` to refuse.
+It does not pass them on standard input: Claude Code's shell check refuses a
+heredoc holding JSON, which every measured session hit on its first try. In a session
+nobody can answer in, it goes through the stages in one pass and stops at the
+board. The stages connect every note to the next, synchronous steps included,
+since the planning prompt writes a side effect's trigger from the arrows into
+its note. Its hand-off runs `plan --from-board`, records the links, and checks
+them with `board:status --plan` before the person reviews the plan. The board
+is then committed, since the first `plan:approve` of a plan, which stamps its
+baseline, refuses a tree with changes outside the plan's own files, and a
+board is not one of them.
+
 ### 3. From a board to a plan
 
 ```bash

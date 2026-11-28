@@ -1,0 +1,127 @@
+---
+name: event-storming
+description: "Run an event-storming session with the person on a board (`docs/boards/<slug>.board.json`, RFC 0041) before a plan exists, for a change whose shape is not settled yet (\"let's storm this\", \"map the events\", \"what happens in the domain when …\"). Works in four stages and stops for the person after each, then hands the board to plan-write."
+---
+
+# Event-Storming Skill
+
+A board is where the person and you work out a change before it is ready to
+plan: what happens in the domain, who causes it, what follows, and what nobody
+has decided. The person arranges the board on a canvas in the Dev Center, and
+you read and edit the same file as text. The board carries no authority:
+nothing checks it, approves it or runs from it. The plan written from it is
+what gets reviewed.
+
+When the change is already clear (the person can name the models, routes and
+pages), skip the board and use `plan-write`.
+
+## 0. Open the board
+
+```bash
+bunx guren board:show <slug>     # an existing board
+bunx guren board:new "<title>"   # a new one; a title with no ASCII letters or digits needs --slug
+```
+
+Write the notes in the language the person writes in. `board:new` records the
+app's default locale, else `en`; pass `--locale ja` when the person writes in
+another. Tell the person where to see it: with `bun run dev` running (it
+enables the Dev Center), `/_guren/boards/<slug>` on the app's port.
+
+You edit the board through `board:apply`. Write the operations as a JSON
+file outside the repository (your scratchpad or a temp directory), since
+`plan:approve` refuses to approve a plan the first time while the tree holds
+an untracked file, and pass its path.
+Create the file with your file-writing tool, not a shell heredoc: a shell
+command holding JSON braces and quotes is refused by some agents' checks.
+
+```json
+[
+  { "op": "section", "id": "publishing", "title": "Publishing" },
+  { "op": "add", "id": "post_published", "kind": "event", "text": "Post was published", "section": "publishing" }
+]
+```
+
+```bash
+bunx guren board:apply <slug> --ops <path to the file>
+```
+
+- You name every note: an id is lowercase letters, digits and `_`, starting
+  with a letter, 2 to 32 characters. A note's text is one line of at most 280
+  characters.
+- Leave out coordinates. A note is placed next to `after`, or in `section`,
+  and its position carries no meaning: never move the person's notes to tidy
+  the board.
+- An operation that cannot apply (a note the person removed meanwhile) is
+  reported as dropped while the rest apply. Read what was dropped and decide
+  again; do not resend it unchanged.
+- A file that is not JSON, an operation of the wrong shape, or a list that
+  would leave the board invalid is refused whole, and nothing is written.
+  Fix what the error names and send the list again.
+
+## The stages
+
+Before every stage run `board:show <slug>` again: the person may have moved,
+reworded or removed notes on the canvas, and their board is the one you build
+on. After every stage, show the person what you added (the outline lines, not
+the JSON), ask what is wrong or missing, and wait for their answer before the
+next stage. Apply their corrections first.
+
+1. **Events.** Only `event` notes: what happened, in the past tense ("Post
+   was published"), one fact each. Put the ones that belong together in a
+   `section` per flow. Read the app first (`bunx guren context`) so an event
+   it already has keeps the name the person knows.
+2. **Commands, actors, records and pages.** Before each event, the `command`
+   that causes it ("Publish a post") and the `actor` who issues it. Beside
+   the command, the `aggregate` it changes and the `view` the actor uses.
+   Connect them in reading order: actor to view, view to command, command to
+   aggregate, aggregate to event (`{ "op": "connect", "from": …, "to": … }`).
+   The plan is written from the arrows, not from where notes sit, so a note
+   with no arrow leaves the planner to guess.
+3. **Reactions and external systems.** After each event, the `reaction`
+   that follows it ("When published, tell subscribers") and any `external`
+   system it reaches, each connected from the note before it. A step the
+   caller does not wait for, such as a queued job or a mail, gets an async
+   arrow: add `"kind": "async"` to the `connect`.
+4. **Questions.** One `question` note per thing nobody has decided, with
+   `about` naming the notes it concerns ("Notify for a saved draft too?").
+   Ask; do not decide for the person. A question the person answers becomes
+   an edit to the notes, and the question is removed.
+
+Stop when the person says the board has settled. A stage the person skips is
+skipped. In a session nobody can answer in (`claude -p`, a scheduled run), go
+through the four stages in one pass, leave everything you could not settle as
+a question note, and stop at the board: tell the person it is ready to review.
+
+## Hand off to a plan
+
+```bash
+bunx guren plan --from-board <slug> --print-prompt
+```
+
+Add the person's own request in quotes when they gave one. Follow the prompt
+as the `plan-write` skill describes, from its step 0: it maps each note to
+plan elements and asks the board's open questions. The plan never mentions
+the board. If step 0 or the prompt ends with no plan, stop there; the board
+stays as it is, with no links.
+
+Once `plan:render` reports no failed check, record which note became which
+element with `link` operations (its prompt has a section on them), then check
+them against the plan before the person reviews it:
+
+```bash
+bunx guren board:status <slug> --plan docs/plans/<plan-slug>/plan.json
+```
+
+Every link should read `planned` or `present`. A `missing` link names
+something the plan does not add: fix the link or the plan. An `unknown` link
+means the app or the plan did not read: fix what its reason names and run the
+command again. Leave actors and questions unlinked. A note listed as leading
+nowhere needs a link, unless the change does not need it: then it is in the
+plan's non-goals and stays listed, and you tell the person why.
+
+Commit the board with its links before the person runs `plan:approve`: its
+first approval of a plan refuses a tree with uncommitted changes outside the
+plan's own files. Commit it again if they edit the canvas before approving.
+Once the plan is approved, the board page marks each linked note as
+`board:status` does without `--plan`, across every approved plan still open;
+**Refresh board** checks again.
