@@ -54,7 +54,12 @@ export interface AppMcpSkills {
 export async function loadSkills(config: McpSkillsConfig | undefined): Promise<AppMcpSkills | undefined> {
   if (!config) return undefined
 
-  const module = await config.files()
+  let module: McpSkillFilesModule
+  try {
+    module = await config.files()
+  } catch (cause) {
+    throw new Error('[@guren/plugin-mcp] The skills module passed as `skills.files` could not be loaded.', { cause })
+  }
   if (!isFileRecord(module?.files) || !isFileRecord(module?.binary)) {
     throw new Error(
       '[@guren/plugin-mcp] The skills module exports no `files` and `binary` objects, '
@@ -62,22 +67,25 @@ export async function loadSkills(config: McpSkillsConfig | undefined): Promise<A
     )
   }
 
-  const record: Record<string, string | Uint8Array> = { ...module.files }
+  // Copied before the catalog is built: its digests and the bytes served are one reading of the module.
+  const contents = new Map<string, string | Uint8Array>(Object.entries(module.files))
   for (const [path, base64] of Object.entries(module.binary)) {
-    if (Object.hasOwn(record, path)) {
+    if (contents.has(path)) {
       throw new Error(`[@guren/plugin-mcp] The skills module lists "${path}" as both text and binary.`)
     }
     try {
-      record[path] = decodeBase64(base64)
+      contents.set(path, decodeBase64(base64))
     } catch {
       throw new Error(`[@guren/plugin-mcp] The skills module holds "${path}" as binary, and its content is not base64.`)
     }
   }
   // What codegen leaves once the last skill is removed: nothing to load, and nothing to warn about.
-  if (Object.keys(record).length === 0) return undefined
-  refuseNestedSkills(Object.keys(record))
+  if (contents.size === 0) return undefined
+  const paths = [...contents.keys()]
+  refuseUnnormalizedPaths(paths)
+  refuseNestedSkills(paths)
 
-  const catalog = await SkillsExtension.load(memorySkillFiles(record), {
+  const catalog = await SkillsExtension.load(memorySkillFiles(Object.fromEntries(contents)), {
     onWarning: ({ path, message }) => {
       console.warn(`[@guren/plugin-mcp] Skill file "${path}": ${message}`)
     },
@@ -91,17 +99,35 @@ export async function loadSkills(config: McpSkillsConfig | undefined): Promise<A
     // `load()` never publishes `"dynamic"`: every file of the skill is listed.
     for (const resource of Array.isArray(entry.resources) ? entry.resources : []) {
       const path = pathOfUri(resource.uri)
-      const mimeType = mimeTypeOf(resource.uri)
-      if (path !== undefined && Object.hasOwn(module.files, path)) {
-        files.set(resource.uri, { uri: resource.uri, mimeType, text: module.files[path]! })
-      } else if (path !== undefined && Object.hasOwn(module.binary, path)) {
-        files.set(resource.uri, { uri: resource.uri, mimeType, blob: module.binary[path]! })
-      } else {
+      const content = path === undefined ? undefined : contents.get(path)
+      if (path === undefined || content === undefined) {
         throw new Error(`[@guren/plugin-mcp] The skill catalog publishes ${resource.uri}, which the skills module does not hold.`)
       }
+      files.set(resource.uri, fileContents(resource.uri, mimeTypeOf(path), content))
     }
   }
   return { entries: catalog.entries, byUri, files }
+}
+
+/** Text when the bytes are lossless UTF-8 and base64 otherwise, the split the SDK's own skills server makes. */
+function fileContents(uri: string, mimeType: string, content: string | Uint8Array): SkillFileContents {
+  if (typeof content === 'string') return { uri, mimeType, text: content }
+  const text = decodeUtf8(content)
+  return text === undefined ? { uri, mimeType, blob: encodeBase64(content) } : { uri, mimeType, text }
+}
+
+/**
+ * The SDK's file adapter drops empty and `.` segments and refuses `..`, so
+ * such a key is published at a URI that leads back to no key of the module.
+ */
+function refuseUnnormalizedPaths(paths: readonly string[]): void {
+  const odd = paths.find((path) => path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..'))
+  if (odd !== undefined) {
+    throw new Error(
+      `[@guren/plugin-mcp] The skills module holds the path ${JSON.stringify(odd)}. `
+      + 'A path is relative to the skill namespace, with no empty, "." or ".." segment.',
+    )
+  }
 }
 
 /**
@@ -222,8 +248,8 @@ function encodeCursor(uri: string): string {
 
 function decodeCursor(cursor: string): string | undefined {
   try {
-    const decoded = atob(cursor.replaceAll('-', '+').replaceAll('_', '/'))
-    return decoded.startsWith(CURSOR_PREFIX) ? decoded.slice(CURSOR_PREFIX.length) : undefined
+    const decoded = decodeUtf8(decodeBase64(cursor.replaceAll('-', '+').replaceAll('_', '/')))
+    return decoded?.startsWith(CURSOR_PREFIX) ? decoded.slice(CURSOR_PREFIX.length) : undefined
   } catch {
     return undefined
   }
@@ -236,13 +262,29 @@ function decodeBase64(base64: string): Uint8Array {
   return bytes
 }
 
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = ''
+  // In chunks: one spread of a large file exceeds the engine's argument limit.
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
+  return btoa(binary)
+}
+
+/** Undefined unless decoding loses nothing; a BOM is kept, so the text encodes back to the bytes that were hashed. */
+function decodeUtf8(bytes: Uint8Array): string | undefined {
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  } catch {
+    return undefined
+  }
+}
+
+/** A plain object of strings: a `Map` or any other instance would otherwise read as a module with no files. */
 function isFileRecord(value: unknown): value is Readonly<Record<string, string>> {
-  return (
-    typeof value === 'object'
-    && value !== null
-    && !Array.isArray(value)
-    && Object.values(value).every((content) => typeof content === 'string')
-  )
+  if (typeof value !== 'object' || value === null) return false
+  const prototype: unknown = Object.getPrototypeOf(value)
+  return (prototype === Object.prototype || prototype === null) && Object.values(value).every((content) => typeof content === 'string')
 }
 
 /** Kept equal to the table the SDK's own skills server answers from (`mime.ts`), which it does not export. */
@@ -272,8 +314,9 @@ const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   pdf: 'application/pdf',
 }
 
-function mimeTypeOf(uri: string): string {
-  const name = uri.slice(uri.lastIndexOf('/') + 1)
+/** By the file's decoded name, never its URI: a percent-encoded extension matches nothing. */
+function mimeTypeOf(path: string): string {
+  const name = path.slice(path.lastIndexOf('/') + 1)
   const dot = name.lastIndexOf('.')
   const extension = dot <= 0 ? '' : name.slice(dot + 1).toLowerCase()
   return Object.hasOwn(MIME_BY_EXTENSION, extension) ? MIME_BY_EXTENSION[extension]! : 'application/octet-stream'

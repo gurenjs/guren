@@ -140,8 +140,8 @@ These are skills for the agents of the application's *users*. They are
 unrelated to `.claude/skills/`, which the agent harness installs for the
 developer's own coding agent.
 
-`resources/skills/` is the default this RFC proposes. Open Question 1 asks
-whether it should be `app/Mcp/Skills/`.
+`resources/skills/` was chosen over `app/Mcp/Skills/` before phase 1 (Open
+Question 1).
 
 #### 1.2 A generated module
 
@@ -684,5 +684,5 @@ To measure during phase 1:
    `SkillsExtension.load()` over an in-memory record took a median of 1.2 ms
    for 10 skills in 30 files (120 kB) and 8.7 ms for 100 skills in 400 files
    (1.6 MB), on Bun 1.4.5 and Apple silicon. Both numbers come from an
-   SDK-only fixture; the same pair on a packed tarball through wrangler, and
-   the cold start on workerd itself, remain to be measured.
+   SDK-only fixture; the plugin's own bundle through wrangler, and the cold
+   start on workerd itself, remain to be measured.

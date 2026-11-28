@@ -126,7 +126,6 @@ export function createAppMcpServer(options: AppMcpServerOptions, era: ProtocolEr
   const tools = options.tools.filter((tool) => !isReservedAgentToolName(tool.toolName))
 
   const approvalsConfigured = options.approvals !== undefined
-  // An app with no `ui` tool advertises exactly what it did before RFC 0038.
   const servesUi = tools.some((tool) => tool.ui)
   const skills = options.skills
   const servesSkillsExtension = skills !== undefined && era === 'modern'

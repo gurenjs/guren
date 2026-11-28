@@ -112,6 +112,47 @@ describe('loadSkills', () => {
     await expect(loadSkills({ files: () => wrong })).rejects.toThrow('.guren/mcp-skills.gen.ts')
   })
 
+  test('should fail the boot on files held in anything but a plain object', async () => {
+    const mapped = { files: new Map([['refunds/SKILL.md', REFUNDS]]), binary: {} } as unknown as McpSkillFilesModule
+
+    await expect(loadSkills({ files: () => mapped })).rejects.toThrow('.guren/mcp-skills.gen.ts')
+  })
+
+  test('should name the option when the module cannot be loaded, keeping the cause', async () => {
+    const cause = new Error('unavailable')
+
+    const failure = await loadSkills({ files: () => Promise.reject(cause) }).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(Error)
+    expect((failure as Error).message).toContain('`skills.files`')
+    expect((failure as Error).cause).toBe(cause)
+  })
+
+  test('should fail the boot on a path with an empty, "." or ".." segment', async () => {
+    for (const path of ['refunds/./notes.md', 'refunds//notes.md', '/refunds/notes.md', 'refunds/../notes.md']) {
+      const module: McpSkillFilesModule = { files: { 'refunds/SKILL.md': REFUNDS, [path]: 'x' }, binary: {} }
+
+      await expect(loadSkills({ files: () => module })).rejects.toThrow(`holds the path ${JSON.stringify(path)}`)
+    }
+  })
+
+  test('should serve the bytes the catalog hashed when the module changes while it loads', async () => {
+    const files: Record<string, string> = { 'refunds/SKILL.md': REFUNDS, 'refunds/check.txt': 'before' }
+
+    const pending = loadSkills({ files: () => ({ files, binary: {} }) })
+    queueMicrotask(() => {
+      files['refunds/check.txt'] = 'changed while the catalog was being built'
+    })
+    const skills = (await pending)!
+
+    const listed = (getSkill(skills, 'skill://refunds/SKILL.md').skill.resources as Array<{ uri: string; size?: number }>).find(
+      (resource) => resource.uri === 'skill://refunds/check.txt',
+    )
+    const served = readSkillResource('skill://refunds/check.txt', skills) as { text: string }
+    expect(files['refunds/check.txt']).not.toBe('before')
+    expect(new TextEncoder().encode(served.text)).toHaveLength(listed!.size!)
+  })
+
   test('should fail the boot on a path listed as both text and binary', async () => {
     const module: McpSkillFilesModule = { files: { 'refunds/SKILL.md': REFUNDS }, binary: { 'refunds/SKILL.md': 'AA==' } }
 
@@ -134,12 +175,13 @@ describe('loadSkills', () => {
 
   test('should skip a skill the catalog refuses, name its file once, and publish none of its files', async () => {
     const module = skillsModule()
-    const files = { ...module.files, 'broken/SKILL.md': 'no frontmatter here\n' }
+    const files = { ...module.files, 'broken/SKILL.md': 'no frontmatter here\n', 'broken/notes.md': 'notes\n' }
 
     const skills = await loadSkills({ files: () => ({ files, binary: module.binary }) })
 
     expect(skills?.entries.map((entry) => entry.uri)).toEqual(['skill://billing/dunning/SKILL.md', 'skill://refunds/SKILL.md'])
     expect(readSkillResource('skill://broken/SKILL.md', skills!)).toBeUndefined()
+    expect(readSkillResource('skill://broken/notes.md', skills!)).toBeUndefined()
     const named = warn.mock.calls.filter(([message]) => String(message).includes('broken/SKILL.md'))
     expect(named).toHaveLength(1)
     expect(String(named[0]![0])).toStartWith('[@guren/plugin-mcp]')
@@ -160,6 +202,30 @@ describe('loadSkills', () => {
     })
     expect(readSkillResource('skill://refunds/nope.md', skills)).toBeUndefined()
     expect(readSkillResource('not a uri', skills)).toBeUndefined()
+  })
+
+  test('should decide text or blob by the bytes, and the type by the decoded file name', async () => {
+    const module: McpSkillFilesModule = {
+      // The extension holds U+212A, which lowercases to "k" and is percent-encoded in the URI.
+      files: { 'refunds/SKILL.md': REFUNDS, 'refunds/readme.marKdown': '# k\n' },
+      binary: {
+        'refunds/hi.txt': 'aGk=',
+        'refunds/bom.txt': btoa(String.fromCharCode(0xef, 0xbb, 0xbf, 0x68, 0x69)),
+        // Unpadded in the module, canonical base64 on the wire.
+        'refunds/raw.bin': '//4',
+      },
+    }
+
+    const skills = (await loadSkills({ files: () => module }))!
+
+    expect(readSkillResource('skill://refunds/readme.mar%E2%84%AAdown', skills)).toMatchObject({ mimeType: 'text/markdown' })
+    expect(readSkillResource('skill://refunds/hi.txt', skills)).toEqual({ uri: 'skill://refunds/hi.txt', mimeType: 'text/plain', text: 'hi' })
+    expect(readSkillResource('skill://refunds/bom.txt', skills)).toMatchObject({ text: '﻿hi' })
+    expect(readSkillResource('skill://refunds/raw.bin', skills)).toEqual({
+      uri: 'skill://refunds/raw.bin',
+      mimeType: 'application/octet-stream',
+      blob: '//4=',
+    })
   })
 })
 
@@ -184,11 +250,13 @@ describe('listSkills', () => {
     expect(getSkill(skills, 'skill://refunds/SKILL.md')).toMatchObject({ ttlMs: 0, cacheScope: 'private' })
   })
 
-  test('should refuse a cursor it did not issue', async () => {
+  test('should refuse a cursor that is not base64, lacks the prefix, or is not UTF-8', async () => {
     const skills = (await loadSkills({ files: () => skillsModule() }))!
 
     expect(() => listSkills(skills, 'garbage!')).toThrow('Invalid cursor')
     expect(() => listSkills(skills, btoa('before:skill://refunds/SKILL.md'))).toThrow('Invalid cursor')
+    // "after:" followed by the byte FF.
+    expect(() => listSkills(skills, 'YWZ0ZXI6_w')).toThrow('Invalid cursor')
   })
 })
 
@@ -267,6 +335,7 @@ describe('mcpPlugin skills (RFC 0042)', () => {
       await client.close()
     })
 
+    // The SDK stamps these on a 2026-07-28 result; this pins what reaches the client.
     test('should mark a file read as private and not to be kept', async () => {
       const client = await endpoint.connect('modern')
 
@@ -300,6 +369,9 @@ describe('mcpPlugin skills (RFC 0042)', () => {
       await expect(client.request({ method: 'skills/list', params: {} }, AnyResult)).rejects.toMatchObject({
         code: METHOD_NOT_FOUND,
       })
+      await expect(
+        client.request({ method: 'skills/get', params: { uri: 'skill://refunds/SKILL.md' } }, AnyResult),
+      ).rejects.toMatchObject({ code: METHOD_NOT_FOUND })
 
       await client.close()
     })
@@ -384,7 +456,23 @@ describe('mcpPlugin skills beside the rest of the endpoint', () => {
     await client.close()
   })
 
-  test('should meter every skill read against the token read budget', async () => {
+  test('should serve the second page of a catalog past 100 skills', async () => {
+    const endpoint = await bootEndpoint({ rateLimit: false, skills: { files: () => bulkModule(150) } })
+    const client = await endpoint.connect('modern')
+
+    const first = await client.request({ method: 'skills/list', params: {} }, AnyResult)
+    const second = await client.request({ method: 'skills/list', params: { cursor: first.nextCursor } }, AnyResult)
+
+    expect(first.skills).toHaveLength(100)
+    expect(second.skills).toHaveLength(50)
+    expect((second.skills as Array<{ uri: string }>)[0]!.uri).toBe('skill://bulk-100/SKILL.md')
+    expect(second.nextCursor).toBeUndefined()
+    expect((await new SkillsClient(client).list()).skills).toHaveLength(150)
+
+    await client.close()
+  })
+
+  test('should take a listing and a file read from the token read budget', async () => {
     const endpoint = await bootEndpoint({ rateLimit: { max: 2 }, skills: { files: () => skillsModule() } })
     const client = await endpoint.connect('modern')
     const skills = new SkillsClient(client)
@@ -395,6 +483,19 @@ describe('mcpPlugin skills beside the rest of the endpoint', () => {
     await expect(client.readResource({ uri: 'skill://refunds/references/policy.md' })).rejects.toThrow('Rate limit exceeded')
     await expect(skills.get('skill://refunds/SKILL.md')).rejects.toThrow('Rate limit exceeded')
     await expect(client.listResources()).rejects.toThrow('Rate limit exceeded')
+
+    await client.close()
+  })
+
+  test('should take skills/get and resources/list from the same budget', async () => {
+    const endpoint = await bootEndpoint({ rateLimit: { max: 2 }, skills: { files: () => skillsModule() } })
+    const client = await endpoint.connect('modern')
+    const skills = new SkillsClient(client)
+
+    await skills.get('skill://refunds/SKILL.md')
+    await client.listResources()
+
+    await expect(skills.list()).rejects.toThrow('Rate limit exceeded')
 
     await client.close()
   })
