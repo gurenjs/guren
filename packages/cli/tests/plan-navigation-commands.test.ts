@@ -38,25 +38,36 @@ const FILE = [
 describe('planNavigationWork (RFC 0040 §5)', () => {
   test('should name nav:add and nav:remove by the route name, and what the commands cannot say by hand', () => {
     expect(planNavigationWork(plan, ALL, FILE)).toEqual([
-      // A plan route's id is written as its name; a label with a space is quoted for the shell.
-      { id: 'nav.post', command: "bunx guren nav:add 'Post a job' --route jobs.create --auth required --can create:Job" },
+      // A plan route's id is written as its name; flag values are attached, and a label with a space is quoted.
+      { id: 'nav.post', command: "bunx guren nav:add --route=jobs.create --auth=required --can=create:Job 'Post a job'" },
       // nav:add imports a root model only, so a module's goes in by hand.
       {
         id: 'nav.invoices',
-        command: 'bunx guren nav:add Invoices --route invoices.index',
-        byHand: "Then add show.can ['viewAny', Invoice] (imported from modules/billing/app/Models/Invoice) to the entry it writes.",
+        command: 'bunx guren nav:add --route=invoices.index Invoices',
+        byHand: 'Then add show.can ["viewAny", Invoice] (imported from modules/billing/app/Models/Invoice) to the entry it writes.',
       },
-      { id: 'nav.admin', command: "bunx guren nav:add 'Admin'\\''s' --route admin.index", byHand: 'Then add show.where { admin: true } to the entry it writes.' },
+      { id: 'nav.admin', command: "bunx guren nav:add --route=admin.index 'Admin'\\''s'", byHand: 'Then add show.where { admin: true } to the entry it writes.' },
       { id: 'nav.home', command: 'bunx guren nav:remove home' },
-      { id: 'nav.dashboard', byHand: 'Edit the entry for dashboard: label "Overview", auth \'required\'.' },
+      { id: 'nav.dashboard', byHand: 'Edit the entry for dashboard: label "Overview", show.auth "required".' },
     ])
   })
 
-  test('should leave out what the file already shows, and name everything when it cannot be read', () => {
-    expect(planNavigationWork(plan, ['nav.home', 'nav.dashboard'], [])).toEqual([])
-    expect(planNavigationWork(plan, ['nav.home', 'nav.done'], { unreadable: 'config/navigation.ts spreads its entries' })).toEqual([
-      { id: 'nav.home', command: 'bunx guren nav:remove home' },
-      { id: 'nav.done', command: 'bunx guren nav:add Done --route done.index' },
+  test('should leave out what the file already shows, and tell an entry that is there but shows otherwise', () => {
+    // The home entry is gone and the dashboard entry shows what the alter states.
+    expect(planNavigationWork(plan, ['nav.home', 'nav.dashboard'], [{ route: 'dashboard', label: 'Overview', auth: 'required', line: 7 }])).toEqual([])
+    // nav:add ran and the where was not added yet: the entry is there, short of its audience.
+    expect(planNavigationWork(plan, ['nav.admin'], [{ route: 'admin.index', label: "Admin's", line: 7 }])).toEqual([
+      { id: 'nav.admin', byHand: 'The entry for admin.index is there and shows otherwise; edit it to show.where { admin: true }.' },
+    ])
+    expect(planNavigationWork(plan, ['nav.dashboard'], [])).toEqual([
+      { id: 'nav.dashboard', byHand: 'dashboard has no entry in config/navigation.ts to alter: plan:status reports it.' },
+    ])
+  })
+
+  test('should keep a value opening with a dash from reading as a flag, and run in the app the plan is for', () => {
+    const dashed = PlanDraftSchema.parse({ ...plan, navigation: [{ id: 'nav.dash', change: { kind: 'add' }, route: '-dash', label: '-Dash' }] })
+    expect(planNavigationWork(dashed, ['nav.dash'], [], { cd: 'cd apps/shop && ' })).toEqual([
+      { id: 'nav.dash', command: 'cd apps/shop && bunx guren nav:add --route=-dash -- -Dash' },
     ])
   })
 
