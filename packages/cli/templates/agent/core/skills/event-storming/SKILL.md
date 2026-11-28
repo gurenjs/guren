@@ -28,7 +28,9 @@ see it: with the dev server running, `/_guren/boards/<slug>` on its port.
 
 You edit the board through `board:apply`. Write the operations as a JSON
 file outside the repository (your scratchpad or a temp directory), since
-`plan:approve` refuses a tree with an untracked file, and pass its path:
+`plan:approve` refuses a tree with an untracked file, and pass its path.
+Create the file with your file-writing tool, not a shell heredoc: a shell
+command holding JSON braces and quotes is refused by some agents' checks.
 
 ```json
 [
