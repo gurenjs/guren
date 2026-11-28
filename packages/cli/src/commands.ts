@@ -42,6 +42,7 @@ import { browserDoctorCommand, browserMapCommand, browserRecordCommand, browserS
 import { runtimeErrorsCommand } from './commands/runtime-errors'
 import { planCommand, planRenderCommand, planStatusCommand, planVerifyCommand, planNextCommand, planScaffoldCommand, planApproveCommand, planWaiveCommand, planReviseCommand, planCloseCommand } from './commands/plan'
 import { boardApplyCommand, boardNewCommand, boardShowCommand } from './commands/board'
+import { navAddCommand, navRemoveCommand } from './commands/navigation'
 import { toolListCommand, toolInspectCommand, toolCallCommand, toolLogCommand, tokenIssueCommand, toolDevCommand } from './commands/tools'
 import { assertDestructiveCommandAllowed } from './commands/destructive-guard'
 import { checkCommand, auditCommand, gateCommand } from './commands/diagnostics'
@@ -1820,6 +1821,8 @@ export const builtinSubCommands = {
   'board:new': boardNewCommand,
   'board:show': boardShowCommand,
   'board:apply': boardApplyCommand,
+  'nav:add': navAddCommand,
+  'nav:remove': navRemoveCommand,
   'make:auth': makeAuthCommand,
   'make:agent': makeAgentCommand,
   'make:ai-agent': makeAiAgentCommand,
