@@ -3,9 +3,9 @@
  * so the dispatcher that writes the header and the auth middlewares that read
  * it share one spelling. Not exported from the package index.
  *
- * Read only to choose the *shape* of a refusal: a tool caller cannot follow a
- * redirect, so a guard answers it with JSON instead. Nothing may authorize on
- * it, since any client can send it and gets no more than a JSON refusal.
+ * Read only to refuse or to choose the *shape* of a refusal: a tool caller cannot
+ * follow a redirect, so a guard answers it with JSON, and a `confirm` route refuses
+ * a `webmcp` call. Nothing may authorize on it, since any client can send it.
  */
 
 /** Request header naming the protocol surface a tool call arrived on. */

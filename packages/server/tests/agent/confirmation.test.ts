@@ -44,6 +44,53 @@ const register = (router: Router): void => {
     .agent({ confirm: { message: 'This hides the post from readers.' } })
 }
 
+describe('a WebMCP call to a confirm route', () => {
+  const archive = (app: { fetch(request: Request): Response | Promise<Response> }, headers: Record<string, string> = {}) =>
+    app.fetch(new Request('http://localhost/posts/5/archive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ reason: 'outdated' }),
+    }))
+
+  test('should be refused without running the action, as a page loaded before the deploy would send it', async () => {
+    archived = []
+    const app = createApp({ routes: register })
+    await app.boot()
+
+    const response = await archive(app, { 'X-Guren-Agent-Surface': 'webmcp' })
+
+    expect(response.status).toBe(403)
+    expect(((await response.json()) as { message: string }).message).toContain('"posts.archive" asks the calling user to confirm')
+    expect(archived).toEqual([])
+  })
+
+  test('should leave the application\'s own request to the same route alone', async () => {
+    archived = []
+    const app = createApp({ routes: register })
+    await app.boot()
+
+    const response = await archive(app)
+
+    expect(response.status).toBe(200)
+    expect(archived).toEqual([5])
+  })
+
+  test('should run on a route that declares no confirm', async () => {
+    archived = []
+    const app = createApp({
+      routes: (router) => {
+        router.post('/posts/:id/archive', [PostController, 'archive']).name('posts.archive').agent({})
+      },
+    })
+    await app.boot()
+
+    const response = await archive(app, { 'X-Guren-Agent-Surface': 'webmcp' })
+
+    expect(response.status).toBe(200)
+    expect(archived).toEqual([5])
+  })
+})
+
 describe('agent confirmation through a mounted route', () => {
   test('should ask about a call the route accepts, without running the action', async () => {
     archived = []

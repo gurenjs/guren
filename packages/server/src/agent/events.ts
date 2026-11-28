@@ -63,14 +63,14 @@ export class AgentToolInvoked extends Event {
  * Why a tool invocation was refused before it reached the route handler.
  * Deliberately no `'policy'`: `Gate` policies evaluate *inside* the dispatched
  * request, so a policy denial is an execution that returned 403. A denial carries
- * no HTTP status: the route's action never ran. `'confirmation'` alone follows a
- * rehearsal, which ran the route's middleware and validation (RFC 0042 §2.2).
+ * no HTTP status: the route's action never ran. `'confirmation'` alone may follow
+ * a rehearsal, which runs the route's middleware and validation (RFC 0042 §2.2).
  */
 export type AgentToolDenialReason = 'auth' | 'scope' | 'approval' | 'rate-limit' | 'confirmation'
 
 /**
  * Emitted when an agent tool invocation was refused. Carries no status or
- * duration: nothing ran, and {@link AgentToolDenialReason} is the finding.
+ * duration: the action never ran, and {@link AgentToolDenialReason} is the finding.
  * `'approval'` covers a tool declaring `approval: 'required'` whose call
  * became a pending record instead of an execution. `'confirmation'` covers a
  * `confirm` tool whose caller was asked, declined, or could not be asked.

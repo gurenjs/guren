@@ -60,7 +60,9 @@ export interface AuditedTool {
 /**
  * What the pipeline hands to `app.fetch`. Structural rather than
  * `Application`, so the pipeline stays a leaf of the agent layer and a test
- * can drive it with a bare `fetch`.
+ * can drive it with a bare `fetch`. It must answer a rehearsal (the preflight
+ * header) without running the route's action, as `Router` does: a target that
+ * ignores the header runs a `confirm` tool's action before anyone is asked.
  */
 export interface AgentDispatchTarget {
   fetch(request: Request, env?: unknown, executionCtx?: ExecutionContext): Promise<Response>
@@ -452,8 +454,8 @@ export function createAgentInvocationPipeline(
         }
       }
 
-      // 1. Scope. `gatePreflight` for a rehearsal — the same scope rule, minus
-      //    the approval half, for the reason `AgentInvocation.preflight` gives.
+      // `gatePreflight` for a rehearsal: the same scope rule, minus the approval
+      // half, for the reason `AgentInvocation.preflight` gives.
       const scope: GateVerdict = preflight
         ? gatePreflight(tool, options.abilities, scopeGateOptions)
         : gateToolCall(tool, options.abilities, scopeGateOptions)
@@ -461,8 +463,8 @@ export function createAgentInvocationPipeline(
         return deny(toDenial(scope))
       }
 
-      // 2. The interposition seam, between scope and approval. See
-      //    `AgentInterposition` for why that position is not negotiable.
+      // The interposition seam, between scope and approval. See
+      // `AgentInterposition` for why that position is not negotiable.
       if (options.interpose) {
         const interposed = await options.interpose({ tool, args, preflight })
         if (interposed) {
@@ -470,8 +472,8 @@ export function createAgentInvocationPipeline(
         }
       }
 
-      // 3. Confirmation (RFC 0042 §2.2), never for a rehearsal the caller asked for.
-      //    Ahead of approval: that gate writes a record and notifies people.
+      // Confirmation (RFC 0042 §2.2), never for a rehearsal the caller asked for.
+      // Ahead of approval: that gate writes a record and notifies people.
       if (!preflight && tool.confirm) {
         let fingerprint: string
         try {
@@ -490,10 +492,11 @@ export function createAgentInvocationPipeline(
         if (call.confirmed !== fingerprint) {
           const { confirm } = tool
           // Rehearsed first, so a call the route's middleware or validation refuses is
-          // answered with that refusal and no question reaches a person. Rests on the
-          // target honouring the rehearsal header, as every `.agent()` route of `Router` does.
+          // answered with that refusal and no question reaches a person. Any other
+          // answer is asked about, a middleware's own 200 included: returning it
+          // would hand over a result the caller never agreed to fetch.
           return run(true, (rehearsal) => {
-            if (!rehearsal.preflightVerdict) return undefined
+            if (rehearsal.status >= 400) return undefined
             return deny({
               reason: 'confirmation',
               message:
@@ -510,7 +513,7 @@ export function createAgentInvocationPipeline(
         }
       }
 
-      // 4. Approval — never for a rehearsal.
+      // Approval is never asked of a rehearsal.
       if (!preflight && tool.approval === 'required' && options.approvals) {
         const { approvals } = options
         let verdict: GateVerdict
@@ -536,7 +539,6 @@ export function createAgentInvocationPipeline(
         }
       }
 
-      // 5. Dispatch, then redact and audit.
       return run(preflight)
     },
   }

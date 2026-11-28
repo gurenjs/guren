@@ -429,6 +429,8 @@ describe('the invocation pipeline: confirmation', () => {
 
     expect(result.status).toBe('denied')
     if (result.status !== 'denied') return
+    expect(result.denial.reason).toBe('confirmation')
+    expect(result.denial.confirmation?.fingerprint).toMatch(/^[0-9a-f]{64}$/)
     expect(result.denial.confirmation?.fingerprint).not.toBe(fingerprint)
     expect(h.fetched.map(isRehearsal)).toEqual([true, true])
     expect(h.invoked).toEqual([])
@@ -448,6 +450,19 @@ describe('the invocation pipeline: confirmation', () => {
     expect(h.fetched.map(isRehearsal)).toEqual([true])
     expect(h.denied).toEqual([])
     expect(h.invoked).toEqual([{ tool: 'posts.archive', status: 422, args: { id: 'x' } }])
+  })
+
+  test('should still ask when a middleware answers the rehearsal itself, handing over nothing', async () => {
+    const cached = harness({ respond: () => Response.json({ secret: 'cached' }) })
+    const redirected = harness({ respond: () => new Response(null, { status: 302, headers: { Location: '/login' } }) })
+    const call = { tool: confirmTools().archive, args: { id: 5 } }
+
+    const results = await Promise.all([cached.invoke(call), redirected.invoke(call)])
+
+    for (const result of results) {
+      expect(result.status === 'denied' && result.denial.confirmation?.tool).toBe('posts.archive')
+    }
+    expect([...cached.invoked, ...redirected.invoked]).toEqual([])
   })
 
   test('should report a call that cannot be built as a 400, and ask nothing', async () => {

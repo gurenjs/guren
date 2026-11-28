@@ -8,6 +8,8 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
+import { AGENT_SURFACE_HEADER } from '../internal/agent-request'
+import { readAgentConfirm } from '../internal/agent-confirm'
 import {
   claimsRegisteredRoute,
   isClaimedRoute,
@@ -772,6 +774,8 @@ export class Router<in M extends string = never> {
       const preflightMiddleware = createAgentPreflightMiddleware(route, () =>
         this.aggregateCapabilities(route.routeMiddlewareNames, inlineMiddlewares))
       const chain = [...resolvedMiddlewares, ...inlineMiddlewares]
+      const confirmGuard = createAgentConfirmGuard(route)
+      if (confirmGuard) chain.push(confirmGuard)
       if (contractMiddleware) chain.push(contractMiddleware)
       if (preflightMiddleware) chain.push(preflightMiddleware)
       chain.push(handler)
@@ -1491,6 +1495,31 @@ function guardDispatchedRoute(
   Object.defineProperty(guarded, 'length', { value: first.length })
   Object.defineProperty(guarded, 'name', { value: first.name })
   return guarded
+}
+
+/**
+ * Refuses a WebMCP call to a `confirm` route (RFC 0042 §2.5): the browser calls the
+ * route past the pipeline that asks, and a page loaded before `confirm` was declared
+ * still holds the tool. It refuses and never authorizes, since any client sets the header.
+ */
+function createAgentConfirmGuard(route: RegisteredRoute): MiddlewareHandler | null {
+  if (!route.agent || !readAgentConfirm(route.agent.confirm)) {
+    return null
+  }
+
+  return async (c, next) => {
+    if (c.req.header(AGENT_SURFACE_HEADER) !== 'webmcp') {
+      return next()
+    }
+    return c.json(
+      {
+        message:
+          `"${route.name ?? route.path}" asks the calling user to confirm before it runs, which a WebMCP call `
+          + 'cannot do. Nothing was run. Reload the page: the tool is no longer registered.',
+      },
+      403,
+    )
+  }
 }
 
 /**
