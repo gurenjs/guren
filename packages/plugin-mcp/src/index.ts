@@ -17,3 +17,4 @@ export type {
   McpAppPermissions,
   McpUiConfig,
 } from './mcp-apps'
+export type { AppMcpSkills, McpSkillFilesModule, McpSkillsConfig } from './skills'

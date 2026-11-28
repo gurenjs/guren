@@ -648,11 +648,17 @@ No deprecation.
 
 Needed before phase 1:
 
-1. **Where skills live.** `resources/skills/` sits beside `resources/js/` and
+1. ~~**Where skills live.** `resources/skills/` sits beside `resources/js/` and
    reads as frontend. `app/Mcp/Skills/` is the alternative. The namespace rules
-   of §1.1 hold either way.
-2. **Learning the protocol era in the per-request factory**, so the Skills
-   capability and methods exist on `2026-07-28` requests only.
+   of §1.1 hold either way.~~
+   **Decided before phase 1: `resources/skills/`.** A skill is prose, and `app/`
+   is what lint, the architecture check and the Docker recipe treat as code. A
+   module keeps the same shape at `modules/<name>/resources/skills/`.
+2. ~~**Learning the protocol era in the per-request factory**, so the Skills
+   capability and methods exist on `2026-07-28` requests only.~~
+   **Resolved in implementation.** The SDK hands the factory the era
+   (`McpRequestContext.era`, `'legacy' | 'modern'`), which `createAppMcpServer()`
+   takes as its second argument.
 
 Follow-ups that do not block either phase:
 
@@ -671,3 +677,12 @@ To measure during phase 1:
 8. **The cost of `ext/skills` on Workers**: bundle size on a packed tarball,
    as `wrangler-bundle.test.ts` does, and the time the catalog adds to a cold
    start.
+   **Measured in implementation, outside workerd.** Bundled with esbuild 0.28.1
+   under the `workerd` conditions, minified with `keepNames`, importing
+   `SkillsExtension` and `memorySkillFiles` beside `Server` and
+   `createMcpHandler` adds 34.7 kB (12.9 kB gzipped) to 342.4 kB (92.5 kB).
+   `SkillsExtension.load()` over an in-memory record took a median of 1.2 ms
+   for 10 skills in 30 files (120 kB) and 8.7 ms for 100 skills in 400 files
+   (1.6 MB), on Bun 1.4.5 and Apple silicon. Both numbers come from an
+   SDK-only fixture; the same pair on a packed tarball through wrangler, and
+   the cold start on workerd itself, remain to be measured.
