@@ -213,6 +213,18 @@ describe('routeTypesPlugin watches route schemas', () => {
     expect(await touchedBy('modules/billing/index.ts')).toBe(true)
   })
 
+  it('regenerates for any file of a skill, at the project root and inside a module', async () => {
+    expect(await touchedBy('resources/skills/refunds/SKILL.md')).toBe(true)
+    await rm(markerPath, { force: true })
+    expect(await touchedBy('resources/skills/refunds/assets/logo.png')).toBe(true)
+    await rm(markerPath, { force: true })
+    expect(await touchedBy('modules/billing/resources/skills/dunning/SKILL.md')).toBe(true)
+  })
+
+  it('ignores a directory that only starts with the skills directory name', async () => {
+    expect(await touchedBy('resources/skills-archive/refunds/SKILL.md')).toBe(false)
+  })
+
   it('regenerates for config/navigation.ts, whose presence routes.gen.ts depends on', async () => {
     expect(await touchedBy('config/navigation.ts')).toBe(true)
   })

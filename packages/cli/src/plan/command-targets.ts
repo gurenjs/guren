@@ -176,6 +176,7 @@ export const PLAN_GENERATOR_TARGETS: Readonly<Record<string, PlanGeneratorRule |
   'make:provider': { valueFlags: MODULE, positional: true, targets: ({ name }) => writes({ section: 'policyProviders', names: [suffixed(name!, 'Provider')] }) },
   'make:adr': 'a decision record, which no plan section declares',
   'make:lesson': 'a lesson, which no plan section declares',
+  'make:mcp-skill': 'a skill for the MCP endpoint, which no plan section declares',
   'make:validator': { valueFlags: ['fields', 'F', ...MODULE], positional: true, targets: ({ name }) => writes(entityValidators(unsuffixed(name!, 'Validator'))) },
   'make:agent': 'a durable agent, which no plan section declares',
   'make:ai-agent': 'an in-process agent, which no plan section declares',

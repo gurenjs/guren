@@ -149,15 +149,24 @@ Question 1).
 
 ```ts
 // .guren/mcp-skills.gen.ts (generated)
-export const files = {
+export const files: Readonly<Record<string, string>> = {
   'refunds/SKILL.md': '---\nname: refunds\ndescription: …\n---\n…',
   'refunds/references/policy.md': '…',
   'billing/dunning/SKILL.md': '…',
-} as const
+}
 
 /** Files that are not valid UTF-8, base64. */
-export const binary = {} as const
+export const binary: Readonly<Record<string, string>> = {}
 ```
+
+The two exports are annotated rather than `as const`: nothing reads a key or a
+file's text as a type, and a literal type per file is weight the application's
+typecheck would carry for no reader.
+
+Codegen publishes every regular file below a directory that holds a top-level
+`SKILL.md`. A dotfile, a dot directory and a symlink are left out, since none
+is something the author placed to be served, and so is a directory with no
+`SKILL.md` of its own.
 
 It is written when at least one `SKILL.md` exists. Once it exists it is never
 deleted: after the last skill is removed it is rewritten with empty objects, so
@@ -274,8 +283,11 @@ bunx guren make:mcp-skill dunning --module billing
 
 `make:mcp-skill` writes `SKILL.md` with the frontmatter filled in and prints
 the `skills` line to add when it can establish that the `mcpPlugin()` call
-lacks one. It is a single-file generator and is registered in
-`PLAN_COMMAND_CLASSES`, `PLAN_GENERATOR_TARGETS` and `PLAN_COMMAND_FILES`.
+lacks one. It is a single-file generator, registered in `PLAN_COMMAND_CLASSES`
+and `PLAN_GENERATOR_TARGETS`, and in `plan/command-files.ts` among the
+generators whose output no source-file declaration can coincide with, as
+`make:adr` is: a `SKILL.md` is published text, so a change that adds one stays
+for a person to read.
 
 `guren check` gains a content-activated group, silent for an app with no skills
 directory:

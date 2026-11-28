@@ -47,6 +47,7 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'make:provider': 'generator',
   'make:adr': 'generator',
   'make:lesson': 'generator',
+  'make:mcp-skill': 'generator',
   'make:validator': 'generator',
   'make:agent': 'generator',
   'make:ai-agent': 'generator',

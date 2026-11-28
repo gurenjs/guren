@@ -22,7 +22,8 @@ export function discoveryFailure(cwd: string, error: FileDiscoveryError, command
   }
 }
 
-async function readDirectory(directory: string) {
+/** An absent directory reads as empty; one that cannot be read throws {@link FileDiscoveryError}. */
+export async function readDirectory(directory: string) {
   try {
     return await readdir(directory, { withFileTypes: true })
   } catch (error) {
@@ -466,6 +467,9 @@ export type SideEffectKind = keyof typeof SIDE_EFFECT_DIRS
 export function discoverSideEffectFiles(appRoot: string, kind: SideEffectKind): Promise<string[]> {
   return discoverDir(appRoot, SIDE_EFFECT_DIRS[kind])
 }
+
+/** Where an app's MCP skills live, relative to an app root: `make:mcp-skill` writes here, codegen reads here and the Vite plugin watches it (RFC 0042). */
+export const MCP_SKILLS_DIR = 'resources/skills'
 
 /** The directory {@link discoverRoutesFiles} reads, relative to an app root. */
 export const ROUTES_DIR = 'routes'
