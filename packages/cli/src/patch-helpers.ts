@@ -709,15 +709,32 @@ export function insertCallOptions(
   if (typeof span === 'string') return span
 
   const optionsSource = content.slice(span.start, span.end + 1)
+  const keys = topLevelKeys(optionsSource)
+  // A shorthand `key` sets the option as surely as `key:`, and a second `key:` beside it would duplicate it.
+  const setsKey = (key: string): boolean => (keys ? keys.has(key) : new RegExp(`(^|[{,]\\s*)${escapeRegExp(key)}\\s*:`, 'm').test(optionsSource))
   const inserted: string[] = []
   let insertion = ''
   for (const { key, source } of options) {
-    if (inserted.includes(key) || new RegExp(`(^|[{,]\\s*)${escapeRegExp(key)}\\s*:`, 'm').test(optionsSource)) continue
+    if (inserted.includes(key) || setsKey(key)) continue
     inserted.push(key)
     insertion += `\n  ${key}: ${source},`
   }
 
   return { content: content.slice(0, span.start + 1) + insertion + content.slice(span.start + 1), inserted }
+}
+
+/** The keys an object literal's source sets at its top level, shorthand included; `undefined` when it does not parse. */
+function topLevelKeys(objectSource: string): Set<string> | undefined {
+  const statement = parseSourceFile(`(${objectSource})`)?.program.body[0]
+  const object = statement?.type === 'ExpressionStatement' ? statement.expression : undefined
+  if (object?.type !== 'ObjectExpression') return undefined
+  const keys = new Set<string>()
+  for (const property of object.properties) {
+    if (property.type === 'SpreadElement' || property.computed) continue
+    if (property.key.type === 'Identifier') keys.add(property.key.name)
+    else if (property.key.type === 'StringLiteral') keys.add(property.key.value)
+  }
+  return keys
 }
 
 /**

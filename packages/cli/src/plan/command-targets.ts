@@ -267,6 +267,7 @@ export const PLAN_GENERATOR_TARGETS: Readonly<Record<string, PlanGeneratorRule |
   'add schedule': 'the schedule kernel, which no plan section declares, and its provider, which `plan:scaffold --entries` leaves once the command wrote it',
   'add storage': 'a storage service, which no plan section declares, and the storage config, which `plan:scaffold --entries` never writes',
   'add ui': 'UI components, which no plan section declares',
+  'add navigation': 'config/navigation.ts, which `plan:scaffold --entries` never writes, and the layout, which no plan section declares',
   'make:auth': { valueFlags: ['oauth'], positional: false, targets: authTargets },
   'add auth': { ...BLUEPRINT, targets: authTargets },
   'add oauth': {

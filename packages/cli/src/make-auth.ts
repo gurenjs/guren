@@ -53,7 +53,7 @@ async function navigationFile(cwd: string): Promise<ScaffoldFileEntry> {
   return { ...file, contents: file.contents.replace(HOME_ENTRY, '') }
 }
 
-function definesNavigation(source: string): boolean {
+export function definesNavigation(source: string): boolean {
   const ast = parseSourceFile(source, NAVIGATION_FILE)
   return ast !== null && definitionBuilderCall(ast)?.builder === 'defineNavigation'
 }
