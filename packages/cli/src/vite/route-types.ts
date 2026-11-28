@@ -55,8 +55,9 @@ const DEFAULT_LANG_DIR = 'lang'
 const MODELS_PATTERN = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(MODELS_DIR)}(?:/|$)`, 'u')
 // A route's body/params/query schema renders into api-client.gen.ts, and generators write it here.
 const VALIDATORS_PATTERN = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(VALIDATORS_DIR)}(?:/|$)`, 'u')
-// Every file of a skill is published into mcp-skills.gen.ts, whatever its extension.
-const SKILLS_PATTERN = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(MCP_SKILLS_DIR)}(?:/|$)`, 'u')
+// Every file of a skill is published into mcp-skills.gen.ts, whatever its extension. A dotfile
+// (.DS_Store, an editor's swap file) never is, so it is left out here as codegen leaves it out.
+const SKILLS_PATTERN = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(MCP_SKILLS_DIR)}(?:/(?!\\.)[^/]+)*$`, 'u')
 const SOURCE_EXTENSION = `(?:${[...IMPORTABLE_EXTENSIONS].map((extension) => escapeRegExp(extension)).join('|')})`
 // Codegen reads a module's routes through its entry's defineModule({ routes }), which
 // imports `./routes` (a file or a directory): moduleEntryFile() and moduleRoutesEntryFile().

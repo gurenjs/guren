@@ -18,8 +18,9 @@ export interface MakeMcpSkillOptions extends WriterOptions {
 const SKILL_NAME_RE = /^[\da-z]+(?:-[\da-z]+)*$/u
 const SKILL_NAME_LIMIT = 64
 const DESCRIPTION_LIMIT = 1024
-// Written as one double-quoted YAML scalar, where a line break or control character would need an escape.
-const UNWRITABLE_IN_DESCRIPTION = /[\u0000-\u001f\u007f\u0085\u2028\u2029]/u
+// Written as one double-quoted YAML scalar, where a line break or control character would need an escape
+// and an unpaired surrogate has no encoding.
+const UNWRITABLE_IN_DESCRIPTION = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cs}]/u
 
 export const MCP_SKILL_DESCRIPTION_PLACEHOLDER = 'TODO: say what this skill does and when an agent should load it.'
 export const MCP_SKILLS_OPTION = "skills: { files: () => import('@/.guren/mcp-skills.gen') }"
@@ -44,8 +45,9 @@ function assertDescription(description: string): void {
 
 export function mcpSkillTemplate(name: string, description: string = MCP_SKILL_DESCRIPTION_PLACEHOLDER): string {
   const title = name.replaceAll('-', ' ').replace(/^./u, (first) => first.toUpperCase())
+  // Both quoted: a bare `true`, `123` or `no` is a valid skill name that a YAML reader takes for another type.
   return `---
-name: ${name}
+name: ${JSON.stringify(name)}
 description: ${JSON.stringify(description)}
 ---
 
@@ -69,21 +71,24 @@ export async function makeMcpSkill(name: string, options: MakeMcpSkillOptions = 
 
 /**
  * The line to add, only where the app's `mcpPlugin()` calls are read whole and none carries `skills`.
- * A spread or a computed key may bring the option, so such a call says nothing.
+ * A spread, a computed key or a file the scan could not read may bring the option, so each says nothing.
  */
 export async function mcpSkillServingHint(options: WriterOptions = {}): Promise<string | undefined> {
   const appRoot = resolveAppRoot(options)
+  const cache = new ParseCache()
   let calls: PluginCall[]
   try {
-    calls = await scanPluginCalls(appRoot, new ParseCache(), MCP_PLUGIN_EXPORT)
+    calls = await scanPluginCalls(appRoot, cache, MCP_PLUGIN_EXPORT)
   } catch (error) {
     // Only this hint rests on the scan, so an unreadable directory costs the hint and not the command.
     if (error instanceof FileDiscoveryError) return undefined
     throw error
   }
+  if (cache.skippedFiles().length > 0 || calls.some((call) => call.keys.has('skills') || !call.complete)) return undefined
   if (calls.length === 0) {
     return `No mcpPlugin() call was found. @guren/plugin-mcp serves skills: pass \`${MCP_SKILLS_OPTION}\` to mcpPlugin().`
   }
-  if (calls.some((call) => call.keys.has('skills') || !call.complete)) return undefined
-  return `Add \`${MCP_SKILLS_OPTION}\` to the mcpPlugin() call in ${calls[0]!.relPath} to serve it.`
+  const files = [...new Set(calls.map((call) => call.relPath))]
+  const where = files.length === 1 ? `the mcpPlugin() call in ${files[0]}` : 'the mcpPlugin() call your app registers'
+  return `Add \`${MCP_SKILLS_OPTION}\` to ${where} to serve it.`
 }

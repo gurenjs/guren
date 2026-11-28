@@ -225,6 +225,11 @@ describe('routeTypesPlugin watches route schemas', () => {
     expect(await touchedBy('resources/skills-archive/refunds/SKILL.md')).toBe(false)
   })
 
+  it('ignores a dotfile and a dot directory inside a skill, which codegen never publishes', async () => {
+    expect(await touchedBy('resources/skills/refunds/.DS_Store')).toBe(false)
+    expect(await touchedBy('resources/skills/.cache/state.json')).toBe(false)
+  })
+
   it('regenerates for config/navigation.ts, whose presence routes.gen.ts depends on', async () => {
     expect(await touchedBy('config/navigation.ts')).toBe(true)
   })

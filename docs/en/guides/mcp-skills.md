@@ -4,7 +4,7 @@ A skill is a set of instructions your app publishes for the agents of its users:
 
 A tool's description says what one call does. A skill covers what no single description can: the steps of a refund, which of two similar tools comes first, the policy a reply has to follow.
 
-This builds on the [Agent Interface](./agent-interface.md): the app must already serve its tools with `mcpPlugin()`.
+Skills are served by `mcpPlugin()`, which the [Agent Interface](./agent-interface.md) guide sets up. An app can publish skills without exposing a single tool.
 
 These skills are for the people who connect an agent to your app. They are unrelated to `.claude/skills/`, which the [agent harness](./agent-harness.md) installs for your own coding agent.
 
@@ -18,7 +18,7 @@ The command writes `resources/skills/refunds/SKILL.md`:
 
 ```md
 ---
-name: refunds
+name: "refunds"
 description: "Process a refund per shop policy"
 ---
 
@@ -27,9 +27,9 @@ description: "Process a refund per shop policy"
 Write the steps an agent follows. Name the tools it calls in order, and say what to do when one refuses.
 ```
 
-`name` is the directory's name: 1 to 64 lowercase letters, digits and single hyphens. `description` is the one line an agent reads to decide whether to load the skill, so say what the skill does and when it applies. Without `--description` the command writes a placeholder for you to replace.
+`name` is the directory's name: 1 to 64 lowercase letters and digits, with single hyphens between them. `description` is the one line an agent reads to decide whether to load the skill, so say what the skill does and when it applies. Without `--description` the command writes a placeholder for you to replace. Both values are quoted, so a name such as `no` or `123` stays a string.
 
-Put supporting files beside `SKILL.md` and refer to them from it by relative path. An agent reads them only when the skill sends it there:
+Put supporting files beside `SKILL.md` and refer to them from it by relative path. A host loads `SKILL.md` first and fetches the other files when the agent follows a reference:
 
 ```tree
 resources/skills/
@@ -49,7 +49,7 @@ This writes `modules/billing/resources/skills/dunning/SKILL.md`.
 
 ## What gets published
 
-`bunx guren codegen` collects the skills into `.guren/mcp-skills.gen.ts`. The Vite dev server runs it again whenever a file under a skills directory changes, and the scaffolded `build` script runs it before building. In an API-only app, run the command yourself after editing a skill.
+`bunx guren codegen` packages the skills into `.guren/mcp-skills.gen.ts`. While the Vite dev server runs, a change under a skills directory regenerates it, and the scaffolded `build` script runs codegen first. An API-only app has no Vite: its `dev` script runs codegen once at start, so run `bun run codegen` after you edit a skill, and before `typecheck` or `build` on a fresh checkout.
 
 Each skill gets an address under `skill://`. A module's skill takes the module's name as a prefix:
 
@@ -59,13 +59,13 @@ Each skill gets an address under `skill://`. A module's skill takes the module's
 | `resources/skills/refunds/references/policy.md` | `skill://refunds/references/policy.md` |
 | `modules/billing/resources/skills/dunning/SKILL.md` | `skill://billing/dunning/SKILL.md` |
 
-Codegen publishes every regular file below a skill's directory, whatever its type. It leaves out:
+Codegen packages every regular file below a skill's directory, whatever its type. It leaves out:
 
-- a directory with no `SKILL.md` directly inside it, and any file placed beside the skill directories
+- a directory with no `SKILL.md` directly inside it, and any file placed beside the skill directories. A manifest spelled `skill.md` gets a warning, since the name is case-sensitive
 - dotfiles and dot directories, such as `.DS_Store`
-- symlinks
+- symlinks, a symlinked skill directory or skills directory included
 
-Two layouts stop the app at boot, with an error naming both files, because one skill's files would sit inside another's:
+Two layouts are refused, because one skill's files would sit inside another's. Codegen warns about them, and the app stops at boot with an error naming both files:
 
 - a `SKILL.md` below another skill's directory
 - a root skill named after a module that has skills, such as `resources/skills/billing/` beside the `billing` module's skills
@@ -84,7 +84,7 @@ mcpPlugin({
 })
 ```
 
-The module is imported, so every deploy bundler inlines the skills and the app reads no directory at runtime. `make:mcp-skill` prints this line when your `mcpPlugin()` call has no `skills` option yet.
+The module is imported, so every deploy bundler inlines the skills and the app reads no directory at runtime. Once your source names the module, codegen writes it even while the app has no skill, so the import resolves on a fresh checkout. `make:mcp-skill` prints the `skills` line when none of your `mcpPlugin()` calls carries it.
 
 The plugin builds the catalog once, at boot. A skill whose frontmatter does not parse, lacks `name` or `description`, or names something other than its directory is left out, and the server says why at startup:
 
@@ -92,9 +92,9 @@ The plugin builds the catalog once, at boot. A skill whose frontmatter does not 
 [@guren/plugin-mcp] Skill file "refunds/SKILL.md": SKILL.md frontmatter: line 3: unexpected text after the value (skill skipped)
 ```
 
-A host on MCP 2026-07-28 that supports the Skills extension lists the skills with `skills/list` and loads one with `skills/get`. To any other client the same files are ordinary resources: each `SKILL.md` appears in `resources/list`, and every file answers `resources/read`.
+A host on MCP 2026-07-28 that supports the Skills extension finds the skills with `skills/list` and `skills/get`, then reads their files with `resources/read`. To any other client the same files are ordinary resources: each `SKILL.md` appears in `resources/list`, and every file answers `resources/read`.
 
-Listing and reading skills is rate limited per caller, like the endpoint's other reads.
+Listing and reading skills is rate limited per caller, like the endpoint's other reads, unless you set `rateLimit: false`.
 
 ## Who can read a skill
 
@@ -103,7 +103,7 @@ Every caller the endpoint authenticates can read every skill. That includes a to
 Two things follow:
 
 - Whatever is in a skills directory is published to everyone who holds a token for your app. Read the directory before you deploy it, and keep credentials, internal URLs and customer data out of it.
-- A skill grants nothing and enforces nothing. It can describe a call that the reader's token will be refused, and an agent can ignore it. Keep every rule the app depends on in the route's [policy](./authorization.md) or in its [scopes and approval gates](./agent-tool-governance.md), and use the skill to explain the rule.
+- A skill grants nothing and enforces nothing. Calling a tool it describes still takes a token with the right scope, and an agent can ignore what it says. Keep every rule the app depends on in the route's [policy](./authorization.md) or in its [scopes and approval gates](./agent-tool-governance.md), and use the skill to explain the rule.
 
 ## Related
 

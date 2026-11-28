@@ -24,6 +24,12 @@ describe('make:mcp-skill', () => {
     await writeFile(file, contents)
   }
 
+  async function servedFrontmatter(): Promise<unknown[]> {
+    const { outputPath } = await generateMcpSkills({ appRoot: app, force: true })
+    const skills = await loadSkills({ files: () => import(outputPath!) })
+    return listSkills(skills!, undefined).skills.map((skill) => skill.frontmatter)
+  }
+
   describe('mcpSkillFile', () => {
     test('should place a root skill under resources/skills and a module skill under the module', () => {
       expect(mcpSkillFile('refunds').path).toBe('resources/skills/refunds/SKILL.md')
@@ -33,7 +39,7 @@ describe('make:mcp-skill', () => {
     test('should write the name and a placeholder description when none is given', () => {
       const { contents } = mcpSkillFile('refund-policy')
 
-      expect(contents).toStartWith(`---\nname: refund-policy\ndescription: ${JSON.stringify(MCP_SKILL_DESCRIPTION_PLACEHOLDER)}\n---\n`)
+      expect(contents).toStartWith(`---\nname: "refund-policy"\ndescription: ${JSON.stringify(MCP_SKILL_DESCRIPTION_PLACEHOLDER)}\n---\n`)
       expect(contents).toContain('\n# Refund policy\n')
     })
 
@@ -51,8 +57,15 @@ describe('make:mcp-skill', () => {
       ['one\ntwo', 'one line of text'],
       ['one two', 'one line of text'],
       ['tab\there', 'one line of text'],
+      ['c1\u0090control', 'one line of text'],
+      ['lone\ud800surrogate', 'one line of text'],
     ])('should refuse the description %p', (description, reason) => {
       expect(() => mcpSkillFile('refunds', { description })).toThrow(reason)
+    })
+
+    test('should count a description in characters, so 1024 outside the basic plane fit', () => {
+      expect(() => mcpSkillFile('refunds', { description: '😀'.repeat(1024) })).not.toThrow()
+      expect(() => mcpSkillFile('refunds', { description: '😀'.repeat(1025) })).toThrow('1-1024 characters')
     })
   })
 
@@ -72,14 +85,23 @@ describe('make:mcp-skill', () => {
       const description = 'Decide "refunds": policy #1, 返金 \\ end'
       await makeMcpSkill('refund-policy', { cwd: app, description })
       await makeMcpSkill('dunning', { cwd: app, root: 'billing' })
-      const { outputPath } = await generateMcpSkills({ appRoot: app, force: true })
 
-      const skills = await loadSkills({ files: () => import(outputPath!) })
-
-      expect(listSkills(skills!, undefined).skills.map((skill) => skill.frontmatter)).toEqual([
+      expect(await servedFrontmatter()).toEqual([
         { name: 'dunning', description: MCP_SKILL_DESCRIPTION_PLACEHOLDER },
         { name: 'refund-policy', description },
       ])
+    })
+
+    test('should write a name YAML would read as another type so that the endpoint still serves the skill', async () => {
+      for (const name of ['123', '1e3', 'no', 'null', 'true']) await makeMcpSkill(name, { cwd: app, description: 'Named like a YAML value.' })
+
+      expect(await servedFrontmatter()).toEqual(['123', '1e3', 'no', 'null', 'true'].map((name) => ({ name, description: 'Named like a YAML value.' })))
+    })
+
+    test('should write only the skill when the description names a UI token class', async () => {
+      await makeMcpSkill('theming', { cwd: app, description: 'Explain bg-g-panel and var(--g-line).' })
+
+      expect(await Bun.file(join(app, 'resources/css/guren.css')).exists()).toBe(false)
     })
   })
 
@@ -99,6 +121,13 @@ describe('make:mcp-skill', () => {
       expect(await mcpSkillServingHint({ cwd: app })).toBe(`Add \`${MCP_SKILLS_OPTION}\` to the mcpPlugin() call in config/mcp.ts to serve it.`)
     })
 
+    test('should name no file when two files call mcpPlugin() without skills', async () => {
+      await put('config/mcp.ts', config('{ tokens: [] }'))
+      await put('src/app.ts', config('{}'))
+
+      expect(await mcpSkillServingHint({ cwd: app })).toBe(`Add \`${MCP_SKILLS_OPTION}\` to the mcpPlugin() call your app registers to serve it.`)
+    })
+
     test('should say nothing when the call already carries skills', async () => {
       await put('config/mcp.ts', config("{ skills: { files: () => import('@/.guren/mcp-skills.gen') } }"))
 
@@ -107,6 +136,12 @@ describe('make:mcp-skill', () => {
 
     test('should say nothing for a call it cannot read whole', async () => {
       await put('config/mcp.ts', config('{ ...shared }', 'const shared = {}\n'))
+
+      expect(await mcpSkillServingHint({ cwd: app })).toBeUndefined()
+    })
+
+    test('should say nothing when a file that names mcpPlugin does not parse', async () => {
+      await put('config/mcp.ts', "import { mcpPlugin } from '@guren/plugin-mcp'\nexport default mcpPlugin({ skills: \n")
 
       expect(await mcpSkillServingHint({ cwd: app })).toBeUndefined()
     })
