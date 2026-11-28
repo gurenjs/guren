@@ -4,7 +4,7 @@
  * auth` writes in place of one only when the app's copy is still a version the framework shipped.
  */
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { lstat, readFile, realpath } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 
 import { assertNotApiOnly } from './app-surface'
@@ -13,7 +13,9 @@ import { readIfExists } from './discovery'
 import { uiComponentHash } from './guren-css'
 import { loadRouteDefinitions } from './load-routes'
 import { definesNavigation } from './make-auth'
-import { wireConfig } from './provider-registrar'
+import { createAppListedFiles } from './app-entry'
+import { parseSourceFile } from './parse-cache'
+import { resolveAppEntry, wireConfig } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE } from './route-registrar'
 import { navigationRouteNames } from './routes-types'
 import { scaffoldTemplateFile } from './scaffold-templates'
@@ -98,28 +100,61 @@ async function appRoutes(cwd: string): Promise<AppRoutes> {
 /** The routes the auth layout links outside its entries; a layout an alpha `add auth` wrote ran without `/profile`. */
 const ACCOUNT_ENDPOINTS = ['GET /login', 'GET /profile', 'POST /logout'] as const
 
-/**
- * Whether the app's installed `pkg` names `exported` in the declarations its manifest points at; `null` when no copy
- * or no declaration file is found, which proves nothing. Walked from the app root up, as `node_modules` is resolved.
- */
-async function installedDeclares(appRoot: string, pkg: string, exported: string): Promise<boolean | null> {
-  for (let dir = resolve(appRoot); ; dir = dirname(dir)) {
-    const root = join(dir, 'node_modules', pkg)
-    const text = await readFile(join(root, 'package.json'), 'utf8').catch(() => undefined)
-    if (text !== undefined) {
-      try {
-        const manifest = JSON.parse(text) as { types?: string; typings?: string; exports?: Record<string, unknown> }
-        const entry = manifest.exports?.['.']
-        const types = (typeof entry === 'object' && entry !== null ? (entry as { types?: unknown }).types : undefined) ?? manifest.types ?? manifest.typings
-        if (typeof types !== 'string') return null
-        const declarations = await readFile(join(root, types), 'utf8')
-        return new RegExp(`\\b${exported}\\b`, 'u').test(declarations)
-      } catch {
-        return null
-      }
-    }
-    if (dirname(dir) === dir) return null
+/** The directory `pkg` resolves to from `from`, walked up as `node_modules` is, through a workspace link. */
+async function packageDir(from: string, pkg: string): Promise<string | undefined> {
+  for (let dir = resolve(from); ; dir = dirname(dir)) {
+    const candidate = join(dir, 'node_modules', pkg)
+    if (existsSync(join(candidate, 'package.json'))) return realpath(candidate).catch(() => candidate)
+    if (dirname(dir) === dir) return undefined
   }
+}
+
+/** The declaration file a manifest's root entry names, through nested conditions (`exports["."].import.types`). */
+function rootTypes(manifest: { types?: unknown; typings?: unknown; exports?: unknown }): string | undefined {
+  const find = (node: unknown): string | undefined => {
+    if (node === null || typeof node !== 'object') return undefined
+    const record = node as Record<string, unknown>
+    if (typeof record.types === 'string') return record.types
+    for (const value of Object.values(record)) {
+      const found = find(value)
+      if (found) return found
+    }
+    return undefined
+  }
+  const exports = manifest.exports as Record<string, unknown> | undefined
+  const root = exports && typeof exports === 'object' && '.' in exports ? exports['.'] : exports
+  const fromExports = find(root)
+  if (fromExports) return fromExports
+  return typeof manifest.types === 'string' ? manifest.types : typeof manifest.typings === 'string' ? manifest.typings : undefined
+}
+
+/**
+ * Whether `pkg`, as resolved from `from`, names `exported` in an export of the declarations its manifest points at;
+ * `null` when no copy or no declaration file is found, which proves nothing.
+ */
+async function installedDeclares(from: string, pkg: string, exported: string): Promise<boolean | null> {
+  const dir = await packageDir(from, pkg)
+  if (dir === undefined) return null
+  try {
+    const types = rootTypes(JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')) as Record<string, unknown>)
+    if (types === undefined) return null
+    const declarations = await readFile(join(dir, types), 'utf8')
+    // An `export *` may carry the name unseen, so only a file that re-exports nothing wholesale can lack it.
+    if (new RegExp(`export\\s*(?:declare\\s+)?(?:function|const|class)\\s+${exported}\\b|export\\s*(?:type\\s*)?\\{[^}]*\\b${exported}\\b`, 'u').test(declarations)) return true
+    return /export\s*\*/u.test(declarations) ? null : false
+  } catch {
+    return null
+  }
+}
+
+/** Whether the entry's `createApp()` lists `config/navigation`, read after wiring: a step left to the author lists nothing. */
+async function listsNavigation(cwd: string): Promise<boolean> {
+  const entryPath = await resolveAppEntry(cwd)
+  if (entryPath === null) return false
+  const file = resolve(cwd, entryPath)
+  const ast = parseSourceFile(await readFile(file, 'utf8').catch(() => ''), file)
+  const lists = ast ? createAppListedFiles(ast.program, cwd, file) : null
+  return lists?.config?.files.includes(resolve(cwd, 'config/navigation')) ?? false
 }
 
 export async function addNavigation(options: AddNavigationOptions = {}): Promise<AddNavigationResult> {
@@ -128,9 +163,10 @@ export async function addNavigation(options: AddNavigationOptions = {}): Promise
     does: 'guren add navigation writes the links of an Inertia layout',
     instead: 'An API-only app has no layout to render them',
   })
-  // config/navigation.ts is imported at start, so an app on a server without the module would not boot.
-  if ((await installedDeclares(cwd, '@guren/server', 'defineNavigation')) === false) {
-    throw new CliError('The installed @guren/core exports no defineNavigation(), which config/navigation.ts imports. Upgrade the @guren packages (bunx guren upgrade), then run this again. Nothing was written.')
+  // config/navigation.ts imports it from @guren/core at start, which re-exports the server @guren/core resolves.
+  const core = await packageDir(cwd, '@guren/core')
+  if (core !== undefined && (await installedDeclares(core, '@guren/server', 'defineNavigation')) === false) {
+    throw new CliError('The installed @guren/core exports no defineNavigation(), which config/navigation.ts imports. Upgrade and install the @guren packages (bunx guren upgrade --install), then run this again. Nothing was written.')
   }
 
   const routes = await appRoutes(cwd)
@@ -152,20 +188,29 @@ export async function addNavigation(options: AddNavigationOptions = {}): Promise
   let layout = judgeNavigationLayout(await readIfExists(cwd, NAVIGATION_LAYOUT_FILE), layoutTemplate.contents)
   let layoutHeld: string | undefined
   if (layout === 'replaced') {
-    const missing = ACCOUNT_ENDPOINTS.filter((endpoint) => !routes.endpoints.has(endpoint))
-    if (navigation === 'foreign') layoutHeld = `${NAVIGATION_FILE} is no defineNavigation() definition, so nothing would share the links the new layout renders`
+    // hono answers any method of an `ALL` route.
+    const missing = ACCOUNT_ENDPOINTS.filter((endpoint) => !routes.endpoints.has(endpoint) && !routes.endpoints.has(`ALL ${endpoint.split(' ')[1]}`))
+    if ((await lstat(resolve(cwd, NAVIGATION_LAYOUT_FILE))).isSymbolicLink()) layoutHeld = `it is a symbolic link, and a write would change the file it points to`
+    else if (navigation === 'foreign') layoutHeld = `${NAVIGATION_FILE} is no defineNavigation() definition, so nothing would share the links the new layout renders`
     else if (routes.unread) layoutHeld = `the account links it renders could not be checked: ${routes.unread}`
     else if (missing.length > 0) layoutHeld = `the new layout links ${missing.join(', ')}, which the routes file does not register`
     else if ((await installedDeclares(cwd, '@guren/inertia-client', 'hasTranslation')) === false) layoutHeld = 'the installed @guren/inertia-client exports no hasTranslation(), which the new layout imports; upgrade it first'
     if (layoutHeld) layout = 'held'
   }
-  if (layout === 'replaced' && (await readIfExists(cwd, LAYOUT_LANG_FILE)) === null) files.push(scaffoldTemplateFile('auth', LAYOUT_LANG_FILE))
 
-  // Each file is written apart: only the layout, judged unedited above, is written over.
   const created = files.length > 0 ? await writeScaffoldFiles(files, { overwritten: options.overwritten, subject: 'navigation' }) : []
-  if (layout === 'replaced') created.push(...(await writeScaffoldFiles([layoutTemplate], { overwritten: options.overwritten, force: true, subject: 'navigation' })))
-
   if (navigation !== 'foreign') await wireConfig('navigation')
+  // The new layout renders only what the definition shares, so it waits for the wiring to land.
+  if (layout === 'replaced' && !(await listsNavigation(cwd))) {
+    layout = 'held'
+    layoutHeld = `createApp() does not list ${NAVIGATION_FILE} yet, so nothing would share the links the new layout renders`
+  }
+  if (layout === 'replaced') {
+    const lang = (await readIfExists(cwd, LAYOUT_LANG_FILE)) === null ? [scaffoldTemplateFile('auth', LAYOUT_LANG_FILE)] : []
+    if (lang.length > 0) created.push(...(await writeScaffoldFiles(lang, { overwritten: options.overwritten, subject: 'navigation' })))
+    // Only the layout, judged unedited above, is written over.
+    created.push(...(await writeScaffoldFiles([layoutTemplate], { overwritten: options.overwritten, force: true, subject: 'navigation' })))
+  }
 
   return { created, navigation, layout, omitted, ...(layoutHeld ? { layoutHeld } : {}), ...(routes.unread && omitted.length > 0 ? { routesUnread: routes.unread } : {}) }
 }

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { mkdir, readFile, realpath, symlink } from 'node:fs/promises'
+import { join, relative, resolve } from 'node:path'
 
 import { addNavigation, judgeNavigationLayout, NAVIGATION_LAYOUT_FILE, navigationNextSteps, SHIPPED_LAYOUTS } from '../src/add-navigation'
 import { uiComponentHash } from '../src/guren-css'
+import { insertCallOptions } from '../src/patch-helpers'
 import { createTempWorkspace, linkWorkspaceCore, seedApiOnlyApp, writeWorkspaceFiles } from './helpers'
 
 const TEMPLATES = resolve(import.meta.dir, '../templates/scaffold/auth')
@@ -57,7 +58,9 @@ describe('addNavigation', () => {
       expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe(await template('config/navigation.ts'))
       expect(await readFile(join(workspace.dir, NAVIGATION_LAYOUT_FILE), 'utf8')).toBe(await template(NAVIGATION_LAYOUT_FILE))
       expect(await readFile(join(workspace.dir, 'lang/en/layout.json'), 'utf8')).toBe(await template('lang/en/layout.json'))
-      expect(overwritten.some((file) => file.endsWith(NAVIGATION_LAYOUT_FILE))).toBe(true)
+      const root = await realpath(workspace.dir)
+      expect(overwritten.map((file) => relative(root, file))).toEqual([NAVIGATION_LAYOUT_FILE])
+      expect(result.created.map((file) => relative(root, file))).toEqual(['config/navigation.ts', 'lang/en/layout.json', NAVIGATION_LAYOUT_FILE])
       const entry = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
       expect(entry).toMatch(/import navigation from '\.\.\/config\/navigation(\.js)?'/)
       expect(entry).toMatch(/config: \[navigation\]/)
@@ -152,8 +155,11 @@ describe('addNavigation', () => {
       await writeWorkspaceFiles(workspace.dir, {
         'src/app.ts': APP_ENTRY,
         'routes/web.ts': routes(''),
-        'node_modules/@guren/server/package.json': '{ "name": "@guren/server", "types": "index.d.ts" }\n',
-        'node_modules/@guren/server/index.d.ts': 'export declare function createApp(): void\n',
+        // The server @guren/core re-exports, resolved from core's own directory up.
+        'node_modules/@guren/core/package.json': '{ "name": "@guren/core", "types": "index.d.ts" }\n',
+        'node_modules/@guren/core/index.d.ts': "export * from '@guren/server'\n",
+        'node_modules/@guren/server/package.json': '{ "name": "@guren/server", "exports": { ".": { "import": { "types": "./dist/index.d.ts" } } } }\n',
+        'node_modules/@guren/server/dist/index.d.ts': 'export declare function createApp(): void\n',
       })
 
       await expect(addNavigation()).rejects.toThrow('The installed @guren/core exports no defineNavigation()')
@@ -168,21 +174,58 @@ describe('addNavigation', () => {
     try {
       await writeWorkspaceFiles(workspace.dir, {
         'src/app.ts': APP_ENTRY,
-        'routes/web.ts': routes(''),
+        'routes/web.ts': routes(ACCOUNT),
         'config/navigation.ts': 'export const links = []\n',
         [NAVIGATION_LAYOUT_FILE]: await readFile(SHIPPED_V2_12, 'utf8'),
       })
+      await linkWorkspaceCore(workspace.dir)
 
       const result = await addNavigation()
 
       expect(result.navigation).toBe('foreign')
       // Nothing would share the links the new layout renders, so the shipped one stays.
-      expect(result.layout).toBe('held')
+      expect(result).toMatchObject({ layout: 'held', layoutHeld: 'config/navigation.ts is no defineNavigation() definition, so nothing would share the links the new layout renders' })
       expect(await readFile(join(workspace.dir, NAVIGATION_LAYOUT_FILE), 'utf8')).toBe(await readFile(SHIPPED_V2_12, 'utf8'))
       expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe('export const links = []\n')
       expect(await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')).not.toContain('navigation')
     } finally {
       await workspace.cleanup()
+    }
+  })
+
+  it('holds a shipped layout that is a symbolic link, and one createApp() could not be made to list', async () => {
+    const workspace = await createTempWorkspace('guren-cli-add-navigation-link-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'src/app.ts': APP_ENTRY,
+        'routes/web.ts': routes(ACCOUNT),
+        'shared/Layout.tsx': await readFile(SHIPPED_V2_12, 'utf8'),
+      })
+      await mkdir(join(workspace.dir, 'resources/js/components'), { recursive: true })
+      await symlink(join(workspace.dir, 'shared/Layout.tsx'), join(workspace.dir, NAVIGATION_LAYOUT_FILE))
+      await linkWorkspaceCore(workspace.dir)
+
+      expect(await addNavigation()).toMatchObject({ layout: 'held', layoutHeld: 'it is a symbolic link, and a write would change the file it points to' })
+      expect(await readFile(join(workspace.dir, 'shared/Layout.tsx'), 'utf8')).toBe(await readFile(SHIPPED_V2_12, 'utf8'))
+    } finally {
+      await workspace.cleanup()
+    }
+
+    const unwired = await createTempWorkspace('guren-cli-add-navigation-unwired-')
+    try {
+      await writeWorkspaceFiles(unwired.dir, {
+        // A config the patcher cannot extend leaves the wiring to the author.
+        'src/app.ts': "import { createApp } from '@guren/core'\nimport { registerWebRoutes } from '../routes/web.js'\n\nconst config = []\nconst app = createApp({ routes: registerWebRoutes, config })\n\nexport default app\n",
+        'routes/web.ts': routes(ACCOUNT),
+        [NAVIGATION_LAYOUT_FILE]: await readFile(SHIPPED_V2_12, 'utf8'),
+      })
+      await linkWorkspaceCore(unwired.dir)
+
+      expect(await addNavigation()).toMatchObject({ layout: 'held', layoutHeld: 'createApp() does not list config/navigation.ts yet, so nothing would share the links the new layout renders' })
+      expect(await readFile(join(unwired.dir, NAVIGATION_LAYOUT_FILE), 'utf8')).toBe(await readFile(SHIPPED_V2_12, 'utf8'))
+      expect(existsSync(join(unwired.dir, 'lang/en/layout.json'))).toBe(false)
+    } finally {
+      await unwired.cleanup()
     }
   })
 
@@ -195,5 +238,13 @@ describe('addNavigation', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+})
+
+describe('insertCallOptions', () => {
+  it('reads a shorthand option as set, and a key nested in another option as not', () => {
+    expect(insertCallOptions('createApp({ routes, config })', [{ key: 'config', source: '[navigation]' }], 'createApp')).toEqual({ content: 'createApp({ routes, config })', inserted: [] })
+    const nested = insertCallOptions('createApp({ providers: [config], session: { config: 1 } })', [{ key: 'config', source: '[navigation]' }], 'createApp')
+    expect(nested).toEqual({ content: 'createApp({\n  config: [navigation], providers: [config], session: { config: 1 } })', inserted: ['config'] })
   })
 })

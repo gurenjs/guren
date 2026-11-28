@@ -151,8 +151,10 @@ bunx guren add navigation
 - `config/navigation.ts` が `defineNavigation()` の定義ではないので、リンクを共有するものがない。
 - 新しいレイアウトがリンクする `GET /login`、`GET /profile`、`POST /logout` をルートファイルが登録していない（初期のリリースのレイアウトは `/profile` 無しで動いていました）。または、確かめるためのルートファイルを読み込めなかった。
 - インストールされている `@guren/inertia-client` に、新しいレイアウトが import する `hasTranslation()` が無い。
+- 配線を試みた後も、`createApp()` が `config/navigation.ts` を並べていない。`config` がコマンドで書き足せない変数になっている場合などで、そのときは手で足す行を表示します。
+- レイアウトがシンボリックリンクで、書き込むとリンク先のファイルが変わってしまう。
 
-インストールされている `@guren/core` に `defineNavigation()` が無いときは、何も書きません。`config/navigation.ts` はアプリの起動時にそれを import するので、先にパッケージを上げてください。手を加えたレイアウトはそのまま残ります。`create-guren-app` がアプリ名を埋め込んで書く blog スターターのレイアウトも残ります。そのうえで、prop を描画するのに要る行を表示します。レイアウトが無いアプリにも、レイアウトを書く代わりに同じ行を表示します。`guren add auth` が書くレイアウトは `/login`、`/profile`、`/logout` へリンクしているためです。
+インストールされている `@guren/core` に `defineNavigation()` が無いときは、何も書きません。`config/navigation.ts` はアプリの起動時にそれを import するので、先にパッケージを上げてインストールしてください（`bunx guren upgrade --install`）。手を加えたレイアウトはそのまま残ります。`create-guren-app` がアプリ名を埋め込んで書く blog スターターのレイアウトも残ります。そのうえで、prop を描画するのに要る行を表示します。レイアウトが無いアプリにも、レイアウトを書く代わりに同じ行を表示します。`guren add auth` が書くレイアウトは `/login`、`/profile`、`/logout` へリンクしているためです。
 
 ## 起動時に隠れるエントリー
 
