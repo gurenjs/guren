@@ -55,6 +55,7 @@ Commands follow a subcommand pattern such as `bunx guren make:controller UserCon
 | Browser tests | `bunx guren add browser-tests` | [Browser Tests](./browser-tests.md) |
 | The Change review workflow | `bunx guren add review` | [Change Review](./change-review.md) |
 | UI components | `bunx guren add ui` | [below](#add-ui) |
+| Navigation in an app older than the module | `bunx guren add navigation` | [Navigation](./navigation.md#adding-the-module-to-an-existing-app) |
 
 Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
 

@@ -1521,6 +1521,20 @@ const addReviewCommand = defineCommand({
   },
 })
 
+const addNavigationCommand = defineCommand({
+  meta: {
+    name: 'navigation',
+    description: 'Install the navigation module (RFC 0040 §5): config/navigation.ts wired into createApp(), and the layout guren add auth writes in place of one only while that file is still a version the framework shipped.',
+  },
+  async run() {
+    const { addNavigation, navigationNextSteps } = await import('./add-navigation')
+    const overwritten: string[] = []
+    const result = await addNavigation({ overwritten })
+    announceWrittenFiles(result.created, overwritten)
+    for (const line of navigationNextSteps(result)) consola.info(line)
+  },
+})
+
 const addUiCommand = defineCommand({
   meta: {
     name: 'ui',
@@ -1569,6 +1583,7 @@ const addSubCommands = {
   cache: createAddBlueprintCommand('cache', 'Install cache scaffolding and an example cache service.'),
   events: createAddBlueprintCommand('events', 'Install event scaffolding with a sample event and listener.'),
   lint: createAddBlueprintCommand('lint', 'Install oxlint with the Guren rules: .oxlintrc.json, lint scripts, and the oxlint dev dependency.'),
+  navigation: addNavigationCommand,
   mail: createAddBlueprintCommand('mail', 'Install mail scaffolding with a sample mailable.'),
   notifications: createAddBlueprintCommand('notifications', 'Install notification scaffolding with sample channels and a sample notification.'),
   queue: createAddBlueprintCommand('queue', 'Install queue scaffolding with a sample job.'),

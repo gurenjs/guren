@@ -136,6 +136,18 @@ export default function JobsIndex() {
 
 The header keeps one measure on every page, so it does not move from one visit to the next.
 
+## Adding the module to an existing app
+
+An app that ran `guren add auth` before the navigation module existed has neither `config/navigation.ts` nor a layout that renders the `navigation` prop. `guren add navigation` adds both:
+
+```bash
+bunx guren add navigation
+```
+
+It writes `config/navigation.ts` when the app has none, with the Home and Dashboard entries `guren add auth` writes, each only when a parameterless `GET` route carries its name (`home`, `dashboard`), and adds it to the `config` array of `createApp()`. An existing `config/navigation.ts` is kept, and still wired when it is a `defineNavigation()` definition.
+
+The layout is replaced only when `resources/js/components/Layout.tsx` is still, byte for byte, a version an earlier `guren add auth` wrote. The command knows every version a release shipped by its hash, as `guren upgrade` knows the UI components. `lang/en/layout.json` is written beside it when absent. A layout you have edited is left as it is, and so is the blog starter's, which `create-guren-app` writes with the app's name in it. The command then prints the lines that render the prop. An app with no layout gets the same lines rather than a layout, since the one `guren add auth` writes links to `/login`, `/profile` and `/logout`.
+
 ## When an entry is hidden at boot
 
 When the app boots, each entry is linked to its route. An entry whose route is not registered, is not a `GET` or has a path parameter is hidden, and the boot prints a warning naming the entry and the reason. The rest of the navigation still renders: a missing route name would otherwise make every page answer 500.
