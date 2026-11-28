@@ -5,10 +5,11 @@
  * holder's lock loses one of two writes after both reported success.
  */
 
-import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { CliError, formatSchemaIssues } from '../cli-error'
+import { withFileLock } from '../file-lock'
 import { writeFileAtomic } from '../plan/beside'
 import { applyBoardOps, type AppliedBoardOps, type BoardOp } from './ops'
 import { boardFile, boardSlug, BoardSchema, compareIds, emptyBoard, isBoardSlug, serializeBoard, type Board } from './schema'
@@ -20,7 +21,6 @@ const BOARD_SUFFIX = '.board.json'
 /** Git-ignored through the `.gitignore` written beside the locks. */
 export const BOARD_LOCK_DIR = '.guren/boards'
 const LOCK_WAIT_MS = 5000
-const LOCK_RETRY_MS = 50
 
 /** Why a board could not be read or written, for a caller that answers each with its own status. */
 export class BoardError extends CliError {
@@ -95,80 +95,10 @@ export async function createBoard(appRoot: string, options: { slug: string; titl
   return { file }
 }
 
-async function lockHolder(path: string): Promise<number | undefined> {
-  const text = await readFile(path, 'utf8').catch(() => '')
-  const pid = Number.parseInt(text, 10)
-  return Number.isInteger(pid) && pid > 0 ? pid : undefined
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    // EPERM is a live process this one may not signal.
-    return (error as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
-
-/** A lock with no id in it for this long was left by a writer that died before writing one. */
-async function isAbandoned(path: string): Promise<boolean> {
-  const written = await stat(path).then(
-    (stats) => stats.mtimeMs,
-    () => undefined,
-  )
-  return written !== undefined && Date.now() - written > LOCK_WAIT_MS
-}
-
-/** Removes a lock left by `dead`, or an empty one. Moved aside first: only one of several waiters wins the rename. */
-async function clearDeadLock(path: string, dead: number | undefined): Promise<void> {
-  const aside = `${path}.${process.pid}`
-  try {
-    await rename(path, aside)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-    throw error
-  }
-  // Another waiter cleared it and took the lock between the read and the rename: give that one back.
-  if ((await lockHolder(aside)) !== dead) await link(aside, path).catch(() => undefined)
-  await rm(aside, { force: true })
-}
-
 async function withBoardLock<T>(appRoot: string, slug: string, waitMs: number, run: () => Promise<T>): Promise<T> {
-  const dir = join(appRoot, BOARD_LOCK_DIR)
-  await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, '.gitignore'), '*\n', { flag: 'wx' }).catch((error: NodeJS.ErrnoException) => {
-    if (error.code !== 'EEXIST') throw error
-  })
-  const path = join(dir, `${boardSlug(slug)}.lock`)
-  const deadline = Date.now() + waitMs
-
-  for (;;) {
-    try {
-      await writeFile(path, `${process.pid}\n`, { flag: 'wx' })
-      break
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
-    // An empty lock is a writer between creating it and writing its id, so it counts as held until it is old.
-    const holder = await lockHolder(path)
-    if (holder === undefined ? await isAbandoned(path) : !isAlive(holder)) {
-      await clearDeadLock(path, holder)
-      continue
-    }
-    if (Date.now() >= deadline) {
-      const who = holder === undefined ? 'another process' : `process ${holder}`
-      const lock = `${BOARD_LOCK_DIR}/${slug}.lock`
-      throw new BoardError('locked', `${boardFile(slug)} is being written by ${who} (${lock}). Try again once it has finished; if nothing is writing the board, delete ${lock}.`)
-    }
-    await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS))
-  }
-
-  try {
-    return await run()
-  } finally {
-    await rm(path, { force: true })
-  }
+  const lock = `${BOARD_LOCK_DIR}/${slug}.lock`
+  return withFileLock(join(appRoot, BOARD_LOCK_DIR), `${boardSlug(slug)}.lock`, waitMs, run, (who) =>
+    new BoardError('locked', `${boardFile(slug)} is being written by ${who} (${lock}). Try again once it has finished; if nothing is writing the board, delete ${lock}.`))
 }
 
 export interface AppliedBoardOpsFile extends AppliedBoardOps {

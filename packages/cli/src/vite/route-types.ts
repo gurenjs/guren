@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { basename, dirname, extname, resolve } from 'node:path'
 import type { ConfigEnv, HmrContext, Logger, Plugin, ResolvedConfig, UserConfig, ViteDevServer } from 'vite'
-import { IMPORTABLE_EXTENSIONS, MODELS_DIR, NAVIGATION_CONFIG_FILE, RESOURCES_DIR, toPosixRelative, VALIDATORS_DIR } from '../discovery'
+import { IMPORTABLE_EXTENSIONS, MODELS_DIR, NAVIGATION_CONFIG_FILE, RESOURCES_DIR, MCP_SKILLS_DIR, toPosixRelative, VALIDATORS_DIR } from '../discovery'
 import { MODULE_ENTRY_FILE, MODULE_ROUTES_FILE } from '../import-resolution'
 import { escapeRegExp } from '../utils'
 import { cliEntry } from '../cli-entry'
@@ -55,6 +55,9 @@ const DEFAULT_LANG_DIR = 'lang'
 const MODELS_PATTERN = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(MODELS_DIR)}(?:/|$)`, 'u')
 // A route's body/params/query schema renders into api-client.gen.ts, and generators write it here.
 const VALIDATORS_PATTERN = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(VALIDATORS_DIR)}(?:/|$)`, 'u')
+// Every file of a skill is published into mcp-skills.gen.ts, whatever its extension. A dotfile
+// (.DS_Store, an editor's swap file) never is, so it is left out here as codegen leaves it out.
+const SKILLS_PATTERN = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(MCP_SKILLS_DIR)}(?:/(?!\\.)[^/]+)*$`, 'u')
 const SOURCE_EXTENSION = `(?:${[...IMPORTABLE_EXTENSIONS].map((extension) => escapeRegExp(extension)).join('|')})`
 // Codegen reads a module's routes through its entry's defineModule({ routes }), which
 // imports `./routes` (a file or a directory): moduleEntryFile() and moduleRoutesEntryFile().
@@ -205,6 +208,7 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
       || MODELS_PATTERN.test(relativeFile)
       || VALIDATORS_PATTERN.test(relativeFile)
       || MODULE_ROUTES_PATTERN.test(relativeFile)
+      || SKILLS_PATTERN.test(relativeFile)
   }
 
   // `configResolved` sets `appRoot` before Vite loads a module or serves a request.

@@ -100,7 +100,10 @@ export const codegenCommand = defineCommand({
     })) {
       switch (result.stage) {
         case 'supporting': {
-          const { pagesOutputPath, pagesPlan, translationsOutputPath, keyCount, attachmentsOutputPath, attachableModels, attachmentWarnings } = result
+          const {
+            pagesOutputPath, pagesPlan, translationsOutputPath, keyCount, attachmentsOutputPath, attachableModels, attachmentWarnings,
+            skillsOutputPath, skillCount, skillWarnings,
+          } = result
           if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
           reportSuppressedPageManifest(pagesPlan)
           if (translationsOutputPath) {
@@ -113,6 +116,12 @@ export const codegenCommand = defineCommand({
             consola.success(
               `Attachment types generated at ${attachmentsOutputPath} (${attachableModels.length} ${attachableModels.length === 1 ? 'model' : 'models'})`,
             )
+          }
+          for (const warning of skillWarnings) {
+            consola.warn(warning)
+          }
+          if (skillsOutputPath) {
+            consola.success(`MCP skills generated at ${skillsOutputPath} (${skillCount} ${skillCount === 1 ? 'skill' : 'skills'})`)
           }
           break
         }
