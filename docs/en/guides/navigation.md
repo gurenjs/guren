@@ -146,7 +146,13 @@ bunx guren add navigation
 
 It writes `config/navigation.ts` when the app has none, with the Home and Dashboard entries `guren add auth` writes, each only when a parameterless `GET` route carries its name (`home`, `dashboard`), and adds it to the `config` array of `createApp()`. An existing `config/navigation.ts` is kept, and still wired when it is a `defineNavigation()` definition.
 
-The layout is replaced only when `resources/js/components/Layout.tsx` is still, byte for byte, a version an earlier `guren add auth` wrote. The command knows every version a release shipped by its hash, as `guren upgrade` knows the UI components. `lang/en/layout.json` is written beside it when absent. A layout you have edited is left as it is, and so is the blog starter's, which `create-guren-app` writes with the app's name in it. The command then prints the lines that render the prop. An app with no layout gets the same lines rather than a layout, since the one `guren add auth` writes links to `/login`, `/profile` and `/logout`.
+The layout is replaced only when `resources/js/components/Layout.tsx` is still, byte for byte, a version an earlier `guren add auth` wrote, line ends aside. The command knows every version a release shipped by its hash, as `guren upgrade` knows the UI components. `lang/en/layout.json` is written beside it when absent. Even such a layout stays when the new one would not work in the app, and the command says why:
+
+- `config/navigation.ts` is no `defineNavigation()` definition, so nothing shares the links.
+- The routes file does not register `GET /login`, `GET /profile` and `POST /logout`, which the new layout links (a layout from an early release ran without `/profile`), or the file could not be loaded to tell.
+- The installed `@guren/inertia-client` has no `hasTranslation()`, which the new layout imports.
+
+The command writes nothing when the installed `@guren/core` has no `defineNavigation()`, since `config/navigation.ts` imports it when the app starts: upgrade the packages first. A layout you have edited is left as it is, and so is the blog starter's, which `create-guren-app` writes with the app's name in it. The command then prints the lines that render the prop. An app with no layout gets the same lines rather than a layout, since the one `guren add auth` writes links to `/login`, `/profile` and `/logout`.
 
 ## When an entry is hidden at boot
 

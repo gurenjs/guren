@@ -4,9 +4,11 @@
  * auth` writes in place of one only when the app's copy is still a version the framework shipped.
  */
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 
 import { assertNotApiOnly } from './app-surface'
+import { CliError } from './cli-error'
 import { readIfExists } from './discovery'
 import { uiComponentHash } from './guren-css'
 import { loadRouteDefinitions } from './load-routes'
@@ -15,7 +17,7 @@ import { wireConfig } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE } from './route-registrar'
 import { navigationRouteNames } from './routes-types'
 import { scaffoldTemplateFile } from './scaffold-templates'
-import { writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
+import { writeScaffoldFiles, type ScaffoldFileEntry } from './utils'
 
 export const NAVIGATION_LAYOUT_FILE = 'resources/js/components/Layout.tsx'
 const NAVIGATION_FILE = 'config/navigation.ts'
@@ -45,7 +47,8 @@ const STARTER_ENTRIES = [
   { route: 'dashboard', line: "  { label: 'Dashboard', route: 'dashboard', show: { auth: 'required' } },\n" },
 ] as const
 
-export type NavigationLayoutOutcome = 'replaced' | 'current' | 'kept' | 'absent'
+/** `held`: a shipped version left in place, since the new one would not work in this app (`layoutHeld` says why). */
+export type NavigationLayoutOutcome = 'replaced' | 'current' | 'kept' | 'absent' | 'held'
 
 export interface AddNavigationResult {
   created: string[]
@@ -54,9 +57,13 @@ export interface AddNavigationResult {
   layout: NavigationLayoutOutcome
   /** The starter entries left out, by route name, because the app names no such route. */
   omitted: string[]
+  layoutHeld?: string
+  /** Why the routes could not be read, when that is why entries were left out. */
+  routesUnread?: string
 }
 
-export interface AddNavigationOptions extends WriterOptions {
+/** No `cwd`: the layout is judged, written and wired in the one app the command runs in. */
+export interface AddNavigationOptions {
   overwritten?: string[]
 }
 
@@ -68,14 +75,50 @@ export function judgeNavigationLayout(current: string | null, template: string):
   return SHIPPED_LAYOUTS.has(hash) ? 'replaced' : 'kept'
 }
 
-/** By the rule codegen types entries by, on the routes file it reads; a file that does not load names nothing. */
-async function namedRoutes(cwd: string): Promise<readonly string[]> {
+interface AppRoutes {
+  /** By the rule codegen types entries by. */
+  names: readonly string[]
+  /** `METHOD /path` of every route the routes file registers. */
+  endpoints: ReadonlySet<string>
+  /** Why the routes file could not be read, which is no answer about any name. */
+  unread?: string
+}
+
+async function appRoutes(cwd: string): Promise<AppRoutes> {
   const routesFile = resolve(cwd, DEFAULT_ROUTES_FILE)
-  if (!existsSync(routesFile)) return []
+  if (!existsSync(routesFile)) return { names: [], endpoints: new Set(), unread: `there is no ${DEFAULT_ROUTES_FILE}` }
   try {
-    return navigationRouteNames(await loadRouteDefinitions(routesFile, cwd))
-  } catch {
-    return []
+    const definitions = await loadRouteDefinitions(routesFile, cwd)
+    return { names: navigationRouteNames(definitions), endpoints: new Set(definitions.map((route) => `${route.method.toUpperCase()} ${route.path}`)) }
+  } catch (error) {
+    return { names: [], endpoints: new Set(), unread: `${DEFAULT_ROUTES_FILE} could not be loaded (${error instanceof Error ? error.message : String(error)})` }
+  }
+}
+
+/** The routes the auth layout links outside its entries; a layout an alpha `add auth` wrote ran without `/profile`. */
+const ACCOUNT_ENDPOINTS = ['GET /login', 'GET /profile', 'POST /logout'] as const
+
+/**
+ * Whether the app's installed `pkg` names `exported` in the declarations its manifest points at; `null` when no copy
+ * or no declaration file is found, which proves nothing. Walked from the app root up, as `node_modules` is resolved.
+ */
+async function installedDeclares(appRoot: string, pkg: string, exported: string): Promise<boolean | null> {
+  for (let dir = resolve(appRoot); ; dir = dirname(dir)) {
+    const root = join(dir, 'node_modules', pkg)
+    const text = await readFile(join(root, 'package.json'), 'utf8').catch(() => undefined)
+    if (text !== undefined) {
+      try {
+        const manifest = JSON.parse(text) as { types?: string; typings?: string; exports?: Record<string, unknown> }
+        const entry = manifest.exports?.['.']
+        const types = (typeof entry === 'object' && entry !== null ? (entry as { types?: unknown }).types : undefined) ?? manifest.types ?? manifest.typings
+        if (typeof types !== 'string') return null
+        const declarations = await readFile(join(root, types), 'utf8')
+        return new RegExp(`\\b${exported}\\b`, 'u').test(declarations)
+      } catch {
+        return null
+      }
+    }
+    if (dirname(dir) === dir) return null
   }
 }
 
@@ -85,16 +128,20 @@ export async function addNavigation(options: AddNavigationOptions = {}): Promise
     does: 'guren add navigation writes the links of an Inertia layout',
     instead: 'An API-only app has no layout to render them',
   })
+  // config/navigation.ts is imported at start, so an app on a server without the module would not boot.
+  if ((await installedDeclares(cwd, '@guren/server', 'defineNavigation')) === false) {
+    throw new CliError('The installed @guren/core exports no defineNavigation(), which config/navigation.ts imports. Upgrade the @guren packages (bunx guren upgrade), then run this again. Nothing was written.')
+  }
 
-  const files: ScaffoldFileEntry[] = []
+  const routes = await appRoutes(cwd)
   const omitted: string[] = []
   const existingNavigation = await readIfExists(cwd, NAVIGATION_FILE)
+  const navigation = existingNavigation === null ? 'written' : definesNavigation(existingNavigation) ? 'kept' : 'foreign'
+  const files: ScaffoldFileEntry[] = []
   if (existingNavigation === null) {
-    const names = await namedRoutes(cwd)
-    const file = scaffoldTemplateFile('auth', NAVIGATION_FILE)
-    let contents = file.contents
+    let contents = scaffoldTemplateFile('auth', NAVIGATION_FILE).contents
     for (const entry of STARTER_ENTRIES) {
-      if (names.includes(entry.route)) continue
+      if (routes.names.includes(entry.route)) continue
       omitted.push(entry.route)
       contents = contents.replace(entry.line, '')
     }
@@ -102,19 +149,25 @@ export async function addNavigation(options: AddNavigationOptions = {}): Promise
   }
 
   const layoutTemplate = scaffoldTemplateFile('auth', NAVIGATION_LAYOUT_FILE)
-  const layout = judgeNavigationLayout(await readIfExists(cwd, NAVIGATION_LAYOUT_FILE), layoutTemplate.contents)
+  let layout = judgeNavigationLayout(await readIfExists(cwd, NAVIGATION_LAYOUT_FILE), layoutTemplate.contents)
+  let layoutHeld: string | undefined
   if (layout === 'replaced') {
-    files.push(layoutTemplate)
-    if ((await readIfExists(cwd, LAYOUT_LANG_FILE)) === null) files.push(scaffoldTemplateFile('auth', LAYOUT_LANG_FILE))
+    const missing = ACCOUNT_ENDPOINTS.filter((endpoint) => !routes.endpoints.has(endpoint))
+    if (navigation === 'foreign') layoutHeld = `${NAVIGATION_FILE} is no defineNavigation() definition, so nothing would share the links the new layout renders`
+    else if (routes.unread) layoutHeld = `the account links it renders could not be checked: ${routes.unread}`
+    else if (missing.length > 0) layoutHeld = `the new layout links ${missing.join(', ')}, which the routes file does not register`
+    else if ((await installedDeclares(cwd, '@guren/inertia-client', 'hasTranslation')) === false) layoutHeld = 'the installed @guren/inertia-client exports no hasTranslation(), which the new layout imports; upgrade it first'
+    if (layoutHeld) layout = 'held'
   }
+  if (layout === 'replaced' && (await readIfExists(cwd, LAYOUT_LANG_FILE)) === null) files.push(scaffoldTemplateFile('auth', LAYOUT_LANG_FILE))
 
-  // The layout is replaced only when judged unedited above, so force reaches no file the app wrote.
-  const created = files.length > 0 ? await writeScaffoldFiles(files, { ...options, force: layout === 'replaced', subject: 'navigation' }) : []
+  // Each file is written apart: only the layout, judged unedited above, is written over.
+  const created = files.length > 0 ? await writeScaffoldFiles(files, { overwritten: options.overwritten, subject: 'navigation' }) : []
+  if (layout === 'replaced') created.push(...(await writeScaffoldFiles([layoutTemplate], { overwritten: options.overwritten, force: true, subject: 'navigation' })))
 
-  const navigation = existingNavigation === null ? 'written' : definesNavigation(existingNavigation) ? 'kept' : 'foreign'
   if (navigation !== 'foreign') await wireConfig('navigation')
 
-  return { created, navigation, layout, omitted }
+  return { created, navigation, layout, omitted, ...(layoutHeld ? { layoutHeld } : {}), ...(routes.unread && omitted.length > 0 ? { routesUnread: routes.unread } : {}) }
 }
 
 /** What the run leaves to the author: the layout's half when it was not replaced, and the entries it left out. */
@@ -126,17 +179,23 @@ export function navigationNextSteps(result: AddNavigationResult): string[] {
   if (result.layout === 'replaced') {
     lines.push(`Replaced ${NAVIGATION_LAYOUT_FILE}, a layout an earlier guren add auth wrote: it renders the navigation prop now, and a page passes wide for the wide measure.`)
   }
-  if (result.layout === 'kept' || result.layout === 'absent') {
+  if (result.layout === 'kept' || result.layout === 'absent' || result.layout === 'held') {
     lines.push(
       result.layout === 'kept'
         ? `${NAVIGATION_LAYOUT_FILE} is not a layout the framework shipped, so it was left as it is. Render the navigation prop in it:`
-        : `There is no ${NAVIGATION_LAYOUT_FILE}. Render the navigation prop in your layout:`,
+        : result.layout === 'held'
+          ? `${NAVIGATION_LAYOUT_FILE} was left as it is, since ${result.layoutHeld}. Render the navigation prop in it:`
+          : `There is no ${NAVIGATION_LAYOUT_FILE}. Render the navigation prop in your layout:`,
+      "  import { Link, usePage } from '@inertiajs/react'",
       "  import type { NavigationItem } from '@guren/core'",
+      '  // in the component:',
       '  const navigation = usePage<{ navigation?: NavigationItem[] }>().props.navigation ?? []',
+      '  // in the header:',
       "  {navigation.map((item) => <Link key={item.path} href={item.path} aria-current={item.current ? 'page' : undefined}>{item.label}</Link>)}",
     )
   }
-  for (const route of result.omitted) {
+  if (result.routesUnread) lines.push(`The starter entries were left out, since ${result.routesUnread}: add them with bunx guren nav:add.`)
+  for (const route of result.routesUnread ? [] : result.omitted) {
     lines.push(route === 'home'
       ? `No GET route with no path parameter is named home, so ${NAVIGATION_FILE} has no Home entry: name your / route with .name('home'), then run bunx guren nav:add "Home" --route home.`
       : `No GET route with no path parameter is named ${route}, so ${NAVIGATION_FILE} has no entry for it.`)

@@ -14,6 +14,8 @@ const SHIPPED_V2_12 = resolve(import.meta.dir, 'fixtures/navigation/Layout.v2.12
 
 const APP_ENTRY = "import { createApp } from '@guren/core'\nimport { registerWebRoutes } from '../routes/web.js'\n\nconst app = createApp({ routes: registerWebRoutes })\n\nexport default app\n"
 const routes = (body: string): string => `import { Router } from '@guren/core'\n\nexport function registerWebRoutes(router: Router): void {\n${body}}\n`
+// The routes the auth layout links outside its entries.
+const ACCOUNT = "  router.get('/login', () => 'login')\n  router.get('/profile', () => 'profile')\n  router.post('/logout', () => 'logout')\n"
 
 describe('SHIPPED_LAYOUTS', () => {
   it('lists the current template, so an app that ran this release\'s add auth reads as current', async () => {
@@ -43,7 +45,7 @@ describe('addNavigation', () => {
     try {
       await writeWorkspaceFiles(workspace.dir, {
         'src/app.ts': APP_ENTRY,
-        'routes/web.ts': routes("  router.get('/', () => 'home').name('home')\n  router.get('/dashboard', () => 'dashboard').name('dashboard')\n"),
+        'routes/web.ts': routes(`  router.get('/', () => 'home').name('home')\n  router.get('/dashboard', () => 'dashboard').name('dashboard')\n${ACCOUNT}`),
         [NAVIGATION_LAYOUT_FILE]: await readFile(SHIPPED_V2_12, 'utf8'),
       })
       await linkWorkspaceCore(workspace.dir)
@@ -84,9 +86,15 @@ describe('addNavigation', () => {
       expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe(navigation)
       expect(existsSync(join(workspace.dir, 'lang/en/layout.json'))).toBe(false)
       expect(await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')).toMatch(/config: \[navigation\]/)
-      const steps = navigationNextSteps(result)
-      expect(steps[0]).toBe(`${NAVIGATION_LAYOUT_FILE} is not a layout the framework shipped, so it was left as it is. Render the navigation prop in it:`)
-      expect(steps).toContain("  import type { NavigationItem } from '@guren/core'")
+      expect(navigationNextSteps(result)).toEqual([
+        `${NAVIGATION_LAYOUT_FILE} is not a layout the framework shipped, so it was left as it is. Render the navigation prop in it:`,
+        "  import { Link, usePage } from '@inertiajs/react'",
+        "  import type { NavigationItem } from '@guren/core'",
+        '  // in the component:',
+        '  const navigation = usePage<{ navigation?: NavigationItem[] }>().props.navigation ?? []',
+        '  // in the header:',
+        "  {navigation.map((item) => <Link key={item.path} href={item.path} aria-current={item.current ? 'page' : undefined}>{item.label}</Link>)}",
+      ])
     } finally {
       await workspace.cleanup()
     }
@@ -116,6 +124,45 @@ describe('addNavigation', () => {
     }
   })
 
+  it('holds a shipped layout whose account links the app does not register', async () => {
+    const workspace = await createTempWorkspace('guren-cli-add-navigation-held-')
+    try {
+      const layout = await readFile(SHIPPED_V2_12, 'utf8')
+      await writeWorkspaceFiles(workspace.dir, {
+        'src/app.ts': APP_ENTRY,
+        'routes/web.ts': routes("  router.get('/login', () => 'login')\n  router.post('/logout', () => 'logout')\n"),
+        [NAVIGATION_LAYOUT_FILE]: layout,
+      })
+      await linkWorkspaceCore(workspace.dir)
+
+      const result = await addNavigation()
+
+      expect(result).toMatchObject({ layout: 'held', layoutHeld: 'the new layout links GET /profile, which the routes file does not register' })
+      expect(await readFile(join(workspace.dir, NAVIGATION_LAYOUT_FILE), 'utf8')).toBe(layout)
+      expect(existsSync(join(workspace.dir, 'lang/en/layout.json'))).toBe(false)
+      expect(navigationNextSteps(result)[0]).toBe(`${NAVIGATION_LAYOUT_FILE} was left as it is, since the new layout links GET /profile, which the routes file does not register. Render the navigation prop in it:`)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('refuses before writing when the installed server has no defineNavigation()', async () => {
+    const workspace = await createTempWorkspace('guren-cli-add-navigation-old-server-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'src/app.ts': APP_ENTRY,
+        'routes/web.ts': routes(''),
+        'node_modules/@guren/server/package.json': '{ "name": "@guren/server", "types": "index.d.ts" }\n',
+        'node_modules/@guren/server/index.d.ts': 'export declare function createApp(): void\n',
+      })
+
+      await expect(addNavigation()).rejects.toThrow('The installed @guren/core exports no defineNavigation()')
+      expect(existsSync(join(workspace.dir, 'config/navigation.ts'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('neither replaces nor wires a config/navigation.ts that is no definition', async () => {
     const workspace = await createTempWorkspace('guren-cli-add-navigation-foreign-')
     try {
@@ -123,11 +170,15 @@ describe('addNavigation', () => {
         'src/app.ts': APP_ENTRY,
         'routes/web.ts': routes(''),
         'config/navigation.ts': 'export const links = []\n',
+        [NAVIGATION_LAYOUT_FILE]: await readFile(SHIPPED_V2_12, 'utf8'),
       })
 
       const result = await addNavigation()
 
       expect(result.navigation).toBe('foreign')
+      // Nothing would share the links the new layout renders, so the shipped one stays.
+      expect(result.layout).toBe('held')
+      expect(await readFile(join(workspace.dir, NAVIGATION_LAYOUT_FILE), 'utf8')).toBe(await readFile(SHIPPED_V2_12, 'utf8'))
       expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe('export const links = []\n')
       expect(await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')).not.toContain('navigation')
     } finally {
