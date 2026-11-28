@@ -509,11 +509,32 @@ function checkNavigation(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
         fail('plan:navigation-entry', `The entry for "${entry.route}" asks "${entry.can.ability}" of the policy "${policy.id}", which lists no such ability.`)
       }
     }
+    const byId = plan.routes.find((candidate) => candidate.id === entry.route)
+    const appNamed = isUnreadable(app.routes) ? [] : app.routes.filter((candidate) => candidate.name === entry.route)
+    if (byId && appNamed.length > 0 && byId.name !== entry.route) {
+      fail('plan:navigation-route', `"${entry.route}" is both the id of the plan's route "${byId.name}" and the name of a route the application registers; give the plan's route another id.`)
+    }
     if (entry.change.kind === 'drop') continue
-    const route = plan.routes.find((candidate) => candidate.id === entry.route)
+    // Every plan route claiming the name, whichever comes first in the document: one that takes it away wins.
+    const claims = byId ? [] : plan.routes.filter((candidate) => candidate.name === entry.route || (candidate.change.kind === 'rename' && candidate.change.from === entry.route))
+    const dropped = claims.find((candidate) => candidate.change.kind === 'drop' && candidate.name === entry.route)
+    const renamed = claims.find((candidate) => candidate.change.kind === 'rename' && candidate.change.from === entry.route)
+    const added = claims.find((candidate) => candidate.change.kind === 'add')
+    if (dropped) {
+      fail('plan:navigation-route', `The entry links "${entry.route}", which the plan drops (${dropped.id}).`)
+      continue
+    }
+    if (renamed) {
+      fail('plan:navigation-route', `The entry links "${entry.route}", which the plan renames to "${renamed.name}"; link it by the id "${renamed.id}".`)
+      continue
+    }
+    if (added) {
+      fail('plan:navigation-route', `The entry names "${entry.route}", a route the plan adds; link it by the id "${added.id}".`)
+      continue
+    }
+    // The plan's own statement of the route, an `existing` or `alter` one by name included, is what it will be.
+    const route = byId ?? claims[0]
     if (route) {
-      const named = isUnreadable(app.routes) ? undefined : app.routes.find((candidate) => candidate.name === entry.route)
-      if (named && route.name !== entry.route) fail('plan:navigation-route', `"${entry.route}" is both the id of the plan's route "${route.name}" and the name of a route the application registers; give the plan's route another id.`)
       if (route.change.kind === 'drop') fail('plan:navigation-route', `The entry links the route "${route.id}", which the plan drops.`)
       if (route.method !== 'GET' || !isParameterless(route.path)) fail('plan:navigation-route', `The entry links "${route.id}" (${route.method} ${route.path}); an entry links a GET route with no path parameter.`)
       const action = actions.get(route.action)
@@ -523,29 +544,14 @@ function checkNavigation(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
       if (action?.change.kind === 'drop' || view?.change.kind === 'drop') fail('plan:navigation-route', `The entry links "${route.id}", whose ${action?.change.kind === 'drop' ? 'action' : 'page'} the plan drops.`)
       continue
     }
-    // The application's route by name, unless the plan takes that name away.
-    const replaced = plan.routes.find((candidate) => candidate.name === entry.route || (candidate.change.kind === 'rename' && candidate.change.from === entry.route))
-    if (replaced?.change.kind === 'drop') {
-      fail('plan:navigation-route', `The entry links "${entry.route}", which the plan drops (${replaced.id}).`)
-      continue
-    }
-    if (replaced?.change.kind === 'add') {
-      fail('plan:navigation-route', `The entry names "${entry.route}", a route the plan adds; link it by the id "${replaced.id}".`)
-      continue
-    }
-    if (replaced?.change.kind === 'rename' && replaced.change.from === entry.route) {
-      fail('plan:navigation-route', `The entry links "${entry.route}", which the plan renames to "${replaced.name}"; link it by the id "${replaced.id}".`)
-      continue
-    }
     if (isUnreadable(app.routes)) {
       results.push(finding('plan:navigation-route', 'warn', `The routes could not be read (${app.routes.unreadable}), so the route "${entry.route}" the entry links was not confirmed.`, at))
       continue
     }
-    const named = app.routes.filter((candidate) => candidate.name === entry.route)
-    if (named.length === 0) {
+    if (appNamed.length === 0) {
       fail('plan:navigation-route', `The entry links "${entry.route}", which is neither the id of a route in the plan nor the name of one the application registers.`)
-    } else if (!named.some((candidate) => candidate.method.toUpperCase() === 'GET' && isParameterless(candidate.path))) {
-      fail('plan:navigation-route', `The entry links "${entry.route}" (${named.map((candidate) => `${candidate.method} ${candidate.path}`).join(', ')}); an entry links a GET route with no path parameter.`)
+    } else if (!appNamed.some((candidate) => candidate.method.toUpperCase() === 'GET' && isParameterless(candidate.path))) {
+      fail('plan:navigation-route', `The entry links "${entry.route}" (${appNamed.map((candidate) => `${candidate.method} ${candidate.path}`).join(', ')}); an entry links a GET route with no path parameter.`)
     }
   }
 }

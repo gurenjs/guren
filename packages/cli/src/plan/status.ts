@@ -316,6 +316,14 @@ function conclude(judgement: Judgement, credit: AlterCredit, reachable: Readonly
   const result = (state: PlanStatusState, extra: Partial<PlanElementStatus> = {}): PlanElementStatus =>
     done(state, { properties, ...extra })
 
+  // An entry the definition is not wired for shows nothing, whatever its properties read (RFC 0040 §5).
+  if (section === 'navigation' && judgement.mount && change.kind === 'alter' && readable.length === 0) {
+    const mount = judgement.mount.verdict()
+    if (mount !== 'mounted') {
+      notes.push(`Not confirmed as wired: ${mount.unconfirmed}.`)
+      return result('present')
+    }
+  }
   // An alter's target existed before the plan, so its existence says nothing about the change.
   if (change.kind === 'alter' && readable.length === 0) return result('unjudged', { reason: unreadableAlterReason(properties, reachable.has(id)) })
   // A mount is a reading of the element itself; with none, existence would complete what the plan stated and nothing read.
@@ -573,10 +581,10 @@ function hasIndex(table: SourcedSchemaTable, columns: ReadonlyArray<string>, kin
   return hidden ? undefined : false
 }
 
-/** A `where` as one comparable text, its fields in code-unit order. */
-function whereKey(where: Record<string, unknown>): string {
-  const fields = Object.keys(where).sort()
-  return fields.length === 0 ? 'none' : fields.map((field) => `${field} = ${JSON.stringify(where[field])}`).join(', ')
+/** A `where` as one comparable text, its fields in code-unit order; an empty one still hides the entry from a guest. */
+function whereKey(where: Record<string, unknown> | undefined): string {
+  if (where === undefined) return 'none'
+  return JSON.stringify(Object.keys(where).sort().map((field) => [field, where[field]]))
 }
 
 const CONSTRAINTS_HIDDEN = "the table's constraints are built where the static reader cannot follow"
@@ -1370,8 +1378,8 @@ class StatusContext {
         if (entry.label !== undefined) properties.push(compare('label', entry.label, found?.label, why))
         if (whole || entry.auth !== undefined) properties.push(compare('auth', entry.auth ?? 'any', found ? (found.auth ?? 'any') : undefined, why))
         if (whole || entry.where !== undefined) {
-          const planned = whereKey(Object.fromEntries((entry.where ?? []).map(({ field, value }) => [field, value])))
-          properties.push(compare('where', planned, found ? whereKey(found.where ?? {}) : undefined, why))
+          const planned = whereKey(entry.where && Object.fromEntries(entry.where.map(({ field, value }) => [field, value])))
+          properties.push(compare('where', planned, found ? whereKey(found.where) : undefined, why))
         }
         if (entry.can) properties.push(this.navigationCan(entry.can, found, why))
         else if (whole) properties.push(compare('can', 'none', found ? (found.can ? `${found.can.ability} ${found.can.model.className}` : 'none') : undefined, why))
@@ -1383,20 +1391,30 @@ class StatusContext {
   }
 
   /** The ability and the model class, the class known by the file its import leads to, as the gate is handed it. */
+  /**
+   * The ability and the model class, the class known by the file model discovery declares it in, which is what the
+   * gate is handed; an import leading elsewhere (a re-export) is unconfirmed. The planned value names the root.
+   */
   private navigationCan(can: NonNullable<PlanNavigation['can']>, found: NavigationFileEntry | undefined, why: string): PlanPropertyStatus {
     const policy = this.plan.policies.find((candidate) => candidate.id === can.policy)
     const model = policy ? this.modelsById.get(policy.model) : undefined
     if (!model) return unknown('can', `${can.ability} ?`, 'the policy element names no model of the plan')
-    const planned = `${can.ability} ${model.name}`
+    const planned = `${can.ability} ${model.module ? `${model.module}/` : ''}${model.name}`
     if (!found) return unknown('can', planned, why)
     if (!found.can) return differ('can', planned, 'none')
-    const actual = `${found.can.ability} ${found.can.model.className}`
-    if (actual !== planned) return differ('can', planned, actual)
-    const file = found.can.model.module?.replace(/\\/gu, '/')
-    if (file === undefined) return unknown('can', planned, `${NAVIGATION_CONFIG_FILE} names ${found.can.model.className} with no import of a model file`)
-    const root = model.module ? `/modules/${model.module}/` : '/'
-    const own = file.endsWith(`${root}app/Models/${model.name}`) && (model.module !== undefined || !file.includes('/modules/'))
-    return own ? match('can', planned) : differ('can', planned, `${actual} from ${file}`)
+    if (found.can.ability !== can.ability || found.can.model.className !== model.name) return differ('can', planned, `${found.can.ability} ${found.can.model.className}`)
+    const imported = found.can.model.module?.replaceAll('\\', '/')
+    if (imported === undefined) return unknown('can', planned, `${NAVIGATION_CONFIG_FILE} names ${model.name} with no import of a model file`)
+    const models = this.section('models')
+    if (isUnreadable(models)) return unknown('can', planned, `the models could not be read (${models.unreadable})`)
+    const leadsTo = (file: string): boolean => imported.endsWith(`/${file.replaceAll('\\', '/').replace(/\.[cm]?[jt]sx?$/u, '')}`)
+    // The longest file the import leads to, since `modules/blog/app/Models/Post` also ends in `app/Models/Post`.
+    const declaring = models
+      .filter((candidate) => candidate.className === model.name && leadsTo(candidate.file))
+      .sort((a, b) => b.file.length - a.file.length)[0]
+    if (declaring?.module === (model.module ?? null)) return match('can', planned)
+    if (declaring) return differ('can', planned, `${can.ability} ${declaring.module ? `${declaring.module}/` : ''}${model.name}`)
+    return unknown('can', planned, `${NAVIGATION_CONFIG_FILE} imports ${model.name} from a file that declares no such model, such as a re-export`)
   }
 
   private entryMount(list: 'providers' | 'config', file: string): PlanAppMount {

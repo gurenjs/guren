@@ -88,6 +88,19 @@ describe('the navigation section of a plan (RFC 0040 §5)', () => {
     ])
   })
 
+  test('should judge a name every plan route claims whatever their order, by what the plan makes of it', () => {
+    const route = (extra: Loose) => ({ method: 'GET', path: '/posts', action: 'action.comments.index', middleware: [], bind: [], ...extra })
+    const pair = [route({ id: 'route.posts.kept', change: { kind: 'existing' }, name: 'posts.index' }), route({ id: 'route.posts.gone', change: { kind: 'drop', reason: 'Gone.' }, name: 'posts.index' })]
+    for (const routes of [pair, [...pair].reverse()]) {
+      const plan = withIndex([POSTS])
+      plan.routes.push(...routes)
+      expect(navigationFindings(plan)).toEqual([['plan:navigation-route', 'fail', 'The entry links "posts.index", which the plan drops (route.posts.gone).']])
+    }
+    const altered = withIndex([POSTS])
+    altered.routes.push(route({ id: 'route.posts.alter', change: { kind: 'alter' }, name: 'posts.index', method: 'POST' }))
+    expect(navigationFindings(altered)).toEqual([['plan:navigation-route', 'fail', 'The entry links "route.posts.alter" (POST /posts); an entry links a GET route with no path parameter.']])
+  })
+
   test('should refuse a blank label and a where field stated twice', () => {
     expect(navigationFindings(withIndex([{ ...POSTS, label: ' ' }]))).toEqual([['plan:navigation-entry', 'fail', 'The entry for "posts.index" has a blank label.']])
     expect(navigationFindings(withIndex([{ ...POSTS, where: [{ field: 'role', value: 'admin' }, { field: 'role', value: 'staff' }] }]))).toEqual([
@@ -154,9 +167,11 @@ describe('plan:status on a navigation entry', () => {
     ],
   })
   const judge = (entries: PlanAppDetail['navigation'], names: string[], entryLists?: PlanAppDetail['entryLists']) =>
-    judgePlan(plan, planAppState({ navigation: names, detail: { navigation: entries, unparsedModelFiles: [], ...(entryLists ? { entryLists } : {}) } as unknown as PlanAppDetail }))
+    judgePlan(plan, planAppState({ navigation: names, detail: { navigation: entries, models: MODELS, unparsedModelFiles: [], ...(entryLists ? { entryLists } : {}) } as unknown as PlanAppDetail }))
       .elements.filter((element) => element.section === 'navigation')
       .map((element) => [element.id, element.state, element.properties.map((property) => [property.property, property.verdict])])
+  // The root's Post and a module's, so a can is judged by the file its import leads to.
+  const MODELS = [{ className: 'Post', module: null, file: 'app/Models/Post.ts' }, { className: 'Post', module: 'blog', file: 'modules/blog/app/Models/Post.ts' }]
   const can = (module?: string) => ({ ability: 'viewAny', model: { expression: 'Post', className: 'Post', ...(module ? { module } : {}) } })
   const entry = { label: 'Posts', route: 'posts.index', auth: 'required' as const, can: can('/repo/app/Models/Post'), line: 7 }
 
@@ -174,5 +189,9 @@ describe('plan:status on a navigation entry', () => {
     ])
     expect(judge([{ ...entry, can: can('/repo/modules/blog/app/Models/Post') }], ['posts.index'])[0]).toEqual(['nav.posts', 'drifted', [['label', 'match'], ['auth', 'match'], ['where', 'match'], ['can', 'differ']]])
     expect(judge([{ ...entry, can: can() }], ['posts.index'])[0]).toEqual(['nav.posts', 'present', [['label', 'match'], ['auth', 'match'], ['where', 'match'], ['can', 'unknown']]])
+    // An import through an index re-export is no model file, so it is unconfirmed.
+    expect(judge([{ ...entry, can: can('/repo/app/Models/index') }], ['posts.index'])[0]).toEqual(['nav.posts', 'present', [['label', 'match'], ['auth', 'match'], ['where', 'match'], ['can', 'unknown']]])
+    // An empty where hides the entry from a guest, which no where does not.
+    expect(judge([{ ...entry, where: {} }], ['posts.index'])[0]).toEqual(['nav.posts', 'drifted', [['label', 'match'], ['auth', 'match'], ['where', 'differ'], ['can', 'match']]])
   })
 })
