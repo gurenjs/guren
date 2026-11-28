@@ -58,11 +58,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.26.1",
+    "@guren/core": "^1.29.0",
     "ai": "^7.0.106"
   },
   "devDependencies": {
-    "@guren/plugin-mcp": "^0.7.0",
+    "@guren/plugin-mcp": "^0.8.0",
     "@types/node": "^20.14.10",
     "drizzle-orm": "1.0.0-rc.4",
     "tsdown": "^0.22.14",

@@ -177,12 +177,13 @@ describe('the audit record through DailyFileChannel', () => {
 
     const invoked = toAuditRecord(new AgentToolInvoked(PRINCIPAL, 'posts.index', { page: 2 }, 200, 17, 'mcp'), NOW)
     const denied = toAuditRecord(new AgentToolDenied(null, 'posts.store', { title: 'x' }, 'rate-limit', 'mcp'), NOW)
-    for (const record of [invoked, denied]) {
+    const unconfirmed = toAuditRecord(new AgentToolDenied(PRINCIPAL, 'posts.destroy', { id: 5 }, 'confirmation', 'mcp'), NOW)
+    for (const record of [invoked, denied, unconfirmed]) {
       channel.log({ level: 'info', message: 'agent.audit', timestamp: new Date(record.ts), context: { ...record } })
     }
 
     const written = readFileSync(dailyFilePath(basePath, NOW), 'utf8')
-    expect(written.split('\n').map(parseAuditRecord)).toEqual([invoked, denied, null])
+    expect(written.split('\n').map(parseAuditRecord)).toEqual([invoked, denied, unconfirmed, null])
   })
 })
 

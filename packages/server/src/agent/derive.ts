@@ -9,6 +9,7 @@
  * a route becomes a tool only by declaring `.agent()` *and* carrying a name.
  */
 import type { AgentRouteMetadata, ResourceResponseShape, RouteDefinition } from '../mvc/Router'
+import { readAgentConfirm } from '../internal/agent-confirm'
 import { extractPathParamNames } from '../internal/route-path'
 import { derivableAbility } from '../authorization/middleware'
 import {
@@ -104,6 +105,12 @@ export interface DerivedAgentTool {
   authorization?: { ability: string }
   /** Declared verbatim: invocations require server-side approval. */
   approval?: 'required'
+  /**
+   * Declared `confirm`, normalized: present means the calling user is asked
+   * before the call runs (RFC 0042 §2), with `message` when the route gave a
+   * non-blank one.
+   */
+  confirm?: { message?: string }
   /** Declared verbatim: argument fields masked in agent audit logs. */
   redact?: string[]
   expose: DerivedAgentToolExposure
@@ -237,6 +244,7 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
     }
 
     const toolWarnings: string[] = []
+    const confirm = readAgentConfirm(agent.confirm)
     const readOnlyHint = agent.readOnlyHint ?? READ_ONLY_METHODS.has(method)
     const input = buildInputSchema(definition, method, toolWarnings)
     const tool: DerivedAgentTool = {
@@ -263,10 +271,13 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
       },
       authorization: deriveAuthorization(definition, method),
       approval: agent.approval,
+      ...(confirm ? { confirm } : {}),
       redact: agent.redact ? [...agent.redact] : undefined,
       expose: {
         mcp: agent.expose?.mcp ?? true,
-        webMcp: agent.expose?.webMcp ?? true,
+        // The browser fetches a WebMCP tool's route itself, past the pipeline that asks,
+        // and a client built before `confirm` skips only what is not exposed.
+        webMcp: confirm ? false : agent.expose?.webMcp ?? true,
       },
       ...(ui ? { ui } : {}),
       warnings: toolWarnings,

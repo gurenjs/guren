@@ -637,3 +637,95 @@ describe('dispatchToolCall recording', () => {
   })
 })
 
+describe('dispatchToolCall confirmation', () => {
+  function definitions(): RouteDefinition[] {
+    const router = new Router()
+    router
+      .delete('/notes', () => new Response('ok'))
+      .name('notes.purge')
+      .agent({ confirm: { message: 'This deletes every note.' }, redact: ['token'] })
+    router.delete('/drafts', () => new Response('ok')).name('drafts.purge').agent({ confirm: true })
+    return router.definitions()
+  }
+
+  /** A stub application that counts what it was sent. */
+  function application(): { sent: Request[]; fetch: (request: Request) => Promise<Response> } {
+    const sent: Request[] = []
+    return { sent, fetch: async (request) => (sent.push(request), Response.json({ ok: true })) }
+  }
+
+  it('refuses a confirm tool where nobody can be asked, sending nothing', async () => {
+    const app = application()
+
+    await expect(dispatchToolCall(definitions(), app.fetch, { name: 'notes.purge', args: {} })).rejects.toThrow(
+      '"notes.purge" asks the calling user to confirm before it runs, and nobody can be asked here. Pass --confirm to run it.',
+    )
+    expect(app.sent.filter((request) => request.method === 'DELETE')).toEqual([])
+  })
+
+  it('runs it when the caller passed --confirm, asking nobody', async () => {
+    const app = application()
+    const asked: unknown[] = []
+
+    const result = await dispatchToolCall(definitions(), app.fetch, {
+      name: 'notes.purge',
+      args: {},
+      confirm: true,
+      ask: async (question) => (asked.push(question), false),
+    })
+
+    expect(result.outcome.status).toBe(200)
+    expect(asked).toEqual([])
+    expect(app.sent.filter((request) => request.method === 'DELETE')).toHaveLength(1)
+  })
+
+  it('asks with the route\'s message and the redacted arguments, and runs on a yes', async () => {
+    const app = application()
+    const asked: unknown[] = []
+
+    const result = await dispatchToolCall(definitions(), app.fetch, {
+      name: 'notes.purge',
+      args: { token: 'hunter2', before: '2026-01-01' },
+      ask: async (question) => (asked.push(question), true),
+    })
+
+    expect(asked).toEqual([
+      { tool: 'notes.purge', message: 'This deletes every note.', input: { token: '[REDACTED]', before: '2026-01-01' } },
+    ])
+    expect(result.outcome.status).toBe(200)
+  })
+
+  it('asks the default question for a route that declared no message', async () => {
+    const asked: Array<{ message: string }> = []
+
+    await dispatchToolCall(definitions(), application().fetch, {
+      name: 'drafts.purge',
+      args: {},
+      ask: async (question) => (asked.push(question), true),
+    })
+
+    expect(asked.map((question) => question.message)).toEqual(['Run "drafts.purge"?'])
+  })
+
+  it('refuses, sending nothing, when the person says no', async () => {
+    const app = application()
+
+    await expect(
+      dispatchToolCall(definitions(), app.fetch, { name: 'notes.purge', args: {}, ask: async () => false }),
+    ).rejects.toThrow('"notes.purge" was not confirmed, so nothing was run.')
+    expect(app.sent.filter((request) => request.method === 'DELETE')).toEqual([])
+  })
+
+  it('does not ask about a rehearsal', async () => {
+    const asked: unknown[] = []
+
+    await dispatchToolCall(definitions(), application().fetch, {
+      name: 'notes.purge',
+      args: {},
+      preflight: true,
+      ask: async (question) => (asked.push(question), false),
+    })
+
+    expect(asked).toEqual([])
+  })
+})

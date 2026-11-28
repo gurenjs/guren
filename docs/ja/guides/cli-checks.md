@@ -128,6 +128,7 @@ provider の外のコードでは、`isIntrospecting()` で同じ判定ができ
 | `agent-route-tool-name:*` | ツール名(`agent.toolName` またはルート名)が MCP の文法 `^[A-Za-z0-9._-]{1,128}$` に合っていない。クライアントは、そのツールだけでなくツール一覧全体を拒否する。 |
 | `agent-route-reserved-name:*` | フレームワークが予約しているツール名を使っている。`guren_preflight` は、MCP エンドポイントが自分で追加するメタツールの名前。この名前を使ったルートは、まったく公開されない。 |
 | `agent-route-portable-name:*` | (警告、参考扱い) MCP としては正しいツール名だが、文法 `^[A-Za-z0-9_-]{1,64}$` に合っていない。この文法は Claude と OpenAI のツール API が課しているもので、Claude Managed Agents は MCP ツールにも適用する。これらのクライアントは、ツールを何も言わずに読み飛ばす。`agent.toolName` に、どのクライアントでも通る綴り(`posts_index`)を設定すること。参考扱いなので、`check --ci` と `guren gate` はこの指摘では失敗しない。 |
+| `agent-route-confirm-webmcp:*` | (警告、参考扱い) ルートが `confirm` と `expose: { webMcp: true }` を両方宣言している。呼び出し元に確認を求めるツールは WebMCP に登録されない。ブラウザがルートを直接呼ぶため、尋ねる手段がないからである。宣言した公開先は効かないので、どちらかを外すこと。 |
 | `agent-route-duplicate:*` | 2 つ以上のルートが同じツール名になる。 |
 | `agent-route-authorization:*` | 読み取り専用ではないツールなのに、ミドルウェアチェーンに認可の役割（capability）を持つものがなく、コントローラアクションでも `this.authorize(...)` を呼んでいない。**認証は認可の代わりにならない**。`this.auth.userOrFail()` や API トークンの確認だけの場合は、専用のメッセージで報告される。 |
 
