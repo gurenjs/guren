@@ -89,6 +89,8 @@ describe('the navigation writer', () => {
 
   test('should keep a comment on the line it closes, and an import a type still names', () => {
     expect(appendNavigationEntry(FILES['a commented']!, PLAIN, workspace.dir)).toContain("// the start\n  { label: 'Jobs', route: 'jobs.index' },\n")
+    const middle = `${HEAD}export default defineNavigation([\n  { label: 'A', route: 'a' },\n  { label: 'B', route: 'b' }, // keep b\n  { label: 'C', route: 'c' },\n])\n`
+    expect(removeNavigationEntry(middle, 'b', workspace.dir)).toBe(`${HEAD}export default defineNavigation([\n  { label: 'A', route: 'a' },\n  { label: 'C', route: 'c' },\n])\n`)
     const typed = `${HEAD}import { Job } from '@/app/Models/Job'\nexport type Posting = Job\nexport default defineNavigation([\n  { label: 'P', route: 'p', show: { can: ['create', Job] } },\n])\n`
     expect(removeNavigationEntry(typed, 'p', workspace.dir)).toContain("import { Job } from '@/app/Models/Job'")
   })

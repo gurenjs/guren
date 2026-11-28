@@ -113,7 +113,8 @@ function cut(source: string, from: number, to: number): string {
   const start = lineStart(source, from)
   const lineEnd = source.indexOf('\n', to)
   const end = lineEnd === -1 ? source.length : lineEnd + 1
-  if (source.slice(start, from).trim() === '' && source.slice(to, end).trim() === '') return source.slice(0, start) + source.slice(end)
+  // A comment closing the line goes with what it closed.
+  if (source.slice(start, from).trim() === '' && /^[ \t]*(?:\/\/[^\n]*)?\n?$/u.test(source.slice(to, end))) return source.slice(0, start) + source.slice(end)
   return source.slice(0, from) + source.slice(to).replace(/^[ \t]*/u, '')
 }
 
