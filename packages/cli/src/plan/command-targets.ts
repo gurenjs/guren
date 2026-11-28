@@ -23,7 +23,7 @@ import { routeFile, routeGroupController } from '../make-route'
 import { validatorFile, validatorSchemaNames } from '../make-validator'
 import { ensureSuffix, kebabCase, pascalCase, type ScaffoldFileEntry } from '../utils'
 import { findTable, isUnreadable, type PlanAppState } from './app-state'
-import { namedTargets, tableTarget, type PlanAppTarget } from './app-targets'
+import { namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
 import { judgePlanCommand, quotePlanCommand } from './command-allowlist'
 import { planScaffoldCoverage, planScaffoldMounts } from './scaffold'
 import { validatorFilePath } from './scaffold-http'
@@ -44,6 +44,8 @@ export type PlanGeneratorTarget =
   | { section: 'validators'; file: string; exports: readonly string[] }
   /** An app-relative routes file. */
   | { section: 'routes'; file: string }
+  /** Route names in any root, which `routes.gen.ts` lists once the route is registered. */
+  | { section: 'routeNames'; names: readonly string[] }
   /** SQL table names, matched against a planned model's `table` in any root, and whether the generator also writes their migration. */
   | { section: 'tables'; names: readonly string[]; migration: boolean }
 
@@ -218,14 +220,21 @@ export const PLAN_GENERATOR_TARGETS: Readonly<Record<string, PlanGeneratorRule |
     },
   },
   'lang:publish': "the framework's translation catalogs, which no plan section declares",
-  // The model a --can names is imported by config/navigation.ts, which the application loads at start.
+  // The entry's route name fails the typecheck until codegen lists it; the --can model is imported at start.
   'nav:add': {
     valueFlags: ['route', 'auth', 'can'],
     positional: true,
     targets: (call) => {
+      const route = call.flags.get('route')
       const can = call.flags.get('can')
       const model = typeof can === 'string' && can.includes(':') ? can.slice(can.lastIndexOf(':') + 1) : undefined
-      return { writes: [], imports: model === undefined || model === '' ? [] : [{ section: 'models', names: [model] }] }
+      return {
+        writes: [],
+        imports: [
+          ...(typeof route === 'string' && route !== '' ? [{ section: 'routeNames' as const, names: [route] }] : []),
+          ...(model === undefined || model === '' ? [] : [{ section: 'models' as const, names: [model] }]),
+        ],
+      }
     },
   },
   'nav:remove': 'removes a navigation entry, which no plan section declares',
@@ -412,6 +421,7 @@ function indexPlanned(plan: PlanDraft, derivation: PlanTaskDerivation) {
     .filter((effect) => effect.change.kind === 'add' || effect.change.kind === 'rename')
     .map((effect) => ({ id: effect.id, module: effect.module, kind: effect.kind, name: effect.name, label: `${effect.kind} ${effect.name}` }))
   const routes = new Map(plan.routes.map((route) => [route.id, route]))
+  const routeNames = plan.routes.map(routeTarget).filter(startsAbsent)
 
   /** `plan:scaffold` writes to the project root only, so a module's element is its owning step's. */
   const scaffolded = new Map<string, string>()
@@ -460,6 +470,10 @@ function indexPlanned(plan: PlanDraft, derivation: PlanTaskDerivation) {
             return route ? [{ id, name: route.name, label: `route ${route.name}` }] : []
           })
         }
+        case 'routeNames':
+          return routeNames
+            .filter((route) => target.names.includes(route.current))
+            .map((route) => ({ id: route.id, name: route.current, label: `route ${route.current}` }))
       }
     },
     writer(element: Planned): PlanCommandTargetHit['step'] {

@@ -13,6 +13,7 @@ const FILES: Record<string, string> = {
   'no trailing comma': `${HEAD}\nexport default defineNavigation([\n  { label: 'Home', route: 'home' }\n])\n`,
   inline: `${HEAD}export default defineNavigation([{ label: 'Home', route: 'home' }])\n`,
   empty: `${HEAD}\nexport default defineNavigation([])\n`,
+  'a commented': `${HEAD}\nexport default defineNavigation([\n  { label: 'Home', route: 'home' }, // the start\n])\n`,
   'a const list': `${HEAD}\nconst entries = [\n    { label: 'Home', route: 'home' },\n]\n\nexport default defineNavigation(entries)\n`,
 }
 
@@ -84,6 +85,12 @@ describe('the navigation writer', () => {
     expect(await readFile(file, 'utf8')).toContain("can: ['create', Job]")
     await removeNavigationEntryFile(workspace.dir, GUARDED.route)
     expect(await readFile(file, 'utf8')).toBe(FILES.trailing!)
+  })
+
+  test('should keep a comment on the line it closes, and an import a type still names', () => {
+    expect(appendNavigationEntry(FILES['a commented']!, PLAIN, workspace.dir)).toContain("// the start\n  { label: 'Jobs', route: 'jobs.index' },\n")
+    const typed = `${HEAD}import { Job } from '@/app/Models/Job'\nexport type Posting = Job\nexport default defineNavigation([\n  { label: 'P', route: 'p', show: { can: ['create', Job] } },\n])\n`
+    expect(removeNavigationEntry(typed, 'p', workspace.dir)).toContain("import { Job } from '@/app/Models/Job'")
   })
 
   test('should refuse an app with no config/navigation.ts', async () => {

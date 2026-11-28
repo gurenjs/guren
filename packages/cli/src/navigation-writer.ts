@@ -99,9 +99,13 @@ function insertEntry(source: string, ast: File, entry: string): string {
       : `${source.slice(0, comma)} ${entry},${source.slice(comma)}`
   }
   const indent = indentAt(source, span(last).start)
-  return comma === undefined
-    ? `${source.slice(0, lastEnd)},\n${indent}${entry}${source.slice(lastEnd)}`
-    : `${source.slice(0, comma)}\n${indent}${entry},${source.slice(comma)}`
+  // A comment closing the last entry's line stays on that line.
+  const after = comma ?? lastEnd
+  const lineEnd = source.indexOf('\n', after)
+  const rest = source.slice(after, lineEnd === -1 ? end - 1 : lineEnd)
+  const at = lineEnd !== -1 && lineEnd < end && /^\s*(?:\/\/.*)?$/u.test(rest) ? lineEnd : after
+  const head = comma === undefined ? `${source.slice(0, lastEnd)},${source.slice(lastEnd, at)}` : source.slice(0, at)
+  return `${head}\n${indent}${entry}${comma === undefined ? '' : ','}${source.slice(at)}`
 }
 
 /** The text with one range cut, widened to whole lines when nothing else shares them. */
@@ -161,14 +165,23 @@ function addModelImport(source: string, ast: File, model: string): string {
   return `${source.slice(0, at)}${after === -1 ? '\n' : ''}${line}${source.slice(at)}`
 }
 
+/** Whether any identifier in the tree is `name`, types included: a type-only use still needs the import. */
+function namesIdentifier(node: unknown, name: string): boolean {
+  if (Array.isArray(node)) return node.some((child) => namesIdentifier(child, name))
+  if (node === null || typeof node !== 'object') return false
+  const record = node as { type?: unknown; name?: unknown }
+  if (record.type === 'Identifier' && record.name === name) return true
+  return Object.entries(node).some(([key, child]) => key !== 'loc' && key !== 'leadingComments' && key !== 'trailingComments' && namesIdentifier(child, name))
+}
+
 function removeUnusedImport(source: string, model: string, cwd: string): string {
   const ast = parse(source, resolve(cwd, NAVIGATION_FILE))
   const declaration = ast.program.body.find(
     (statement): statement is ImportDeclaration => statement.type === 'ImportDeclaration' && statement.specifiers.some((specifier) => specifier.local.name === model),
   )
   if (declaration === undefined) return source
-  const rest = { ...ast.program, body: ast.program.body.filter((statement) => statement !== declaration) }
-  if (referencedIdentifiers(rest).includes(model)) return source
+  const rest = ast.program.body.filter((statement) => statement !== declaration)
+  if (namesIdentifier(rest, model)) return source
   if (declaration.specifiers.length === 1) return cut(source, span(declaration).start, span(declaration).end)
   const specifiers = declaration.specifiers
   const index = specifiers.findIndex((specifier) => specifier.local.name === model)
