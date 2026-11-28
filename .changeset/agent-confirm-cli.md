@@ -1,8 +1,8 @@
 ---
 '@guren/cli': minor
 '@guren/testing': minor
-'@guren/server': patch
-'@guren/core': patch
+'@guren/server': minor
+'@guren/core': minor
 ---
 
 The surfaces that dispatch an agent tool without the invocation pipeline now honour `confirm` (RFC 0042 §2.5).
