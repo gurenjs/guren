@@ -218,8 +218,8 @@ export function planCommandFiles(plan: PlanDraft): PlanCommandFile[] {
   })
 }
 
-/** Generators whose writes cannot coincide with a file the table above gives: docs, tests, pages, catalogs, UI components, a module's skeleton, seeders, exceptions, console commands, navigation entries. */
-const WRITES_ELSEWHERE = new Set(['make:adr', 'make:lesson', 'make:test', 'make:lang', 'lang:publish', 'make:view', 'add lint', 'add ui', 'make:module', 'make:seeder', 'make:exception', 'make:command', 'nav:add', 'nav:remove'])
+/** Generators whose writes cannot coincide with a file the table above gives: docs, MCP skills, tests, pages, catalogs, UI components, a module's skeleton, seeders, exceptions, console commands, navigation entries. */
+const WRITES_ELSEWHERE = new Set(['make:adr', 'make:lesson', 'make:mcp-skill', 'make:test', 'make:lang', 'lang:publish', 'make:view', 'add lint', 'add ui', 'make:module', 'make:seeder', 'make:exception', 'make:command', 'nav:add', 'nav:remove'])
 
 /**
  * Every path a command of the plan may write: the one path of a call `planCommandFiles()` places, else read

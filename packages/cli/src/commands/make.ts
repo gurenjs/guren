@@ -25,6 +25,8 @@ import { makeNotification } from '../make-notification'
 import { makeProvider } from '../make-provider'
 import { makeAdr } from '../make-adr'
 import { LESSON_SOURCE_KINDS, makeLesson, type LessonSourceKind } from '../make-lesson'
+import { makeMcpSkill, mcpSkillServingHint } from '../make-mcp-skill'
+import { MCP_SKILLS_MODULE } from '../mcp-skills'
 import { makeResource } from '../make-resource'
 import { makeRoute } from '../make-route'
 import { makeSeeder } from '../make-seeder'
@@ -186,6 +188,30 @@ export const makeAdrCommand = defineCommand({
       issues: splitIssueList(args.issue),
     })
     consola.success(`ADR created at ${file}`)
+  },
+})
+
+export const makeMcpSkillCommand = defineCommand({
+  meta: {
+    name: 'make:mcp-skill',
+    description: 'Generate a skill for the MCP endpoint: resources/skills/<name>/SKILL.md, which codegen publishes (RFC 0042).',
+  },
+  args: {
+    name: { type: 'positional', required: true, description: 'Skill name: lowercase letters, digits and single hyphens' },
+    description: { type: 'string', description: 'What the skill does and when an agent should load it, in one line.' },
+    force: FORCE_ARG,
+    module: MODULE_ARG,
+  },
+  async run({ args }) {
+    const options = toWriterOptions(args)
+    const file = await makeMcpSkill(args.name, { ...options, description: args.description })
+    consola.success(`Skill created at ${file}`)
+    if (args.description === undefined) {
+      consola.info('Write its `description`: an agent decides from that line alone whether to load the skill.')
+    }
+    consola.info(`Run \`bunx guren codegen\` to publish it into ${MCP_SKILLS_MODULE}. The Vite dev server does so on every save.`)
+    const hint = await mcpSkillServingHint(options)
+    if (hint) consola.info(hint)
   },
 })
 

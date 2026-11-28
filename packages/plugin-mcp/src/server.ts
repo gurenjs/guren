@@ -6,7 +6,14 @@
  * which would validate (and coerce/transform) a second time on top of the
  * route's own validation (RFC 0016 §3.2).
  */
-import { ProtocolError, ProtocolErrorCode, ResourceNotFoundError, Server, type CallToolResult } from '@modelcontextprotocol/server'
+import {
+  ProtocolError,
+  ProtocolErrorCode,
+  ResourceNotFoundError,
+  Server,
+  type CallToolResult,
+  type ProtocolEra,
+} from '@modelcontextprotocol/server'
 import {
   advertisesStructuredOutput,
   APPROVAL_STATUS_TOOL_NAME,
@@ -35,6 +42,18 @@ import {
 } from './mcp-apps'
 import { describePreflightTool, readPreflightArguments, toPreflightVerdict } from './preflight'
 import { takeReadBudget, type AgentRateLimiter } from './rate-limit'
+import {
+  getSkill,
+  GetSkillParams,
+  listSkillResources,
+  listSkills,
+  ListSkillsParams,
+  readSkillResource,
+  SKILLS_EXTENSION_ID,
+  SKILLS_GET_METHOD,
+  SKILLS_LIST_METHOD,
+  type AppMcpSkills,
+} from './skills'
 
 export type { AuditedTool }
 
@@ -88,13 +107,17 @@ export interface AppMcpServerOptions {
   ui?: AppMcpUi
   /** The application's origin, which a view's hand-off to the browser is made absolute against. */
   appOrigin?: string
+  /** Skills (RFC 0042 §1). Every authenticated caller sees every one: a skill is static text and grants nothing. */
+  skills?: AppMcpSkills
 }
 
 /**
  * One server per request: the tool list and every gate depend on the caller, so
- * the endpoint's handler builds one from each request's options.
+ * the endpoint's handler builds one from each request's options. `era` is the
+ * one the SDK built this instance for: the Skills extension is specified against
+ * `2026-07-28` only, so its capability and methods exist on a `modern` instance alone.
  */
-export function createAppMcpServer(options: AppMcpServerOptions): Server {
+export function createAppMcpServer(options: AppMcpServerOptions, era: ProtocolEra = 'legacy'): Server {
   // A route that claimed a reserved meta-tool name never reaches the catalog
   // (RFC 0016 §5.4). `guren check` fails the build over it, but the endpoint
   // must not depend on that: an MCP client answers a duplicated name in
@@ -103,12 +126,21 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
   const tools = options.tools.filter((tool) => !isReservedAgentToolName(tool.toolName))
 
   const approvalsConfigured = options.approvals !== undefined
-  // An app with no `ui` tool advertises exactly what it did before RFC 0038.
   const servesUi = tools.some((tool) => tool.ui)
+  const skills = options.skills
+  const servesSkillsExtension = skills !== undefined && era === 'modern'
+  const extensions = {
+    ...(servesUi ? { [MCP_APPS_EXTENSION_ID]: {} } : {}),
+    // `directoryRead` is not declared: every entry carries its whole manifest.
+    ...(servesSkillsExtension ? { [SKILLS_EXTENSION_ID]: {} } : {}),
+  }
   const server = new Server(options.serverInfo, {
-    capabilities: servesUi
-      ? { tools: {}, resources: {}, extensions: { [MCP_APPS_EXTENSION_ID]: {} } }
-      : { tools: {} },
+    capabilities: {
+      tools: {},
+      // The extension requires `resources` beside it; on the 2025 era a skill's files stay readable as plain resources.
+      ...(servesUi || skills ? { resources: {} } : {}),
+      ...(Object.keys(extensions).length > 0 ? { extensions } : {}),
+    },
   })
   // The `tools/list` filter, which therefore also decides what a caller may read as a resource.
   const listedTools = (): DerivedAgentTool[] =>
@@ -178,24 +210,44 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
     return callResult
   })
 
-  if (servesUi) {
-    // Metered like `guren_approval_status`, the other reads that never enter the pipeline.
-    const meterRead = (): void => {
-      const refused = takeReadBudget(options.limiter, options.rateKey)
-      if (refused) throw new ProtocolError(ProtocolErrorCode.InvalidRequest, refused)
-    }
+  // Metered like `guren_approval_status`, the other reads that never enter the pipeline.
+  const meterRead = (): void => {
+    const refused = takeReadBudget(options.limiter, options.rateKey)
+    if (refused) throw new ProtocolError(ProtocolErrorCode.InvalidRequest, refused)
+  }
 
+  if (servesUi || skills) {
     server.setRequestHandler('resources/list', () => {
       meterRead()
-      return { resources: listUiResources(listedTools(), options.ui) }
+      return {
+        resources: [
+          ...(servesUi ? listUiResources(listedTools(), options.ui) : []),
+          ...(skills ? listSkillResources(skills) : []),
+        ],
+      }
     })
 
     server.setRequestHandler('resources/read', (request) => {
       const uri = request.params.uri
       meterRead()
-      const contents = readUiResource(uri, listedTools(), options.ui)
+      // A `ui://` read keeps its per-caller scope check; a skill file has none to make.
+      const contents
+        = (skills ? readSkillResource(uri, skills) : undefined)
+        ?? (servesUi ? readUiResource(uri, listedTools(), options.ui) : undefined)
       if (!contents) throw new ResourceNotFoundError(uri)
       return { contents: [contents] }
+    })
+  }
+
+  if (skills && servesSkillsExtension) {
+    server.setRequestHandler(SKILLS_LIST_METHOD, { params: ListSkillsParams }, (params) => {
+      meterRead()
+      return listSkills(skills, params.cursor)
+    })
+
+    server.setRequestHandler(SKILLS_GET_METHOD, { params: GetSkillParams }, (params) => {
+      meterRead()
+      return getSkill(skills, params.uri)
     })
   }
 
