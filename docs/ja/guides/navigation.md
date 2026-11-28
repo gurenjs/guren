@@ -75,7 +75,7 @@ bunx guren nav:add "Post a job" --route jobs.create --auth required --can create
 bunx guren nav:remove jobs.create
 ```
 
-`--auth` には `required`、`guest`、`any` のどれかを、`--can` には `<ability>:<Model>` の形で指定します。新しいエントリーはリストの最後に入り、インデントとカンマの付け方はファイルに合わせます。`--can` のモデルは `@/app/Models/<Model>` から import されます。`createApp()` は `config/navigation.ts` を import するので、モデルのファイルが無いときやクラスを export していないときに書き込むと、アプリが起動できなくなります。そのため、この場合は書き込まずに止まります。エントリーを外したときは、ファイルのどこからもモデルの名前が使われなくなった場合に限って、その import も消えます。
+`--auth` には `required`、`guest`、`any` のどれかを、`--can` には `<ability>:<Model>` の形で指定します。新しいエントリーはリストの最後に入り、インデントとカンマの付け方はファイルに合わせます。`--can` のモデルは `@/app/Models/<Model>` から import されます。`createApp()` は `config/navigation.ts` を import するので、モデルのファイルが無いときやクラスを export していないときに書き込むと、アプリが起動できなくなります。そのため、この場合は書き込まずに止まります。モデルのファイルが `export *` で別のファイルを再 export しているなど、export を確かめられないときは、エントリーを書いたうえで警告します。エントリーを外したときは、ファイルのどこからもモデルの名前が使われなくなった場合に限って、その import も消えます。
 
 どちらのコマンドも `guren check` と同じ読み方でファイルを読むので、スプレッドや翻訳したラベルのように読み戻せない書き方のファイルは編集しません。書き込む前に編集結果を読み直し、元のエントリーに 1 つ足した（または 1 つ外した）結果と一致しなければ、何も書きません。ルートそのものの確認は行わないので、`guren check` で確かめてください。`config/navigation.ts` が無いときも止まります。`guren add auth` を実行すると、このファイルがそれを描画するレイアウトと一緒に作られます。
 

@@ -2,16 +2,15 @@ import { consola } from 'consola'
 
 import { CliError } from '../cli-error'
 import { defineCommand } from '../define-command'
-import type { NavigationFileAuth } from '../navigation-file'
+import { splitCanFlag, type NavigationFileAuth } from '../navigation-file'
 import { addNavigationEntryFile, removeNavigationEntryFile } from '../navigation-writer'
 
 const AUTH_VALUES: readonly NavigationFileAuth[] = ['any', 'required', 'guest']
 
-/** `create:Job` as the ability and the model; the ability is everything before the last colon. */
 export function parseCanFlag(value: string): { ability: string; model: string } {
-  const colon = value.lastIndexOf(':')
-  if (colon === -1) throw new CliError(`--can is "${value}": write it as <ability>:<Model>, such as create:Job.`)
-  return { ability: value.slice(0, colon), model: value.slice(colon + 1) }
+  const can = splitCanFlag(value)
+  if (can === undefined) throw new CliError(`--can is "${value}": write it as <ability>:<Model>, such as create:Job.`)
+  return can
 }
 
 export const navAddCommand = defineCommand({
@@ -31,12 +30,13 @@ export const navAddCommand = defineCommand({
     if (auth !== undefined && !AUTH_VALUES.includes(auth as NavigationFileAuth)) {
       throw new CliError(`--auth is "${auth}"; it takes ${AUTH_VALUES.join(', ')}.`)
     }
-    const file = await addNavigationEntryFile(process.cwd(), {
+    const { file, unverified } = await addNavigationEntryFile(process.cwd(), {
       label: args.label,
       route: args.route,
       ...(auth === undefined ? {} : { auth: auth as NavigationFileAuth }),
       ...(args.can === undefined ? {} : { can: parseCanFlag(args.can) }),
     })
+    if (unverified) consola.warn(unverified)
     consola.success(`Added the "${args.route}" entry to ${file}.`)
   },
 })

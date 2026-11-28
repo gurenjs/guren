@@ -95,6 +95,42 @@ describe('the navigation writer', () => {
     expect(removeNavigationEntry(typed, 'p', workspace.dir)).toContain("import { Job } from '@/app/Models/Job'")
   })
 
+  test('should keep line ends, and a comment an empty list holds', () => {
+    const crlf = `${HEAD.replace('\n', '\r\n')}\r\nexport default defineNavigation([\r\n  { label: 'Home', route: 'home' }, // the start\r\n])\r\n`
+    const written = appendNavigationEntry(crlf, GUARDED, workspace.dir)
+    expect(written.replace(/\r\n/gu, '')).not.toContain('\n')
+    expect(written).toContain("// the start\r\n  { label: 'Post a job\\'s'")
+    expect(removeNavigationEntry(written, GUARDED.route, workspace.dir)).toBe(crlf)
+    const commented = `${HEAD}export default defineNavigation([\n  // Add entries here\n])\n`
+    expect(appendNavigationEntry(commented, PLAIN, workspace.dir)).toBe(`${HEAD}export default defineNavigation([\n  // Add entries here\n  { label: 'Jobs', route: 'jobs.index' },\n])\n`)
+  })
+
+  test('should write the model import on a line of its own after the last import', () => {
+    const source = `${HEAD.trimEnd()} /* the links,\n   one per route */\nexport default defineNavigation([])\n`
+    expect(appendNavigationEntry(source, GUARDED, workspace.dir)).toStartWith(`${HEAD}import { Job } from '@/app/Models/Job' /* the links,`)
+  })
+
+  test.each([
+    ['a type-only specifier', "import { type Job } from '@/app/Models/Job'\n", 'not as the class\'s named value export'],
+    ['an alias', "import { Report as Job } from '@/app/Models/Job'\n", 'not as the class\'s named value export'],
+    ['a local type', 'type Job = string\n', 'already names a Job that is not the model'],
+  ] as const)('should refuse a model name the file binds through %s', (_, binding, message) => {
+    expect(() => appendNavigationEntry(`${HEAD}${binding}export default defineNavigation([])\n`, GUARDED, workspace.dir)).toThrow(message)
+  })
+
+  test('should reuse a relative import of the model, and cut a specifier beside a default import', () => {
+    const relative = `${HEAD}import { Job } from '../app/Models/Job.js'\nexport default defineNavigation([])\n`
+    expect(appendNavigationEntry(relative, GUARDED, workspace.dir).match(/import/gu)).toHaveLength(2)
+    const entry = "export default defineNavigation([\n  { label: 'P', route: 'p', show: { can: ['create', Job] } },\n])\n"
+    expect(removeNavigationEntry(`${HEAD}import Job, { other } from '@/app/Models/Job'\nother\n${entry}`, 'p', workspace.dir)).toContain("import { other } from '@/app/Models/Job'\n")
+    expect(removeNavigationEntry(`${HEAD}import Other, { Job } from '@/app/Models/Job'\nOther\n${entry}`, 'p', workspace.dir)).toContain("import Other from '@/app/Models/Job'\n")
+  })
+
+  test('should write nothing when the edit would not read back', () => {
+    const source = `${HEAD}export default defineNavigation([\n  { label: 'A', route: 'a' } /* note */,\n  { label: 'B', route: 'b' },\n])\n`
+    expect(() => removeNavigationEntry(source, 'a', workspace.dir)).toThrow('would not read back as intended')
+  })
+
   test('should refuse an app with no config/navigation.ts', async () => {
     await expect(addNavigationEntryFile(workspace.dir, PLAIN)).rejects.toThrow('config/navigation.ts does not exist')
   })

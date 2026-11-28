@@ -8,14 +8,14 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-import type { File, ImportDeclaration, Node } from '@babel/types'
+import type { File, ImportDeclaration, ImportSpecifier, Node } from '@babel/types'
 
-import { referencedIdentifiers } from './ast-walk'
 import { CliError } from './cli-error'
 import { navigationEntryList, readNavigationFile, type NavigationFileAuth, type NavigationFileEntry } from './navigation-file'
 import { parseSourceFile } from './parse-cache'
 import { exportedNames } from './plan/app-detail'
 import { writeFileAtomic } from './plan/beside'
+import { specifierBase, withoutExtension } from './schema-binding'
 
 export const NAVIGATION_FILE = 'config/navigation.ts'
 
@@ -32,6 +32,10 @@ const MODEL_NAME = /^[A-Z][A-Za-z0-9_]*$/u
 const PLAIN_TEXT = /^[^\p{Cc}\p{Zl}\p{Zp}]*$/u
 
 const modelSpecifier = (model: string): string => `@/app/Models/${model}`
+const modelModule = (cwd: string, model: string): string => resolve(cwd, 'app/Models', model)
+const eolOf = (source: string): string => (source.includes('\r\n') ? '\r\n' : '\n')
+// What may follow on a line after an entry or an import and stay on it: blanks, then a line comment.
+const LINE_TAIL = /^[ \t]*(?:\/\/[^\r\n]*)?\r?\n?$/u
 
 function parse(source: string, file: string): File {
   const ast = parseSourceFile(source, file)
@@ -86,9 +90,18 @@ function insertEntry(source: string, ast: File, entry: string): string {
   const { start, end } = span(list)
   const elements = list.elements as Node[]
   const last = elements.at(-1)
+  const eol = eolOf(source)
   if (last === undefined) {
+    const inside = source.slice(start + 1, end - 1)
     const indent = indentAt(source, start)
-    return `${source.slice(0, start)}[\n${indent}  ${entry},\n${indent}]${source.slice(end)}`
+    if (inside.trim() === '') return `${source.slice(0, start)}[${eol}${indent}  ${entry},${eol}${indent}]${source.slice(end)}`
+    // An empty list that holds a comment keeps it: the entry goes before the closing bracket.
+    const close = end - 1
+    if (source.slice(lineStart(source, close), close).trim() === '') {
+      const at = lineStart(source, close)
+      return `${source.slice(0, at)}${indentAt(source, close)}  ${entry},${eol}${source.slice(at)}`
+    }
+    return `${source.slice(0, close)}${/\s$/u.test(source.slice(0, close)) ? '' : ' '}${entry} ${source.slice(close)}`
   }
   const lastEnd = span(last).end
   const sameLine = !source.slice(start, span(last).start).includes('\n')
@@ -102,10 +115,11 @@ function insertEntry(source: string, ast: File, entry: string): string {
   // A comment closing the last entry's line stays on that line.
   const after = comma ?? lastEnd
   const lineEnd = source.indexOf('\n', after)
-  const rest = source.slice(after, lineEnd === -1 ? end - 1 : lineEnd)
-  const at = lineEnd !== -1 && lineEnd < end && /^\s*(?:\/\/.*)?$/u.test(rest) ? lineEnd : after
+  const rest = source.slice(after, lineEnd === -1 ? end - 1 : lineEnd + 1)
+  const tailEnd = lineEnd !== -1 && source[lineEnd - 1] === '\r' ? lineEnd - 1 : lineEnd
+  const at = lineEnd !== -1 && lineEnd < end && LINE_TAIL.test(rest) ? tailEnd : after
   const head = comma === undefined ? `${source.slice(0, lastEnd)},${source.slice(lastEnd, at)}` : source.slice(0, at)
-  return `${head}\n${indent}${entry}${comma === undefined ? '' : ','}${source.slice(at)}`
+  return `${head}${eol}${indent}${entry}${comma === undefined ? '' : ','}${source.slice(at)}`
 }
 
 /** The text with one range cut, widened to whole lines when nothing else shares them. */
@@ -114,7 +128,7 @@ function cut(source: string, from: number, to: number): string {
   const lineEnd = source.indexOf('\n', to)
   const end = lineEnd === -1 ? source.length : lineEnd + 1
   // A comment closing the line goes with what it closed.
-  if (source.slice(start, from).trim() === '' && /^[ \t]*(?:\/\/[^\n]*)?\n?$/u.test(source.slice(to, end))) return source.slice(0, start) + source.slice(end)
+  if (source.slice(start, from).trim() === '' && LINE_TAIL.test(source.slice(to, end))) return source.slice(0, start) + source.slice(end)
   return source.slice(0, from) + source.slice(to).replace(/^[ \t]*/u, '')
 }
 
@@ -144,26 +158,42 @@ const importsOf = (ast: File): ImportDeclaration[] =>
   ast.program.body.filter((statement): statement is ImportDeclaration => statement.type === 'ImportDeclaration')
 
 /** Whether the file before the edit needs the model's import, refusing a name it already binds to something else. */
-function needsModelImport(ast: File, model: string): boolean {
+function needsModelImport(ast: File, model: string, cwd: string): boolean {
   for (const declaration of importsOf(ast)) {
     for (const specifier of declaration.specifiers) {
       if (specifier.local.name !== model) continue
-      const isModel = declaration.source.value === modelSpecifier(model) && specifier.type === 'ImportSpecifier' && declaration.importKind !== 'type'
-      if (isModel) return false
-      throw new CliError(`${NAVIGATION_FILE} already imports a ${model} from ${declaration.source.value}, which is not ${modelSpecifier(model)}.`)
+      const resolved = specifierBase(cwd, resolve(cwd, NAVIGATION_FILE), declaration.source.value)
+      const sameFile = resolved !== null && withoutExtension(resolved) === modelModule(cwd, model)
+      const named = specifier.type === 'ImportSpecifier' && specifierImports(specifier) === model
+      const value = declaration.importKind !== 'type' && !(specifier.type === 'ImportSpecifier' && specifier.importKind === 'type')
+      if (sameFile && named && value) return false
+      throw new CliError(sameFile
+        ? `${NAVIGATION_FILE} imports ${model} from ${declaration.source.value}, but not as the class's named value export; import it as { ${model} } first.`
+        : `${NAVIGATION_FILE} already imports a ${model} from ${declaration.source.value}, which is not app/Models/${model}.`)
     }
   }
-  if (referencedIdentifiers(ast.program).includes(model)) throw new CliError(`${NAVIGATION_FILE} already names a ${model} that is not the model.`)
+  const body = ast.program.body.filter((statement) => statement.type !== 'ImportDeclaration')
+  if (namesIdentifier(body, model)) throw new CliError(`${NAVIGATION_FILE} already names a ${model} that is not the model.`)
   return true
 }
 
+const specifierImports = (specifier: ImportSpecifier): string =>
+  specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
+
 function addModelImport(source: string, ast: File, model: string): string {
-  const line = `import { ${model} } from '${modelSpecifier(model)}'\n`
+  const eol = eolOf(source)
+  const line = `import { ${model} } from '${modelSpecifier(model)}'`
   const lastImport = importsOf(ast).at(-1)
-  if (lastImport === undefined) return line + source
-  const after = source.indexOf('\n', span(lastImport).end)
-  const at = after === -1 ? source.length : after + 1
-  return `${source.slice(0, at)}${after === -1 ? '\n' : ''}${line}${source.slice(at)}`
+  if (lastImport === undefined) return `${line}${eol}${source}`
+  // Right after the statement, on a line of its own: what shares the import's line may open a comment.
+  const end = span(lastImport).end
+  const lineEnd = source.indexOf('\n', end)
+  const rest = lineEnd === -1 ? source.slice(end) : source.slice(end, lineEnd + 1)
+  if (LINE_TAIL.test(rest)) {
+    const at = lineEnd === -1 ? source.length : lineEnd + 1
+    return `${source.slice(0, at)}${lineEnd === -1 ? eol : ''}${line}${eol}${source.slice(at)}`
+  }
+  return `${source.slice(0, end)}${eol}${line}${source.slice(end)}`
 }
 
 /** Whether any identifier in the tree is `name`, types included: a type-only use still needs the import. */
@@ -184,23 +214,50 @@ function removeUnusedImport(source: string, model: string, cwd: string): string 
   const rest = ast.program.body.filter((statement) => statement !== declaration)
   if (namesIdentifier(rest, model)) return source
   if (declaration.specifiers.length === 1) return cut(source, span(declaration).start, span(declaration).end)
-  const specifiers = declaration.specifiers
-  const index = specifiers.findIndex((specifier) => specifier.local.name === model)
-  const specifier = specifiers[index]!
-  const next = specifiers[index + 1]
+  const specifier = declaration.specifiers.find((candidate) => candidate.local.name === model)!
+  const named = declaration.specifiers.filter((candidate): candidate is ImportSpecifier => candidate.type === 'ImportSpecifier')
+  if (specifier.type !== 'ImportSpecifier') {
+    // `import Job, { other }`: the default and its comma go.
+    const comma = commaAfter(source, span(specifier).end, span(declaration).end)
+    return comma === undefined ? source : source.slice(0, span(specifier).start) + source.slice(comma).replace(/^[ \t]*/u, '')
+  }
+  if (named.length === 1) {
+    // `import Other, { Job }`: the braces go with their one name.
+    const open = source.lastIndexOf('{', span(specifier).start)
+    const close = source.indexOf('}', span(specifier).end)
+    const before = source.lastIndexOf(',', open)
+    if (open === -1 || close === -1 || before === -1) return source
+    return source.slice(0, before) + source.slice(close + 1)
+  }
+  const index = named.indexOf(specifier)
+  const next = named[index + 1]
   if (next !== undefined) return source.slice(0, span(specifier).start) + source.slice(span(next).start)
-  return source.slice(0, span(specifiers[index - 1]!).end) + source.slice(span(specifier).end)
+  return source.slice(0, span(named[index - 1]!).end) + source.slice(span(specifier).end)
 }
 
-const sameEntry = (entry: NavigationFileEntry, input: NavigationEntryInput): boolean =>
+const sameEntry = (entry: NavigationFileEntry, input: NavigationEntryInput, cwd: string): boolean =>
   entry.label === input.label &&
   entry.route === input.route &&
   entry.auth === input.auth &&
   entry.where === undefined &&
   entry.can?.ability === input.can?.ability &&
-  entry.can?.model.className === input.can?.model
+  entry.can?.model.className === input.can?.model &&
+  // The import half of the edit: the class must resolve to the model's file.
+  (input.can === undefined || entry.can?.model.module === modelModule(cwd, input.can.model))
 
 const comparable = (entry: NavigationFileEntry): string => JSON.stringify({ ...entry, line: undefined })
+
+const READ_BACK_FAILED = `The edit to ${NAVIGATION_FILE} would not read back as intended, so nothing was written. Edit the file by hand.`
+
+/** An edit of the file's text, any failure of which is the writer's, not the file's. */
+function edit(make: () => string): string {
+  try {
+    return make()
+  } catch (error) {
+    if (error instanceof CliError) throw new CliError(READ_BACK_FAILED)
+    throw error
+  }
+}
 
 function readBack(source: string, cwd: string, expected: NavigationFileEntry[], added?: NavigationEntryInput): void {
   const entries = readEntries(parse(source, resolve(cwd, NAVIGATION_FILE)), cwd)
@@ -209,8 +266,8 @@ function readBack(source: string, cwd: string, expected: NavigationFileEntry[], 
   const holds =
     kept.length === expected.length &&
     kept.every((entry, index) => comparable(entry) === comparable(expected[index]!)) &&
-    (added === undefined || (fresh !== undefined && sameEntry(fresh, added)))
-  if (!holds) throw new CliError(`The edit to ${NAVIGATION_FILE} would not read back as intended, so nothing was written. Edit the file by hand.`)
+    (added === undefined || (fresh !== undefined && sameEntry(fresh, added, cwd)))
+  if (!holds) throw new CliError(READ_BACK_FAILED)
 }
 
 /** The source with the entry appended last, or a `CliError` naming why not. Pure; `cwd` is the app root. */
@@ -219,11 +276,13 @@ export function appendNavigationEntry(source: string, input: NavigationEntryInpu
   const ast = parse(source, resolve(cwd, NAVIGATION_FILE))
   const entries = readEntries(ast, cwd)
   if (entries.some((entry) => entry.route === input.route)) throw new CliError(`${NAVIGATION_FILE} already has an entry for route "${input.route}".`)
-  const importModel = input.can !== undefined && needsModelImport(ast, input.can.model)
-  let next = insertEntry(source, ast, renderEntry(input))
-  if (importModel) next = addModelImport(next, parse(next, resolve(cwd, NAVIGATION_FILE)), input.can!.model)
-  readBack(next, cwd, entries, input)
-  return next
+  const importModel = input.can !== undefined && needsModelImport(ast, input.can.model, cwd)
+  return edit(() => {
+    let next = insertEntry(source, ast, renderEntry(input))
+    if (importModel) next = addModelImport(next, parse(next, resolve(cwd, NAVIGATION_FILE)), input.can!.model)
+    readBack(next, cwd, entries, input)
+    return next
+  })
 }
 
 /** The source without the entry for `route`, and without the `can` model's import once nothing else names it. */
@@ -232,11 +291,13 @@ export function removeNavigationEntry(source: string, route: string, cwd: string
   const entries = readEntries(ast, cwd)
   const removed = entries.find((entry) => entry.route === route)
   if (removed === undefined) throw new CliError(`${NAVIGATION_FILE} has no entry for route "${route}".`)
-  let next = cutEntry(source, ast, route, entries)
-  const model = removed.can?.model
-  if (model !== undefined && !model.expression.includes('.')) next = removeUnusedImport(next, model.expression, cwd)
-  readBack(next, cwd, entries.filter((entry) => entry !== removed))
-  return next
+  return edit(() => {
+    let next = cutEntry(source, ast, route, entries)
+    const model = removed.can?.model
+    if (model !== undefined && !model.expression.includes('.')) next = removeUnusedImport(next, model.expression, cwd)
+    readBack(next, cwd, entries.filter((entry) => entry !== removed))
+    return next
+  })
 }
 
 async function readNavigationSource(cwd: string): Promise<string> {
@@ -250,26 +311,31 @@ function checkModelFile(cwd: string, model: string): void {
   if (!existsSync(file)) throw new CliError(`app/Models/${model}.ts does not exist, and the application imports ${NAVIGATION_FILE} at start: write the model first.`)
 }
 
-async function checkModelExport(cwd: string, model: string): Promise<void> {
+/** Refuses a model file that exports no such class; returns why the export could not be confirmed. */
+async function checkModelExport(cwd: string, model: string): Promise<string | undefined> {
   const file = resolve(cwd, 'app/Models', `${model}.ts`)
   const ast = parseSourceFile(await readFile(file, 'utf8'), file)
-  if (ast === null) return
+  const unverified = `app/Models/${model}.ts was not confirmed to export ${model}`
+  if (ast === null) return `${unverified}: it does not parse.`
   const classes = ast.program.body.flatMap((node) =>
     node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration' && node.declaration.id ? [node.declaration.id.name] : [])
   const names = exportedNames(ast, 'anywhere')
-  if (names !== null && ![...names, ...classes].includes(model)) throw new CliError(`app/Models/${model}.ts exports no ${model}.`)
+  if (names === null) return `${unverified}: it re-exports another module with export *.`
+  if (![...names, ...classes].includes(model)) throw new CliError(`app/Models/${model}.ts exports no ${model}.`)
+  return undefined
 }
 
-/** `guren nav:add`: the edit written in place; returns the file's path relative to `cwd`. */
-export async function addNavigationEntryFile(cwd: string, input: NavigationEntryInput): Promise<string> {
+/** `guren nav:add`: the edit written in place, with the file relative to `cwd` and why the model's export went unconfirmed. */
+export async function addNavigationEntryFile(cwd: string, input: NavigationEntryInput): Promise<{ file: string; unverified?: string }> {
   const source = await readNavigationSource(cwd)
+  let unverified: string | undefined
   if (input.can) {
     checkInput(input)
     checkModelFile(cwd, input.can.model)
-    await checkModelExport(cwd, input.can.model)
+    unverified = await checkModelExport(cwd, input.can.model)
   }
   await writeFileAtomic(resolve(cwd, NAVIGATION_FILE), appendNavigationEntry(source, input, cwd))
-  return NAVIGATION_FILE
+  return { file: NAVIGATION_FILE, ...(unverified === undefined ? {} : { unverified }) }
 }
 
 /** `guren nav:remove`. */

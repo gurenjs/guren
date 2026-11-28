@@ -42,6 +42,12 @@ export type NavigationFileReading =
   | { status: 'not-a-definition' }
   | { status: 'unreadable'; reason: string; line?: number }
 
+/** `--can create:Job` as the ability and the model; the ability is everything before the last colon. */
+export function splitCanFlag(value: string): { ability: string; model: string } | undefined {
+  const colon = value.lastIndexOf(':')
+  return colon === -1 ? undefined : { ability: value.slice(0, colon), model: value.slice(colon + 1) }
+}
+
 const ENTRY_KEYS: ReadonlySet<string> = new Set(['label', 'route', 'show'])
 const SHOW_KEYS: ReadonlySet<string> = new Set(['auth', 'can', 'where'])
 const AUTH_VALUES: ReadonlySet<string> = new Set<NavigationFileAuth>(['any', 'required', 'guest'])

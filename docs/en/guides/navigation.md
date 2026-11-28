@@ -75,7 +75,7 @@ bunx guren nav:add "Post a job" --route jobs.create --auth required --can create
 bunx guren nav:remove jobs.create
 ```
 
-`--auth` takes `required`, `guest` or `any`, and `--can` takes `<ability>:<Model>`. The new entry goes last in the list, in the file's own indentation and comma style. A `--can` model is imported from `@/app/Models/<Model>`, and the command refuses when that file does not exist or does not export the class, since `createApp()` imports `config/navigation.ts` and the app would fail to start. Removing an entry also removes the model's import once nothing else in the file names it.
+`--auth` takes `required`, `guest` or `any`, and `--can` takes `<ability>:<Model>`. The new entry goes last in the list, in the file's own indentation and comma style. A `--can` model is imported from `@/app/Models/<Model>`, and the command refuses when that file does not exist or does not export the class, since `createApp()` imports `config/navigation.ts` and the app would fail to start. When it cannot tell, as with a model file that re-exports another with `export *`, it writes the entry and warns. Removing an entry also removes the model's import once nothing else in the file names it.
 
 Both commands read the file the way `guren check` does and refuse one written in a form they cannot read back, such as a spread or a translated label. Each edit is read back before it is written, and an edit that would not read back as the entries before plus or minus one writes nothing. Neither command checks the route itself; `guren check` does. They refuse when `config/navigation.ts` does not exist; `guren add auth` writes one together with the layout that renders it.
 

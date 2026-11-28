@@ -24,6 +24,7 @@ import { validatorFile, validatorSchemaNames } from '../make-validator'
 import { ensureSuffix, kebabCase, pascalCase, type ScaffoldFileEntry } from '../utils'
 import { findTable, isUnreadable, type PlanAppState } from './app-state'
 import { namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
+import { splitCanFlag } from '../navigation-file'
 import { judgePlanCommand, quotePlanCommand } from './command-allowlist'
 import { planScaffoldCoverage, planScaffoldMounts } from './scaffold'
 import { validatorFilePath } from './scaffold-http'
@@ -227,7 +228,7 @@ export const PLAN_GENERATOR_TARGETS: Readonly<Record<string, PlanGeneratorRule |
     targets: (call) => {
       const route = call.flags.get('route')
       const can = call.flags.get('can')
-      const model = typeof can === 'string' && can.includes(':') ? can.slice(can.lastIndexOf(':') + 1) : undefined
+      const model = typeof can === 'string' ? splitCanFlag(can)?.model : undefined
       return {
         writes: [],
         imports: [
