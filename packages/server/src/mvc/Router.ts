@@ -224,6 +224,11 @@ export interface AgentRouteMetadata {
   idempotentHint?: boolean
   /** Route invocations through an agent surface require server-side approval. */
   approval?: 'required'
+  /**
+   * Ask the calling user before the call runs (RFC 0042 §2). A surface that
+   * cannot ask refuses the call, and the tool is not registered over WebMCP.
+   */
+  confirm?: true | { message?: string }
   /** Argument fields masked in agent audit logs. */
   redact?: string[]
   /** Render this tool's result in an MCP Apps host with an Inertia page (RFC 0038). */

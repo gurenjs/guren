@@ -351,6 +351,169 @@ describe('the invocation pipeline: the approval gate', () => {
   })
 })
 
+/** Two `confirm` tools: one bare, one with a message and an approval requirement. */
+function confirmTools(): Record<'archive' | 'purge', DerivedAgentTool> {
+  const router = new Router()
+  const handler = () => new Response('ok')
+  router.post('/posts/:id/archive', handler).name('posts.archive').agent({ confirm: true, redact: ['secret'] })
+  router
+    .delete('/posts', handler)
+    .name('posts.purge')
+    .agent({ confirm: { message: 'This deletes every post.' }, approval: 'required' })
+  const byName = new Map(deriveAgentTools(router.definitions()).tools.map((t) => [t.toolName, t]))
+  return { archive: byName.get('posts.archive')!, purge: byName.get('posts.purge')! }
+}
+
+const isRehearsal = (request: Request): boolean => request.headers.get('X-Guren-Agent-Preflight') !== null
+
+/** The stub application's answer, with a rehearsal answered as the preflight seam answers it. */
+function seam(respond: (request: Request) => Response = () => Response.json({ ok: true })): (request: Request) => Response {
+  return (request) =>
+    isRehearsal(request)
+      ? Response.json({ preflight: true, allowed: true }, { headers: { 'X-Guren-Agent-Preflight-Verdict': '1' } })
+      : respond(request)
+}
+
+async function fingerprintAsked(h: Harness, call: Parameters<Harness['invoke']>[0]): Promise<string> {
+  const result = await h.invoke(call)
+  if (result.status !== 'denied' || !result.denial.confirmation) throw new Error('the call was not held for confirmation')
+  return result.denial.confirmation.fingerprint
+}
+
+describe('the invocation pipeline: confirmation', () => {
+  test('should hold an unconfirmed call with the question, after a rehearsal and no execution', async () => {
+    const h = harness({ respond: seam() })
+
+    const result = await h.invoke({ tool: confirmTools().archive, args: { id: 5, secret: 'hunter2' } })
+
+    expect(result.status).toBe('denied')
+    if (result.status !== 'denied') return
+    expect(result.denial.reason).toBe('confirmation')
+    expect(result.denial.confirmation).toEqual({
+      tool: 'posts.archive',
+      message: 'Run "posts.archive"?',
+      input: { id: 5, secret: '[REDACTED]' },
+      fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+    })
+    expect(h.fetched.map(isRehearsal)).toEqual([true])
+    expect(h.invoked).toEqual([])
+    expect(h.denied).toEqual([{ tool: 'posts.archive', reason: 'confirmation', args: { id: 5, secret: '[REDACTED]' } }])
+  })
+
+  test('should ask with the message the route declared', async () => {
+    const h = harness({ respond: seam(), approvals: approvalOptions(new MemoryApprovalStore()) })
+
+    const result = await h.invoke({ tool: confirmTools().purge, args: {} })
+
+    expect(result.status === 'denied' && result.denial.confirmation?.message).toBe('This deletes every post.')
+  })
+
+  test('should run the call once it carries the fingerprint the caller agreed to', async () => {
+    const h = harness({ respond: seam() })
+    const call = { tool: confirmTools().archive, args: { id: 5 } }
+    const fingerprint = await fingerprintAsked(h, call)
+
+    const result = await h.invoke({ ...call, confirmed: fingerprint })
+
+    expect(result.status).toBe('executed')
+    expect(h.fetched.map(isRehearsal)).toEqual([true, false])
+    expect(h.invoked).toEqual([{ tool: 'posts.archive', status: 200, args: { id: 5 } }])
+  })
+
+  test('should ask again when the agreed fingerprint is of other arguments', async () => {
+    const h = harness({ respond: seam() })
+    const { archive } = confirmTools()
+    const fingerprint = await fingerprintAsked(h, { tool: archive, args: { id: 5 } })
+
+    const result = await h.invoke({ tool: archive, args: { id: 6 }, confirmed: fingerprint })
+
+    expect(result.status).toBe('denied')
+    if (result.status !== 'denied') return
+    expect(result.denial.confirmation?.fingerprint).not.toBe(fingerprint)
+    expect(h.fetched.map(isRehearsal)).toEqual([true, true])
+    expect(h.invoked).toEqual([])
+  })
+
+  test('should answer with the route\'s own refusal, and no question, when the rehearsal is refused', async () => {
+    const h = harness({
+      respond: () => Response.json({ errors: { id: ['must be a number'] } }, { status: 422 }),
+    })
+
+    const result = await h.invoke({ tool: confirmTools().archive, args: { id: 'x' } })
+
+    expect(result.status).toBe('executed')
+    if (result.status !== 'executed') return
+    expect(result.outcome.isError).toBe(true)
+    expect(result.outcome.status).toBe(422)
+    expect(h.fetched.map(isRehearsal)).toEqual([true])
+    expect(h.denied).toEqual([])
+    expect(h.invoked).toEqual([{ tool: 'posts.archive', status: 422, args: { id: 'x' } }])
+  })
+
+  test('should report a call that cannot be built as a 400, and ask nothing', async () => {
+    const h = harness({ respond: seam() })
+
+    const result = await h.invoke({ tool: confirmTools().archive, args: {} })
+
+    expect(result.status === 'executed' && result.outcome.status).toBe(400)
+    expect(h.fetched).toEqual([])
+    expect(h.denied).toEqual([])
+  })
+
+  test('should not ask about a rehearsal the caller requested', async () => {
+    const h = harness({ respond: seam() })
+
+    const result = await h.invoke({ tool: confirmTools().archive, args: { id: 5 }, preflight: true })
+
+    expect(result.status).toBe('executed')
+    expect(h.fetched.map(isRehearsal)).toEqual([true])
+    expect(h.denied).toEqual([])
+  })
+
+  test('should run after the scope gate and the interposition hook, rehearsing nothing they refuse', async () => {
+    const { archive } = confirmTools()
+    const ungranted = harness({ respond: seam(), abilities: [] })
+    const metered = harness({ respond: seam(), interpose: () => ({ reason: 'rate-limit', message: 'Slow down.' }) })
+
+    const [scope, limit] = await Promise.all([
+      ungranted.invoke({ tool: archive, args: { id: 5 } }),
+      metered.invoke({ tool: archive, args: { id: 5 } }),
+    ])
+
+    expect(scope.status === 'denied' && scope.denial.reason).toBe('scope')
+    expect(limit.status === 'denied' && limit.denial.reason).toBe('rate-limit')
+    expect([...ungranted.fetched, ...metered.fetched]).toEqual([])
+  })
+
+  test('should run before the approval gate, which files a request only for a confirmed call', async () => {
+    const store = new MemoryApprovalStore()
+    const h = harness({ respond: seam(), approvals: approvalOptions(store) })
+    const call = { tool: confirmTools().purge, args: {} }
+
+    const fingerprint = await fingerprintAsked(h, call)
+    expect(store.records).toEqual([])
+    expect(h.notified).toEqual([])
+
+    const confirmed = await h.invoke({ ...call, confirmed: fingerprint })
+
+    expect(confirmed.status === 'denied' && confirmed.denial.reason).toBe('approval')
+    expect(store.records).toHaveLength(1)
+    expect(h.fetched.map(isRehearsal)).toEqual([true])
+  })
+
+  test('should fail closed on arguments that cannot be fingerprinted, dispatching nothing', async () => {
+    const h = harness({ respond: seam() })
+
+    const result = await h.invoke({ tool: confirmTools().archive, args: { id: 5, at: Number.NaN } })
+
+    expect(result.status).toBe('denied')
+    if (result.status !== 'denied') return
+    expect(result.denial.reason).toBe('confirmation')
+    expect(result.denial.confirmation).toBeUndefined()
+    expect(h.fetched).toEqual([])
+  })
+})
+
 describe('the invocation pipeline: dispatch', () => {
   test('should build the request from the tool contract and forward the surface', async () => {
     const h = harness({ origin: 'https://app.example', authorization: 'Bearer t' })

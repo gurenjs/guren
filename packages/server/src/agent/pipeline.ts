@@ -1,6 +1,6 @@
 /**
- * The invocation pipeline (RFC 0017 §1): scope gate → interposition → approval
- * gate → dispatch → redact → audit, in one protocol-neutral place. `app.fetch`
+ * The invocation pipeline (RFC 0017 §1): scope gate → interposition → confirmation
+ * → approval gate → dispatch → redact → audit, in one protocol-neutral place. `app.fetch`
  * alone only executes, so a surface dispatching without these would bypass
  * scopes, approvals and the trail while looking exactly like a gated call.
  * One function with option hooks, not a middleware chain (RFC 0017 Open
@@ -11,6 +11,7 @@
 import type { ExecutionContext } from 'hono'
 
 import {
+  agentApprovalFingerprints,
   DEFAULT_AGENT_APPROVAL_TTL_MS,
   type AgentApprovalRequest,
   type AgentApprovalStore,
@@ -31,6 +32,7 @@ import {
   type AgentToolDenialReason,
 } from './events'
 import {
+  agentApprovalKeysFromEnv,
   gateApproval,
   gatePreflight,
   gateToolCall,
@@ -74,6 +76,23 @@ export interface AgentInvocationDenial {
    * with (see {@link GateVerdict}).
    */
   body?: Record<string, unknown>
+  /** Present when `reason` is `'confirmation'` and the call may be asked about. */
+  confirmation?: AgentConfirmationRequest
+}
+
+/**
+ * The question a `confirm` tool's call is held for (RFC 0042 §2.2). A surface that
+ * can ask shows it, and repeats the call with {@link AgentInvocation.confirmed} set
+ * to `fingerprint` once the caller agreed; every other surface refuses with the denial.
+ */
+export interface AgentConfirmationRequest {
+  tool: string
+  /** The route's message, else `Run "<toolName>"?`. */
+  message: string
+  /** The call's arguments after the tool's `redact` rules, for display. */
+  input: Record<string, unknown>
+  /** Of the raw arguments, under the current application key. */
+  fingerprint: string
 }
 
 /**
@@ -312,6 +331,12 @@ export interface AgentInvocation {
    * trail says a caller passed.
    */
   auditedArguments?: Record<string, unknown>
+  /**
+   * The {@link AgentConfirmationRequest.fingerprint} the caller agreed to. Set only
+   * by a surface that asked: it is compared with this call's own arguments, so an
+   * answer given for other arguments confirms nothing.
+   */
+  confirmed?: string
 }
 
 /** What {@link createAgentInvocationPipeline} returns. */
@@ -371,6 +396,62 @@ export function createAgentInvocationPipeline(
         return { status: 'denied', denial }
       }
 
+      const dispatch = async (rehearsal: boolean): Promise<ToolCallOutcome> => {
+        const built = buildToolRequest(tool, args, {
+          origin: options.origin,
+          authorization: options.authorization,
+          preflight: rehearsal,
+          surface: options.surface,
+        })
+        if (!('request' in built)) {
+          // No HTTP happened, but the call did: the status the app would have answered.
+          return { content: [{ type: 'text', text: describeBuildFailure(built) }], isError: true, status: 400 }
+        }
+
+        // The dispatch mark and principal handoff, on the exact object about to
+        // be dispatched. Both return the same object; assigning the result is
+        // what keeps a future refactor from dispatching a copy.
+        const request = markAgentDispatch(
+          options.handoff === 'seam' && options.principal
+            ? installAgentPrincipal(built.request, {
+                principal: options.principal,
+                abilities: options.abilities,
+              })
+            : built.request,
+        )
+        if (options.sharedProps) installAgentSharedProps(request, options.sharedProps)
+
+        // env and execution context are forwarded explicitly — omitting them
+        // silently loses D1/R2 bindings and waitUntil on Workers.
+        return mapToolResponse(
+          tool,
+          await options.app.fetch(request, options.env, options.executionCtx),
+          request.url,
+        )
+      }
+
+      // One measurement around the whole round trip, the request build included.
+      // `settle` decides what a dispatched outcome becomes; `undefined` records it as the result.
+      const run = async (
+        rehearsal: boolean,
+        settle?: (outcome: ToolCallOutcome) => AgentInvocationResult | undefined,
+      ): Promise<AgentInvocationResult> => {
+        const startedAt = performance.now()
+        try {
+          const outcome = await dispatch(rehearsal)
+          const settled = settle?.(outcome)
+          if (settled) return settled
+          record.invoked(audited, auditArgs, outcome.status, elapsed(startedAt))
+          return { status: 'executed', outcome }
+        } catch (error) {
+          // The route's own failures came back as responses; reaching here means
+          // the dispatch itself broke. Still an invocation — it ran — recorded
+          // with the status the app would have reported for an unhandled throw.
+          record.invoked(audited, auditArgs, 500, elapsed(startedAt))
+          return { status: 'failed', message: error instanceof Error ? error.message : String(error) }
+        }
+      }
+
       // 1. Scope. `gatePreflight` for a rehearsal — the same scope rule, minus
       //    the approval half, for the reason `AgentInvocation.preflight` gives.
       const scope: GateVerdict = preflight
@@ -389,7 +470,47 @@ export function createAgentInvocationPipeline(
         }
       }
 
-      // 3. Approval — never for a rehearsal.
+      // 3. Confirmation (RFC 0042 §2.2), never for a rehearsal the caller asked for.
+      //    Ahead of approval: that gate writes a record and notifies people.
+      if (!preflight && tool.confirm) {
+        let fingerprint: string
+        try {
+          const keys = options.approvals?.keys ?? agentApprovalKeysFromEnv()
+          fingerprint = (await agentApprovalFingerprints(args, keys))[0]!
+        } catch (error) {
+          // Fail closed: a call that cannot be fingerprinted cannot be matched to an answer.
+          return deny({
+            reason: 'confirmation',
+            message:
+              `The tool "${tool.toolName}" asks the calling user to confirm before it runs, and this call `
+              + `could not be bound to an answer, so it was not run: ${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
+
+        if (call.confirmed !== fingerprint) {
+          const { confirm } = tool
+          // Rehearsed first, so a call the route's middleware or validation refuses is
+          // answered with that refusal and no question reaches a person. Rests on the
+          // target honouring the rehearsal header, as every `.agent()` route of `Router` does.
+          return run(true, (rehearsal) => {
+            if (!rehearsal.preflightVerdict) return undefined
+            return deny({
+              reason: 'confirmation',
+              message:
+                `The tool "${tool.toolName}" asks the calling user to confirm before it runs, and this surface `
+                + 'has no way to ask. Nothing was executed.',
+              confirmation: {
+                tool: tool.toolName,
+                message: confirm.message ?? `Run "${tool.toolName}"?`,
+                input: redactAgentArguments(args, tool.redact),
+                fingerprint,
+              },
+            })
+          })
+        }
+      }
+
+      // 4. Approval — never for a rehearsal.
       if (!preflight && tool.approval === 'required' && options.approvals) {
         const { approvals } = options
         let verdict: GateVerdict
@@ -415,57 +536,8 @@ export function createAgentInvocationPipeline(
         }
       }
 
-      // 4. Dispatch, then redact and audit — one measurement around the whole
-      //    round trip, including the request build.
-      const startedAt = performance.now()
-      try {
-        const built = buildToolRequest(tool, args, {
-          origin: options.origin,
-          authorization: options.authorization,
-          preflight,
-          surface: options.surface,
-        })
-        if (!('request' in built)) {
-          // No HTTP happened, but the call did — recorded as an invocation
-          // with the status the app would have answered.
-          const outcome: ToolCallOutcome = {
-            content: [{ type: 'text', text: describeBuildFailure(built) }],
-            isError: true,
-            status: 400,
-          }
-          record.invoked(audited, auditArgs, outcome.status, elapsed(startedAt))
-          return { status: 'executed', outcome }
-        }
-
-        // The dispatch mark and principal handoff, on the exact object about to
-        // be dispatched. Both return the same object; assigning the result is
-        // what keeps a future refactor from dispatching a copy.
-        const request = markAgentDispatch(
-          options.handoff === 'seam' && options.principal
-            ? installAgentPrincipal(built.request, {
-                principal: options.principal,
-                abilities: options.abilities,
-              })
-            : built.request,
-        )
-        if (options.sharedProps) installAgentSharedProps(request, options.sharedProps)
-
-        // env and execution context are forwarded explicitly — omitting them
-        // silently loses D1/R2 bindings and waitUntil on Workers.
-        const outcome = await mapToolResponse(
-          tool,
-          await options.app.fetch(request, options.env, options.executionCtx),
-          request.url,
-        )
-        record.invoked(audited, auditArgs, outcome.status, elapsed(startedAt))
-        return { status: 'executed', outcome }
-      } catch (error) {
-        // The route's own failures came back as responses; reaching here means
-        // the dispatch itself broke. Still an invocation — it ran — recorded
-        // with the status the app would have reported for an unhandled throw.
-        record.invoked(audited, auditArgs, 500, elapsed(startedAt))
-        return { status: 'failed', message: error instanceof Error ? error.message : String(error) }
-      }
+      // 5. Dispatch, then redact and audit.
+      return run(preflight)
     },
   }
 }
