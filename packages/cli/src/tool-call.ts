@@ -54,6 +54,8 @@ export interface ToolCallOptions {
   as?: string
   /** Ask for a verdict instead of an execution (RFC 0016 §5.4). */
   preflight?: boolean
+  /** `--confirm`: the caller agrees to a `confirm` tool's call without being asked (RFC 0042 §2.5). */
+  confirm?: boolean
   /** Application root directory. */
   appRoot?: string
   /** Emit one machine-readable JSON object instead of the human report. */
@@ -274,6 +276,13 @@ async function primeCsrfHeaders(
   }
 }
 
+/** What a `confirm` tool's call is asked about: the route's message and the arguments as the trail would record them. */
+export interface ToolConfirmQuestion {
+  tool: string
+  message: string
+  input: Record<string, unknown>
+}
+
 export interface ToolCallResult {
   tool: DerivedAgentTool
   outcome: ToolCallOutcome
@@ -301,6 +310,10 @@ export async function dispatchToolCall(
     args: Record<string, unknown>
     actingAs?: string | number
     preflight?: boolean
+    /** The caller already agreed to a `confirm` tool's call (`--confirm`). */
+    confirm?: boolean
+    /** Asks the person at the terminal. Absent where nobody can be asked: the call is then refused. */
+    ask?: (question: ToolConfirmQuestion) => Promise<boolean>
     /**
      * The application's audit emitter, when it configured one. Passed in rather than
      * resolved here so the recording rules stay testable with no app on disk.
@@ -344,6 +357,26 @@ export async function dispatchToolCall(
       `--input gives a URL dot-segment ("." or "..") for ${built.invalidPath.join(', ')}, which would `
         + `resolve to a different path than ${tool.path}. Pass a real value.`,
     )
+  }
+
+  // This command dispatches past the pipeline that asks, so it asks itself (RFC 0042 §2.5).
+  // Refused like the two above: nothing was sent, so nothing is recorded.
+  if (tool.confirm && !options.preflight && !options.confirm) {
+    const agreed = options.ask
+      ? await options.ask({
+          tool: tool.toolName,
+          message: tool.confirm.message ?? `Run "${tool.toolName}"?`,
+          input: redactAgentArguments(options.args, tool.redact),
+        })
+      : false
+    if (!agreed) {
+      throw new Error(
+        options.ask
+          ? `"${tool.toolName}" was not confirmed, so nothing was run.`
+          : `"${tool.toolName}" asks the calling user to confirm before it runs, and nobody can be asked here. `
+            + 'Pass --confirm to run it.',
+      )
+    }
   }
 
   // Set on the built object: a copy loses the dispatcher's mark and force-https redirects it.
@@ -487,6 +520,9 @@ export async function runToolCall(options: ToolCallOptions): Promise<void> {
     args,
     actingAs,
     preflight: options.preflight,
+    confirm: options.confirm,
+    // `--json` promises one JSON object on stdout, which a prompt would break.
+    ...(!options.json && process.stdin.isTTY && process.stdout.isTTY ? { ask: askAtTerminal } : {}),
     audit,
   })
 
@@ -501,6 +537,12 @@ export async function runToolCall(options: ToolCallOptions): Promise<void> {
   if (result.outcome.isError) {
     markCommandFailed()
   }
+}
+
+async function askAtTerminal(question: ToolConfirmQuestion): Promise<boolean> {
+  consola.info(`${question.tool} ${JSON.stringify(question.input)}`)
+  // Anything but an explicit yes refuses, a cancelled prompt (a symbol) included.
+  return (await consola.prompt(question.message, { type: 'confirm', initial: false })) === true
 }
 
 function printJson(result: ToolCallResult): void {

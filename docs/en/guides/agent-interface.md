@@ -119,6 +119,7 @@ mistake, not a no-op.
 | `destructiveHint` | `false` is the strong claim "additive updates only". |
 | `idempotentHint` | Repeat calls with the same arguments add no effect. |
 | `approval` | `'required'` means a call becomes a pending request for a human to approve instead of executing. See [Approval-gated tools](./agent-tool-governance.md#approval-gated-tools). With no queue configured the endpoint fails closed: the tool is neither listed nor callable. |
+| `confirm` | `true` or `{ message }` asks the calling user, in their client, before the call runs. A caller that cannot be asked is refused, and the tool is not registered over WebMCP. See [Asking the calling user](./agent-tool-governance.md#asking-the-calling-user). |
 | `redact` | Argument field names to mask in the audit trail. See [The audit trail](./agent-tool-governance.md#the-audit-trail). |
 
 ## The input schema
@@ -437,6 +438,20 @@ it, and a verdict conforms to no route's output, so the verdict needs a tool of
 its own. `tool:call` and `@guren/testing` are not bound by that rule and ask
 for a verdict on the call itself.
 
+### `--confirm` answers a tool that asks first
+
+A tool declaring [`confirm`](./agent-tool-governance.md#asking-the-calling-user)
+asks its caller before it runs. In a terminal, `tool:call` asks you, showing the
+route's message and the arguments as the audit trail would record them.
+Anywhere nobody can be asked (a script, CI, `--json`), the call is refused
+until you pass the flag:
+
+```bash
+bunx guren tool:call posts.destroyMany --confirm
+```
+
+`--preflight` never asks, since a rehearsal runs nothing.
+
 ## Testing a tool
 
 `app.agent()` calls the tools of an app under test, through the same dispatch:
@@ -460,6 +475,13 @@ request:
 await app.agent().call('posts.index').assertOk()
 await app.agent().call('posts.store', { title: 'no' }).assertStatus(422)
 await app.agent().call('secret.show').assertDenied()
+```
+
+A tool declaring [`confirm`](./agent-tool-governance.md#asking-the-calling-user)
+throws unless the test calls it as a caller who agreed:
+
+```ts
+await app.agent().call('posts.destroyMany', {}, { as: user, confirm: true }).assertOk()
 ```
 
 | Assertion | Passes when |
@@ -670,13 +692,16 @@ Four rules worth knowing:
   one name makes an MCP client reject the whole catalogue.
 
 Rehearsing is not requesting. Preflighting an approval-gated tool creates no
-pending request and notifies nobody.
+pending request and notifies nobody. Preflighting a tool that declares
+`confirm` asks nobody: the verdict carries `confirmation: 'required'`, and its
+`allowed` covers the rehearsal only.
 
 ## Locking the tools down
 
 [Control and Audit Agent Tool Access](./agent-tool-governance.md) covers the
-token scopes every MCP caller needs, plus two optional controls: approval gates
-for tools a person should confirm, and the audit trail.
+token scopes every MCP caller needs, plus three optional controls: approval
+gates for calls someone you chose has to approve, confirmation for calls the
+agent's own user is asked about, and the audit trail.
 
 ## Dev MCP is a different endpoint
 
@@ -713,8 +738,9 @@ calls `this.authorize(...)`.
 characters, which is where `agent.toolName` comes in; advisory, so `check --ci`
 and `guren gate` stay green), a missing output shape,
 an Inertia response, a body-carrying route with no `body` schema, a read-only
-tool whose action mutates, and any verdict it could not reach (an inline
-handler, an unreadable controller file, two controller classes sharing a name).
+tool whose action mutates, `confirm` beside `expose: { webMcp: true }` (advisory:
+the tool is kept off WebMCP either way), and any verdict it could not reach (an
+inline handler, an unreadable controller file, two controller classes sharing a name).
 
 `bunx guren audit` treats the same routes more strictly: a body-validation
 finding that is a warning for an ordinary route becomes a **failure** for an

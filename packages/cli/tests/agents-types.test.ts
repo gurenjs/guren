@@ -122,6 +122,21 @@ describe('buildAgentToolsContent', () => {
     expect(content).toContain('"token"')
   })
 
+  test('carries the confirmation a tool asks for, and keeps that tool off WebMCP', () => {
+    const router = new Router()
+    router.get('/posts', [PostController, 'index']).name('posts.index').agent({})
+    router
+      .delete('/posts', { name: 'posts.purge', agent: { confirm: { message: 'This deletes every post.' } } }, [PostController, 'index'])
+    const content = buildAgentToolsContent(deriveAgentTools(router.definitions()).tools, { resources })
+    const purge = content.slice(content.indexOf("'posts.purge': {"))
+
+    expect(purge).toContain('"message": "This deletes every post."')
+    expect(purge).toMatch(/confirm: \{\s*"message"/)
+    expect(purge).toMatch(/"webMcp": false/)
+    // Only the tool that declares it: `posts.index` carries no `confirm` field.
+    expect(content.match(/\bconfirm: /g)).toHaveLength(1)
+  })
+
   test('carries the merge inverse a client needs to rebuild the request', () => {
     const { tools } = deriveAgentTools(fixtureDefinitions())
     const content = buildAgentToolsContent(tools, { resources })

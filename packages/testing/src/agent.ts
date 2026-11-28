@@ -89,6 +89,12 @@ export interface AgentCallOptions {
    * MCP reaches the same seam through the `guren_preflight` companion tool instead.
    */
   preflight?: boolean
+  /**
+   * Call a `confirm` tool as a caller who agreed to it (RFC 0042 §2). Without it such a
+   * call throws: every agent surface asks first or refuses, and this helper dispatches
+   * past the pipeline that does.
+   */
+  confirm?: boolean
 }
 
 /**
@@ -312,6 +318,13 @@ export class TestAgent {
       throw new Error(
         `Tool "${name}" was given a URL dot-segment ("." or "..") for ${built.invalidPath.join(', ')}, `
           + `which would resolve to a different path than ${tool.path}.`,
+      )
+    }
+
+    if (tool.confirm && !options.preflight && !options.confirm) {
+      throw new Error(
+        `Tool "${name}" asks the calling user to confirm before it runs, so an agent surface asks first or `
+          + 'refuses the call. Pass { confirm: true } to call it as a caller who agreed.',
       )
     }
 

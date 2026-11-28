@@ -36,6 +36,7 @@ function describeAnnotations(tool: DerivedAgentTool): string {
   if (tool.annotations.destructiveHint) flags.push('destructive')
   if (tool.annotations.idempotentHint) flags.push('idempotent')
   if (tool.approval === 'required') flags.push('approval')
+  if (tool.confirm) flags.push('confirm')
   return flags.length > 0 ? flags.join(', ') : '-'
 }
 
@@ -182,6 +183,7 @@ export async function displayToolInspection(
   console.log(field('Annotations', describeAnnotations(tool)))
   console.log(field('Authorization', tool.authorization ? tool.authorization.ability : '(not statically derivable)'))
   if (tool.approval) console.log(field('Approval', tool.approval))
+  if (tool.confirm) console.log(field('Confirm', tool.confirm.message ?? 'asks the calling user before it runs'))
   if (tool.redact) console.log(field('Redacted', tool.redact.join(', ')))
   if (tool.ui) {
     const page = tool.ui.page === undefined ? 'no page' : `page ${tool.ui.page}`

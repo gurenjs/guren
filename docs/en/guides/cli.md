@@ -521,6 +521,7 @@ bunx guren tool:call posts.index --as user:42 --json
 | `--input` | `{}` | Tool arguments as a JSON object |
 | `--as` | (unauthenticated) | Authenticate as a user (`user:42`). Development only: sets `GUREN_TESTING=1` for the process, so the app accepts an injected user instead of a real credential, and passwords hash with the cheap test parameters (see [Testing](./testing.md#password-hashing-in-tests)) |
 | `--preflight` | `false` | Ask for a verdict instead of an execution — the handler does not run |
+| `--confirm` | `false` | Run a tool that asks its caller to confirm, without being asked. A terminal is asked otherwise, and anywhere else the call is refused (see [Asking the calling user](./agent-tool-governance.md#asking-the-calling-user)) |
 | `--app` | Current directory | Application root directory |
 | `--json` | `false` | Output the call result as JSON |
 
