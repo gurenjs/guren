@@ -407,6 +407,15 @@ its commands, and each linked note shows `present` (the application has the
 element), `planned` (an open plan adds it) or `missing`. The overlay is read
 on open and on refresh, and is written nowhere.
 
+**Amended in implementation (M3b):** a note also reads `unknown`, drawn as
+such, and a note whose link changed since the report shows no state until the
+next one, since the report judged another link. The line under the canvas
+counts the states, the notes that lead nowhere and the plans read. The board is
+read in process first, so a board that is gone answers 404 before any child
+starts. Besides open and refresh, a return to the window checks again, at most
+once every 15 seconds and never while a check is running, since each check
+loads the application in a child.
+
 A board sits under `docs/`, which `change:lane` reads as ambient, and its text
 reaches the producer prompt. That is the standing of the request string today:
 untrusted text, quoted, that a plan is written from. What is reviewed is the
