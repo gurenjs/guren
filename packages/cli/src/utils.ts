@@ -246,9 +246,9 @@ export async function pathExists(path: string): Promise<boolean> {
 // A Guren UI utility (`bg-g-panel`, `focus:outline-g-accent`) or token variable (`var(--g-line)`).
 const GUREN_UI_USE_RE = /(?<![\w-])[a-z][a-z0-9-]*-g-[a-z]|--g-[a-z]/
 
-/** Whether a scaffolded file under `resources/` styles with the Guren UI tokens. */
+/** Whether a scaffolded file under `resources/` styles with the Guren UI tokens. Prose naming a token styles nothing. */
 function usesGurenUiTokens(entry: ScaffoldFileEntry): boolean {
-  return /(?:^|\/)resources\//.test(entry.path) && GUREN_UI_USE_RE.test(entry.contents)
+  return /(?:^|\/)resources\//.test(entry.path) && !entry.path.endsWith('.md') && GUREN_UI_USE_RE.test(entry.contents)
 }
 
 export type ScaffoldFilesOptions = WriterOptions & {

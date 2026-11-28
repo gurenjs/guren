@@ -122,7 +122,7 @@ export async function scanPluginCalls(
   target: PluginExport,
   scope: 'app' | 'project' = 'app',
 ): Promise<PluginCall[]> {
-  const files = (scope === 'project' ? await collectProjectFiles(cwd) : await appFiles(cwd))
+  const files = (scope === 'project' ? await collectProjectFiles(cwd) : await pluginCallFiles(cwd))
     .filter((file) => !/\.test\.[jt]sx?$/.test(file))
 
   const calls: PluginCall[] = []
@@ -137,7 +137,8 @@ export async function scanPluginCalls(
   return calls
 }
 
-async function appFiles(cwd: string): Promise<string[]> {
+/** Where an app registers a plugin: its `config/`, `src/` and `app/` trees, module roots included, and the app entry. */
+export async function pluginCallFiles(cwd: string): Promise<string[]> {
   const roots = await listAppRoots(cwd)
   const groups = await Promise.all(
     roots.flatMap((root) => ['config', 'src', 'app'].map((dir) => collectFiles(resolve(root.dir, dir)))),

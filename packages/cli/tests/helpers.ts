@@ -384,6 +384,7 @@ export const { Attachment } = configureAttachments({
 export const SKIPPED_GENERATORS: Record<string, string> = {
   'make:adr': 'markdown output',
   'make:lesson': 'markdown output',
+  'make:mcp-skill': 'markdown output',
   'make:migration': 'SQL migration output',
   'make:lang': 'JSON translation catalogs',
 }

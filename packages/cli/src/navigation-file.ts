@@ -6,7 +6,7 @@
  * file unreadable, with the line, rather than an entry read in part. Another key of an entry is
  * passed over, as `defineNavigation()` passes it over.
  */
-import type { File, Node } from '@babel/types'
+import type { ArrayExpression, CallExpression, File, Node } from '@babel/types'
 
 import { memberKeyName, unwrapTypeAssertion } from './ast-walk'
 import { definitionBuilderCall } from './resolved-config'
@@ -42,6 +42,12 @@ export type NavigationFileReading =
   | { status: 'not-a-definition' }
   | { status: 'unreadable'; reason: string; line?: number }
 
+/** `--can create:Job` as the ability and the model; the ability is everything before the last colon. */
+export function splitCanFlag(value: string): { ability: string; model: string } | undefined {
+  const colon = value.lastIndexOf(':')
+  return colon === -1 ? undefined : { ability: value.slice(0, colon), model: value.slice(colon + 1) }
+}
+
 const ENTRY_KEYS: ReadonlySet<string> = new Set(['label', 'route', 'show'])
 const SHOW_KEYS: ReadonlySet<string> = new Set(['auth', 'can', 'where'])
 const AUTH_VALUES: ReadonlySet<string> = new Set<NavigationFileAuth>(['any', 'required', 'guest'])
@@ -64,15 +70,7 @@ export function readNavigationFile(ast: File, source: { cwd: string; file: strin
   if (definition?.builder !== 'defineNavigation') return { status: 'not-a-definition' }
   try {
     const constants = topLevelConstants(ast)
-    const [argument, ...rest] = definition.call.arguments
-    if (argument === undefined || rest.length > 0) refuse(definition.call, 'defineNavigation() is not given one list of entries')
-    let list = unwrapTypeAssertion(argument as Node)
-    if (list.type === 'Identifier') {
-      const initializer = constants.get(list.name)
-      if (initializer === undefined) refuse(list, `the entries are ${list.name}, which is no top-level const of the file`)
-      list = unwrapTypeAssertion(initializer)
-    }
-    if (list.type !== 'ArrayExpression') refuse(list, 'the entries are not a list written in place')
+    const list = entryList(definition.call, constants)
     const imports = importsByLocal(ast.program.body)
     const entries: NavigationFileEntry[] = []
     const routes = new Set<string>()
@@ -87,6 +85,31 @@ export function readNavigationFile(ast: File, source: { cwd: string; file: strin
     return { status: 'read', entries }
   } catch (error) {
     if (error instanceof Unreadable) return { status: 'unreadable', reason: error.reason, ...(error.line ? { line: error.line } : {}) }
+    throw error
+  }
+}
+
+function entryList(call: CallExpression, constants: Map<string, Node>): ArrayExpression {
+  const [argument, ...rest] = call.arguments
+  if (argument === undefined || rest.length > 0) refuse(call, 'defineNavigation() is not given one list of entries')
+  let list = unwrapTypeAssertion(argument as Node)
+  if (list.type === 'Identifier') {
+    const initializer = constants.get(list.name)
+    if (initializer === undefined) refuse(list, `the entries are ${list.name}, which is no top-level const of the file`)
+    list = unwrapTypeAssertion(initializer)
+  }
+  if (list.type !== 'ArrayExpression') refuse(list, 'the entries are not a list written in place')
+  return list
+}
+
+/** The list literal the entries are written in, for a writer; only for a file `readNavigationFile()` reads. */
+export function navigationEntryList(ast: File): ArrayExpression | undefined {
+  const definition = definitionBuilderCall(ast)
+  if (definition?.builder !== 'defineNavigation') return undefined
+  try {
+    return entryList(definition.call, topLevelConstants(ast))
+  } catch (error) {
+    if (error instanceof Unreadable) return undefined
     throw error
   }
 }

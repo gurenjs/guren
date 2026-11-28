@@ -66,6 +66,19 @@ Each distinct ability and model is asked once per page, and all of them at the s
 
 Hiding a link protects nothing. A user can still type the URL, so the route's middleware and the action's `this.authorize()` are what keep a page private.
 
+## Adding an entry from the command line
+
+`guren nav:add` appends an entry to `config/navigation.ts`, and `guren nav:remove` takes one out by its route name:
+
+```bash
+bunx guren nav:add "Post a job" --route jobs.create --auth required --can create:Job
+bunx guren nav:remove jobs.create
+```
+
+`--auth` takes `required`, `guest` or `any`, and `--can` takes `<ability>:<Model>`. The new entry goes last in the list, in the file's own indentation and comma style. A `--can` model is imported from `@/app/Models/<Model>`, and the command refuses when that file does not exist or exports the name as something other than a class (a type, a declaration or a value), since `createApp()` imports `config/navigation.ts` and the app would fail to start. When it cannot tell, as with a re-export or a value built by a call, it writes the entry and warns. Removing an entry also removes the model's import once nothing else in the file names it.
+
+Both commands read the file the way `guren check` does and refuse one written in a form they cannot read back, such as a spread or a translated label. Each edit holds a lock (`.guren/locks/navigation.lock`) from the read to the write, so two commands run at once both land. It is read back before it is written, and an edit that would not read back as the entries before plus or minus one writes nothing. Neither command checks the route itself; `guren check` does. They refuse when `config/navigation.ts` does not exist; `guren add auth` writes one together with the layout that renders it.
+
 ## Rendering the links
 
 The `navigation` prop holds, for each entry the user may see, its `label`, its `path` and whether it is `current`, and nothing else: ability names, hidden routes and `where` fields never reach the browser. The current entry is the one whose path is the request's, else the longest one that prefixes it by whole segments, so `/jobs` is current on `/jobs/42` and not on `/jobsboard`. `/` is current only on `/`.

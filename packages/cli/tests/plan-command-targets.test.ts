@@ -117,6 +117,12 @@ describe('the §2 check', () => {
     expect(messageOf('guren make:factory PostFactory')).toBeUndefined()
   })
 
+  test('should fail a navigation entry naming a route or a --can model the plan adds', () => {
+    expect(messageOf('guren nav:add Comments --route comments.store')).toEndWith(`it imports route comments.store (route.comments.store), which step ${SCAFFOLD} writes, ${FAILS_TYPECHECK}.`)
+    expect(messageOf('guren nav:add Posts --route posts.index --can create:Comment')).toEndWith(`it imports model Comment (model.comment), which step ${SCAFFOLD} writes, ${FAILS_TYPECHECK}.`)
+    expect(messageOf('guren nav:add Posts --route posts.index')).toBeUndefined()
+  })
+
   test('should name both what a resource writes and the model it imports', () => {
     expect(messageOf('guren make:resource CommentResource')).toBe(
       'The command "guren make:resource CommentResource" runs before the steps that build what the plan adds: '
