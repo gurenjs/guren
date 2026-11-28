@@ -2,6 +2,7 @@ import {
   AGENT_AUDIT_BINDING,
   AgentToolDenied,
   AgentToolInvoked,
+  agentApprovalPrincipalKey,
   createAgentApprovalContext,
   createAgentInvocationPipeline,
   createAuditEmitter,
@@ -25,6 +26,7 @@ import {
 import { createMcpHandler } from '@modelcontextprotocol/server'
 import type { Context } from 'hono'
 
+import { confirmationKeyFromEnv } from './confirmation'
 import { readExternalMcpAuth, type ExternalMcpAuth } from './external-auth'
 import { AgentRateLimiter, createRateLimitInterposition, type RateLimitConfig } from './rate-limit'
 import { uiAuthority, unbuiltPages, type AppMcpUi, type McpUiConfig } from './mcp-apps'
@@ -139,6 +141,14 @@ const factory = definePlugin<McpPluginConfig>({
     }
 
     const path = config.path ?? '/mcp'
+    const confirmationKey = confirmationKeyFromEnv()
+    const unaskable = confirmationKey ? [] : exposed.filter((tool) => tool.confirm)
+    if (unaskable.length > 0) {
+      console.warn(
+        '[@guren/plugin-mcp] This app has no valid APP_KEY to sign a confirmation question with, so every call to '
+        + `${unaskable.map((tool) => `"${tool.toolName}"`).join(', ')} is refused: the route declares confirm.`,
+      )
+    }
     const serverInfo = {
       name: config.serverInfo?.name ?? 'guren-app',
       version: config.serverInfo?.version ?? '1.0.0',
@@ -287,6 +297,9 @@ const factory = definePlugin<McpPluginConfig>({
         ui,
         appOrigin: origin,
         ...(skills ? { skills } : {}),
+        ...(confirmationKey
+          ? { confirmation: { key: confirmationKey, binding: `${agentApprovalPrincipalKey(principal)}\0${path}` } }
+          : {}),
         onInvoked: (tool, args, status, durationMs) => {
           record(
             new AgentToolInvoked(
