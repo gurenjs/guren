@@ -153,11 +153,11 @@ async function readEditedPlan(
     )
   }
   // No op names `planVersion`: a revision moves it only when it adds the first entry of a version 2 section.
-  const holdsEntries = parsed.data.providers !== undefined || parsed.data.config !== undefined || parsed.data.env !== undefined
+  const holdsEntries = parsed.data.providers !== undefined || parsed.data.config !== undefined || parsed.data.env !== undefined || parsed.data.navigation !== undefined
   const version = parent.planVersion < ENTRY_SECTIONS_VERSION && holdsEntries ? ENTRY_SECTIONS_VERSION : parent.planVersion
   if (parsed.data.planVersion !== version) {
     throw new CliError(
-      `The edited plan on ${origin} declares planVersion ${parsed.data.planVersion}, and the revision would give it ${version}. A revision moves planVersion only when it adds the first providers, config or env entry; leave it as ${version}.`,
+      `The edited plan on ${origin} declares planVersion ${parsed.data.planVersion}, and the revision would give it ${version}. A revision moves planVersion only when it adds the first providers, config, env or navigation entry; leave it as ${version}.`,
     )
   }
   return { child: parsed.data, raw }

@@ -221,6 +221,8 @@ export const PLAN_SECTION_STEP: Record<PlanElementSection, { step: WorkStep; sca
   providers: { step: 'http', scaffoldable: false },
   config: { step: 'http', scaffoldable: false },
   env: { step: 'http', scaffoldable: false },
+  // An entry links a page, so it is done with the page its route renders; nothing writes one.
+  navigation: { step: 'pages', scaffoldable: false },
   // Pages are not emitted (Part 3 D4): a page written with the plan's props would match by construction.
   views: { step: 'pages', scaffoldable: false },
   commands: { step: 'commands', scaffoldable: false },
@@ -332,6 +334,7 @@ const REFERENCE_ORDERS_WORK: Record<PlanReferenceField, boolean> = {
   'column.references': true,
   'resource.model': true,
   'policy.model': true,
+  'navigation.policy': true,
   'action.body': true,
   'action.params': true,
   'action.query': true,
@@ -565,6 +568,14 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
   for (const provider of plan.providers ?? []) place(coveredOnce(provider.id) ?? foundation, 'providers', provider)
   for (const entry of plan.config ?? []) place(coveredOnce(entry.id) ?? foundation, 'config', entry)
   for (const entry of plan.env ?? []) place(coveredOnce(entry.id) ?? foundation, 'env', entry)
+  // RFC 0040 §5: an entry belongs to the task of the view its route renders; an application route's is Foundation's.
+  const actionsById = new Map(plan.controllers.flatMap((controller) => controller.actions.map((action) => [action.id, action] as const)))
+  for (const entry of plan.navigation ?? []) {
+    const route = plan.routes.find((candidate) => candidate.id === entry.route)
+    const response = route ? actionsById.get(route.action)?.response : undefined
+    const linked = response?.kind === 'inertia' ? owner.get(response.view) : route ? owner.get(route.id) : undefined
+    place(coveredOnce(entry.id) ?? linked ?? foundation, 'navigation', entry, { file: 'config/navigation.ts' })
+  }
 
   /** Element id → the elements whose work it needs done first. An `existing` target is already there. */
   const needs = new Map<string, string[]>()
@@ -586,6 +597,10 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
       if (modelById.get(reference.to)?.change.kind === 'drop') reads(reference.to, reference.from.id)
       else if (columnById.get(reference.from.id)?.change.kind !== 'drop') reads(reference.from.id, reference.to)
     }
+  }
+  // A link waits for the route it links, which may sit in another task than the page it renders.
+  for (const entry of plan.navigation ?? []) {
+    if (entry.change.kind !== 'drop') reads(entry.id, plan.routes.find((route) => route.id === entry.route)?.id)
   }
   // An action an intent took from its controller is written into the controller's file, so it waits for the class; a dropped one goes first.
   for (const controller of plan.controllers) {

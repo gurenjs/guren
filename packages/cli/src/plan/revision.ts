@@ -28,6 +28,7 @@ import {
   PlanConfigSchema,
   PlanControllerSchema,
   PlanEnvSchema,
+  PlanNavigationSchema,
   PlanFlowSchema,
   PlanModelSchema,
   PlanPolicySchema,
@@ -75,13 +76,14 @@ export const PLAN_TOP_SECTIONS = [
   'providers',
   'config',
   'env',
+  'navigation',
   'flows',
   'commands',
   'tasks',
 ] as const satisfies ReadonlyArray<PlanElementSection>
 
 /** The sections a plan omits when empty (RFC 0040 §5); a version 1 plan holds none of them. */
-const SECTIONS_ABSENT_WHEN_EMPTY = ['providers', 'config', 'env'] as const
+const SECTIONS_ABSENT_WHEN_EMPTY = ['providers', 'config', 'env', 'navigation'] as const
 
 // Array order is part of the hash, so an ADD says where it goes: before a sibling, or at the end.
 const add = <S extends string, E extends z.ZodType>(section: S, element: E) =>
@@ -115,6 +117,7 @@ const AddOpSchema = z.discriminatedUnion('section', [
   add('providers', PlanProviderSchema),
   add('config', PlanConfigSchema),
   add('env', PlanEnvSchema),
+  add('navigation', PlanNavigationSchema),
   add('flows', PlanFlowSchema),
   add('commands', PlanCommandSchema),
   add('tasks', PlanTaskIntentSchema),
@@ -148,6 +151,7 @@ const ModifyOpSchema = z.discriminatedUnion('section', [
   modify('providers', PlanProviderSchema.omit({ id: true })),
   modify('config', PlanConfigSchema.omit({ id: true })),
   modify('env', PlanEnvSchema.omit({ id: true })),
+  modify('navigation', PlanNavigationSchema.omit({ id: true })),
   modify('flows', PlanFlowSchema.omit({ id: true })),
   modify('commands', PlanCommandSchema.omit({ id: true })),
   modify('tasks', PlanTaskIntentSchema.omit({ id: true, acceptance: true })),

@@ -12,12 +12,12 @@ import type { File, ImportDeclaration, ImportSpecifier, Node } from '@babel/type
 
 import { CliError } from './cli-error'
 import { withFileLock } from './file-lock'
-import { navigationEntryList, readNavigationFile, type NavigationFileAuth, type NavigationFileEntry } from './navigation-file'
+import { NAVIGATION_CONFIG_FILE, navigationEntryList, readNavigationFile, type NavigationFileAuth, type NavigationFileEntry } from './navigation-file'
 import { parseSourceFile } from './parse-cache'
 import { writeFileAtomic } from './plan/beside'
 import { specifierBase, withoutExtension } from './schema-binding'
 
-export const NAVIGATION_FILE = 'config/navigation.ts'
+export const NAVIGATION_FILE = NAVIGATION_CONFIG_FILE
 
 export interface NavigationEntryInput {
   label: string
