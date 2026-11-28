@@ -195,7 +195,7 @@ Guren は、GET 以外のリクエストに対するリダイレクトを 303 �
 { "id": "command.attachments", "command": "guren add attachments", "reason": "Comments take images." }
 ```
 
-検査を通るのは、`guren <subcommand>` か `bunx guren <subcommand>` の形で、サブコマンドが `make:migration` 以外の `make:*`、`lang:publish`、`add plugin` 以外の `add <blueprint>` のどれかであるコマンドです。引数に使えるのは文字、数字、`_-.,:/=@+%` で、空白を含む値は一重引用符か二重引用符で囲みます (`--fields "title:string,body:text?"`)。シェルの演算子、`$`、バックスラッシュ、閉じていない引用符があると検査は失敗します。絶対パスの引数や、`..` でアプリケーションの外に出る引数も失敗します (`--path /etc`、`--app=../other`)。
+検査を通るのは、`guren <subcommand>` か `bunx guren <subcommand>` の形で、サブコマンドが `make:migration` 以外の `make:*`、`lang:publish`、`nav:add`、`nav:remove`、`add plugin` 以外の `add <blueprint>` のどれかであるコマンドです。引数に使えるのは文字、数字、`_-.,:/=@+%` で、空白を含む値は一重引用符か二重引用符で囲みます (`--fields "title:string,body:text?"`)。シェルの演算子、`$`、バックスラッシュ、閉じていない引用符があると検査は失敗します。絶対パスの引数や、`..` でアプリケーションの外に出る引数も失敗します (`--path /etc`、`--app=../other`)。
 
 この検査で制限しているのはシェルの構文とジェネレーターの書き込み先で、`--force` などジェネレーターごとのその他のフラグは判断しません。ここに挙げた以外のコマンドも失敗します。`bun run db:migrate` は計画に書くものではなく、`data` ステップの検証コマンドとして実行されます。
 

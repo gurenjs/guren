@@ -211,9 +211,9 @@ describe('the classification against the registry', () => {
     expect(groups.sort()).toEqual([...PLAN_COMMAND_GROUPS].sort())
   })
 
-  test('should allow generators only: make:* writers, lang:publish and add <blueprint>, never add plugin', () => {
+  test('should allow generators only: make:* writers, lang:publish, nav:add/nav:remove and add <blueprint>, never add plugin', () => {
     const offenders = Object.entries(PLAN_COMMAND_CLASSES)
-      .filter(([name, commandClass]) => commandClass === 'generator' && !/^(?:make:(?!migration$)[a-z-]+|lang:publish|add (?!plugin$)[a-z]+)$/.test(name))
+      .filter(([name, commandClass]) => commandClass === 'generator' && !/^(?:make:(?!migration$)[a-z-]+|lang:publish|nav:(?:add|remove)|add (?!plugin$)[a-z]+)$/.test(name))
       .map(([name]) => name)
     expect(offenders).toEqual([])
   })
