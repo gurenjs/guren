@@ -74,6 +74,7 @@ const DENIAL_REASONS: Record<AgentToolDenialReason, true> = {
   'scope': true,
   'approval': true,
   'rate-limit': true,
+  'confirmation': true,
 }
 
 /**

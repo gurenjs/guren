@@ -4,6 +4,7 @@
 
 ### Patch Changes
 
+- Updated dependencies
 - Updated dependencies [9f7acba]
 - Updated dependencies [9f7acba]
 - Updated dependencies [fc0ea39]
@@ -27,8 +28,8 @@
 - Updated dependencies [aa7ab4f]
 - Updated dependencies [9f7acba]
 - Updated dependencies [9f7acba]
+  - @guren/core@1.29.0
   - @guren/plugin-agents@0.2.6
-  - @guren/core@1.28.1
   - @guren/cli@2.40.0
   - @guren/plugin-cloudflare@0.13.3
   - @guren/orm@2.17.1

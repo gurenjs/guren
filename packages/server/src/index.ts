@@ -209,6 +209,7 @@ export {
 export type {
   AgentAuditRecorder,
   AgentAuditRecorderOptions,
+  AgentConfirmationRequest,
   AgentDispatchTarget,
   AgentInterposition,
   AgentInvocation,

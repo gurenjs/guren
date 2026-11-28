@@ -103,7 +103,7 @@
     "@babel/types": "^7.29.0",
     "@e2e-dev/acp": "0.1.2",
     "@e2e-dev/web": "0.16.0",
-    "@guren/core": "^1.28.1",
+    "@guren/core": "^1.29.0",
     "@inertiajs/react": "^3.6.1",
     "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/ext-apps": "2.1.0",

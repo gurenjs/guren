@@ -52,7 +52,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.28.1",
+    "@guren/core": "^1.29.0",
     "@types/sanitize-html": "^2.16.1",
     "marked": "^18.0.10",
     "marked-highlight": "^2.2.4",

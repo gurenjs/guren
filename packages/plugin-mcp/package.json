@@ -50,7 +50,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.28.1",
+    "@guren/core": "^1.29.0",
     "@modelcontextprotocol/server": "^2.4.0"
   },
   "devDependencies": {

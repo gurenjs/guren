@@ -8,8 +8,9 @@
 
   A token request that sends no `scope`, as the MCP SDK's does, is unaffected. One that sends a scope the grant does not hold as written, such as the advertised `tools:read` against a grant of `tool:<name>` entries, now keeps none of it: `@cloudflare/workers-oauth-provider` 1.2.0 and later refuse the request with `invalid_scope`, and an older provider returns a token that calls nothing, with an empty `scope` in the token response. Re-run `bunx guren cloudflare:build --mcp-oauth` to take the fix; access tokens issued before it keep their props until they expire.
 
+- Updated dependencies
 - Updated dependencies [9f7acba]
-  - @guren/core@1.28.1
+  - @guren/core@1.29.0
 
 ## 0.13.2
 

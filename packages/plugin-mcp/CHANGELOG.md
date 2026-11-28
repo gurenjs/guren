@@ -10,8 +10,9 @@
 
 ### Patch Changes
 
+- Updated dependencies
 - Updated dependencies [9f7acba]
-  - @guren/core@1.28.1
+  - @guren/core@1.29.0
 
 ## 0.7.0
 

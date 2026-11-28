@@ -1,6 +1,6 @@
 {
   "name": "@guren/core",
-  "version": "1.28.1",
+  "version": "1.29.0",
   "description": "Guren: the Bun-first fullstack TypeScript framework. Laravel-style MVC on Hono, Drizzle ORM and Inertia.js + React. Develop on Bun; deploy to Bun, AWS Lambda (Node.js), Vercel or Cloudflare Workers.",
   "keywords": [
     "guren",
