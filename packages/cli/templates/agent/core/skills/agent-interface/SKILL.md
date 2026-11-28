@@ -66,6 +66,7 @@ Serving is a separate, app-level step: the endpoint mounts only when the app ins
 | `destructiveHint` | `false` is the strong claim "additive updates only" — `guren audit` checks it against the action. Unset keeps the spec default (destructive for a non-read-only tool). |
 | `idempotentHint` | Repeat calls with the same arguments add no effect. The derivation defaults it to true for PUT and DELETE; declaring it records your own claim. |
 | `approval` | `'required'` marks the tool as needing server-side approval before it executes. There is no approval queue yet, so the MCP endpoint **fails closed** on it: the tool is neither listed nor callable. |
+| `confirm` | `true` or `{ message }` asks the calling user, in their client, before the call runs. The MCP endpoint asks a client on MCP 2026-07-28 that declares form elicitation and refuses every other caller; in-process and durable agents are refused, and the tool is never registered over WebMCP. The answer is a cooperating host's word, not authorization: a call its caller must not be able to approve needs `approval`. |
 | `ui` | The Inertia page an MCP Apps host renders the result with (`ui: pages.posts.Show`), or `{ visibility: ['app'] }` for a tool only a view calls. See below. |
 | `redact` | Argument field names to mask in the `AgentToolInvoked` / `AgentToolDenied` events the endpoint emits. Unioned with a built-in fragment list (`password`, `secret`, `token`, `apikey`, …), so it *adds* to a default rather than being the whole mask. Matching is lowercased, separator-stripped containment — `redact: ['id']` also masks `userId`. |
 
@@ -178,7 +179,9 @@ bunx guren check    # agent-route rules run in the normal suite
 bunx guren audit    # validation rules are stricter for agent-exposed routes
 ```
 
-`guren check` **fails** on: a nameless agent route, a tool name outside `^[A-Za-z0-9._-]{1,128}$`, two routes resolving to one tool name, and a non-read-only tool whose controller action shows no authorization. It **warns** on: a missing output or body schema, an Inertia response, a read-only tool whose action mutates (declared or GET/QUERY-default), a controller file it could not read, and any verdict it could not reach because the handler body was one it does not read (an inline handler, or a controller outside `app/Http/Controllers/`).
+A `confirm` tool is asked about outside MCP too: `bunx guren tool:call <name>` asks in a terminal and is refused elsewhere without `--confirm`, and `app.agent().call(name, input, { confirm: true })` is how a test calls it.
+
+`guren check` **fails** on: a nameless agent route, a tool name outside `^[A-Za-z0-9._-]{1,128}$`, two routes resolving to one tool name, and a non-read-only tool whose controller action shows no authorization. It **warns** on: a missing output or body schema, an Inertia response, a read-only tool whose action mutates (declared or GET/QUERY-default), `confirm` beside `expose: { webMcp: true }` (`agent-route-confirm-webmcp`, advisory), a controller file it could not read, and any verdict it could not reach because the handler body was one it does not read (an inline handler, or a controller outside `app/Http/Controllers/`).
 
 For `ui` it **fails** on a page `.guren/pages.gen.ts` lacks (`agent-route-ui-page`), a malformed `ui` (`agent-route-ui-shape`) and `ui` beside `output` (`agent-route-ui-output`), and **warns** when the action never renders the page, passes a deferred prop, or `mcpPlugin()` has no `ui` option.
 

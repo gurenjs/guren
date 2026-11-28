@@ -411,9 +411,11 @@ that tests for `failed` and `denied` and falls through.
 Before it denies, the step runs the rehearsal `guren_preflight` runs (the
 route's middleware and validation, never its action). A call that would be
 refused there is refused with that reason and no question, so a malformed call
-does not put a prompt in front of a person. What the rehearsal cannot see still
-runs after the answer: the action's own authorization may refuse a confirmed
-call.
+does not put a prompt in front of a person. Refused means a 4xx or 5xx, or a
+request that cannot be built. Any other answer is asked about, a middleware's
+own 2xx or 3xx included: returning it would hand a result to a caller nobody
+asked. What the rehearsal cannot see still runs after the answer: the action's
+own authorization may refuse a confirmed call.
 
 A rehearsal requested by the caller (`preflight: true`) skips the step, as it
 skips approval. `guren_preflight`'s verdict gains `confirmation: 'required'`
@@ -482,7 +484,9 @@ The guide says the first point in its opening paragraph.
 **Audit.** The challenge is recorded as `AgentToolDenied` with reason
 `confirmation`, and so is a declined answer. A state the SDK rejects before the
 handler runs is not recorded, since no tool was resolved. Neither the signed
-state nor the form payload is written to the trail.
+state nor the form payload is written to the trail. A declined answer never
+enters the pipeline, so the endpoint writes that record itself and meters the
+answer as a read.
 
 #### 2.4 A client that cannot be asked
 
@@ -509,17 +513,21 @@ over the prompt removes `confirm`.
 | Durable agents (`@guren/plugin-agents`) | Pipeline | Refused |
 | MCP Apps views | Pipeline, through the endpoint | As the endpoint; a refusal settles the view's visit as `denied` with reason `confirmation` |
 | `guren tool:call` | Its own `buildToolRequest` and `app.fetch` | Prompts on a TTY; otherwise refuses unless `--confirm` is passed |
-| WebMCP | The browser fetches the route | The tool is not registered |
+| `TestApp.agent().call()` | Its own `buildToolRequest` and the app's dispatch | Throws unless the test passes `{ confirm: true }` |
+| WebMCP | The browser fetches the route | The tool is not registered, and the route answers a `webmcp` request with 403 |
 
-Two of these do not pass through the pipeline, so each needs its own change:
+Three of these do not pass through the pipeline, so each needs its own change:
 
 - `guren tool:call` checks `tool.confirm` before it dispatches.
+- `TestApp.agent().call()` does the same, so a test cannot show a call
+  succeeding that every agent surface would ask about or refuse.
 - `deriveAgentTools` resolves `expose.webMcp` to `false` for a tool that
   declares `confirm`, whatever the route says. The WebMCP client already skips
   a tool that is not exposed, so a client built before this RFC skips it too,
   and no version of the client has to learn the field for the guarantee to
-  hold. `guren check` warns when a route sets both `confirm` and
-  `expose: { webMcp: true }`.
+  hold. A page loaded before `confirm` was declared still holds the tool, so
+  the route itself refuses a request announcing the `webmcp` surface. `guren
+  check` warns when a route sets both `confirm` and `expose: { webMcp: true }`.
 
 A person to ask on behalf of an in-process or durable agent is a follow-up
 (Open Question 5). URL-mode elicitation, for a step that must happen in a

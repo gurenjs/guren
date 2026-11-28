@@ -4,6 +4,7 @@ import {
   AGENT_TOOL_NAME_PATTERN,
   deriveAgentToolUi,
   isReservedAgentToolName,
+  readAgentConfirm,
   PORTABLE_AGENT_TOOL_NAME_PATTERN,
   RESERVED_AGENT_TOOL_NAMES,
 } from '@guren/server'
@@ -157,6 +158,27 @@ function portableNameFinding(route: AgentRoute): CheckResult | undefined {
  * imported, never restated: drift from `@guren/plugin-mcp`'s catalogue would
  * pass a route whose tool the endpoint has already dropped.
  */
+/**
+ * `confirm` beside `expose: { webMcp: true }` (RFC 0042 §2.5). The derivation keeps a
+ * `confirm` tool off WebMCP, where the browser calls the route past the pipeline that
+ * asks, so the declared exposure never applies. Advisory: what runs is the safe reading.
+ */
+function confirmWebMcpFinding(route: AgentRoute): CheckResult | undefined {
+  if (route.agent.expose?.webMcp !== true || !readAgentConfirm(route.agent.confirm)) return undefined
+
+  return {
+    ...check(
+      `agent-route-confirm-webmcp:${route.keySuffix}`,
+      `${route.label} agent tool`,
+      'warn',
+      'The route declares confirm and expose: { webMcp: true }. A tool that asks its caller to confirm is never '
+      + 'registered over WebMCP: the browser calls the route itself, where nothing can ask.',
+      'Remove expose.webMcp, or remove confirm if reach over WebMCP matters more than the question.',
+    ),
+    advisory: true,
+  }
+}
+
 function reservedNameFinding(route: AgentRoute): CheckResult | undefined {
   const { toolName } = route
   if (toolName === undefined || !isReservedAgentToolName(toolName)) return undefined
@@ -734,6 +756,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     push(readOnlyHonestyFinding(route), fromBody(route))
     push(outputFinding(route))
     push(inputFinding(route))
+    push(confirmWebMcpFinding(route))
     await uiFindings(route, uiContext, push)
   }
 

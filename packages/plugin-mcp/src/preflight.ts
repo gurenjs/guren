@@ -77,6 +77,14 @@ const PREFLIGHT_OUTPUT_SCHEMA: McpObjectSchema = {
         'Validation errors, as the application reported them — field name to messages, for a '
         + 'contract failure. Absent when the refusal was not a validation one.',
     },
+    confirmation: {
+      type: 'string',
+      enum: ['required'],
+      description:
+        'Present when a real call asks the calling user to confirm before it runs. `allowed` then '
+        + 'covers this rehearsal only: the call still waits for that answer, and is refused to a '
+        + 'client that cannot be asked.',
+    },
   },
   required: ['tool', 'allowed', 'status', 'message'],
 }
@@ -152,6 +160,7 @@ export interface PreflightVerdict {
   validated?: string[]
   unverified?: string[]
   errors?: unknown
+  confirmation?: 'required'
 }
 
 export type PreflightOutcome =
@@ -170,7 +179,11 @@ export type PreflightOutcome =
  * only come from a gate in front of the seam or its own validation, so nothing
  * ran; anything else means a handler ran, reported as an error, not a rehearsal.
  */
-export function toPreflightVerdict(toolName: string, outcome: ToolCallOutcome): PreflightOutcome {
+export function toPreflightVerdict(
+  toolName: string,
+  outcome: ToolCallOutcome,
+  tool: { confirm?: boolean } = {},
+): PreflightOutcome {
   const parsed = parseContent(outcome)
 
   if (!outcome.isError && outcome.preflightVerdict === true) {
@@ -190,6 +203,7 @@ export function toPreflightVerdict(toolName: string, outcome: ToolCallOutcome): 
             : `A call to "${toolName}" would be allowed. The handler did not run.`,
         ...(validated ? { validated } : {}),
         ...(unverified ? { unverified } : {}),
+        ...(tool.confirm ? { confirmation: 'required' as const } : {}),
       },
     }
   }

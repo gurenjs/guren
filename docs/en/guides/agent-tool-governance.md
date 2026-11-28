@@ -1,15 +1,16 @@
 # Control and Audit Agent Tool Access
 
 Once routes are served as agent tools (see [Agent Interface](./agent-interface.md)),
-three controls decide what an agent may do and keep a record of what it did:
+four controls decide what an agent may do and keep a record of what it did:
 
 | Control | What it decides | Section |
 |---|---|---|
 | Token scopes | Which tools a bearer token sees and may call | [Tokens and scopes](#tokens-and-scopes) |
-| Approval gates | Which calls wait for a person before they run | [Approval-gated tools](#approval-gated-tools) |
+| Approval gates | Which calls wait for a person you chose before they run | [Approval-gated tools](#approval-gated-tools) |
+| Confirmation | Which calls ask the person the agent works for, in their client | [Asking the calling user](#asking-the-calling-user) |
 | Audit trail | Where every call and every refusal is recorded | [The audit trail](#the-audit-trail) |
 
-Token scopes are required: a token with none sees no tools at all. Below, a *principal* is the identity a call runs as: the user a token or session belongs to, or a service for a token with no user. Approval gates and the audit trail are optional, and each works without the other.
+Token scopes are required: a token with none sees no tools at all. Below, a *principal* is the identity a call runs as: the user a token or session belongs to, or a service for a token with no user. Approval gates, confirmation and the audit trail are optional, and each works without the others.
 
 ## Tokens and scopes
 
@@ -298,6 +299,76 @@ ordinary invocation recorded under `guren_approval_status`.
 see your `mcpPlugin({ … })` call and finds no `approvals` in it: without a
 queue the tool is not guarded, it is uncallable.
 
+## Asking the calling user
+
+`confirm` asks the person an agent is working for, in their own client, before
+the call runs:
+
+```ts
+router
+  .delete('/posts', [PostController, 'destroyMany'])
+  .name('posts.destroyMany')
+  .agent({ description: 'Delete every draft post.', confirm: { message: 'This deletes every draft post.' } })
+```
+
+The answer comes from the client. A host that cooperates shows the question to
+a person, and one that does not can answer in their place, so a confirmation
+is not authorization. Keep a call its caller must not be able to approve on
+[`approval: 'required'`](#approval-gated-tools), where someone your application
+chose answers. Both can sit on one route: the caller is asked first, and an
+approval request is filed only for a call they agreed to.
+
+`confirm: true` asks `Run "<tool name>"?`. Either way the client shows the
+question with the tool's name and its arguments, masked by the route's
+[`redact`](#redaction) list.
+
+### What the caller sees
+
+Over MCP the endpoint answers the call with a form in place of a result. The
+client shows it and repeats the call with the answer:
+
+- **Agreed.** The action runs for the arguments the person saw. A retry with
+  other arguments is asked about again.
+- **Declined, cancelled, or returned with the box unticked.** The call ends as
+  a refusal and nothing runs.
+
+Before anyone is asked, the call is rehearsed the way
+[`guren_preflight`](./agent-interface.md#rehearsing-a-call-over-mcp) rehearses
+one. A call the route's middleware or validation refuses comes back with that
+refusal and no question, so a malformed call never puts a prompt in front of a
+person. The route's middleware therefore runs for the rehearsal and again for
+the confirmed call: a rate limiter of your own on the route counts both.
+
+An agreement is valid for ten minutes and is not single-use, so a client that
+repeats the confirmed call within that time runs it again. The question is
+signed with a key derived from `APP_KEY` and bound to the caller. Nothing is
+stored, any instance verifies what another one sent, and rotating `APP_KEY`
+makes pending questions be asked again.
+
+### Who can be asked
+
+| Caller | With `confirm` |
+|---|---|
+| MCP client on protocol `2026-07-28` that declares form elicitation | Asked |
+| MCP client on an earlier protocol version, or without form elicitation | Refused, with a message naming the reason |
+| A view in an [MCP Apps](./mcp-apps.md) host | As the endpoint: asked or refused through the host |
+| [In-process agents](./ai-agents.md) and [durable agents](./durable-agents.md) | Refused: there is no person to ask |
+| WebMCP (`@guren/plugin-webmcp`) | The tool is not registered, whatever `expose` says |
+| `bunx guren tool:call` | Asked in a terminal. Elsewhere refused unless you pass `--confirm` |
+| `app.agent().call()` in tests | Throws unless the test passes `{ confirm: true }` |
+
+The tool stays in `tools/list` for a client that will be refused. Adding
+`confirm` therefore takes the tool away from every client that cannot ask. If
+reach matters more than the question, leave `confirm` off.
+
+An app with no valid `APP_KEY` cannot sign the question. It warns at boot and
+refuses every call to a `confirm` tool.
+
+In the [audit trail](#the-audit-trail), the question and a declined answer are
+each a denial with reason `confirmation`. `guren_preflight` reports
+`confirmation: 'required'` for such a tool, and its `allowed` then covers the
+rehearsal only.
+
 ## The audit trail
 
 Every invocation and every denial is emitted as a framework event, so you
@@ -308,11 +379,11 @@ forward them wherever you already forward events.
 | `AgentToolInvoked` | the call reached the application | `principal`, `tool`, `arguments`, `status`, `durationMs`, `surface` |
 | `AgentToolDenied` | Guren refused the call before building any HTTP request | `principal`, `tool`, `arguments`, `reason`, `surface` |
 
-`reason` is one of `'auth'`, `'scope'`, `'approval'`, `'rate-limit'`: exactly
-the checks that precede the request. **A policy denial is not one of them:**
-policies evaluate inside the dispatched request, so it arrives as an
-`AgentToolInvoked` with status `403`. A denial carries no status or duration
-because nothing ran.
+`reason` is one of `'auth'`, `'scope'`, `'approval'`, `'rate-limit'`,
+`'confirmation'`: exactly the checks that precede the request. **A policy
+denial is not one of them:** policies evaluate inside the dispatched request,
+so it arrives as an `AgentToolInvoked` with status `403`. A denial carries no
+status or duration because the route's action never ran.
 
 `principal` is who the call ran as, `{ kind: 'user' | 'service', id }`, or
 `null` when nobody authenticated. `surface` is where it arrived from: `mcp`
@@ -409,7 +480,7 @@ completed. If your application's `@guren/core` predates preflight support it
 runs the call for real (the command warns about that), and the record then
 names the tool that actually executed.
 
-`tool:call` records only invocations, never denials. The four denial reasons
+`tool:call` records only invocations, never denials. The denial reasons
 name checks an adapter runs before sending a request, and this one runs none.
 It holds no token and dispatches straight into the app. A 401 or a 403 your
 application answers with is a response, so it is recorded as an invocation

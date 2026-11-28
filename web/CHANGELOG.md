@@ -1,5 +1,39 @@
 # web
 
+## 0.1.70
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies [9f7acba]
+- Updated dependencies [fc0ea39]
+- Updated dependencies [9f7acba]
+- Updated dependencies [c3e1d94]
+- Updated dependencies [ed8fa34]
+- Updated dependencies [5552b06]
+- Updated dependencies [0c73849]
+- Updated dependencies [61d24b6]
+- Updated dependencies [5d5cce7]
+- Updated dependencies
+- Updated dependencies [9f7acba]
+- Updated dependencies [9f7acba]
+- Updated dependencies [9f7acba]
+- Updated dependencies [5ffa35f]
+- Updated dependencies [d72b416]
+- Updated dependencies [4c658dd]
+- Updated dependencies [52fdccb]
+- Updated dependencies [23e81b5]
+- Updated dependencies [1510b67]
+- Updated dependencies [c4846c5]
+- Updated dependencies [aa7ab4f]
+- Updated dependencies [9f7acba]
+- Updated dependencies [9f7acba]
+  - @guren/core@1.29.0
+  - @guren/cli@2.40.0
+  - @guren/plugin-markdown@0.4.5
+  - @guren/plugin-cloudflare@0.13.3
+  - @guren/orm@2.17.1
+
 ## 0.1.69
 
 ### Patch Changes

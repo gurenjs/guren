@@ -167,6 +167,45 @@ describe('deriveAgentTools (RFC 0016)', () => {
     })
   })
 
+  describe('confirmation', () => {
+    test('should carry no confirm for a route that declares none', () => {
+      const router = new Router()
+      router.delete('/posts/:id', [PostController, 'destroy']).name('posts.destroy').agent({})
+
+      expect('confirm' in toolNamed(router, 'posts.destroy')).toBe(false)
+    })
+
+    test('should normalize `true` and keep a declared message', () => {
+      const router = new Router()
+      router.delete('/posts/:id', [PostController, 'destroy']).name('posts.destroy').agent({ confirm: true })
+      router.post('/posts', [PostController, 'store']).name('posts.store').agent({ confirm: { message: 'This publishes the post.' } })
+
+      expect(toolNamed(router, 'posts.destroy').confirm).toEqual({})
+      expect(toolNamed(router, 'posts.store').confirm).toEqual({ message: 'This publishes the post.' })
+    })
+
+    test('should keep a confirm tool off WebMCP whatever the route says', () => {
+      const router = new Router()
+      router
+        .delete('/posts/:id', [PostController, 'destroy'])
+        .name('posts.destroy')
+        .agent({ confirm: true, expose: { webMcp: true } })
+
+      expect(toolNamed(router, 'posts.destroy').expose).toEqual({ mcp: true, webMcp: false })
+    })
+
+    test('should ask for a value it cannot read rather than turn the question off', () => {
+      const router = new Router()
+      router
+        .delete('/posts/:id', [PostController, 'destroy'])
+        .name('posts.destroy')
+        .agent({ confirm: 'yes' as unknown as true })
+
+      expect(toolNamed(router, 'posts.destroy').confirm).toEqual({})
+      expect(toolNamed(router, 'posts.destroy').expose.webMcp).toBe(false)
+    })
+  })
+
   describe('annotation defaults', () => {
     const cases: Array<[string, { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean }]> = [
       ['GET', { readOnlyHint: true, destructiveHint: false, idempotentHint: true }],

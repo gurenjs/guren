@@ -12,6 +12,7 @@ import {
   ResourceNotFoundError,
   Server,
   type CallToolResult,
+  type InputRequiredResult,
   type ProtocolEra,
 } from '@modelcontextprotocol/server'
 import {
@@ -25,6 +26,7 @@ import {
   type AgentApprovalStore,
   type AgentInvocationDenial,
   type AgentInvocationPipeline,
+  type AgentInvocationResult,
   type AgentPrincipal,
   type AgentToolDenialReason,
   type AuditedTool,
@@ -32,6 +34,13 @@ import {
 } from '@guren/core'
 
 import { describeApprovalStatusTool, readApprovalStatusArguments } from './approval-status'
+import {
+  askForConfirmation,
+  cannotAsk,
+  createConfirmationCodec,
+  readConfirmationAnswer,
+  type ConfirmationSigning,
+} from './confirmation'
 import {
   listUiResources,
   MCP_APPS_EXTENSION_ID,
@@ -109,6 +118,11 @@ export interface AppMcpServerOptions {
   appOrigin?: string
   /** Skills (RFC 0042 §1). Every authenticated caller sees every one: a skill is static text and grants nothing. */
   skills?: AppMcpSkills
+  /**
+   * What the question about a `confirm` tool is signed with (RFC 0042 §2.3).
+   * Absent, such a tool is refused: the endpoint cannot verify the answer's state.
+   */
+  confirmation?: ConfirmationSigning
 }
 
 /**
@@ -134,6 +148,7 @@ export function createAppMcpServer(options: AppMcpServerOptions, era: ProtocolEr
     // `directoryRead` is not declared: every entry carries its whole manifest.
     ...(servesSkillsExtension ? { [SKILLS_EXTENSION_ID]: {} } : {}),
   }
+  const codec = options.confirmation ? createConfirmationCodec(options.confirmation) : undefined
   const server = new Server(options.serverInfo, {
     capabilities: {
       tools: {},
@@ -141,6 +156,8 @@ export function createAppMcpServer(options: AppMcpServerOptions, era: ProtocolEr
       ...(servesUi || skills ? { resources: {} } : {}),
       ...(Object.keys(extensions).length > 0 ? { extensions } : {}),
     },
+    // A state that fails here never reaches a handler: the SDK answers `-32602`.
+    ...(codec ? { requestState: { verify: codec.verify } } : {}),
   })
   // The `tools/list` filter, which therefore also decides what a caller may read as a resource.
   const listedTools = (): DerivedAgentTool[] =>
@@ -173,7 +190,7 @@ export function createAppMcpServer(options: AppMcpServerOptions, era: ProtocolEr
     }
   })
 
-  server.setRequestHandler('tools/call', async (request): Promise<CallToolResult> => {
+  server.setRequestHandler('tools/call', async (request, ctx): Promise<CallToolResult | InputRequiredResult> => {
     const name = request.params.name
     const args = (request.params.arguments ?? {}) as Record<string, unknown>
 
@@ -196,11 +213,27 @@ export function createAppMcpServer(options: AppMcpServerOptions, era: ProtocolEr
     // Every check a call passes happens in there. What is left here is the
     // protocol: turning one of the pipeline's three results into the
     // `CallToolResult` shape an MCP client reads.
-    const result = await options.pipeline.invoke({ tool, args })
+    const answer = tool.confirm ? readConfirmationAnswer(tool.toolName, ctx, codec) : undefined
+    const result: AgentInvocationResult = answer?.kind === 'declined'
+      ? declined(options, tool, args)
+      : await options.pipeline.invoke({ tool, args, ...(answer?.kind === 'agreed' ? { confirmed: answer.fingerprint } : {}) })
+
+    // Asked again when the agreed fingerprint was of other arguments: the changed call starts over.
+    const question = result.status === 'denied' ? result.denial.confirmation : undefined
+    const unasked = question ? cannotAsk(era, ctx, codec) : undefined
+    if (question && codec && unasked === undefined) {
+      return askForConfirmation(question, codec, ctx)
+    }
+
     // On every route tool, not only `ui` ones: a view must be able to settle any visit it sends.
     const _meta = resultMeta(tool, result, options.appOrigin ?? 'http://localhost', servesUi ? options.ui : undefined)
 
-    if (result.status === 'denied') return { ...denial(result.denial), _meta }
+    if (result.status === 'denied') {
+      const refusal = unasked
+        ? errorResult(`The tool "${tool.toolName}" asks the calling user to confirm before it runs. ${unasked} Nothing was executed.`)
+        : denial(result.denial)
+      return { ...refusal, _meta }
+    }
     if (result.status === 'failed') return { ...errorResult(result.message), _meta }
 
     const { outcome } = result
@@ -255,6 +288,28 @@ export function createAppMcpServer(options: AppMcpServerOptions, era: ProtocolEr
 }
 
 /**
+ * A form the caller declined, cancelled or returned unticked ends the call as a
+ * `confirmation` denial (RFC 0042 §2.3). The pipeline is not entered, so the record
+ * is written here and the answer is metered as a read: an unmetered one would let a
+ * caller holding one valid state write to the trail without limit.
+ */
+function declined(options: AppMcpServerOptions, tool: DerivedAgentTool, args: Record<string, unknown>): AgentInvocationResult {
+  const refused = takeReadBudget(options.limiter, options.rateKey)
+  if (refused) {
+    options.onDenied(tool, args, 'rate-limit')
+    return { status: 'denied', denial: { reason: 'rate-limit', message: refused } }
+  }
+  options.onDenied(tool, args, 'confirmation')
+  return {
+    status: 'denied',
+    denial: {
+      reason: 'confirmation',
+      message: `The calling user did not confirm "${tool.toolName}". Nothing was executed.`,
+    },
+  }
+}
+
+/**
  * `guren_preflight`: check whether a call to another tool would be allowed,
  * without performing it (RFC 0016 §5.4). Every check is the one a real call
  * would face, reached the same way and re-implemented nowhere, so a verdict
@@ -295,7 +350,7 @@ async function handlePreflight(
   if (result.status === 'denied') return errorResult(result.denial.message)
   if (result.status === 'failed') return errorResult(result.message)
 
-  const mapped = toPreflightVerdict(target.toolName, result.outcome)
+  const mapped = toPreflightVerdict(target.toolName, result.outcome, { confirm: target.confirm !== undefined })
   if ('executed' in mapped) return errorResult(mapped.executed)
 
   return structuredResult(mapped.verdict)
