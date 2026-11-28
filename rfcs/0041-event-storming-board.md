@@ -389,6 +389,18 @@ side-effect classes are part of the detail; so the command imports
 open ones: found by the discovery rule `check --plan` uses and read one by one
 through `readOpenPlan()`. It is advisory and exits 0.
 
+**Amended in implementation (M3a):** a note reads one of five states, not
+three. `unknown` is a link no reading can settle: the section its kind needs
+did not read, a module's routes did not load (for a route), or a plan did not
+read, which may be the one adding it. `unlinked` is a note with no link. The
+notes that lead nowhere are the `missing` links and the unlinked notes an
+element could answer, so actors and questions are left out: no link kind names
+either, and the prompt tells the agent to give them none. A `command` note
+links to its route and an `external` one to the side effect that reaches the
+system. `--plan` reads the file whether or not it is approved, since the agent
+records and checks its links before the person reviews the plan. A route and a
+page match by name across modules; every other kind matches in its `module`.
+
 The canvas draws the same result on the notes. `/_guren/boards/<slug>/status`
 runs `board:status --json` as a child, as the plan page's readiness route runs
 its commands, and each linked note shows `present` (the application has the

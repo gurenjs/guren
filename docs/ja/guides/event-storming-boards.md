@@ -92,14 +92,56 @@ bunx guren board:apply post-notifications --ops ops.json
 
 ## ボードから計画へ
 
-ボードが落ち着いたら、ボードを示して計画を頼みます。
+ボードが落ち着いたら、ボードを含めた計画用のプロンプトを表示して、エージェントに渡します。
 
-```text
-Read the board with `bunx guren board:show post-notifications` and write an implementation plan from it.
-Every event and reaction becomes a side effect, every command a route and an action, and every open question a plan question.
+```bash
+bunx guren plan --from-board post-notifications --print-prompt
 ```
 
-その先は計画の検査、レビューのページ、承認の流れになります。[実装計画](./implementation-plans.md)を参照してください。
+プロンプトには依頼の後にボードのアウトラインが引用されます。引用符で囲んで自分の依頼を書き足すこともできます。付箋が計画のどの要素になるかも、プロンプトでエージェントに伝わります。
+
+| 付箋 | 計画での扱い |
+|---|---|
+| `event`、`reaction` | 副作用。きっかけは、その付箋に入ってくる矢印から書かれます |
+| `command` | ルートと、それが呼ぶアクション |
+| `aggregate` | モデル |
+| `view` | ビュー |
+| `question` | 計画の問い。対象の付箋から作られた要素が影響先になります |
+| 囲み | フロー |
+
+変更に要らないと分かった付箋は、計画の対象外（non-goals）に入ります。その先は計画の検査、レビューのページ、承認の流れになります。[実装計画](./implementation-plans.md)を参照してください。
+
+計画が `plan:render` を通ったら、エージェントは `link` 操作で、どの付箋がどの要素になったかを記録します。link は計画と同じ名前で要素を指します。モデルはクラス名、ルートは名前、アクションは `Class.action`、ビューはページ、副作用はクラス名です。コマンドの付箋はルートに link し、アクターと問いには link を付けません。
+
+```json
+[{ "op": "link", "id": "post_published", "link": { "kind": "event", "name": "PostPublished" } }]
+```
+
+計画からボードへの参照はないので、ボードを消しても付箋を動かしても、計画とその承認はそのまま残ります。
+
+## 付箋の行き先を確かめる
+
+`board:status` を実行すると、link のある付箋ごとに、その要素があるかどうかが表示されます。
+
+```bash
+bunx guren board:status post-notifications --plan docs/plans/post-notifications/plan.json
+```
+
+```text
+Board: Post notifications  (docs/boards/post-notifications.board.json)
+Plans: docs/plans/post-notifications/plan.json (given)
+
+Linked notes:
+  present   [aggregate post] Post  = model Post
+  planned   [event post_published] Post was published  = event PostPublished  (docs/plans/post-notifications/plan.json)
+  missing   [command publish_post] Publish a post  = route posts.publish
+
+Lead nowhere (2):
+  [command publish_post] Publish a post  = route posts.publish (missing)
+  [reaction tell_subscribers] When published, tell subscribers  (no link)
+```
+
+`present` はアプリに要素があること、`planned` は計画がその要素を足すこと、`missing` はどちらにもないことを表します。`unknown` は、アプリか計画の一部を読めず判断できなかったことを表します。**Lead nowhere**（行き先のない付箋）には、`missing` の link と、link を付けられるのに付いていない付箋が並びます。アクターと問いは含みません。`--plan` を付けないときは、承認済みでまだ閉じていない計画を読みます。付けると、承認の有無にかかわらずその計画を 1 つだけ読みます。人がレビューする前に、エージェントが自分の付けた link を確かめるのはこの形です。アプリは `plan:status` と同じように読むので、`db/schema.ts` とバリデーターが読み込まれます。結果を表示するだけなので、ボードと計画を読めれば終了コードは 0 です。
 
 ## 上限
 

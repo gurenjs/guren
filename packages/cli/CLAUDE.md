@@ -66,9 +66,11 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
   output. Plan engines stay in their existing modules. Keep application loading
   lazy and specific to each command: impact scans, detailed state, and commands
   that need no application must retain their own loading conditions.
-- `src/commands/board.ts` owns the three `board:*` command definitions and their
-  output. The document, the operations, placement, the outline and the file
-  lock stay in `src/board/`. None of them loads the application.
+- `src/commands/board.ts` owns the four `board:*` command definitions and their
+  output. The document, the operations, placement, the outline, the file lock
+  and the status judgement stay in `src/board/`. Only `board:status` loads the
+  application, through a dynamic import of `loadPlanAppState()`, so the other
+  three stay usable in an app that does not load.
 - `src/commands/tools.ts` owns tool:* and token:issue definitions and argument
   validation. Execution stays in the existing tool/token modules. Preserve the
   tool:dev process-lifetime marker and the local defineCommand wrapper.
