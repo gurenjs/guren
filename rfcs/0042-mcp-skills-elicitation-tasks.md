@@ -149,20 +149,33 @@ Question 1).
 
 ```ts
 // .guren/mcp-skills.gen.ts (generated)
-export const files = {
+export const files: Readonly<Record<string, string>> = {
   'refunds/SKILL.md': '---\nname: refunds\ndescription: …\n---\n…',
   'refunds/references/policy.md': '…',
   'billing/dunning/SKILL.md': '…',
-} as const
+}
 
 /** Files that are not valid UTF-8, base64. */
-export const binary = {} as const
+export const binary: Readonly<Record<string, string>> = {}
 ```
 
-It is written when at least one `SKILL.md` exists. Once it exists it is never
-deleted: after the last skill is removed it is rewritten with empty objects, so
-an `import()` the application still configures keeps resolving. RFC 0038 keeps
-an empty `.guren/mcp-app/index.gen.ts` for the same reason.
+The two exports are annotated rather than `as const`: nothing reads a key or a
+file's text as a type, and a literal type per file is weight the application's
+typecheck would carry for no reader.
+
+Codegen publishes every regular file below a directory that holds a regular
+`SKILL.md` at its top. It reads no dotfile or dot directory and follows no
+symlink, the skills directory's own included, so nothing outside the directory
+is published through a link. A directory with no `SKILL.md` of its own is not
+read at all. It warns about a manifest spelled in another case and about a
+`SKILL.md` below another skill's directory, and still writes the module: the
+endpoint's refusal at boot (§1.4) is what stops the second.
+
+It is written when at least one `SKILL.md` exists, or when the application's
+source names the module, and it is never deleted: with no skill it is written
+with empty objects, so the `import()` the application configures resolves on a
+checkout whose `.guren/` is git-ignored and whose last skill was removed. RFC
+0038 keeps an empty `.guren/mcp-app/index.gen.ts` for the same reason.
 
 The keys are paths under the skill namespace, which is the shape
 `memorySkillFiles()` takes. The module holds file contents only. Digests, sizes
@@ -272,10 +285,14 @@ bunx guren make:mcp-skill refunds --description "Process a refund per shop polic
 bunx guren make:mcp-skill dunning --module billing
 ```
 
-`make:mcp-skill` writes `SKILL.md` with the frontmatter filled in and prints
+`make:mcp-skill` writes `SKILL.md` with the frontmatter filled in, both values
+quoted since a valid name such as `no` or `123` is another type to YAML, and prints
 the `skills` line to add when it can establish that the `mcpPlugin()` call
-lacks one. It is a single-file generator and is registered in
-`PLAN_COMMAND_CLASSES`, `PLAN_GENERATOR_TARGETS` and `PLAN_COMMAND_FILES`.
+lacks one. It is a single-file generator, registered in `PLAN_COMMAND_CLASSES`
+and `PLAN_GENERATOR_TARGETS`, and in `plan/command-files.ts` among the
+generators whose output no source-file declaration can coincide with, as
+`make:adr` is: a `SKILL.md` is published text, so a change that adds one stays
+for a person to read.
 
 `guren check` gains a content-activated group, silent for an app with no skills
 directory:

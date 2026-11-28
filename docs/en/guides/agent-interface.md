@@ -730,6 +730,7 @@ The full finding-key tables are in
 - [Control and Audit Agent Tool Access](./agent-tool-governance.md): token scopes, approval gates and the audit trail
 - [API Tokens](./api-tokens.md): the store the MCP endpoint verifies bearers against
 - [MCP Apps](./mcp-apps.md): rendering a tool's result as an Inertia page inside the host
+- [MCP Skills](./mcp-skills.md): publishing instructions that tell an agent how to use the tools together
 - [Authorization](./authorization.md): the policies that decide what a principal may do
 - [CLI](./cli.md): `tool:list` and `tool:inspect`
 - [Checks and Audits in Depth](./cli-checks.md#agent-exposed-routes): the check/audit finding keys for agent routes
