@@ -15,7 +15,10 @@ import { formatPlanRevise, planReviseFile, withStdinDashes } from '../plan-revis
 import { formatPlanWaive, planWaiveFile } from '../plan-waive'
 import { formatPlanClose, planCloseFile } from '../plan-close'
 import { readAppDefaultLocale } from '../app-locale'
-import { buildPlanPrompt, formatPlanPrompt } from '../plan/prompt'
+import { buildPlanPrompt, formatPlanPrompt, type PlanPromptBoard } from '../plan/prompt'
+import { boardSlug } from '../board/schema'
+import { readBoard } from '../board/store'
+import { renderBoardOutline } from '../board/text'
 
 const planArgs = {
   request: {
@@ -32,6 +35,11 @@ const planArgs = {
     type: 'boolean',
     description: 'With --print-prompt, print { prompt, schema } as JSON.',
   },
+  'from-board': {
+    type: 'string',
+    description: 'Write the plan from the event-storming board docs/boards/<slug>.board.json (RFC 0041 §3): its outline is quoted after the request.',
+    valueHint: 'post-notifications',
+  },
   revise: {
     type: 'string',
     description: 'Not available yet: revising a plan through a model. Edit the plan and run plan:revise.',
@@ -46,7 +54,7 @@ export const planCommand = defineCommand({
   meta: {
     name: 'plan',
     description:
-      'Print the prompt and the JSON Schema an agent writes an implementation plan from (RFC 0030 §8), with --print-prompt. Calls no model and spawns nothing: the agent reading the prompt writes the plan and checks it with plan:render. Asking a model directly is not available yet.',
+      'Print the prompt and the JSON Schema an agent writes an implementation plan from (RFC 0030 §8), with --print-prompt. Calls no model and spawns nothing: the agent reading the prompt writes the plan and checks it with plan:render. --from-board <slug> quotes an event-storming board in it (RFC 0041). Asking a model directly is not available yet.',
   },
   args: planArgs,
   async run({ args }) {
@@ -58,7 +66,7 @@ export const planCommand = defineCommand({
     if (undeclared.length > 0) {
       const flags = undeclared.map((name) => (name.length === 1 ? `-${name}` : `--${name}`)).join(', ')
       throw new CliError(
-        `guren plan does not take ${flags}; it takes --print-prompt, --json and --revise. An unquoted request whose words start with - is read as flags too, so quote it: guren plan "<request>" --print-prompt.`,
+        `guren plan does not take ${flags}; it takes --print-prompt, --json, --from-board and --revise. An unquoted request whose words start with - is read as flags too, so quote it: guren plan "<request>" --print-prompt.`,
       )
     }
     if (!args['print-prompt']) {
@@ -66,7 +74,14 @@ export const planCommand = defineCommand({
         'guren plan cannot ask a model for a plan yet (RFC 0030 §8). Run guren plan --print-prompt "<request>" and give its output to the agent in your session, which writes the plan and checks it with guren plan:render.',
       )
     }
-    const built = buildPlanPrompt(args._.join(' '))
+    let board: PlanPromptBoard | undefined
+    const fromBoard = args['from-board']
+    if (fromBoard !== undefined) {
+      if (fromBoard === '') throw new CliError('--from-board needs the board\'s slug: guren plan --from-board <slug> --print-prompt.')
+      const slug = boardSlug(fromBoard)
+      board = { slug, outline: renderBoardOutline(await readBoard(process.cwd(), slug), slug) }
+    }
+    const built = buildPlanPrompt(args._.join(' '), board)
     console.log(args.json ? JSON.stringify(built, null, 2) : formatPlanPrompt(built))
   },
 })

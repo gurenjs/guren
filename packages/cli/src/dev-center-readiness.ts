@@ -31,7 +31,7 @@ export interface PlanReadiness {
   message?: string
 }
 
-interface ChildRun { exitCode: number | null; stdout: string; stderr: string; failed?: string }
+export interface ChildRun { exitCode: number | null; stdout: string; stderr: string; failed?: string }
 
 export type ReadinessRunner = (argv: string[], cwd: string, env: NodeJS.ProcessEnv) => Promise<ChildRun>
 
@@ -47,17 +47,17 @@ export const runReadinessChild: ReadinessRunner = (argv, cwd, env) =>
   })
 
 /** An error the CLI did not mean to raise prints its stack; a refusal (`CliError`) prints the message alone. */
-const STACK_FRAME = /\n\s+at /u
+export const STACK_FRAME = /\n\s+at /u
 
 /** The report is the last thing printed, pretty-printed from a `{` at the start of a line; an app module may print before it. */
-function lastReport(stdout: string): unknown {
+export function lastReport(stdout: string): unknown {
   const line = stdout.lastIndexOf('\n{')
   const start = line >= 0 ? line + 1 : stdout.startsWith('{') ? 0 : -1
   return start < 0 ? undefined : JSON.parse(stdout.slice(start))
 }
 
 /** consola prints a refusal as ` ERROR  <message>`; the level is the CLI's, not the message's. */
-function refusalText(stderr: string): string {
+export function refusalText(stderr: string): string {
   const text = stderr.replace(/^\s*ERROR\s+/u, '').trim()
   return text.length > MESSAGE_LIMIT ? `${text.slice(0, MESSAGE_LIMIT)}…` : text
 }

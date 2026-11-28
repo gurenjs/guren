@@ -19,6 +19,8 @@ export function createDevCenterHandler(options: {
   plans?: (cwd: string) => Promise<PlanOverview>
   boards?: (cwd: string) => Promise<BoardOverview>
   readiness?: ReadinessRunner
+  /** Runs `guren board:status` for a board's overlay; the readiness runner's shape. */
+  boardStatus?: ReadinessRunner
   uiCatalog?: (cwd: string, viteUrl: string | undefined) => Promise<UiCatalog>
   /** The app's Vite dev server, which renders the catalog's preview. */
   viteUrl?: () => string | undefined
@@ -57,7 +59,7 @@ export function createDevCenterHandler(options: {
       const readiness = planReadinessRoute(path)
       if (readiness) return handleReadinessRequest(options.cwd, request, readiness, options.readiness)
       const board = boardRoute(path)
-      if (board) return handleBoardRequest(options.cwd, request, board)
+      if (board) return handleBoardRequest(options.cwd, request, board, options.boardStatus)
       if (request.method !== 'GET') return new Response('Method not allowed', { status: 405, headers: { ...headers, Allow: 'GET' } })
       if (path === MCP_APPS_SANDBOX_PATH) return serveMcpAppsSandbox(request)
       if (path === '/_guren/graph.json') {

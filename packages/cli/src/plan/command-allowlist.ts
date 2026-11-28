@@ -163,6 +163,7 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'board:new': 'board',
   'board:show': 'board',
   'board:apply': 'board',
+  'board:status': 'board',
   'agent:init': 'harness',
   'agent:sync': 'harness',
 })

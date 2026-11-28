@@ -349,6 +349,22 @@ The harness template gains an `event-storming` skill under
 stops for the person after each: events only, then commands and actors, then
 reactions and external systems, then questions.
 
+**Amended in implementation (M3c):** the second stage also adds the
+aggregate each command changes and the view its actor uses, since no other
+stage would. The skill reads the board again before every stage, so the
+person's canvas edits are what it builds on, and writes operations to a file
+outside the repository, leaving none in the tree for `plan:approve` to refuse.
+It does not pass them on standard input: Claude Code's shell check refuses a
+heredoc holding JSON, which every measured session hit on its first try. In a session
+nobody can answer in, it goes through the stages in one pass and stops at the
+board. The stages connect every note to the next, synchronous steps included,
+since the planning prompt writes a side effect's trigger from the arrows into
+its note. Its hand-off runs `plan --from-board`, records the links, and checks
+them with `board:status --plan` before the person reviews the plan. The board
+is then committed, since the first `plan:approve` of a plan, which stamps its
+baseline, refuses a tree with changes outside the plan's own files, and a
+board is not one of them.
+
 ### 3. From a board to a plan
 
 ```bash
@@ -389,11 +405,32 @@ side-effect classes are part of the detail; so the command imports
 open ones: found by the discovery rule `check --plan` uses and read one by one
 through `readOpenPlan()`. It is advisory and exits 0.
 
+**Amended in implementation (M3a):** a note reads one of five states, not
+three. `unknown` is a link no reading can settle: the section its kind needs
+did not read, a module's routes did not load (for a route), or a plan did not
+read, which may be the one adding it. `unlinked` is a note with no link. The
+notes that lead nowhere are the `missing` links and the unlinked notes an
+element could answer, so actors and questions are left out: no link kind names
+either, and the prompt tells the agent to give them none. A `command` note
+links to its route and an `external` one to the side effect that reaches the
+system. `--plan` reads the file whether or not it is approved, since the agent
+records and checks its links before the person reviews the plan. A route and a
+page match by name across modules; every other kind matches in its `module`.
+
 The canvas draws the same result on the notes. `/_guren/boards/<slug>/status`
 runs `board:status --json` as a child, as the plan page's readiness route runs
 its commands, and each linked note shows `present` (the application has the
 element), `planned` (an open plan adds it) or `missing`. The overlay is read
 on open and on refresh, and is written nowhere.
+
+**Amended in implementation (M3b):** a note also reads `unknown`, drawn as
+such, and a note whose link changed since the report shows no state until the
+next one, since the report judged another link. The line under the canvas
+counts the states, the notes that lead nowhere and the plans read. The board is
+read in process first, so a board that is gone answers 404 before any child
+starts. Besides open and refresh, a return to the window checks again, at most
+once every 15 seconds and never while a check is running, since each check
+loads the application in a child.
 
 A board sits under `docs/`, which `change:lane` reads as ambient, and its text
 reaches the producer prompt. That is the standing of the request string today:

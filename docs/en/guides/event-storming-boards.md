@@ -10,7 +10,7 @@ A board carries no authority. No check fails because of one, nothing approves it
 bunx guren board:new "Post notifications"
 ```
 
-The board is written to `docs/boards/post-notifications.board.json`, and you commit it with the rest of your work. The slug comes from the title. A title with no ASCII letters needs one of its own:
+The board is written to `docs/boards/post-notifications.board.json`, and you commit it with the rest of your work. The slug comes from the title. A title with no ASCII letters or digits needs one of its own:
 
 ```bash
 bunx guren board:new "投稿の公開通知" --slug post-notifications
@@ -90,16 +90,69 @@ bunx guren board:apply post-notifications --ops ops.json
 
 The operations are `add`, `edit`, `move`, `remove`, `connect`, `disconnect`, `link`, `section` and `unsection`. An operation that cannot apply, such as one that names a note that is gone, is reported and skipped, and the rest still apply. You and your agent can therefore edit one board at the same time without losing each other's work. Agents connected to the Dev MCP endpoint can also read boards through the `guren_get_boards` tool.
 
+The agent harness in a scaffolded app ships an `event-storming` skill for running a session with your agent. Ask for one ("let's storm post notifications") and the agent works in four stages, stopping for you after each so you can correct the board on the canvas or in chat:
+
+1. events only;
+2. the commands that cause them, with the actors, the records they change and the pages they use;
+3. the reactions that follow each event and the external systems they reach;
+4. a question note for each thing nobody has decided.
+
+When you say the board has settled, the skill hands it to the plan, as the next section describes, and commits the board with its links before you approve the plan.
+
 ## From a board to a plan
 
-When the board has settled, ask your agent for a plan and point it at the board:
+When the board has settled, print the planning prompt with the board in it and give it to your agent:
 
-```text
-Read the board with `bunx guren board:show post-notifications` and write an implementation plan from it.
-Every event and reaction becomes a side effect, every command a route and an action, and every open question a plan question.
+```bash
+bunx guren plan --from-board post-notifications --print-prompt
 ```
 
-The plan's own checks, review page and approval then take over, as described in [Implementation Plans](./implementation-plans.md).
+The prompt quotes the board's outline after your request, and you can add a request of your own in quotes. It tells the agent how notes become plan elements:
+
+| Note | In the plan |
+|---|---|
+| `event`, `reaction` | a side effect, whose trigger comes from the arrows into the note |
+| `command` | a route and the action it calls |
+| `aggregate` | a model |
+| `view` | a view |
+| `question` | a plan question, about the elements its notes became |
+| a section | a flow |
+
+A note the change turns out not to need goes into the plan's non-goals. The plan's own checks, review page and approval then take over, as described in [Implementation Plans](./implementation-plans.md).
+
+Once the plan passes `plan:render`, the agent records which note became which element with `link` operations. A link names the element as the plan does: a model's class, a route's name, `Class.action` for an action, a view's page, a side effect's class. A command note links to its route, and actors and questions get no link.
+
+```json
+[{ "op": "link", "id": "post_published", "link": { "kind": "event", "name": "PostPublished" } }]
+```
+
+The plan never mentions the board, so deleting the board or moving a note leaves the plan and its approval as they were.
+
+## See where each note went
+
+`board:status` reports, for every linked note, whether its element exists:
+
+```bash
+bunx guren board:status post-notifications --plan docs/plans/post-notifications/plan.json
+```
+
+```text
+Board: Post notifications  (docs/boards/post-notifications.board.json)
+Plans: docs/plans/post-notifications/plan.json (given)
+
+Linked notes:
+  present   [aggregate post] Post  = model Post
+  planned   [event post_published] Post was published  = event PostPublished  (docs/plans/post-notifications/plan.json)
+  missing   [command publish_post] Publish a post  = route posts.publish
+
+Lead nowhere (2):
+  [command publish_post] Publish a post  = route posts.publish (missing)
+  [reaction tell_subscribers] When published, tell subscribers  (no link)
+```
+
+`present` means your app has the element, `planned` that a plan adds it, and `missing` that neither does. `unknown` means part of your app or a plan could not be read, so the command cannot tell. **Lead nowhere** lists the missing links and the notes with no link that could have one, so actors and questions are left out. Without `--plan`, the command reads the plans that are approved and not yet closed. With it, it reads that one plan whether or not it is approved, which is how your agent checks its links before you review the plan. The command reads your app as `plan:status` does, so it loads `db/schema.ts` and your validators. It only reports: once the board and the plan are read, it exits 0.
+
+The board page in the Dev Center shows the same result on the notes. Each linked note carries a badge, **In the app**, **Planned**, **Missing** or **Unknown**, and the line under the canvas counts them and names the plans it read. The page checks when you open the board and when you press **Refresh board**. It also checks when you come back to the window, if 15 seconds have passed since the last check. It reads the approved plans that are not yet closed, as `board:status` does without `--plan`. A note whose link changed since the last check shows no badge until the next one.
 
 ## Limits
 
