@@ -6,13 +6,14 @@
 
 | フィールド | 中身 |
 |---|---|
-| `planVersion` | `2`。`providers`、`config`、`env` のどれも持たない計画は `1` のままでかまいません |
+| `planVersion` | `2`。`providers`、`config`、`env`、`navigation` のどれも持たない計画は `1` のままでかまいません |
 | `title`、`summary`、`locale` | 計画の題と要約、本文の言語 (`en`、`ja`。ビューのラベルは除く) |
 | `scope` | `goals` と `nonGoals` |
 | `assumptions`、`questions` | 指示なしに決めたことと、決めきれなかったこと |
 | `models`、`validators`、`controllers`、`routes`、`views`、`resources`、`policies`、`sideEffects` | 設計の本体。要素の種類ごとに 1 セクション |
 | `providers`、`config` | 変更が `createApp()` に登録するもの([Provider と config](#provider-と-config) を参照) |
 | `env` | 変更が宣言する環境変数([環境変数](#環境変数) を参照) |
+| `navigation` | 変更が足す、変える、外すレイアウトのリンク([ナビゲーションのエントリー](#ナビゲーションのエントリー) を参照) |
 | `flows` | 計画で足すものの中を、リクエストがどう流れるか。ノードとエッジで書く |
 | `commands` | 変更の前に実行しておく `guren add attachments` などのコマンド |
 | `tasks` | スライスごとに達成すべきことと、その受け入れ振る舞い |
@@ -186,6 +187,21 @@ Guren は、GET 以外のリクエストに対するリダイレクトを 303 �
 - `guren change:lane` は、`defineEnv()` に足したキーを `env-added` として読みます。開いている計画のうち 1 つだけがそのキーの要素を足していて、宣言が要素の書いたとおりなら `low` に下げます。キーを変えたり外したりした場合、ファイルは `source-edited` のままです。キーと一緒にコメントを足したり消したりした場合や、`// @ts-expect-error` のようなディレクティブを別のコードの上に動かした場合も同じです。
 - 追加するキーを受け持つステップで `plan:scaffold --entries` を実行すると、キーが `config/env.ts` に宣言され、`.env.example` にも書かれます。タスクのコマンドが先に宣言していれば書きません。
 - ほかの 2 つのセクションと同じく、`env` を持つ計画は `planVersion` を `2` にします。
+
+## ナビゲーションのエントリー
+
+`navigation` には、変更が `config/navigation.ts` に足す、変える、外すエントリーを、ルートごとに 1 つずつ並べます（[ナビゲーション](./navigation.md)）。
+
+```json
+{ "id": "nav.jobs", "change": { "kind": "add" }, "route": "route.jobs.index", "label": "Jobs", "auth": "required", "can": { "ability": "viewAny", "policy": "policy.job" } }
+```
+
+- `route` には、計画にあるルートの id か、アプリが登録しているルートの名前を書きます。計画のルートは、パラメーターの無い `GET` で、アクションがページを描画するものに限ります。アプリのルートはメソッドとパスだけを確かめ、ページを描画するかどうかは `guren check` が判定します。
+- 足すエントリーには `label` を書き、計画のロケールの言葉にします。`auth` は `required`、`guest`、`any` のどれかで、`where` はユーザーのフィールドとの一致、`can` は Policy の要素が持つ ability を指定します。エントリーはルートで見分けるので、`change.kind` は `add`、`existing`、`alter`、`drop` のどれかです。リンク先を別のルートに移すときは、外して足します。
+- 検査では、同じルートの要素が 2 つあるとき、`config/navigation.ts` に既にあるルートを `add` するとき、無いルートを `alter` や `drop` するときに失敗します。
+- `plan:status` は `config/navigation.ts` をソースのまま読み、エントリーのラベル、`auth`、`where`、`can` を比べます。外すエントリーは、そのルートのエントリーがファイルから消えた時点で完了です。エントリーは、コマンドと同じく、ステップの検証が通れば承認時の受け入れで完了になります。
+- エントリーは、そのルートが描画するページのタスクの pages ステップに入ります。アプリのルートのエントリーは Foundation に入ります。scaffold はエントリーを書かず、`guren nav:add` と `nav:remove` が書きます。
+- `navigation` を持つ計画も `planVersion` を `2` にします。
 
 ## コマンド
 

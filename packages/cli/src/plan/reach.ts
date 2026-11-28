@@ -27,6 +27,7 @@ const REFERENCE_CARRIES_BEHAVIOUR: Record<PlanReferenceField, boolean> = {
   'view.propResource': true,
   'resource.model': true,
   'policy.model': true,
+  'navigation.policy': false,
   'view.actionRoute': false,
   'view.formValidator': false,
   'view.formSubmitsTo': false,
@@ -93,7 +94,7 @@ export function behaviourCanReach(plan: PlanDraft | Plan): Set<string> {
 
 export interface PlanElementWithoutBehaviour {
   id: string
-  section: 'columns' | 'sideEffects' | 'commands' | 'providers' | 'config' | 'env'
+  section: 'columns' | 'sideEffects' | 'commands' | 'providers' | 'config' | 'env' | 'navigation'
 }
 
 /**
@@ -112,6 +113,8 @@ export function planElementsWithoutBehaviour(plan: PlanDraft | Plan): PlanElemen
     if (section === 'sideEffects' && (change === 'add' || change === 'alter')) return [{ id, section }]
     if (section === 'columns' && change === 'alter') return [{ id, section }]
     if ((section === 'providers' || section === 'config' || section === 'env') && change === 'add') return [{ id, section }]
+    // A link grants nothing and no behaviour requests it; what it shows is read off the file.
+    if (section === 'navigation' && change !== 'existing') return [{ id, section }]
     return []
   })
 }
@@ -123,6 +126,7 @@ const WITHOUT_BEHAVIOUR_NOUNS: Record<PlanElementWithoutBehaviour['section'], st
   providers: 'providers',
   config: 'config definitions',
   env: 'environment keys',
+  navigation: 'navigation entries',
 }
 
 /** `<kind>: <ids>` per section with any, so a long list still reads at a glance; `plan:approve` and `plan:render` print it. */

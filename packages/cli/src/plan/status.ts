@@ -42,6 +42,7 @@ import {
   type PlanEnv,
   type PlanElementSection,
   type PlanModel,
+  type PlanNavigation,
   type PlanPolicy,
   type PlanProvider,
   type PlanResource,
@@ -49,6 +50,8 @@ import {
   type PlanSideEffect,
   type PlanView,
 } from './schema'
+import { NAVIGATION_CONFIG_FILE } from '../navigation-file'
+import { navigationRouteName } from './app-targets'
 import { derivePlanTasks, planLaterRelationships, type PlanLaterRelationship, type PlanTaskDerivation } from './tasks'
 
 /**
@@ -141,6 +144,7 @@ export const PLAN_STATUS_SECTIONS = [
   'providers',
   'config',
   'env',
+  'navigation',
   'commands',
 ] as const satisfies readonly PlanElementSection[]
 
@@ -349,6 +353,7 @@ const NOUNS = {
   providers: { plural: 'providers', singular: 'provider' },
   config: { plural: 'config definitions', singular: 'config definition' },
   env: { plural: 'environment keys', singular: 'environment key' },
+  navigation: { plural: 'navigation entries', singular: 'navigation entry' },
 } as const satisfies Record<string, PlanNoun>
 
 function inSection(section: PlanAppNames, name: string, plural: string): Existence {
@@ -493,6 +498,7 @@ function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit, deri
     ...(plan.providers ?? []).map((provider) => context.provider(provider)),
     ...(plan.config ?? []).map((entry) => context.config(entry)),
     ...(plan.env ?? []).map((entry) => context.env(entry)),
+    ...(plan.navigation ?? []).map((entry) => context.navigation(entry)),
     ...plan.commands.map((command) => context.command(command)),
   ]
   return { elements, summary: summarize(elements) }
@@ -1335,6 +1341,38 @@ class StatusContext {
         if (found.unverified !== undefined) return [unknown('declaration', planned, found.unverified)]
         if (found.signature === undefined) return [unknown('declaration', planned, `${found.source} holds a builder call no planned key states`)]
         return [found.signature === expected ? match('declaration', planned, found.source) : differ('declaration', planned, found.source)]
+      },
+    })
+  }
+
+  /**
+   * An entry of `config/navigation.ts`, found by its route (RFC 0040 §5) and judged by what it shows: the label, who
+   * sees it, and the ability and model its `can` asks. Nothing mounts an entry: the file is the config `createApp()` binds.
+   */
+  navigation(entry: PlanNavigation): PlanElementStatus {
+    const entries = this.detail?.navigation ?? NO_DETAIL
+    const classes = isUnreadable(entries) ? entries : entries.map((found) => ({ className: found.route, module: null, file: NAVIGATION_CONFIG_FILE }))
+    const route = navigationRouteName(this.plan, entry)
+    return this.named('navigation', { id: entry.id, change: entry.change, name: route }, this.app.navigation, NOUNS.navigation, classes, {
+      properties: () => {
+        if (entry.change.kind === 'drop') return []
+        const found = isUnreadable(entries) ? undefined : entries.find((candidate) => candidate.route === route)
+        const why = isUnreadable(entries) ? entries.unreadable : `${NAVIGATION_CONFIG_FILE} has no entry for ${route}`
+        const properties: PlanPropertyStatus[] = []
+        if (entry.label !== undefined) properties.push(compare('label', entry.label, found?.label, why))
+        if (entry.auth !== undefined) properties.push(compare('auth', entry.auth, found ? (found.auth ?? 'any') : undefined, why))
+        for (const [field, value] of Object.entries(entry.where ?? {})) {
+          const actual = found ? found.where?.[field] : undefined
+          properties.push(compare(`where ${field}`, JSON.stringify(value), found ? (actual === undefined ? 'absent' : JSON.stringify(actual)) : undefined, why))
+        }
+        if (entry.can) {
+          const policy = this.plan.policies.find((candidate) => candidate.id === entry.can!.policy)
+          const model = policy ? this.modelsById.get(policy.model)?.name : undefined
+          const planned = `${entry.can.ability} ${model ?? '?'}`
+          const actual = found ? (found.can ? `${found.can.ability} ${found.can.model.className}` : 'none') : undefined
+          properties.push(model === undefined ? unknown('can', planned, 'the policy element names no model of the plan') : compare('can', planned, actual, why))
+        }
+        return properties
       },
     })
   }

@@ -5,10 +5,10 @@
  * the checks judged another one, which is the drift `references.ts` exists to prevent.
  */
 
-import type { PlanChange, PlanController, PlanDraft, PlanElementSection, PlanModel, PlanRoute } from './schema'
+import type { PlanChange, PlanController, PlanDraft, PlanElementSection, PlanModel, PlanNavigation, PlanRoute } from './schema'
 
 /** The `PlanAppState` sections {@link namedTargets} reads, in the order their findings are reported. */
-export const NAMED_APP_SECTIONS = ['models', 'controllers', 'validators', 'resources', 'policies', 'providers', 'config', 'env', 'pages'] as const
+export const NAMED_APP_SECTIONS = ['models', 'controllers', 'validators', 'resources', 'policies', 'providers', 'config', 'env', 'navigation', 'pages'] as const
 
 /** The `PlanAppState` section a target is looked up in. */
 export type PlanAppTargetSection = (typeof NAMED_APP_SECTIONS)[number] | 'tables' | 'actions' | 'routes'
@@ -34,6 +34,11 @@ export interface PlanAppTarget {
   table?: { lookup: string; current: string }
   /** A route: the endpoint the plan gives it, which an `add` must not find already registered. */
   endpoint?: string
+}
+
+/** The route name an entry links: the name of the plan's route its `route` is the id of, else `route` itself (RFC 0040 §5). */
+export function navigationRouteName(plan: Pick<PlanDraft, 'routes'>, entry: Pick<PlanNavigation, 'route'>): string {
+  return plan.routes.find((route) => route.id === entry.route)?.name ?? entry.route
 }
 
 /** How an endpoint is compared everywhere: `GET /posts`. */
@@ -80,6 +85,8 @@ export function namedTargets(plan: PlanDraft): PlanAppTarget[] {
     ...named(plan.providers ?? [], 'providers', 'providers', 'provider class', (p) => p.className),
     ...named(plan.config ?? [], 'config', 'config', 'config definition', (c) => c.name),
     ...named(plan.env ?? [], 'env', 'env', 'environment key', (e) => e.key),
+    // One navigation per application: an entry is known by its route, whichever root registers it.
+    ...named(plan.navigation ?? [], 'navigation', 'navigation', 'navigation entry for route', (entry) => navigationRouteName(plan, entry)),
     // A module's pages are not colocated: they live in the project's own resources/js/pages
     // under the module's name, so the page id carries the root and the name does not.
     ...named(plan.views, 'views', 'pages', 'page', (v) => v.page, false),

@@ -283,6 +283,31 @@ export const PlanEnvSchema = z.strictObject({
   description: NonEmptySchema.optional(),
 })
 
+/** An entry is known by its route, so it is never renamed: a new route is a drop and an add. */
+const NavigationChangeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('existing') }),
+  z.strictObject({ kind: z.literal('add') }),
+  z.strictObject({ kind: z.literal('alter') }),
+  z.strictObject({ kind: z.literal('drop'), reason: NonEmptySchema }),
+])
+
+export const PLAN_NAVIGATION_AUTH = ['any', 'required', 'guest'] as const
+
+/**
+ * An entry of `config/navigation.ts` (RFC 0040 §5), one per route: `route` is the id of a route the plan
+ * declares or the name of one the application has. `can` names a policy element and one of its abilities.
+ */
+export const PlanNavigationSchema = z.strictObject({
+  id: IdSchema,
+  change: NavigationChangeSchema,
+  route: NonEmptySchema,
+  label: NonEmptySchema.optional(),
+  auth: z.enum(PLAN_NAVIGATION_AUTH).optional(),
+  // The values `readNavigationFile()` reads a `where` field as.
+  where: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  can: z.strictObject({ ability: NonEmptySchema, policy: IdSchema }).optional(),
+})
+
 export const PLAN_FLOW_NODE_KINDS = ['actor', 'page', 'route', 'action', 'job', 'store', 'external', 'decision'] as const
 
 /**
@@ -405,6 +430,7 @@ const draftShape = {
   providers: z.array(PlanProviderSchema).optional().transform(absentWhenEmpty),
   config: z.array(PlanConfigSchema).optional().transform(absentWhenEmpty),
   env: z.array(PlanEnvSchema).optional().transform(absentWhenEmpty),
+  navigation: z.array(PlanNavigationSchema).optional().transform(absentWhenEmpty),
   flows: z.array(PlanFlowSchema).default([]),
   locale: LocaleSchema,
   commands: z.array(PlanCommandSchema).default([]),
@@ -413,9 +439,9 @@ const draftShape = {
 }
 
 /** The sections a version 1 plan cannot hold, since a CLI that reads only version 1 refuses them. */
-function holdsSectionsOfItsVersion(plan: { planVersion: number; providers?: unknown; config?: unknown; env?: unknown }, context: z.core.$RefinementCtx): void {
+function holdsSectionsOfItsVersion(plan: { planVersion: number; providers?: unknown; config?: unknown; env?: unknown; navigation?: unknown }, context: z.core.$RefinementCtx): void {
   if (plan.planVersion >= ENTRY_SECTIONS_VERSION) return
-  for (const key of ['providers', 'config', 'env'] as const) {
+  for (const key of ['providers', 'config', 'env', 'navigation'] as const) {
     if (plan[key] !== undefined) context.addIssue({ code: 'custom', path: [key], message: `needs planVersion ${ENTRY_SECTIONS_VERSION}` })
   }
 }
@@ -446,6 +472,7 @@ export type PlanSideEffect = z.infer<typeof PlanSideEffectSchema>
 export type PlanProvider = z.infer<typeof PlanProviderSchema>
 export type PlanConfig = z.infer<typeof PlanConfigSchema>
 export type PlanEnv = z.infer<typeof PlanEnvSchema>
+export type PlanNavigation = z.infer<typeof PlanNavigationSchema>
 export type PlanFlow = z.infer<typeof PlanFlowSchema>
 export type PlanFlowNode = z.infer<typeof PlanFlowNodeSchema>
 export type PlanFlowEdge = z.infer<typeof PlanFlowEdgeSchema>
@@ -475,6 +502,7 @@ export type PlanElementSection =
   | 'providers'
   | 'config'
   | 'env'
+  | 'navigation'
   | 'flows'
   | 'commands'
   | 'tasks'
@@ -525,6 +553,7 @@ export function listPlanElementEntries(plan: PlanDraft): PlanElementEntry[] {
   push('providers', plan.providers ?? [])
   push('config', plan.config ?? [])
   push('env', plan.env ?? [])
+  push('navigation', plan.navigation ?? [])
   push('flows', plan.flows)
   push('commands', plan.commands)
   for (const task of plan.tasks) {

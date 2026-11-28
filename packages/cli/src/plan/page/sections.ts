@@ -20,6 +20,7 @@ type SectionKey =
   | 'providers'
   | 'config'
   | 'env'
+  | 'navigation'
   | 'flows'
   | 'commands'
   | 'tasks'
@@ -44,6 +45,7 @@ export const SECTIONS: readonly Section[] = [
   { key: 'providers', label: 'sections.providers', render: renderProviders },
   { key: 'config', label: 'sections.config', render: renderConfig },
   { key: 'env', label: 'sections.env', render: renderEnv },
+  { key: 'navigation', label: 'sections.navigation', render: renderNavigation },
   { key: 'flows', label: 'sections.flows', render: renderFlows },
   { key: 'commands', label: 'sections.commands', render: renderCommands },
   { key: 'tasks', label: 'sections.tasks', render: renderTasks },
@@ -340,6 +342,25 @@ function renderEnv(host: HTMLElement, { plan }: PlanPagePayload): void {
       ['env.description', entry.description],
     ])
     host.appendChild(card({ id: entry.id, title: entry.key, change: entry.change, body: body }))
+  }
+}
+
+function renderNavigation(host: HTMLElement, { plan }: PlanPagePayload): void {
+  for (const entry of plan.navigation ?? []) {
+    const where = Object.entries(entry.where ?? {}).map(([field, value]) => field + ' = ' + JSON.stringify(value))
+    let can: HTMLElement | undefined
+    if (entry.can) {
+      can = el('span')
+      can.textContent = entry.can.ability + ' · '
+      can.appendChild(link(entry.can.policy))
+    }
+    const body = kv([
+      ['navigation.route', plan.routes.some((route) => route.id === entry.route) ? link(entry.route) : entry.route],
+      ['navigation.auth', entry.auth],
+      ['navigation.where', where.length > 0 ? where.join(', ') : undefined],
+      ['navigation.can', can],
+    ])
+    host.appendChild(card({ id: entry.id, title: entry.label ?? entry.route, change: entry.change, body: body }))
   }
 }
 

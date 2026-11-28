@@ -26,6 +26,7 @@ export const PLAN_REFERENCE_OWNER_PATHS = {
   views: 'views[]',
   resources: 'resources[]',
   policies: 'policies[]',
+  navigation: 'navigation[]',
   flows: 'flows[]',
   tasks: 'tasks[]',
   acceptance: 'tasks[].acceptance[]',
@@ -52,6 +53,7 @@ export type PlanReferenceField =
   | 'view.formSubmitsTo'
   | 'resource.model'
   | 'policy.model'
+  | 'navigation.policy'
   | 'task.covers'
   | 'acceptance.route'
   | 'acceptance.inertia'
@@ -117,6 +119,7 @@ export const PLAN_REFERENCES: ReadonlyArray<PlanReferenceDefinition> = [
   definition('view.formSubmitsTo', 'views', 'form.submitsTo', 'routes', 'The form target'),
   definition('resource.model', 'resources', 'model', 'models', 'The resource model'),
   definition('policy.model', 'policies', 'model', 'models', 'The policy model'),
+  definition('navigation.policy', 'navigation', 'can.policy', 'policies', (_site, owner) => `The policy of the entry for "${owner.route}"`),
   definition('task.covers', 'tasks', 'covers[]', null, 'The task covers'),
   definition('acceptance.route', 'acceptance', 'route', 'routes', 'The behaviour route'),
   definition('acceptance.inertia', 'acceptance', 'expect.inertia', 'views', 'The expected page'),

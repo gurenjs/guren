@@ -165,7 +165,13 @@ const ENTRY = `## Providers, config and environment keys
 - \`providers\` lists the service providers the change registers in \`createApp({ providers })\`, each a default export of \`app/Providers/<className>.ts\` with a one-sentence \`purpose\`. \`config\` lists the config definitions it registers in \`createApp({ config })\`, each the default export of \`config/<name>.ts\`, named by \`name\`.
 - \`change.kind\` is \`add\` or \`existing\` there: changing or removing a registration is left to the person.
 - Leave out the provider an added policy needs: \`plan:scaffold\` writes and registers \`<Policy>Provider\` with the policy.
-- \`env\` lists the keys the change adds to \`defineEnv({ ... })\` in \`config/env.ts\`: \`key\`, its \`type\` (\`string\`, \`url\`, \`number\`, \`port\`, \`boolean\` or \`enum\` with \`choices\`; \`string\` when left out), and \`default\`, \`required\`, \`secret\` and \`description\` where they apply. A key with no \`default\` that is not \`required\` is optional.`
+- \`env\` lists the keys the change adds to \`defineEnv({ ... })\` in \`config/env.ts\`: \`key\`, its \`type\` (\`string\`, \`url\`, \`number\`, \`port\`, \`boolean\` or \`enum\` with \`choices\`; \`string\` when left out), and \`default\`, \`required\`, \`secret\` and \`description\` where they apply. A key with no \`default\` that is not \`required\` is optional.
+
+## Navigation
+
+- \`navigation\` lists the layout links the change adds, alters or drops in \`config/navigation.ts\`, one element per route. \`route\` is the id of a route in the plan, or the name of a route the application already has. The route is a \`GET\` with no path parameter that renders a page.
+- An added entry carries its \`label\`, in the plan's locale. \`auth\` is \`required\` (signed in), \`guest\` or \`any\` (the default), and \`can\` names an ability and the id of the policy element that lists it, for a link only some users see.
+- An entry is known by its route: a link that moves to another route is a \`drop\` and an \`add\`. Leave the entry out when the layout is not to show the page.`
 
 const CHECK = `## Check the plan
 

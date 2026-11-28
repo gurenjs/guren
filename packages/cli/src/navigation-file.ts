@@ -6,9 +6,14 @@
  * file unreadable, with the line, rather than an entry read in part. Another key of an entry is
  * passed over, as `defineNavigation()` passes it over.
  */
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
+
 import type { ArrayExpression, CallExpression, File, Node } from '@babel/types'
 
 import { memberKeyName, unwrapTypeAssertion } from './ast-walk'
+import { parseSourceFile } from './parse-cache'
 import { definitionBuilderCall } from './resolved-config'
 import { importsByLocal, specifierBase, withoutExtension } from './schema-binding'
 
@@ -62,6 +67,25 @@ const lineOf = (node: Node): number | undefined => node.loc?.start.line
 
 function refuse(node: Node, reason: string): never {
   throw new Unreadable(reason, lineOf(node))
+}
+
+export const NAVIGATION_CONFIG_FILE = 'config/navigation.ts'
+
+/** The entries of an app root's `config/navigation.ts` on disk: none when the file is absent, why when it does not read. */
+export async function readNavigationEntries(cwd: string): Promise<NavigationFileEntry[] | { unreadable: string }> {
+  const file = resolve(cwd, NAVIGATION_CONFIG_FILE)
+  if (!existsSync(file)) return []
+  let ast: File | null
+  try {
+    ast = parseSourceFile(await readFile(file, 'utf8'), file)
+  } catch (error) {
+    return { unreadable: `${NAVIGATION_CONFIG_FILE} could not be read (${error instanceof Error ? error.message : String(error)})` }
+  }
+  if (ast === null) return { unreadable: `${NAVIGATION_CONFIG_FILE} does not parse` }
+  const reading = readNavigationFile(ast, { cwd, file })
+  if (reading.status === 'not-a-definition') return { unreadable: `${NAVIGATION_CONFIG_FILE} is no defineNavigation() definition` }
+  if (reading.status === 'unreadable') return { unreadable: `${NAVIGATION_CONFIG_FILE}${reading.line ? `:${reading.line}` : ''} cannot be read as data (${reading.reason})` }
+  return reading.entries
 }
 
 /** `file` is absolute, so an import of the `can` model resolves from it; `cwd` is the app root `@/` names. */

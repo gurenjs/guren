@@ -16,6 +16,7 @@
   "sections.providers": "Provider",
   "sections.config": "設定",
   "sections.env": "環境変数",
+  "sections.navigation": "ナビゲーション",
   "sections.flows": "フロー",
   "sections.commands": "コマンド",
   "sections.tasks": "タスクと受け入れ条件",
@@ -166,6 +167,10 @@
   "env.required": "必須",
   "env.secret": "秘密",
   "env.description": "説明",
+  "navigation.route": "ルート",
+  "navigation.auth": "表示する相手",
+  "navigation.where": "条件",
+  "navigation.can": "権限",
 
   "tasks.entity": "エンティティ",
   "tasks.covers": "対象の要素",

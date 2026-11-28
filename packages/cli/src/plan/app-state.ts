@@ -42,6 +42,7 @@ import { ParseCache } from '../parse-cache'
 import { readSourceClassIdentities } from '../source-class-identities'
 import { isUnreadable, type PlanAppUnreadable } from './unreadable'
 import { readEnvDeclarations } from '../env-declarations'
+import { readNavigationEntries } from '../navigation-file'
 
 const CONTROLLERS_DIR = 'app/Http/Controllers'
 
@@ -129,6 +130,8 @@ export interface PlanAppState {
   config: PlanAppNames
   /** The keys the project root's `config/env.ts` declares, read from source. */
   env: PlanAppNames
+  /** The routes the project root's `config/navigation.ts` has an entry for, read from source (RFC 0040 §5). */
+  navigation: PlanAppNames
   /**
    * Inertia page ids, e.g. `posts/Show`. Every page sits in the project's own
    * `resources/js/pages`, a module's under its name, so the id carries the scope and
@@ -170,7 +173,7 @@ export async function loadPlanAppState(
 
   // One cache keeps the shared graph readers and Impact scans on the same source readings.
   const cache = new ParseCache()
-  const [apiOnly, models, resources, policies, providers, config, env, pages, validators, routes, controllers, tables] = await Promise.all([
+  const [apiOnly, models, resources, policies, providers, config, env, navigation, pages, validators, routes, controllers, tables] = await Promise.all([
     isConfirmedApiOnlyApp(root).catch(() => false),
     modelSection(root, cache),
     classSection(root, discoverResourceFiles),
@@ -178,6 +181,7 @@ export async function loadPlanAppState(
     classSection(root, (appRoot) => discoverEntryFiles(appRoot, PROVIDERS_DIR)),
     classSection(root, (appRoot) => discoverEntryFiles(appRoot, CONFIG_DIR)),
     envSection(root),
+    navigationSection(root),
     pageSection(root, cache),
     validatorSections(root, roots, cache),
     readRoutesFileGraph(root, options.routesFile),
@@ -194,6 +198,7 @@ export async function loadPlanAppState(
     providers,
     config,
     env,
+    navigation,
     pages,
     validators: validators.names,
     routes: isUnreadable(routes.routes)
@@ -284,6 +289,12 @@ function byName(a: PlanAppName, b: PlanAppName): number {
 async function envSection(root: string): Promise<PlanAppNames> {
   const declarations = await readEnvDeclarations(root)
   return isUnreadable(declarations) ? declarations : declarations.map(({ key }) => ({ name: key, module: null })).sort(byName)
+}
+
+/** The project root's `config/navigation.ts`, which `createApp({ config })` binds: an app has one navigation. */
+async function navigationSection(root: string): Promise<PlanAppNames> {
+  const entries = await readNavigationEntries(root)
+  return isUnreadable(entries) ? entries : entries.map(({ route }) => ({ name: route, module: null })).sort(byName)
 }
 
 /** A section named after the class each discovered file declares, as `guren context` names them. */
