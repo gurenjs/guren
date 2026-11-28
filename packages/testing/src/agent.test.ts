@@ -69,7 +69,11 @@ function routes(router: Router): void {
     .post('/drafts', () => Response.json({ ok: true }, { status: 201 }))
     .name('drafts.store')
     .agent({})
+}
 
+/** Apart from `routes`: cases there enumerate the tool list, and this tool would join it. */
+function confirmRoutes(router: Router): void {
+  routes(router)
   router.delete('/posts', [PostController, 'purge']).name('posts.purge').agent({ confirm: true })
 }
 
@@ -83,7 +87,7 @@ describe('TestApp.agent()', () => {
     const app = await freshApp()
     const names = (await app.agent().tools()).map((tool) => tool.toolName).sort()
 
-    expect(names).toEqual(['drafts.store', 'posts.index', 'posts.purge', 'posts.store', 'secret.show'])
+    expect(names).toEqual(['drafts.store', 'posts.index', 'posts.store', 'secret.show'])
   })
 
   it('dispatches a read tool and exposes its structured result', async () => {
@@ -178,7 +182,8 @@ describe('TestApp.agent()', () => {
   })
 
   it('refuses a confirm tool unless the test calls it as a caller who agreed', async () => {
-    const app = await freshApp()
+    created.length = 0
+    const app = await TestApp.create({ routes: confirmRoutes })
     await app.agent().call('posts.store', { title: 'Kept until agreed' })
 
     // Wrapped: the pending call is a thenable, and `rejects` wants a promise.
@@ -191,7 +196,7 @@ describe('TestApp.agent()', () => {
   })
 
   it('rehearses a confirm tool without the option, since a rehearsal runs nothing', async () => {
-    const app = await freshApp()
+    const app = await TestApp.create({ routes: confirmRoutes })
 
     await app.agent().call('posts.purge', {}, { preflight: true }).assertOk()
   })
