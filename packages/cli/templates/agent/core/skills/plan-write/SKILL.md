@@ -40,7 +40,9 @@ bunx guren plan "<the request>" --print-prompt
 ```
 
 Quote the request: an unquoted word starting with `-` is read as a flag.
-Follow the prompt it prints. When it has you ask the person, ask in whatever
+A change worked out on an event-storming board adds `--from-board <slug>`,
+and its prompt ends with the links to record on the board (the
+`event-storming` skill). Follow the prompt it prints. When it has you ask the person, ask in whatever
 way your client offers and wait for the answers before you write the JSON. If
 the change needs no plan, make it the usual way.
 

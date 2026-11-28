@@ -90,6 +90,15 @@ bunx guren board:apply post-notifications --ops ops.json
 
 The operations are `add`, `edit`, `move`, `remove`, `connect`, `disconnect`, `link`, `section` and `unsection`. An operation that cannot apply, such as one that names a note that is gone, is reported and skipped, and the rest still apply. You and your agent can therefore edit one board at the same time without losing each other's work. Agents connected to the Dev MCP endpoint can also read boards through the `guren_get_boards` tool.
 
+The agent harness in a scaffolded app ships an `event-storming` skill for running a session with your agent. Ask for one ("let's storm post notifications") and the agent works in four stages, stopping for you after each so you can correct the board on the canvas or in chat:
+
+1. events only;
+2. the commands that cause them, with the actors, the records they change and the pages they use;
+3. the reactions that follow each event and the external systems they reach;
+4. a question note for each thing nobody has decided.
+
+When you say the board has settled, the skill hands it to the plan, as the next section describes.
+
 ## From a board to a plan
 
 When the board has settled, print the planning prompt with the board in it and give it to your agent:

@@ -74,7 +74,9 @@ bunx guren gate                    # every CI stage (codegen, typecheck, lint, c
 Implementation plans: the `plan-write` and `plan-implement` skills. A plan is
 built only after a person approves it, so before writing one read step 0 of
 `plan-write`, which says what to do in a session nobody approves from (a
-non-interactive run, a request that says nobody will review). A defect: the
+non-interactive run, a request that says nobody will review). A change whose
+shape is not settled yet starts on an event-storming board with the person:
+the `event-storming` skill, which hands the board to `plan-write`. A defect: the
 `fix` skill, which reproduces it as a failing test before changing anything.
 Browser verification: the `verify-in-browser` skill. Each lists its own
 commands.
