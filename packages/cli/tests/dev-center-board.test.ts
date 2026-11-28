@@ -112,7 +112,7 @@ describe('board documents', () => {
       expect(await page.text(), path).toContain('id="board-view"')
     }
     expect((await get(dir, '/_guren/boards/demo/extra')).status).toBe(404)
-    expect((await get(dir, '/_guren/boards/demo/status')).status).toBe(404)
+    expect((await get(dir, '/_guren/boards/demo/status/extra')).status).toBe(404)
   })
 })
 
