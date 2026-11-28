@@ -4,7 +4,7 @@
  */
 import { CliError } from './cli-error'
 import { FileDiscoveryError, MCP_SKILLS_DIR } from './discovery'
-import { SKILL_MANIFEST } from './mcp-skills'
+import { MCP_SKILLS_OPTION, SKILL_MANIFEST } from './mcp-skills'
 import { ParseCache } from './parse-cache'
 import { MCP_PLUGIN_EXPORT, scanPluginCalls, type PluginCall } from './plugin-calls'
 import { resolveAppRoot, safeModuleName, writeScaffoldFile, type ScaffoldFileEntry, type WriterOptions } from './utils'
@@ -23,7 +23,6 @@ const DESCRIPTION_LIMIT = 1024
 const UNWRITABLE_IN_DESCRIPTION = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cs}]/u
 
 export const MCP_SKILL_DESCRIPTION_PLACEHOLDER = 'TODO: say what this skill does and when an agent should load it.'
-export const MCP_SKILLS_OPTION = "skills: { files: () => import('@/.guren/mcp-skills.gen') }"
 
 function assertSkillName(name: string): void {
   if (name.length <= SKILL_NAME_LIMIT && SKILL_NAME_RE.test(name)) return

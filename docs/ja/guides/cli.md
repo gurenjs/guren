@@ -433,7 +433,7 @@ bunx guren route:list --format compact # コンパクトな1行形式
 
 | コマンド | 説明 | 例 |
 |----------|------|----|
-| `tool:list` | このアプリが公開しているエージェントツールを一覧表示 | `bunx guren tool:list` |
+| `tool:list` | このアプリが公開しているエージェントツールを一覧表示。その下に、MCP エンドポイントが配信する[スキル](./mcp-skills.md)も表示する | `bunx guren tool:list` |
 | `tool:inspect` | 1 つのツールの導出結果を表示 | `bunx guren tool:inspect posts.store` |
 | `tool:call` | エージェントと同じ経路で 1 つのツールを呼び出す | `bunx guren tool:call posts.index` |
 | `tool:dev` | 使い捨てトークン付きでツールをローカルに提供 | `bunx guren tool:dev` |
@@ -444,7 +444,7 @@ bunx guren route:list --format compact # コンパクトな1行形式
 # 認可アビリティ・MCPアノテーションとともに表示
 bunx guren tool:list
 
-# 導出結果そのもの（警告を含む）
+# 導出結果そのもの（警告を含む）。スキルは `skills` に入る
 bunx guren tool:list --json
 
 # 1つのツールの詳細: 入力フィールド・出力スキーマ・認可・

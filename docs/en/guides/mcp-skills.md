@@ -105,6 +105,22 @@ Two things follow:
 - Whatever is in a skills directory is published to everyone who holds a token for your app. Read the directory before you deploy it, and keep credentials, internal URLs and customer data out of it.
 - A skill grants nothing and enforces nothing. Calling a tool it describes still takes a token with the right scope, and an agent can ignore what it says. Keep every rule the app depends on in the route's [policy](./authorization.md) or in its [scopes and approval gates](./agent-tool-governance.md), and use the skill to explain the rule.
 
+## What the checks enforce
+
+`bunx guren check` reads the skills once an app has a skill, a generated module, or an import of one. Whether a skill is served is decided by the same catalog code the endpoint runs at boot, so the check and the server agree.
+
+| Check | Fails or warns when |
+|---|---|
+| `mcp-skill-frontmatter:<file>` | The endpoint would leave the skill out: no frontmatter, no `name` or `description`, or a `name` that differs from the directory. |
+| `mcp-skill-manifest:<file>` | A directory's manifest is spelled in another case, such as `skill.md`, so the directory is not published. |
+| `mcp-skill-namespace:<file>` | A `SKILL.md` sits below another skill's directory, or a root skill carries the name of a module that has skills. |
+| `mcp-skill-limit:<file>` | One skill holds more than 512 files or 16 MiB, the size every host is required to accept. |
+| `mcp-skills-stale` | `.guren/mcp-skills.gen.ts` is missing or differs from the files, so the endpoint serves older ones. `check --fix` runs codegen. |
+| `mcp-skills-unserved` | Skills exist and no `mcpPlugin()` call carries `skills` (warning). A call whose options the check cannot read whole is reported as unverified instead. |
+| `mcp-skill-host-limit` | A text file over 100 KB, a skill over 400 KB, or more than 100 skills, the limits Claude Code documents (advisory: `check --ci` and `gate` do not count it). |
+
+`bunx guren audit` scans the text files of every published skill for hardcoded credentials, with the rule it applies to source files. `bunx guren tool:list` prints the skills the endpoint would serve below the tools, and `--json` carries them as `skills`.
+
 ## Related
 
 - [Agent Interface](./agent-interface.md): declaring tools and serving them over MCP

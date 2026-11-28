@@ -294,17 +294,25 @@ generators whose output no source-file declaration can coincide with, as
 `make:adr` is: a `SKILL.md` is published text, so a change that adds one stays
 for a person to read.
 
-`guren check` gains a content-activated group, silent for an app with no skills
-directory:
+`guren check` gains a content-activated group, silent for an app with no skill,
+no generated module and no import of one:
 
 | Key | Severity | Condition |
 | --- | --- | --- |
-| `mcp-skill-frontmatter:<path>` | fail | No frontmatter, no `name`, no `description`, or `name` differs from the directory |
+| `mcp-skill-frontmatter:<path>` | fail | The catalog refuses the skill: no frontmatter, no `name`, no `description`, or `name` differs from the directory |
+| `mcp-skill-manifest:<path>` | fail | A directory's manifest is spelled in another case (`skill.md`), so it is not published |
 | `mcp-skill-namespace:<path>` | fail | A root skill named like a module that has skills, or a `SKILL.md` below another skill |
 | `mcp-skill-limit:<path>` | fail | More than 512 files or 16 MiB in one skill |
-| `mcp-skills-stale` | fail, `fix: codegen` | `.guren/mcp-skills.gen.ts` differs from what codegen would write |
+| `mcp-skills-stale` | fail, `fix: codegen` | `.guren/mcp-skills.gen.ts` is missing or differs from what codegen would write, a module still holding deleted skills included |
 | `mcp-skills-unserved` | warn | Skills exist and the `mcpPlugin()` call, read whole, carries no `skills` |
-| `mcp-skill-host-limit:<path>` | warn | A text file over 100 KB, a skill over 400 KB, or more than 100 skills |
+| `mcp-skill-host-limit:<path>` | warn, advisory | A text file over 100 KB, a skill over 400 KB, or more than 100 skills |
+
+`mcp-skill-frontmatter` is not a reading of the frontmatter by the CLI. The
+check hands the contents codegen publishes to `SkillsExtension.load()`, from the
+SDK `@guren/cli` already depends on, and reports what it refuses, so the verdict
+is the one the endpoint reaches at boot (§1.4). The SDK's own size limits are
+lifted for that call, since `mcp-skill-limit` judges them and a skill over them
+is still served.
 
 The 512-file and 16 MiB figures are what the extension requires every host to
 accept and recommends servers stay under; failing on them is Guren's
@@ -320,7 +328,10 @@ is a heuristic over text, and it does not replace reading what a skills
 directory holds before deploying it.
 
 `guren tool:list` prints the skills under the tools, including for an app that
-has skills and no tools, and `--json` carries them as `skills`.
+has skills and no tools, and `--json` carries them as `skills`. It lists what
+that same catalog call would serve from the files on disk, with what it
+refused as warnings; whether `mcpPlugin()` is given the module is the check's
+to say.
 
 ### 2. Confirmation by elicitation
 

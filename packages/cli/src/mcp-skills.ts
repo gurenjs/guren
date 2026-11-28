@@ -9,10 +9,12 @@ import { lstat, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { appDependsOn, FileDiscoveryError, listAppRoots, MCP_SKILLS_DIR, readDirectory, toPosixRelative } from './discovery'
 import { MCP_PLUGIN_EXPORT, pluginCallFiles } from './plugin-calls'
-import { pathExists, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { escapeRegExp, pathExists, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
 export const SKILL_MANIFEST = 'SKILL.md'
 export const MCP_SKILLS_MODULE = '.guren/mcp-skills.gen.ts'
+/** The option that serves the module, as `make:mcp-skill` and `guren check` print it. */
+export const MCP_SKILLS_OPTION = "skills: { files: () => import('@/.guren/mcp-skills.gen') }"
 /** What an app's `import()` of the generated module names, whatever alias or relative path leads to it. */
 const MCP_SKILLS_MODULE_STEM = 'mcp-skills.gen'
 
@@ -32,12 +34,36 @@ export interface DiscoveredSkill {
   files: DiscoveredSkillFile[]
 }
 
+/** What the reading found that an author did not intend, each with the app-relative file it concerns. */
+export type McpSkillProblem =
+  | { kind: 'misnamed'; file: string }
+  | { kind: 'collision'; file: string; kept: string; key: string }
+  | { kind: 'nested'; file: string; outer: string }
+
 export interface McpSkillsContent {
   skills: DiscoveredSkill[]
   files: Record<string, string>
   /** Files that are not valid UTF-8, as base64. */
   binary: Record<string, string>
+  /** The app-relative file behind each published key. */
+  sources: Record<string, string>
+  /** Each published file's size in bytes, by key. */
+  sizes: Record<string, number>
+  problems: McpSkillProblem[]
+  /** `problems`, as the lines codegen prints. */
   warnings: string[]
+}
+
+export function describeSkillProblem(problem: McpSkillProblem): string {
+  switch (problem.kind) {
+    case 'misnamed':
+      return `${problem.file} is not published: a skill's manifest is named ${SKILL_MANIFEST}, in that case.`
+    case 'collision':
+      return `${problem.file} is not published: ${problem.kept} already takes skill://${problem.key}.`
+    case 'nested':
+      return `${problem.file} sits inside the skill ${problem.outer}, and the MCP endpoint refuses a nested skill at boot. `
+        + 'Move it out, or rename a root skill that carries the name of a module with skills.'
+  }
 }
 
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
@@ -66,9 +92,9 @@ async function filesBelow(dir: string, prefix: string): Promise<DiscoveredSkillF
 
 /**
  * Every skill of the app, the root's first and then each module's by name. A directory with no `SKILL.md`
- * is never descended into, so nothing below it can fail the read; one spelled in another case is named in `warnings`.
+ * is never descended into, so nothing below it can fail the read; one spelled in another case is named in `problems`.
  */
-export async function discoverMcpSkills(appRoot: string, warnings: string[] = []): Promise<DiscoveredSkill[]> {
+export async function discoverMcpSkills(appRoot: string, problems: McpSkillProblem[] = []): Promise<DiscoveredSkill[]> {
   const roots = (await listAppRoots(appRoot)).sort((a, b) => byCodeUnit(a.module ?? '', b.module ?? ''))
   const skills: DiscoveredSkill[] = []
   for (const root of roots) {
@@ -83,9 +109,7 @@ export async function discoverMcpSkills(appRoot: string, warnings: string[] = []
       const top = await readDirectory(dir)
       if (!top.some((entry) => entry.isFile() && entry.name === SKILL_MANIFEST)) {
         const misnamed = top.find((entry) => entry.isFile() && entry.name.toLowerCase() === SKILL_MANIFEST.toLowerCase())
-        if (misnamed) {
-          warnings.push(`${toPosixRelative(appRoot, join(dir, misnamed.name))} is not published: a skill's manifest is named ${SKILL_MANIFEST}, in that case.`)
-        }
+        if (misnamed) problems.push({ kind: 'misnamed', file: toPosixRelative(appRoot, join(dir, misnamed.name)) })
         continue
       }
       const path = root.module === null ? name : `${root.module}/${name}`
@@ -119,36 +143,43 @@ export function nestedSkillManifests(keys: Iterable<string>): Array<{ inner: str
 
 /** The contents the generated module holds. A path two skills both give is published once, the first one's. */
 export async function readMcpSkills(appRoot: string): Promise<McpSkillsContent> {
-  const warnings: string[] = []
-  const skills = await discoverMcpSkills(appRoot, warnings)
+  const problems: McpSkillProblem[] = []
+  const skills = await discoverMcpSkills(appRoot, problems)
   const text = new Map<string, string>()
   const binary = new Map<string, string>()
   const sources = new Map<string, string>()
+  const sizes = new Map<string, number>()
 
   for (const skill of skills) {
     for (const { key, file } of skill.files) {
-      const taken = sources.get(key)
-      if (taken !== undefined) {
-        warnings.push(`${toPosixRelative(appRoot, file)} is not published: ${toPosixRelative(appRoot, taken)} already takes skill://${key}.`)
+      const relative = toPosixRelative(appRoot, file)
+      const kept = sources.get(key)
+      if (kept !== undefined) {
+        problems.push({ kind: 'collision', file: relative, kept, key })
         continue
       }
-      sources.set(key, file)
+      sources.set(key, relative)
       const bytes = await readFile(file)
+      sizes.set(key, bytes.byteLength)
       const decoded = decodeUtf8(bytes)
       if (decoded === undefined) binary.set(key, bytes.toString('base64'))
       else text.set(key, decoded)
     }
   }
 
-  const source = (key: string): string => toPosixRelative(appRoot, sources.get(key)!)
   for (const { inner, outer } of nestedSkillManifests(sources.keys())) {
-    warnings.push(
-      `${source(inner)} sits inside the skill ${source(outer)}, and the MCP endpoint refuses a nested skill at boot. `
-      + 'Move it out, or rename a root skill that carries the name of a module with skills.',
-    )
+    problems.push({ kind: 'nested', file: sources.get(inner)!, outer: sources.get(outer)! })
   }
 
-  return { skills, files: sorted(text), binary: sorted(binary), warnings }
+  return {
+    skills,
+    files: sorted(text),
+    binary: sorted(binary),
+    sources: sorted(sources),
+    sizes: Object.fromEntries(sizes),
+    problems,
+    warnings: problems.map(describeSkillProblem),
+  }
 }
 
 function sorted(entries: ReadonlyMap<string, string>): Record<string, string> {
@@ -195,6 +226,25 @@ export interface GenerateMcpSkillsOptions extends WriterOptions {
   appRoot?: string
 }
 
+const MCP_SKILL_INPUT = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(MCP_SKILLS_DIR)}(?:/|$)`, 'u')
+
+/** Whether a changed path, app-relative, is a file codegen may publish or the directory holding them. */
+export function isMcpSkillInput(relativePath: string): boolean {
+  return MCP_SKILL_INPUT.test(relativePath)
+}
+
+/**
+ * What the module should hold now, or `null` for an app codegen writes none for: one with no skill that
+ * neither imports the module nor already holds the file. `guren check` compares the file with this.
+ */
+export async function planMcpSkillsModule(appRoot: string): Promise<{ content: McpSkillsContent; source: string | null }> {
+  const content = await readMcpSkills(appRoot)
+  const unwanted = content.skills.length === 0
+    && !(await pathExists(resolve(appRoot, MCP_SKILLS_MODULE)))
+    && !(await appImportsSkillsModule(appRoot))
+  return { content, source: unwanted ? null : renderMcpSkillsModule(content) }
+}
+
 /**
  * Written for an app that has a skill, that imports the module, or that already holds the file, and never
  * removed: with no skill it is written empty, so the `import()` in `mcpPlugin({ skills })` keeps resolving.
@@ -203,13 +253,9 @@ export async function generateMcpSkills(
   options: GenerateMcpSkillsOptions = {},
 ): Promise<{ outputPath: string | null; skillCount: number; warnings: string[] }> {
   const appRoot = resolveAppRoot(options)
-  const outputFile = resolve(appRoot, MCP_SKILLS_MODULE)
-  const content = await readMcpSkills(appRoot)
+  const { content, source } = await planMcpSkillsModule(appRoot)
+  if (source === null) return { outputPath: null, skillCount: 0, warnings: content.warnings }
 
-  if (content.skills.length === 0 && !(await pathExists(outputFile)) && !(await appImportsSkillsModule(appRoot))) {
-    return { outputPath: null, skillCount: 0, warnings: content.warnings }
-  }
-
-  const outputPath = await writeGeneratedFileIn(appRoot, outputFile, renderMcpSkillsModule(content), { force: options.force })
+  const outputPath = await writeGeneratedFileIn(appRoot, resolve(appRoot, MCP_SKILLS_MODULE), source, { force: options.force })
   return { outputPath, skillCount: content.skills.length, warnings: content.warnings }
 }
