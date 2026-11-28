@@ -32,8 +32,10 @@ import {
 import { fileExists, toPosixRelative } from './discovery'
 import { moduleDescriptorOrScaffold } from './app-entry'
 import { MODULE_ROUTES_FILE, moduleRoutesEntryFile } from './import-resolution'
+import type { Statement } from '@babel/types'
+import { readNavigationFile, type NavigationFileEntry } from './navigation-file'
 import { NAVIGATION_FILE, addNavigationEntryFile } from './navigation-writer'
-import { pagePropMember, readPagePropMembers } from './page-props-extractor'
+import { readPagePropMembers } from './page-props-extractor'
 
 /**
  * The alternative the API-only refusal names, shared with the resource
@@ -75,8 +77,11 @@ export interface MakeFeatureOptions extends WriterOptions {
    * `announce: false` needs it: announcing prints them.
    */
   kept?: string[]
-  /** Receives what became of the index page's navigation entry; only a caller passing `announce: false` needs it. */
-  navigation?: { outcome?: FeatureNavigation }
+  /**
+   * Receives what became of the index page's navigation entry. `false` leaves the entry to the
+   * caller, as `add resource` does once it knows the routes it registers.
+   */
+  navigation?: { outcome?: FeatureNavigation } | false
 }
 
 export async function makeFeature(name: string, options: MakeFeatureOptions = {}): Promise<string[]> {
@@ -235,7 +240,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   await ensureUiComponents(appRoot, uiComponentsImportedBy(pageFiles))
   const kept = keptFiles.map((file) => resolve(appRoot, file.path))
   options.kept?.push(...kept)
-  const navigation = await addFeatureNavigationEntry(appRoot, { label: collection, routeName, model: singular, withPolicy, moduleName })
+  const navigationTarget = { label: collection, routeName, model: singular, withPolicy, moduleName }
+  const navigation: FeatureNavigation = options.navigation === false ? { status: 'absent' } : await addFeatureNavigationEntry(appRoot, navigationTarget)
   if (options.navigation) options.navigation.outcome = navigation
 
   if (options.announce === false) {
@@ -245,9 +251,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   announceWrittenFiles(created, overwritten)
   announceKeptFiles(kept)
   if (navigation.status !== 'absent') {
-    announceFrame(frame)
-    const line = navigationLine(navigation, routeName, collection)
-    if (navigation.status === 'failed' || (navigation.status === 'added' && navigation.unverified)) consola.warn(line)
+    // A promotion that kept every page wrote none in this frame.
+    if (pageFiles.some((file) => !keptFiles.includes(file))) announceFrame(frame)
+    const line = navigationLine(navigation, navigationTarget)
+    if (navigationNeedsAttention(navigation)) consola.warn(line)
     else consola.info(line)
   }
 
@@ -593,25 +600,53 @@ export type FeaturePageFrame =
 
 export const FEATURE_LAYOUT_FILE = 'resources/js/components/Layout.tsx'
 const FEATURE_LAYOUT_SPECIFIER = '@/resources/js/components/Layout'
+// What the extensionless import may resolve to ahead of Layout.tsx.
+const LAYOUT_TWINS = ['.ts', '.js', '.jsx', '.mjs', '.mts']
+const OPTIONAL_BOOLEAN = new Set([undefined, 'boolean', 'boolean | undefined', 'undefined | boolean'])
 
 /**
- * The app's `Layout` frames the pages only when its default export's props declare `children`
- * and `wide` (RFC 0040 §5), the props `guren add auth` writes; any other layout is left alone.
+ * The app's `Layout` frames the pages only when the props its default export function takes
+ * are read whole and fit both calls the pages make, `<Layout>` and `<Layout wide>`: `children`,
+ * an optional boolean `wide`, nothing else required (RFC 0040 §5, the layout `guren add auth` writes).
  */
 export async function featurePageFrame(appRoot: string): Promise<FeaturePageFrame> {
   const file = resolve(appRoot, FEATURE_LAYOUT_FILE)
   if (!existsSync(file)) return { kind: 'standalone' }
-  const source = await readFile(file, 'utf8')
-  const ast = parseSourceFile(source, file)
   const keep = (why: string): FeaturePageFrame => ({ kind: 'standalone', why: `${FEATURE_LAYOUT_FILE} ${why}, so the pages keep their own <main>` })
-  if (ast === null) return keep('does not parse')
-  if (!ast.program.body.some((node) => node.type === 'ExportDefaultDeclaration')) return keep('has no default export')
-  const members = readPagePropMembers(ast, source)
-  for (const name of ['children', 'wide']) {
-    const member = pagePropMember(members, name)
-    if (member.status !== 'declared') return keep(member.status === 'unreadable' ? `has props this cannot read (${member.reason})` : `declares no ${name} prop`)
+  const twin = LAYOUT_TWINS.find((extension) => existsSync(file.replace(/\.tsx$/u, extension)))
+  if (twin) return keep(`sits beside Layout${twin}, which the pages' import may resolve to instead`)
+  let source: string
+  try {
+    source = await readFile(file, 'utf8')
+  } catch {
+    return keep('cannot be read')
   }
+  const ast = parseSourceFile(source, file)
+  if (ast === null) return keep('does not parse')
+  const component = ast.program.body.find((node) => node.type === 'ExportDefaultDeclaration')
+  if (component?.declaration.type !== 'FunctionDeclaration') return keep('has no default export function this can read')
+  // readPagePropMembers() takes a file's `Props` ahead of the component's own parameter.
+  const param = component.declaration.params[0]
+  const annotation = param && 'typeAnnotation' in param && param.typeAnnotation?.type === 'TSTypeAnnotation' ? param.typeAnnotation.typeAnnotation : undefined
+  const takesProps = annotation?.type === 'TSTypeReference' && annotation.typeName.type === 'Identifier' && annotation.typeName.name === 'Props'
+  if (!takesProps && declaresType(ast.program.body, 'Props')) return keep('declares a Props type its component does not take')
+  const read = readPagePropMembers(ast, source)
+  if (read.status !== 'members') return keep(read.status === 'unreadable' ? `has props this cannot read (${read.reason})` : 'declares no props')
+  if (read.open) return keep(`has props this cannot read whole (${read.open})`)
+  if (!read.members.has('children')) return keep('declares no children prop')
+  const wide = read.members.get('wide')
+  if (!wide) return keep('declares no wide prop')
+  if (!wide.acceptsUndefined || !OPTIONAL_BOOLEAN.has(wide.type)) return keep('declares wide as something other than an optional boolean')
+  const required = [...read.members.values()].find((member) => member.name !== 'children' && !member.acceptsUndefined)
+  if (required) return keep(`requires a ${required.name} prop the pages do not pass`)
   return { kind: 'layout' }
+}
+
+function declaresType(body: readonly Statement[], name: string): boolean {
+  return body.some((node) => {
+    const declaration = node.type === 'ExportNamedDeclaration' ? node.declaration : node
+    return (declaration?.type === 'TSInterfaceDeclaration' || declaration?.type === 'TSTypeAliasDeclaration') && declaration.id.name === name
+  })
 }
 
 function announceFrame(frame: FeaturePageFrame): void {
@@ -635,47 +670,90 @@ function pageFrameLines(frame: FeaturePageFrame, title: string, spacing: boolean
   }
 }
 
+/** The feature an index page's navigation entry is for. */
+export interface FeatureNavigationTarget {
+  label: string
+  routeName: string
+  model: string
+  withPolicy: boolean
+  moduleName: string | undefined
+}
+
 /** What became of the index page's entry in `config/navigation.ts`. */
 export type FeatureNavigation =
   | { status: 'added'; unverified?: string }
   | { status: 'absent' }
-  | { status: 'skipped'; reason: string }
+  /** `ungated`: the run writes the policy and the entry the file holds asks no `viewAny` of it. */
+  | { status: 'listed'; ungated: boolean }
+  | { status: 'skipped'; reason: string; command: string }
   | { status: 'failed'; reason: string }
+
+const navAddCommand = (feature: FeatureNavigationTarget, can: boolean): string =>
+  `bunx guren nav:add "${feature.label}" --route ${feature.routeName}.index${can ? ` --can viewAny:${feature.model}` : ''}`
 
 /**
  * The index page's entry, through the one writer (RFC 0040 §5), with `viewAny` when the
  * feature writes the policy. Called after the files are written, so a refusal is reported,
  * never thrown: the feature is on disk either way.
  */
-async function addFeatureNavigationEntry(
-  appRoot: string,
-  feature: { label: string; routeName: string; model: string; withPolicy: boolean; moduleName: string | undefined },
-): Promise<FeatureNavigation> {
+export async function addFeatureNavigationEntry(appRoot: string, feature: FeatureNavigationTarget): Promise<FeatureNavigation> {
   if (!existsSync(resolve(appRoot, NAVIGATION_FILE))) return { status: 'absent' }
-  if (feature.moduleName && feature.withPolicy) return { status: 'skipped', reason: `the policy's model is the module's, which a can entry cannot name yet` }
+  const route = `${feature.routeName}.index`
+  if (feature.moduleName && feature.withPolicy) {
+    return { status: 'skipped', reason: `the policy's model is the module's, which a can entry cannot name yet; this command adds the entry with no can`, command: navAddCommand(feature, false) }
+  }
+  // The entry imports the model, which imports its table: an export the schema lacks fails the app's start.
+  if (feature.withPolicy && !(await findDeclaredTable(appRoot, schemaIdentifierFor(feature.model)).catch(() => undefined))) {
+    return { status: 'skipped', reason: `${schemaPathFor(null)} does not export ${schemaIdentifierFor(feature.model)} yet, and the entry's model imports it when the app starts; run this once the table is added`, command: navAddCommand(feature, true) }
+  }
+  const listed = await listedEntry(appRoot, route)
+  if (listed) {
+    const gated = listed.can?.ability === 'viewAny' && listed.can.model.className === feature.model
+    return { status: 'listed', ungated: feature.withPolicy && !gated }
+  }
   try {
     const { unverified } = await addNavigationEntryFile(appRoot, {
       label: feature.label,
-      route: `${feature.routeName}.index`,
+      route,
       ...(feature.withPolicy ? { can: { ability: 'viewAny', model: feature.model } } : {}),
     })
     return { status: 'added', ...(unverified === undefined ? {} : { unverified }) }
   } catch (error) {
-    if (error instanceof CliError) return { status: 'failed', reason: error.message }
-    throw error
+    return { status: 'failed', reason: error instanceof Error ? error.message : String(error) }
   }
 }
 
+/** The entry the file already holds for `route`; a file that does not read leaves the writer to say why. */
+async function listedEntry(appRoot: string, route: string): Promise<NavigationFileEntry | undefined> {
+  const file = resolve(appRoot, NAVIGATION_FILE)
+  try {
+    const ast = parseSourceFile(await readFile(file, 'utf8'), file)
+    const reading = ast ? readNavigationFile(ast, { cwd: appRoot, file }) : undefined
+    return reading?.status === 'read' ? reading.entries.find((entry) => entry.route === route) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Whether the line is a warning: the entry is missing or does not do what this run asked of it. */
+export function navigationNeedsAttention(outcome: FeatureNavigation): boolean {
+  return outcome.status === 'failed' || (outcome.status === 'added' && outcome.unverified !== undefined) || (outcome.status === 'listed' && outcome.ungated)
+}
+
 /** One line on the entry, naming the command that adds it by hand when this run did not. */
-export function navigationLine(outcome: FeatureNavigation, routeName: string, label: string): string {
-  const byHand = `bunx guren nav:add "${label}" --route ${routeName}.index`
+export function navigationLine(outcome: FeatureNavigation, feature: Pick<FeatureNavigationTarget, 'label' | 'routeName' | 'model'>): string {
+  const route = `${feature.routeName}.index`
   switch (outcome.status) {
     case 'added':
-      return `Navigation: added ${routeName}.index to ${NAVIGATION_FILE}${outcome.unverified ? ` (${outcome.unverified})` : ''}.`
+      return `Navigation: added ${route} to ${NAVIGATION_FILE}${outcome.unverified ? ` (${outcome.unverified})` : ''}.`
     case 'absent':
       return `Navigation: ${NAVIGATION_FILE} does not exist, so no entry was added.`
+    case 'listed':
+      return outcome.ungated
+        ? `Navigation: ${NAVIGATION_FILE} already lists ${route} with no can ['viewAny', ${feature.model}], so the policy does not hide it: add show: { can: ['viewAny', ${feature.model}] } to that entry.`
+        : `Navigation: ${NAVIGATION_FILE} already lists ${route}.`
     case 'skipped':
-      return `Navigation: no entry added, since ${outcome.reason}. Add one with: ${byHand}`
+      return `Navigation: no entry added, since ${outcome.reason}: ${outcome.command}`
     case 'failed':
       return `Navigation: no entry added: ${outcome.reason}`
   }

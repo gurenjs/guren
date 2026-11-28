@@ -11,7 +11,7 @@ import { CliError } from './cli-error'
 import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
 import { channelFile } from './make-channel'
-import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature, navigationLine, type FeatureNavigation } from './make-feature'
+import { addFeatureNavigationEntry, API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature, navigationLine, navigationNeedsAttention, type FeatureNavigation, type FeatureNavigationTarget } from './make-feature'
 import { parseFieldsString, type FieldDefinition } from './fields'
 import { collectionSlug, pluralize, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
 import { autoIncrementPrimaryKey, buildFieldColumn, TABLE_FACTORY } from './schema-columns'
@@ -27,9 +27,11 @@ import { DIALECT_BARRELS } from './drizzle-specifiers'
 import { ensureGitignoreEntry } from './plugin-scaffold'
 import { wireProviders } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE, findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
+import { NAVIGATION_FILE } from './navigation-writer'
 import { scaffoldTemplateFile } from './scaffold-templates'
 import { installServiceScaffold } from './service-scaffold'
 import { assertCwdUnsupported, camelCase, pascalCase, writeScaffoldFiles, type WriterOptions } from './utils'
+import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
@@ -365,7 +367,6 @@ export async function addResource(options: RunBlueprintOptions): Promise<AddReso
   await assertResourceTargetsPatchable(routeName)
 
   const kept: string[] = []
-  const navigation: { outcome?: FeatureNavigation } = {}
   const created = await makeFeature(singular, {
     ...blueprintWriterOptions(options),
     fields: options.fields,
@@ -373,22 +374,34 @@ export async function addResource(options: RunBlueprintOptions): Promise<AddReso
     publicAccess: options.publicAccess,
     announce: false,
     kept,
-    navigation,
+    navigation: false,
   })
 
   const schemaUpdated = await updateResourceSchema(singular, fields)
   const routesUpdated = await updateResourceRoutes(singular, routeName, routeVar)
 
-  const outcome = navigation.outcome
+  const target: FeatureNavigationTarget = { label: pluralize(singular), routeName, model: singular, withPolicy: false, moduleName: undefined }
+  const outcome = await resourceNavigationEntry(target, routesUpdated)
   return {
     created,
     kept,
     schemaUpdated,
     routesUpdated,
-    ...(outcome && outcome.status !== 'absent'
-      ? { navigation: { line: navigationLine(outcome, routeName, pluralize(singular)), warn: outcome.status === 'failed' || (outcome.status === 'added' && outcome.unverified !== undefined) } }
-      : {}),
+    ...(outcome.status === 'absent' ? {} : { navigation: { line: navigationLine(outcome, target), warn: navigationNeedsAttention(outcome) } }),
   }
+}
+
+/**
+ * Added only once the index route is known to carry its name: a routes file that already
+ * answered `/<collection>` is left as it was, and may name the route otherwise.
+ */
+async function resourceNavigationEntry(target: FeatureNavigationTarget, routesUpdated: boolean): Promise<FeatureNavigation> {
+  const route = `${target.routeName}.index`
+  if (!routesUpdated && !(await readFile(resolve(process.cwd(), DEFAULT_ROUTES_FILE), 'utf8').catch(() => '')).includes(`'${route}'`)) {
+    if (!existsSync(resolve(process.cwd(), NAVIGATION_FILE))) return { status: 'absent' }
+    return { status: 'skipped', reason: `${DEFAULT_ROUTES_FILE} already registered /${target.routeName} without naming ${route}; name the index route, then run`, command: `bunx guren nav:add "${target.label}" --route ${route}` }
+  }
+  return addFeatureNavigationEntry(process.cwd(), target)
 }
 
 /** Per dialect, the builders the resource table calls besides its columns', and its `createdAt`. */

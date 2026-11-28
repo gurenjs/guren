@@ -683,6 +683,8 @@ describe('makeFeature and the navigation module (RFC 0040 §5)', () => {
   const AUTH_TEMPLATES = join(import.meta.dir, '../templates/scaffold/auth')
   const readTemplate = (path: string): Promise<string> => readFile(join(AUTH_TEMPLATES, path), 'utf8')
 
+  const POSTS_SCHEMA = "import { pgTable, serial } from 'drizzle-orm/pg-core'\n\nexport const posts = pgTable('posts', { id: serial('id').primaryKey() })\n"
+
   async function seedNavigationApp(dir: string, options: { layout?: string } = {}): Promise<void> {
     await writeWorkspaceFiles(dir, {
       'config/navigation.ts': await readTemplate('config/navigation.ts'),
@@ -717,10 +719,11 @@ describe('makeFeature and the navigation module (RFC 0040 §5)', () => {
     }
   })
 
-  it('shows the entry only where the policy allows viewAny when it writes the policy', async () => {
+  it('writes the entry with can viewAny when it writes the policy and the schema exports the table', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-nav-policy-')
     try {
       await seedNavigationApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': POSTS_SCHEMA })
       await makeFeature('Post', { fields: 'title:string', withPolicy: true })
 
       const navigation = await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')
@@ -731,10 +734,24 @@ describe('makeFeature and the navigation module (RFC 0040 §5)', () => {
     }
   })
 
+  it('adds no can entry before the schema exports the table, since the model would fail the app at start', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-nav-no-table-')
+    try {
+      await seedNavigationApp(workspace.dir)
+      const before = await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')
+      const infos = await captureInfos(() => makeFeature('Post', { fields: 'title:string', withPolicy: true }))
+
+      expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe(before)
+      expect(infos).toContain('Navigation: no entry added, since db/schema.ts does not export posts yet, and the entry\'s model imports it when the app starts; run this once the table is added: bunx guren nav:add "Posts" --route posts.index --can viewAny:Post')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('writes the pages it wrote before when the app has no navigation file and no layout', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-nav-absent-')
     try {
-      const navigation: NonNullable<MakeFeatureOptions['navigation']> = {}
+      const navigation: NonNullable<Exclude<MakeFeatureOptions['navigation'], false>> = {}
       const infos = await captureInfos(() => makeFeature('Post', { fields: 'title:string', navigation }))
 
       expect(navigation.outcome).toEqual({ status: 'absent' })
@@ -743,6 +760,25 @@ describe('makeFeature and the navigation module (RFC 0040 §5)', () => {
       expect(index).toContain('    <main className="min-h-screen bg-g-page font-sans text-g-text">\n      <Head title="Posts" />\n      <div className="mx-auto max-w-3xl space-y-6 px-6 py-12">')
       expect(index).not.toContain('Layout')
       expect(infos.some((line) => line.startsWith('Navigation:') || line.startsWith('Pages:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it.each([
+    ['wide required', 'interface LayoutProps { children: ReactNode; wide: boolean }', 'declares wide as something other than an optional boolean'],
+    ['wide as a string', "interface LayoutProps { children: ReactNode; wide?: 'full' }", 'declares wide as something other than an optional boolean'],
+    ['another required prop', 'interface LayoutProps { children: ReactNode; wide?: boolean; title: string }', 'requires a title prop the pages do not pass'],
+  ])('leaves a layout alone whose props do not fit the pages\' calls (%s)', async (_, props, why) => {
+    const workspace = await createTempWorkspace('guren-cli-feature-nav-unfit-layout-')
+    try {
+      await seedNavigationApp(workspace.dir, {
+        layout: `import type { ReactNode } from 'react'\n\n${props}\n\nexport default function Layout({ children }: LayoutProps) {\n  return <main>{children}</main>\n}\n`,
+      })
+      const infos = await captureInfos(() => makeFeature('Post', { fields: 'title:string' }))
+
+      expect(await readFile(join(workspace.dir, 'resources/js/pages/posts/Index.tsx'), 'utf8')).not.toContain('Layout')
+      expect(infos).toContain(`Pages: resources/js/components/Layout.tsx ${why}, so the pages keep their own <main>.`)
     } finally {
       await workspace.cleanup()
     }
@@ -785,26 +821,40 @@ describe('makeFeature and the navigation module (RFC 0040 §5)', () => {
       const infos = await captureInfos(() => makeFeature('Invoice', { fields: 'title:string', root: 'billing', withPolicy: true }))
 
       expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe(before)
-      expect(infos).toContain('Navigation: no entry added, since the policy\'s model is the module\'s, which a can entry cannot name yet. Add one with: bunx guren nav:add "Invoices" --route invoices.index')
+      expect(infos).toContain('Navigation: no entry added, since the policy\'s model is the module\'s, which a can entry cannot name yet; this command adds the entry with no can: bunx guren nav:add "Invoices" --route invoices.index')
     } finally {
       await workspace.cleanup()
     }
   })
 
-  it('reports an entry the file already has as a warning, with the feature still written', async () => {
+  it('says the file already lists the route on a re-run', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-nav-twice-')
     try {
       await seedNavigationApp(workspace.dir)
       await makeFeature('Post', { fields: 'title:string' })
       const before = await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')
 
-      const navigation: NonNullable<MakeFeatureOptions['navigation']> = {}
-      const { result, warnings } = await captureWarnings(() => makeFeature('Post', { fields: 'title:string', force: true, navigation }))
+      const navigation: NonNullable<Exclude<MakeFeatureOptions['navigation'], false>> = {}
+      const infos = await captureInfos(() => makeFeature('Post', { fields: 'title:string', force: true, navigation }))
 
-      expect(result.length).toBeGreaterThan(0)
-      expect(navigation.outcome).toEqual({ status: 'failed', reason: 'config/navigation.ts already has an entry for route "posts.index".' })
-      expect(warnings).toContain('Navigation: no entry added: config/navigation.ts already has an entry for route "posts.index".')
+      expect(navigation.outcome).toEqual({ status: 'listed', ungated: false })
+      expect(infos).toContain('Navigation: config/navigation.ts already lists posts.index.')
       expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe(before)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when a re-run writes the policy over an entry that asks no viewAny of it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-nav-ungated-')
+    try {
+      await seedNavigationApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': POSTS_SCHEMA })
+      await makeFeature('Post', { fields: 'title:string' })
+
+      const { warnings } = await captureWarnings(() => makeFeature('Post', { fields: 'title:string', force: true, withPolicy: true }))
+
+      expect(warnings).toContain("Navigation: config/navigation.ts already lists posts.index with no can ['viewAny', Post], so the policy does not hide it: add show: { can: ['viewAny', Post] } to that entry.")
     } finally {
       await workspace.cleanup()
     }
