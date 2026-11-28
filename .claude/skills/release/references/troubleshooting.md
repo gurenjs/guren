@@ -115,9 +115,28 @@ Rebuild in the release worktree, with no force push:
 git merge --no-commit --no-ff origin/main
 git read-tree -u --reset origin/main     # the tree is main's again
 bun install
+bun run build
 bun run version-packages
 # tutorial version line again if it applies, then commit and push
 ```
+
+`version-packages` stops here with `The templates changed but create-guren-app
+is still X`. That check compares the working tree with `HEAD`, and `HEAD` is the
+earlier version commit, whose `create-guren-app` already moved. The bump itself
+is done. Confirm it against `main` with
+`git show origin/main:packages/create-app/package.json`, then run the steps the
+chain did not reach:
+
+```bash
+bun run ./scripts/sync-import-floors.ts --release
+bun run audit:plugin-compat
+bun install
+```
+
+Compare the result with the earlier version commit
+(`git diff --cached --stat <earlier version commit>` after `git add -A`). It
+should hold only what arrived from `main` and the changelog lines that consume
+it.
 
 Start the canary again on the new head. If this keeps happening, ask the user
 to hold merges to `main` until the version PR is in.
