@@ -1,5 +1,54 @@
 # @guren/core
 
+## 1.29.0
+
+### Minor Changes
+
+- `.agent({ confirm: true })` asks the calling user before an agent's call runs (RFC 0042 §2). `confirm` also takes `{ message }` for the question's text.
+
+  The invocation pipeline gains a confirmation step between the interposition hook and the approval gate. A call to a `confirm` tool is first rehearsed (the route's middleware and validation, never its action). A call the route refuses with a 4xx or 5xx is answered with that refusal. Any other call is denied with the new reason `confirmation`, and the denial carries `confirmation: { tool, message, input, fingerprint }`. A surface that can ask repeats the call with `confirmed: fingerprint`; every surface that cannot keeps refusing, which today is all of them: in-process agents, durable agents, MCP Apps views and the MCP endpoint. A rehearsal the caller asks for (`preflight: true`) is not held.
+
+  A `confirm` tool resolves `expose.webMcp` to `false` whatever the route declares, since the browser calls a WebMCP tool's route without passing through the pipeline. The route also answers a request announcing the `webmcp` surface with 403, so a page loaded before `confirm` was declared cannot run the tool it still holds.
+
+  `AgentToolDenialReason` gains `'confirmation'`. Code that switches over it exhaustively stops compiling until it names the new member.
+
+### Patch Changes
+
+- 9f7acba: An attachment whose bytes are not read as an image no longer writes a client-declared type that a browser renders as a page onto the stored object. A declared HTML, XML (SVG and XHTML included) or XSL type, `multipart/x-mixed-replace`, a type a browser sniffs (`unknown/unknown`, `application/unknown`, `*/*`), a comma-separated list of types or a malformed one is written to the object as `application/octet-stream`, so on an S3 or R2 disk a public URL or a direct `temporaryUrl()` to it downloads instead of rendering in the bucket's origin. The row's `contentType`, `inspectAttachment()`'s result, the signed delivery route, the object key and every other declared type are unchanged. Objects stored before this release keep the type they were written with.
+- Updated dependencies [9f7acba]
+- Updated dependencies
+- Updated dependencies [8cf0438]
+- Updated dependencies [9f7acba]
+- Updated dependencies [fc0ea39]
+- Updated dependencies [9f7acba]
+- Updated dependencies [8cf0438]
+- Updated dependencies [9f7acba]
+- Updated dependencies [c3e1d94]
+- Updated dependencies [ed8fa34]
+- Updated dependencies [5552b06]
+- Updated dependencies [0c73849]
+- Updated dependencies [61d24b6]
+- Updated dependencies [5d5cce7]
+- Updated dependencies
+- Updated dependencies [9f7acba]
+- Updated dependencies [9f7acba]
+- Updated dependencies [9f7acba]
+- Updated dependencies [5ffa35f]
+- Updated dependencies [d72b416]
+- Updated dependencies [4c658dd]
+- Updated dependencies [52fdccb]
+- Updated dependencies [23e81b5]
+- Updated dependencies [1510b67]
+- Updated dependencies [c4846c5]
+- Updated dependencies [aa7ab4f]
+- Updated dependencies [9f7acba]
+- Updated dependencies [fc0ea39]
+- Updated dependencies [9f7acba]
+- Updated dependencies [9f7acba]
+  - @guren/server@2.39.0
+  - @guren/cli@2.40.0
+  - @guren/orm@2.17.1
+
 ## 1.28.0
 
 ### Minor Changes
