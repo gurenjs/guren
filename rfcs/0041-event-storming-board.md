@@ -441,7 +441,8 @@ plan, so the lane of a board file does not change.
 
 Two things this draft first included are left to a separate RFC. A review found
 that each touches a rule that has to be redesigned first, and what was found is
-recorded here so that RFC starts from it.
+recorded here so that RFC starts from it. A third, from the open questions,
+follows them.
 
 **Letting a plan state the event flow.** A side effect would name what
 triggers it (the actions or jobs that emit an event, the event a listener
@@ -483,6 +484,12 @@ code, `board:new --from-app`, and a `docs/spec/events.md` view.
   does not regenerate views. A fifth view turns the gate red in every
   application that commits `docs/spec/` until someone runs `spec:generate`.
 - The graph's `kind` and `relation` are closed enums under `schemaVersion: 1`.
+
+**A board in the docs graph** (Open Question 6). `docs:graph` would draw a
+board with edges to the entities its notes link to. The same closed enums
+apply, and an edge to the plan made from a board needs a record of it, which
+neither file keeps: a plan never names its board, and a board names its plan
+nowhere either.
 
 ### Package boundaries
 
@@ -580,23 +587,49 @@ plan written from a board is an ordinary plan.
 
 ## Open Questions
 
-1. **How the canvas learns of an agent's edit.** The proposal reads the board
+1. ~~**How the canvas learns of an agent's edit.** The proposal reads the board
    again on focus and after every write, close to the Dev Center's present
    rule of one read on open and a refresh button (RFC 0032). A person watching
    an agent work sees nothing until they click.
    Server-sent events from the write path would fix that at the cost of the
-   Dev Center's first held connection.
-2. **The board after the plan exists.** The proposal leaves it editable and
+   Dev Center's first held connection.~~
+   **Resolved in implementation (M2b, M3b), the page reads again; no events.**
+   The board is read on open, on **Refresh board**, after every write (the
+   response carries the board as written) and whenever the window regains
+   focus, unless edits are still waiting to be saved. The link states of §3
+   are checked on open and on refresh, and on a return to the window at most
+   once every 15 seconds. An agent's edit therefore shows once the person
+   looks at the page again. Server-sent events would add the Dev Center's
+   first held connection for what a glance already gives, so they are left
+   out; a later RFC can add them if watching an agent edit live turns out to
+   matter.
+2. ~~**The board after the plan exists.** The proposal leaves it editable and
    lets `board:status --plan` show what drifted: a note added since, a link
    that no longer resolves. Nothing revises the plan from it. The alternative
    is to freeze the board when its plan is approved and require a new board
-   for a revision.
-3. **Slugs for non-ASCII titles.** A Japanese title has no ASCII slug.
+   for a revision.~~
+   **Resolved in implementation (M3a, M3b), the board stays editable.**
+   Nothing freezes it. `board:status`, with or without `--plan`, and the
+   canvas's link states show what no longer matches: a note with no link that
+   could have one, a link the application and the open plans do not have.
+   Nothing revises a plan from a board; a revision goes through `plan:revise`
+   as any other does. A frozen board would need a rule for when it thaws, and
+   a board carries no authority to protect.
+3. ~~**Slugs for non-ASCII titles.** A Japanese title has no ASCII slug.
    `board:new` as proposed requires `--slug` then. Deriving one from the date
-   is the alternative.
-4. **One board across modules.** A link carries `module`, so a board can span
+   is the alternative.~~
+   **Resolved in implementation (M1), `--slug` is required.** `board:new`
+   derives the slug from a title with ASCII letters or digits and refuses one
+   without them, naming `--slug`. A date-derived slug would name every board
+   of a day alike and tell a reader of `docs/boards/` nothing.
+4. ~~**One board across modules.** A link carries `module`, so a board can span
    modules. Whether a section should be able to name the module its notes
-   default to is not decided.
+   default to is not decided.~~
+   **Resolved, a section names no module.** Each link names its own `module`,
+   and a board may span modules that way. A section default would make a
+   note's link mean another element after a drag out of the section, and the
+   canvas moves notes between sections freely. Nothing so far has asked for
+   the default; a later RFC can add it with that rule settled.
 5. ~~**The ceiling of 500 notes.** It is a guess. The canvas should be measured
    with a board of that size before M2 ships, and the number set from the
    result.~~
@@ -608,6 +641,10 @@ plan written from a board is an ordinary plan.
    `applyBoardOps()` over the whole board and redraws it, took 14.8 ms; a refresh
    including the fetch took 20 ms. Every interaction stays within one frame, so
    nothing measured argues for a lower ceiling.
-6. **Whether a board is a node in the docs graph.** `docs:graph` could draw a
+6. ~~**Whether a board is a node in the docs graph.** `docs:graph` could draw a
    board with edges to the entities its notes link to and to the plan made
-   from it. Nothing in this RFC needs it.
+   from it. Nothing in this RFC needs it.~~
+   **Resolved, not in this RFC.** A board is not a node of `docs:graph`.
+   Nothing here reads one there, and the edge to "the plan made from it" has
+   no source: the plan never names its board (§3). It is listed under Later
+   work.
