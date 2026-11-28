@@ -720,5 +720,36 @@ To measure during phase 1:
    `SkillsExtension.load()` over an in-memory record took a median of 1.2 ms
    for 10 skills in 30 files (120 kB) and 8.7 ms for 100 skills in 400 files
    (1.6 MB), on Bun 1.4.5 and Apple silicon. Both numbers come from an
-   SDK-only fixture; the plugin's own bundle through wrangler, and the cold
-   start on workerd itself, remain to be measured.
+   SDK-only fixture.
+   **The plugin's bundle, measured through wrangler.** The probe is a worker
+   that boots `createApp()` with `mcpPlugin()` behind `createWorkersHandler()`.
+   Its `@guren/*` packages are vendored from `dist` and the rest installed from
+   npm, as `wrangler-bundle.test.ts` assembles its probe, with
+   `cloudflare:build`'s stubs and defines. Each variant was bundled by
+   `wrangler deploy --dry-run` (4.141.0, not minified), with skills of prose cut
+   from the guides so that gzip sees real text:
+
+   | Variant | Uncompressed | Gzipped |
+   | --- | --- | --- |
+   | `ext/skills` stubbed out | 1663.4 KiB | 364.7 KiB |
+   | `ext/skills`, no `skills` option | 1729.0 KiB | 381.9 KiB |
+   | 10 skills, 30 files, 120 kB | 1850.2 KiB | 423.4 KiB |
+   | 100 skills, 400 files, 1.6 MB | 3343.3 KiB | 908.5 KiB |
+
+   The extension adds 65.6 KiB (17.2 KiB gzipped) whether or not an app has a
+   skill, and the skills themselves add about their own size. Workers counts
+   only the uncompressed size, against 64 MiB.
+
+   The cold start is still open. The same bundles were started in workerd
+   through Miniflare 5.20260801.1-alpha, 20 times each, but the machine was
+   under a load average above 700 for the whole run: the first request ranged
+   from 15 ms to 283 ms within one variant, and the variant with `ext/skills`
+   stubbed out came out slower than the one carrying it. Those numbers are not
+   recorded here. What the run does settle is where the cost lands: the catalog
+   is built when the plugin boots, which `createWorkersHandler()` does inside
+   the first request's fetch handler, not at global scope. The Workers limits
+   page counts CPU time spent in handler code and allows 10 ms per request on
+   the Free plan; it says nothing about the first request specifically. The
+   SDK-only figure above (8.7 ms for 100 skills on Bun) is therefore the one to
+   keep in mind for a Free-plan app until the cold start is measured on a quiet
+   machine or a deployed worker.
