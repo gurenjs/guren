@@ -151,12 +151,12 @@ describe('plan:scaffold --entries (RFC 0040 §5)', () => {
     expect(unregistered.declared?.keys).toEqual(['REPORTS_BUCKET'])
     expect(unregistered.left[0]).toEqual({ id: 'provider.reports', section: 'providers', reason: 'this application has neither src/app.ts nor app.ts to register it in: write and register it by hand' })
 
-    // A second `providers` key would be prepended, and the list written last is the one createApp() reads.
+    // A quoted key sets the option too, so no second `providers` key is composed beside it; the provider is left.
     const quoted = "import { createApp } from '@guren/core'\nimport A from '../app/Providers/A.js'\n\nexport default createApp({\n  'providers': [A],\n})\n"
     const twice = await createApp({ files: { 'src/app.ts': quoted } })
     const report = await planScaffoldEntriesFile(twice.plan, { appRoot: twice.dir, step: STEP })
     expect(report.created).toEqual([])
-    expect(report.left[0]?.reason).toBe('src/app.ts would not read as registering it once written: write and register it by hand')
+    expect(report.left[0]?.reason).toBe('Could not find the providers array: write and register it by hand')
     expect(await read(twice.dir, 'src/app.ts')).toBe(quoted)
   })
 
