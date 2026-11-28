@@ -79,6 +79,10 @@ bunx guren nav:remove jobs.create
 
 Both commands read the file the way `guren check` does and refuse one written in a form they cannot read back, such as a spread or a translated label. Each edit holds a lock (`.guren/locks/navigation.lock`) from the read to the write, so two commands run at once both land. It is read back before it is written, and an edit that would not read back as the entries before plus or minus one writes nothing. Neither command checks the route itself; `guren check` does. They refuse when `config/navigation.ts` does not exist; `guren add auth` writes one together with the layout that renders it.
 
+`guren make:feature` and `guren add resource` add the index page's entry through the same writer, labelled with the collection (`Posts`, linking to `posts.index`). With `--policy`, the entry also carries `can: ['viewAny', Post]`, so it shows only to users the policy lets list posts. The index action itself does not ask the policy, so a user without `viewAny` can still open the page by its URL. Until the policy is registered, the gate denies `viewAny` and the entry stays hidden from everyone. An app without `config/navigation.ts` gets no entry. A module's feature gets none either, since a module's model cannot be a `can` model yet; the command prints the `nav:add` line to run. When the file already lists the route, or cannot be read back, the feature is still written and the command warns.
+
+When `resources/js/components/Layout.tsx` declares `children` and `wide` in its props, as the one `guren add auth` writes does, the four pages `make:feature` writes render inside `<Layout>`, and the index page passes `wide`. Any other layout is left alone, and the pages keep their own `<main>`.
+
 ## Rendering the links
 
 The `navigation` prop holds, for each entry the user may see, its `label`, its `path` and whether it is `current`, and nothing else: ability names, hidden routes and `where` fields never reach the browser. The current entry is the one whose path is the request's, else the longest one that prefixes it by whole segments, so `/jobs` is current on `/jobs/42` and not on `/jobsboard`. `/` is current only on `/`.

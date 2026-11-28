@@ -679,6 +679,126 @@ describe('makeFeature', () => {
   })
 })
 
+describe('makeFeature and the navigation module (RFC 0040 §5)', () => {
+  const AUTH_TEMPLATES = join(import.meta.dir, '../templates/scaffold/auth')
+  const readTemplate = (path: string): Promise<string> => readFile(join(AUTH_TEMPLATES, path), 'utf8')
+
+  async function seedNavigationApp(dir: string, options: { layout?: string } = {}): Promise<void> {
+    await writeWorkspaceFiles(dir, {
+      'config/navigation.ts': await readTemplate('config/navigation.ts'),
+      'resources/js/components/Layout.tsx': options.layout ?? await readTemplate('resources/js/components/Layout.tsx'),
+    })
+  }
+
+  it('adds the index page to config/navigation.ts and frames the pages in the layout, the index page wide', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-nav-')
+    try {
+      await seedNavigationApp(workspace.dir)
+      const infos = await captureInfos(() => makeFeature('Post', { fields: 'title:string' }))
+
+      const navigation = await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')
+      expect(navigation).toContain("  { label: 'Posts', route: 'posts.index' },\n])")
+      expect(navigation).not.toContain('@/app/Models/Post')
+
+      const index = await readFile(join(workspace.dir, 'resources/js/pages/posts/Index.tsx'), 'utf8')
+      expect(index).toContain("import Layout from '@/resources/js/components/Layout'")
+      expect(index).toContain('    <Layout wide>\n      <Head title="Posts" />\n      <div className="space-y-6">')
+      expect(index).toContain('      </div>\n    </Layout>\n')
+      expect(index).not.toContain('<main')
+      for (const page of ['Show', 'New', 'Edit']) {
+        const source = await readFile(join(workspace.dir, `resources/js/pages/posts/${page}.tsx`), 'utf8')
+        expect(source).toContain('    <Layout>\n')
+        expect(source).not.toContain('<main')
+      }
+      expect(infos).toContain('Pages: framed by resources/js/components/Layout.tsx, the index page with wide.')
+      expect(infos).toContain('Navigation: added posts.index to config/navigation.ts.')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('shows the entry only where the policy allows viewAny when it writes the policy', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-nav-policy-')
+    try {
+      await seedNavigationApp(workspace.dir)
+      await makeFeature('Post', { fields: 'title:string', withPolicy: true })
+
+      const navigation = await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')
+      expect(navigation).toContain("import { Post } from '@/app/Models/Post'\n")
+      expect(navigation).toContain("  { label: 'Posts', route: 'posts.index', show: { can: ['viewAny', Post] } },\n])")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('writes the pages it wrote before when the app has no navigation file and no layout', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-nav-absent-')
+    try {
+      const navigation: NonNullable<MakeFeatureOptions['navigation']> = {}
+      const infos = await captureInfos(() => makeFeature('Post', { fields: 'title:string', navigation }))
+
+      expect(navigation.outcome).toEqual({ status: 'absent' })
+      expect(existsSync(join(workspace.dir, 'config/navigation.ts'))).toBe(false)
+      const index = await readFile(join(workspace.dir, 'resources/js/pages/posts/Index.tsx'), 'utf8')
+      expect(index).toContain('    <main className="min-h-screen bg-g-page font-sans text-g-text">\n      <Head title="Posts" />\n      <div className="mx-auto max-w-3xl space-y-6 px-6 py-12">')
+      expect(index).not.toContain('Layout')
+      expect(infos.some((line) => line.startsWith('Navigation:') || line.startsWith('Pages:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('leaves a layout that declares no wide prop alone, and says so', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-nav-plain-layout-')
+    try {
+      await seedNavigationApp(workspace.dir, {
+        layout: 'import type { ReactNode } from \'react\'\n\nexport default function Layout({ children }: { children: ReactNode }) {\n  return <main>{children}</main>\n}\n',
+      })
+      const infos = await captureInfos(() => makeFeature('Post', { fields: 'title:string' }))
+
+      const index = await readFile(join(workspace.dir, 'resources/js/pages/posts/Index.tsx'), 'utf8')
+      expect(index).toContain('<main className="min-h-screen')
+      expect(index).not.toContain('Layout')
+      expect(infos).toContain('Pages: resources/js/components/Layout.tsx declares no wide prop, so the pages keep their own <main>.')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('adds no entry for a module feature and names the command that would', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-nav-module-')
+    try {
+      await seedNavigationApp(workspace.dir)
+      const before = await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')
+      const infos = await captureInfos(() => makeFeature('Invoice', { fields: 'title:string', root: 'billing', withPolicy: true }))
+
+      expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe(before)
+      expect(infos).toContain('Navigation: no entry added, since a module\'s model cannot be a can model yet. Add one with: bunx guren nav:add "Invoices" --route invoices.index')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports an entry the file already has as a warning, with the feature still written', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-nav-twice-')
+    try {
+      await seedNavigationApp(workspace.dir)
+      await makeFeature('Post', { fields: 'title:string' })
+      const before = await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')
+
+      const navigation: NonNullable<MakeFeatureOptions['navigation']> = {}
+      const { result, warnings } = await captureWarnings(() => makeFeature('Post', { fields: 'title:string', force: true, navigation }))
+
+      expect(result.length).toBeGreaterThan(0)
+      expect(navigation.outcome).toEqual({ status: 'failed', reason: 'config/navigation.ts already has an entry for route "posts.index".' })
+      expect(warnings).toContain('Navigation: no entry added: config/navigation.ts already has an entry for route "posts.index".')
+      expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe(before)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
 describe('buildRouteRegistrationHint', () => {
   // Every scaffolded registrar names its parameter `router`, and the block is
   // pasted in as-is, so it may only reference `router` and names it binds itself.

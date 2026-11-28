@@ -11,9 +11,9 @@ import { CliError } from './cli-error'
 import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
 import { channelFile } from './make-channel'
-import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature } from './make-feature'
+import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature, navigationLine, type FeatureNavigation } from './make-feature'
 import { parseFieldsString, type FieldDefinition } from './fields'
-import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
+import { collectionSlug, pluralize, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
 import { autoIncrementPrimaryKey, buildFieldColumn, TABLE_FACTORY } from './schema-columns'
 import { schemaDeclaresTable, schemaPathFor, type SchemaDialect } from './schema-parser'
 import { eventFile } from './make-event'
@@ -337,6 +337,8 @@ export interface AddResourceResult {
   schemaUpdated: boolean
   /** False when `routes/web.ts` already registered the resource's routes. */
   routesUpdated: boolean
+  /** The line on the index page's navigation entry, absent when the app has no `config/navigation.ts`. */
+  navigation?: { line: string; warn: boolean }
 }
 
 export async function addResource(options: RunBlueprintOptions): Promise<AddResourceResult> {
@@ -363,6 +365,7 @@ export async function addResource(options: RunBlueprintOptions): Promise<AddReso
   await assertResourceTargetsPatchable(routeName)
 
   const kept: string[] = []
+  const navigation: { outcome?: FeatureNavigation } = {}
   const created = await makeFeature(singular, {
     ...blueprintWriterOptions(options),
     fields: options.fields,
@@ -370,12 +373,22 @@ export async function addResource(options: RunBlueprintOptions): Promise<AddReso
     publicAccess: options.publicAccess,
     announce: false,
     kept,
+    navigation,
   })
 
   const schemaUpdated = await updateResourceSchema(singular, fields)
   const routesUpdated = await updateResourceRoutes(singular, routeName, routeVar)
 
-  return { created, kept, schemaUpdated, routesUpdated }
+  const outcome = navigation.outcome
+  return {
+    created,
+    kept,
+    schemaUpdated,
+    routesUpdated,
+    ...(outcome && outcome.status !== 'absent'
+      ? { navigation: { line: navigationLine(outcome, routeName, pluralize(singular)), warn: outcome.status === 'failed' || (outcome.status === 'added' && outcome.unverified !== undefined) } }
+      : {}),
+  }
 }
 
 /** Per dialect, the builders the resource table calls besides its columns', and its `createdAt`. */
