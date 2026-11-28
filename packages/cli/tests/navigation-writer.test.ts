@@ -106,8 +106,26 @@ describe('the navigation writer', () => {
   })
 
   test('should write the model import on a line of its own after the last import', () => {
-    const source = `${HEAD.trimEnd()} /* the links,\n   one per route */\nexport default defineNavigation([])\n`
-    expect(appendNavigationEntry(source, GUARDED, workspace.dir)).toStartWith(`${HEAD}import { Job } from '@/app/Models/Job' /* the links,`)
+    const commented = `${HEAD.trimEnd()} /* the links,\n   one per route */\nexport default defineNavigation([])\n`
+    expect(appendNavigationEntry(commented, GUARDED, workspace.dir)).toStartWith(`${HEAD}import { Job } from '@/app/Models/Job'\n/* the links,`)
+    const oneLine = `${HEAD.trimEnd()}; export default defineNavigation([])\n`
+    expect(appendNavigationEntry(oneLine, GUARDED, workspace.dir)).toStartWith(`${HEAD.trimEnd()};\nimport { Job } from '@/app/Models/Job'\nexport default`)
+  })
+
+  test('should edit around an entry written in parentheses', () => {
+    const source = `${HEAD}export default defineNavigation([\n  ({ label: 'Home', route: 'home' }),\n])\n`
+    const written = appendNavigationEntry(source, PLAIN, workspace.dir)
+    expect(written).toContain("  ({ label: 'Home', route: 'home' }),\n  { label: 'Jobs', route: 'jobs.index' },\n")
+    expect(removeNavigationEntry(written, PLAIN.route, workspace.dir)).toBe(source)
+    const nested = `${HEAD}export default defineNavigation([\n  { label: 'A', route: 'a' },\n  (({ label: 'Home', route: 'home' })),\n])\n`
+    expect(removeNavigationEntry(nested, 'home', workspace.dir)).toBe(`${HEAD}export default defineNavigation([\n  { label: 'A', route: 'a' },\n])\n`)
+  })
+
+  test('should remove a namespace import once nothing else names it', () => {
+    const entry = "export default defineNavigation([\n  { label: 'P', route: 'p', show: { can: ['create', Models.Job] } },\n])\n"
+    expect(removeNavigationEntry(`${HEAD}import * as Models from '@/app/Models'\n${entry}`, 'p', workspace.dir)).toBe(`${HEAD}export default defineNavigation([])\n`)
+    expect(removeNavigationEntry(`${HEAD}import * as Models from '@/app/Models'\ntype Post = Models.Post\n${entry}`, 'p', workspace.dir)).toContain('import * as Models')
+    expect(removeNavigationEntry(`${HEAD}import D, * as Models from '@/app/Models'\nD\n${entry}`, 'p', workspace.dir)).toContain("import D from '@/app/Models'\n")
   })
 
   test.each([
@@ -129,6 +147,34 @@ describe('the navigation writer', () => {
   test('should write nothing when the edit would not read back', () => {
     const source = `${HEAD}export default defineNavigation([\n  { label: 'A', route: 'a' } /* note */,\n  { label: 'B', route: 'b' },\n])\n`
     expect(() => removeNavigationEntry(source, 'a', workspace.dir)).toThrow('would not read back as intended')
+  })
+
+  test.each([
+    ['a type re-export', "export type { Job } from './x'\n"],
+    ['a declared class', 'export declare class Job {}\n'],
+    ['a value', 'export const Job = 123\n'],
+  ])('should refuse a model file that exports the name as %s', async (_, model) => {
+    await writeWorkspaceFiles(workspace.dir, { 'config/navigation.ts': FILES.trailing!, 'app/Models/Job.ts': model })
+    await expect(addNavigationEntryFile(workspace.dir, GUARDED)).rejects.toThrow('as no runtime class')
+  })
+
+  test.each([
+    ['a class exported by name', 'class Job {}\nexport { Job }\n', undefined],
+    ['a value it cannot read', 'export const Job = make()\n', 'its value is not a class written in the file'],
+    ['a re-export', "export { Job } from './other'\n", 're-exports Job from ./other'],
+    ['export *', "export * from './base'\n", 'export *'],
+  ])('should confirm or warn on %s', async (_, model, warning) => {
+    await writeWorkspaceFiles(workspace.dir, { 'config/navigation.ts': FILES.trailing!, 'app/Models/Job.ts': model })
+    const { unverified } = await addNavigationEntryFile(workspace.dir, GUARDED)
+    if (warning === undefined) expect(unverified).toBeUndefined()
+    else expect(unverified).toContain(warning)
+  })
+
+  test('should keep every entry two writers add at once', async () => {
+    await writeWorkspaceFiles(workspace.dir, { 'config/navigation.ts': FILES.empty! })
+    await Promise.all(['a', 'b', 'c', 'd'].map((route) => addNavigationEntryFile(workspace.dir, { label: route, route })))
+    const written = await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')
+    for (const route of ['a', 'b', 'c', 'd']) expect(written).toContain(`route: '${route}'`)
   })
 
   test('should refuse an app with no config/navigation.ts', async () => {

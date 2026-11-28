@@ -11,9 +11,9 @@ import { resolve } from 'node:path'
 import type { File, ImportDeclaration, ImportSpecifier, Node } from '@babel/types'
 
 import { CliError } from './cli-error'
+import { withFileLock } from './file-lock'
 import { navigationEntryList, readNavigationFile, type NavigationFileAuth, type NavigationFileEntry } from './navigation-file'
 import { parseSourceFile } from './parse-cache'
-import { exportedNames } from './plan/app-detail'
 import { writeFileAtomic } from './plan/beside'
 import { specifierBase, withoutExtension } from './schema-binding'
 
@@ -79,6 +79,19 @@ const lineStart = (source: string, offset: number): number => source.lastIndexOf
 const indentAt = (source: string, offset: number): string => /^[ \t]*/u.exec(source.slice(lineStart(source, offset)))![0]
 const span = (node: Node): { start: number; end: number } => ({ start: node.start!, end: node.end! })
 
+/** An element's span with the parentheses around it, which Babel records beside the node rather than in its span. */
+function elementSpan(source: string, node: Node): { start: number; end: number } {
+  const parenStart = (node.extra as { parenStart?: number } | undefined)?.parenStart
+  if (parenStart === undefined) return span(node)
+  let end = node.end!
+  for (let open = (source.slice(parenStart, node.start!).match(/\(/gu) ?? []).length; open > 0; open -= 1) {
+    const close = /^\s*\)/u.exec(source.slice(end))
+    if (close === null) return span(node)
+    end += close[0].length
+  }
+  return { start: parenStart, end }
+}
+
 /** The offset just past a comma that follows `offset` across whitespace alone, else undefined. */
 function commaAfter(source: string, offset: number, limit: number): number | undefined {
   const match = /^\s*,/u.exec(source.slice(offset, limit))
@@ -103,15 +116,16 @@ function insertEntry(source: string, ast: File, entry: string): string {
     }
     return `${source.slice(0, close)}${/\s$/u.test(source.slice(0, close)) ? '' : ' '}${entry} ${source.slice(close)}`
   }
-  const lastEnd = span(last).end
-  const sameLine = !source.slice(start, span(last).start).includes('\n')
+  const lastSpan = elementSpan(source, last)
+  const lastEnd = lastSpan.end
+  const sameLine = !source.slice(start, lastSpan.start).includes('\n')
   const comma = commaAfter(source, lastEnd, end - 1)
   if (sameLine) {
     return comma === undefined
       ? `${source.slice(0, lastEnd)}, ${entry}${source.slice(lastEnd)}`
       : `${source.slice(0, comma)} ${entry},${source.slice(comma)}`
   }
-  const indent = indentAt(source, span(last).start)
+  const indent = indentAt(source, lastSpan.start)
   // A comment closing the last entry's line stays on that line.
   const after = comma ?? lastEnd
   const lineEnd = source.indexOf('\n', after)
@@ -137,7 +151,7 @@ function cutEntry(source: string, ast: File, route: string, entries: NavigationF
   const elements = list.elements as Node[]
   const index = entries.findIndex((entry) => entry.route === route)
   const element = elements[index]!
-  const { start, end } = span(element)
+  const { start, end } = elementSpan(source, element)
   const comma = commaAfter(source, end, span(list).end - 1)
   if (elements.length === 1) {
     const inside = source.slice(span(list).start + 1, start) + source.slice(comma ?? end, span(list).end - 1)
@@ -147,11 +161,12 @@ function cutEntry(source: string, ast: File, route: string, entries: NavigationF
   const previous = elements[index - 1]
   if (previous === undefined) return cut(source, start, end)
   // The last entry and no trailing comma: the comma before it goes with it.
-  const previousComma = commaAfter(source, span(previous).end, start)
+  const previousEnd = elementSpan(source, previous).end
+  const previousComma = commaAfter(source, previousEnd, start)
   if (previousComma === undefined) return cut(source, start, end)
-  if (!source.slice(span(previous).end, start).includes('\n')) return source.slice(0, span(previous).end) + source.slice(end)
+  if (!source.slice(previousEnd, start).includes('\n')) return source.slice(0, previousEnd) + source.slice(end)
   const joined = cut(source, start, end)
-  return joined.slice(0, span(previous).end) + joined.slice(previousComma)
+  return joined.slice(0, previousEnd) + joined.slice(previousComma)
 }
 
 const importsOf = (ast: File): ImportDeclaration[] =>
@@ -193,7 +208,7 @@ function addModelImport(source: string, ast: File, model: string): string {
     const at = lineEnd === -1 ? source.length : lineEnd + 1
     return `${source.slice(0, at)}${lineEnd === -1 ? eol : ''}${line}${eol}${source.slice(at)}`
   }
-  return `${source.slice(0, end)}${eol}${line}${source.slice(end)}`
+  return `${source.slice(0, end)}${eol}${line}${eol}${source.slice(end).replace(/^[ \t]*/u, '')}`
 }
 
 /** Whether any identifier in the tree is `name`, types included: a type-only use still needs the import. */
@@ -216,10 +231,15 @@ function removeUnusedImport(source: string, model: string, cwd: string): string 
   if (declaration.specifiers.length === 1) return cut(source, span(declaration).start, span(declaration).end)
   const specifier = declaration.specifiers.find((candidate) => candidate.local.name === model)!
   const named = declaration.specifiers.filter((candidate): candidate is ImportSpecifier => candidate.type === 'ImportSpecifier')
-  if (specifier.type !== 'ImportSpecifier') {
+  if (specifier.type === 'ImportDefaultSpecifier') {
     // `import Job, { other }`: the default and its comma go.
     const comma = commaAfter(source, span(specifier).end, span(declaration).end)
     return comma === undefined ? source : source.slice(0, span(specifier).start) + source.slice(comma).replace(/^[ \t]*/u, '')
+  }
+  if (specifier.type === 'ImportNamespaceSpecifier') {
+    // `import Other, * as Models`: the comma before it goes with it.
+    const previous = declaration.specifiers[declaration.specifiers.indexOf(specifier) - 1]
+    return previous === undefined ? source : source.slice(0, span(previous).end) + source.slice(span(specifier).end)
   }
   if (named.length === 1) {
     // `import Other, { Job }`: the braces go with their one name.
@@ -293,8 +313,9 @@ export function removeNavigationEntry(source: string, route: string, cwd: string
   if (removed === undefined) throw new CliError(`${NAVIGATION_FILE} has no entry for route "${route}".`)
   return edit(() => {
     let next = cutEntry(source, ast, route, entries)
-    const model = removed.can?.model
-    if (model !== undefined && !model.expression.includes('.')) next = removeUnusedImport(next, model.expression, cwd)
+    // `Job`, or the namespace `Models` of `Models.Job`.
+    const local = removed.can?.model.expression.split('.')[0]
+    if (local !== undefined) next = removeUnusedImport(next, local, cwd)
     readBack(next, cwd, entries.filter((entry) => entry !== removed))
     return next
   })
@@ -311,36 +332,106 @@ function checkModelFile(cwd: string, model: string): void {
   if (!existsSync(file)) throw new CliError(`app/Models/${model}.ts does not exist, and the application imports ${NAVIGATION_FILE} at start: write the model first.`)
 }
 
-/** Refuses a model file that exports no such class; returns why the export could not be confirmed. */
+/**
+ * Refuses a model file whose export of the name is known to be no runtime class, or absent;
+ * returns why it could not be confirmed. Confirmed only by a class declared in the file and
+ * exported under the name; anything else that could still be one is unconfirmed.
+ */
 async function checkModelExport(cwd: string, model: string): Promise<string | undefined> {
   const file = resolve(cwd, 'app/Models', `${model}.ts`)
   const ast = parseSourceFile(await readFile(file, 'utf8'), file)
-  const unverified = `app/Models/${model}.ts was not confirmed to export ${model}`
-  if (ast === null) return `${unverified}: it does not parse.`
-  const classes = ast.program.body.flatMap((node) =>
-    node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration' && node.declaration.id ? [node.declaration.id.name] : [])
-  const names = exportedNames(ast, 'anywhere')
-  if (names === null) return `${unverified}: it re-exports another module with export *.`
-  if (![...names, ...classes].includes(model)) throw new CliError(`app/Models/${model}.ts exports no ${model}.`)
+  const unverified = (why: string): string => `app/Models/${model}.ts was not confirmed to export the class ${model}: ${why}.`
+  if (ast === null) return unverified('it does not parse')
+  const verdict = modelExportVerdict(ast, model)
+  if (verdict === 'class') return undefined
+  if (verdict === 'absent') throw new CliError(`app/Models/${model}.ts exports no ${model}.`)
+  if (verdict === 'not-a-class') throw new CliError(`app/Models/${model}.ts exports ${model} as no runtime class (a type, a declaration or a value), so the gate has no model to ask.`)
+  return unverified(verdict)
+}
+
+type ModelExportVerdict = 'class' | 'absent' | 'not-a-class' | string
+
+const LITERALS = new Set(['StringLiteral', 'NumericLiteral', 'BooleanLiteral', 'NullLiteral', 'BigIntLiteral', 'TemplateLiteral', 'ObjectExpression', 'ArrayExpression', 'ArrowFunctionExpression', 'FunctionExpression'])
+
+/** What the file binds `local` to at its top level, as far as a runtime class goes. */
+function localBinding(ast: File, local: string): 'class' | 'not-a-class' | 'unknown' | undefined {
+  for (const statement of ast.program.body) {
+    const node = statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportDefaultDeclaration' ? statement.declaration : statement
+    if (!node) continue
+    if (node.type === 'ClassDeclaration' && node.id?.name === local) return node.declare ? 'not-a-class' : 'class'
+    if ((node.type === 'TSInterfaceDeclaration' || node.type === 'TSTypeAliasDeclaration' || node.type === 'TSEnumDeclaration' || node.type === 'FunctionDeclaration') && 'id' in node && node.id?.name === local) return 'not-a-class'
+    if (node.type === 'VariableDeclaration') {
+      for (const declarator of node.declarations) {
+        if (declarator.id.type !== 'Identifier' || declarator.id.name !== local) continue
+        if (node.declare) return 'not-a-class'
+        const init = declarator.init
+        if (init?.type === 'ClassExpression') return 'class'
+        return init && LITERALS.has(init.type) ? 'not-a-class' : 'unknown'
+      }
+    }
+  }
   return undefined
 }
 
+function modelExportVerdict(ast: File, model: string): ModelExportVerdict {
+  let open: string | undefined
+  for (const statement of ast.program.body) {
+    if (statement.type === 'ExportAllDeclaration') open ??= 'it re-exports another module with export *'
+    if (statement.type !== 'ExportNamedDeclaration') continue
+    const declaration = statement.declaration
+    if (declaration) {
+      const names = declaration.type === 'VariableDeclaration'
+        ? declaration.declarations.flatMap((declarator) => (declarator.id.type === 'Identifier' ? [declarator.id.name] : []))
+        : 'id' in declaration && declaration.id?.type === 'Identifier' ? [declaration.id.name] : []
+      if (!names.includes(model)) continue
+      if (statement.exportKind === 'type') return 'not-a-class'
+      const binding = localBinding(ast, model)
+      return binding === 'unknown' ? 'its value is not a class written in the file' : binding ?? 'not-a-class'
+    }
+    for (const specifier of statement.specifiers) {
+      if (specifier.type !== 'ExportSpecifier') continue
+      const exported = specifier.exported.type === 'Identifier' ? specifier.exported.name : specifier.exported.value
+      if (exported !== model) continue
+      if (statement.exportKind === 'type' || specifier.exportKind === 'type') return 'not-a-class'
+      if (statement.source) return `it re-exports ${model} from ${statement.source.value}`
+      const binding = localBinding(ast, specifier.local.name)
+      if (binding === 'unknown') return 'its value is not a class written in the file'
+      if (binding === undefined) return `it exports ${specifier.local.name}, which the file does not declare`
+      return binding
+    }
+  }
+  return open ?? 'absent'
+}
+
+/** Git-ignored through the `.gitignore` written beside the lock. */
+const LOCK_DIR = '.guren/locks'
+const LOCK_WAIT_MS = 5000
+
+/** One read, edit and atomic write, under a lock, so two writers never both succeed on the same starting file. */
+async function editNavigationFile(cwd: string, edit: (source: string) => string, options: { lockWaitMs?: number }): Promise<void> {
+  const lock = `${LOCK_DIR}/navigation.lock`
+  await withFileLock(resolve(cwd, LOCK_DIR), 'navigation.lock', options.lockWaitMs ?? LOCK_WAIT_MS, async () => {
+    const source = await readNavigationSource(cwd)
+    await writeFileAtomic(resolve(cwd, NAVIGATION_FILE), edit(source))
+  }, (who) => new CliError(`${NAVIGATION_FILE} is being written by ${who} (${lock}). Try again once it has finished; if nothing is writing it, delete ${lock}.`))
+}
+
 /** `guren nav:add`: the edit written in place, with the file relative to `cwd` and why the model's export went unconfirmed. */
-export async function addNavigationEntryFile(cwd: string, input: NavigationEntryInput): Promise<{ file: string; unverified?: string }> {
-  const source = await readNavigationSource(cwd)
+export async function addNavigationEntryFile(cwd: string, input: NavigationEntryInput, options: { lockWaitMs?: number } = {}): Promise<{ file: string; unverified?: string }> {
+  await readNavigationSource(cwd)
   let unverified: string | undefined
   if (input.can) {
     checkInput(input)
     checkModelFile(cwd, input.can.model)
     unverified = await checkModelExport(cwd, input.can.model)
   }
-  await writeFileAtomic(resolve(cwd, NAVIGATION_FILE), appendNavigationEntry(source, input, cwd))
+  await editNavigationFile(cwd, (source) => appendNavigationEntry(source, input, cwd), options)
   return { file: NAVIGATION_FILE, ...(unverified === undefined ? {} : { unverified }) }
 }
 
 /** `guren nav:remove`. */
-export async function removeNavigationEntryFile(cwd: string, route: string): Promise<string> {
-  const source = await readNavigationSource(cwd)
-  await writeFileAtomic(resolve(cwd, NAVIGATION_FILE), removeNavigationEntry(source, route, cwd))
+export async function removeNavigationEntryFile(cwd: string, route: string, options: { lockWaitMs?: number } = {}): Promise<string> {
+  await readNavigationSource(cwd)
+  await editNavigationFile(cwd, (source) => removeNavigationEntry(source, route, cwd), options)
   return NAVIGATION_FILE
 }
