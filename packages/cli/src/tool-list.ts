@@ -14,7 +14,10 @@ import {
   type DerivedAgentTool,
   type ResourceResponseShape,
 } from '@guren/server'
+import { resolve } from 'node:path'
 import { loadAppRouteDefinitions } from './load-routes'
+import { readMcpSkills } from './mcp-skills'
+import { loadMcpSkillCatalog, type CatalogSkill } from './mcp-skills-check'
 
 export interface ToolListOptions {
   routesFile?: string
@@ -62,11 +65,26 @@ function describeAuthorization(tool: DerivedAgentTool): string {
   return tool.authorization ? tool.authorization.ability : '-'
 }
 
+/**
+ * The skills the MCP endpoint would serve from the files on disk (RFC 0042 §1.6), judged by the SDK as at boot,
+ * with what it refused as warnings. Whether `mcpPlugin()` is given the module is `guren check`'s to say.
+ */
+export async function listSkills(options: ToolListOptions = {}): Promise<{ skills: CatalogSkill[]; warnings: string[] }> {
+  const content = await readMcpSkills(options.appRoot ? resolve(options.appRoot) : process.cwd())
+  const catalog = await loadMcpSkillCatalog(content)
+  return {
+    skills: catalog.skills,
+    warnings: [...content.warnings, ...catalog.refusals.flatMap(({ key, message }) => (content.sources[key] ? [`${content.sources[key]}: ${message}`] : []))],
+  }
+}
+
 export async function displayTools(options: ToolListOptions & { json?: boolean } = {}): Promise<void> {
-  const { tools, warnings } = await listTools(options)
+  const { tools, warnings: toolWarnings } = await listTools(options)
+  const { skills, warnings: skillWarnings } = await listSkills(options)
+  const warnings = [...toolWarnings, ...skillWarnings]
 
   if (options.json) {
-    console.log(JSON.stringify({ tools, warnings }, null, 2))
+    console.log(JSON.stringify({ tools, warnings, skills }, null, 2))
     return
   }
 
@@ -76,10 +94,41 @@ export async function displayTools(options: ToolListOptions & { json?: boolean }
 
   if (tools.length === 0) {
     consola.warn('No agent tools found. Declare .agent() on a named route to expose one.')
-    return
+  } else {
+    printToolTable([...tools].sort((a, b) => a.toolName.localeCompare(b.toolName)))
   }
 
-  printToolTable([...tools].sort((a, b) => a.toolName.localeCompare(b.toolName)))
+  if (skills.length > 0) {
+    console.log('')
+    printSkillTable(skills)
+  }
+}
+
+const SKILL_DESCRIPTION_WIDTH = 72
+
+function printSkillTable(skills: readonly CatalogSkill[]): void {
+  const columns: Array<[header: string, value: (skill: CatalogSkill) => string]> = [
+    ['Skill', (skill) => skill.uri],
+    ['Files', (skill) => String(skill.fileCount)],
+    ['Description', (skill) => (skill.description.length > SKILL_DESCRIPTION_WIDTH ? `${skill.description.slice(0, SKILL_DESCRIPTION_WIDTH - 1)}…` : skill.description)],
+  ]
+  printTable(columns, skills)
+  console.log('')
+  console.log(`Total: ${skills.length} skill${skills.length === 1 ? '' : 's'}`)
+}
+
+function printTable<Row>(columns: ReadonlyArray<[header: string, value: (row: Row) => string]>, items: readonly Row[]): void {
+  const rows = items.map((item) => columns.map(([, value]) => value(item)))
+  const widths = columns.map(([header], index) =>
+    Math.max(header.length, ...rows.map((row) => row[index]!.length)),
+  )
+
+  const header = columns.map(([label], index) => label.padEnd(widths[index]!)).join(' | ')
+  console.log('\x1b[1m' + header + '\x1b[0m')
+  console.log('-'.repeat(header.length))
+  for (const row of rows) {
+    console.log(row.map((cell, index) => cell.padEnd(widths[index]!)).join(' | '))
+  }
 }
 
 function printToolTable(tools: DerivedAgentTool[]): void {
@@ -94,18 +143,7 @@ function printToolTable(tools: DerivedAgentTool[]): void {
     ['UI', describeUi],
   ]
 
-  const rows = tools.map((tool) => columns.map(([, value]) => value(tool)))
-  const widths = columns.map(([header], index) =>
-    Math.max(header.length, ...rows.map((row) => row[index]!.length)),
-  )
-
-  const header = columns.map(([label], index) => label.padEnd(widths[index]!)).join(' | ')
-  console.log('\x1b[1m' + header + '\x1b[0m')
-  console.log('-'.repeat(header.length))
-  for (const row of rows) {
-    console.log(row.map((cell, index) => cell.padEnd(widths[index]!)).join(' | '))
-  }
-
+  printTable(columns, tools)
   console.log('')
   console.log(`Total: ${tools.length} tool${tools.length === 1 ? '' : 's'}`)
 }

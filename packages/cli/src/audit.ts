@@ -87,6 +87,7 @@ import {
 } from './ai-local-tools-audit'
 import { auditCsrfExemptions, DECLARE_CALL_PATTERN, type CsrfExemptionScan } from './csrf-exemption-audit'
 import { auditAuthorization, GUEST_PATH_PATTERN, isEditFormRoute } from './authorization-audit'
+import { readMcpSkills } from './mcp-skills'
 
 export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
 
@@ -1242,6 +1243,31 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
           ),
         )
       }
+    }
+  }
+
+  // The text codegen publishes to every caller of the MCP endpoint (RFC 0042 §1.6), under the same heuristic.
+  const skills = await readMcpSkills(cwd)
+  for (const [key, text] of Object.entries(skills.files)) {
+    const relPath = skills.sources[key]!
+    const lines = text.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!
+      if (line.includes('guren-audit-ignore') || lines[i - 1]?.includes('guren-audit-ignore')) continue
+      const secretMatch = SECRET_PATTERN.exec(line)
+      if (!secretMatch || SECRET_ALLOWLIST.test(line)) continue
+      secretCount++
+      findings.push(
+        finding(
+          `secret:${relPath}:${i + 1}`,
+          `${relPath}:${i + 1}`,
+          'fail',
+          `Possible hardcoded credential ('${secretMatch[1]}') in a skill file, which every caller of the MCP endpoint can read.`,
+          'Remove the value from the skill: any API token of the app is enough to read this file.',
+          relPath,
+          i + 1,
+        ),
+      )
     }
   }
 
