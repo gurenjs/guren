@@ -42,6 +42,7 @@ import {
   type PlanEnv,
   type PlanElementSection,
   type PlanModel,
+  type PlanNavigation,
   type PlanPolicy,
   type PlanProvider,
   type PlanResource,
@@ -49,6 +50,8 @@ import {
   type PlanSideEffect,
   type PlanView,
 } from './schema'
+import { NAVIGATION_CONFIG_FILE, type NavigationFileEntry } from '../navigation-file'
+import { navigationRouteName } from './app-targets'
 import { derivePlanTasks, planLaterRelationships, type PlanLaterRelationship, type PlanTaskDerivation } from './tasks'
 
 /**
@@ -141,6 +144,7 @@ export const PLAN_STATUS_SECTIONS = [
   'providers',
   'config',
   'env',
+  'navigation',
   'commands',
 ] as const satisfies readonly PlanElementSection[]
 
@@ -312,6 +316,14 @@ function conclude(judgement: Judgement, credit: AlterCredit, reachable: Readonly
   const result = (state: PlanStatusState, extra: Partial<PlanElementStatus> = {}): PlanElementStatus =>
     done(state, { properties, ...extra })
 
+  // An entry the definition is not wired for shows nothing, whatever its properties read (RFC 0040 §5).
+  if (section === 'navigation' && judgement.mount && change.kind === 'alter' && readable.length === 0) {
+    const mount = judgement.mount.verdict()
+    if (mount !== 'mounted') {
+      notes.push(`Not confirmed as wired: ${mount.unconfirmed}.`)
+      return result('present')
+    }
+  }
   // An alter's target existed before the plan, so its existence says nothing about the change.
   if (change.kind === 'alter' && readable.length === 0) return result('unjudged', { reason: unreadableAlterReason(properties, reachable.has(id)) })
   // A mount is a reading of the element itself; with none, existence would complete what the plan stated and nothing read.
@@ -349,6 +361,7 @@ const NOUNS = {
   providers: { plural: 'providers', singular: 'provider' },
   config: { plural: 'config definitions', singular: 'config definition' },
   env: { plural: 'environment keys', singular: 'environment key' },
+  navigation: { plural: 'navigation entries', singular: 'navigation entry' },
 } as const satisfies Record<string, PlanNoun>
 
 function inSection(section: PlanAppNames, name: string, plural: string): Existence {
@@ -493,6 +506,7 @@ function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit, deri
     ...(plan.providers ?? []).map((provider) => context.provider(provider)),
     ...(plan.config ?? []).map((entry) => context.config(entry)),
     ...(plan.env ?? []).map((entry) => context.env(entry)),
+    ...(plan.navigation ?? []).map((entry) => context.navigation(entry)),
     ...plan.commands.map((command) => context.command(command)),
   ]
   return { elements, summary: summarize(elements) }
@@ -565,6 +579,12 @@ function hasIndex(table: SourcedSchemaTable, columns: ReadonlyArray<string>, kin
   if (table.constraints.some((constraint) => kinds.includes(constraint.kind) && sameColumns(constraint, columns))) return true
   const hidden = table.opaqueConstraints || table.constraints.some((constraint) => kinds.includes(constraint.kind) && constraint.opaqueColumns)
   return hidden ? undefined : false
+}
+
+/** A `where` as one comparable text, its fields in code-unit order; an empty one still hides the entry from a guest. */
+function whereKey(where: Record<string, unknown> | undefined): string {
+  if (where === undefined) return 'none'
+  return JSON.stringify(Object.keys(where).sort().map((field) => [field, where[field]]))
 }
 
 const CONSTRAINTS_HIDDEN = "the table's constraints are built where the static reader cannot follow"
@@ -1337,6 +1357,64 @@ class StatusContext {
         return [found.signature === expected ? match('declaration', planned, found.source) : differ('declaration', planned, found.source)]
       },
     })
+  }
+
+  /**
+   * An entry of `config/navigation.ts`, found by its route (RFC 0040 §5) and judged by what it shows: the label, who
+   * sees it, and the ability and model its `can` asks. Nothing mounts an entry: the file is the config `createApp()` binds.
+   */
+  navigation(entry: PlanNavigation): PlanElementStatus {
+    const entries = this.detail?.navigation ?? NO_DETAIL
+    const classes = isUnreadable(entries) ? entries : entries.map((found) => ({ className: found.route, module: null, file: NAVIGATION_CONFIG_FILE }))
+    const route = navigationRouteName(this.plan, entry)
+    return this.named('navigation', { id: entry.id, change: entry.change, name: route }, this.app.navigation, NOUNS.navigation, classes, {
+      properties: () => {
+        if (entry.change.kind === 'drop') return []
+        const found = isUnreadable(entries) ? undefined : entries.find((candidate) => candidate.route === route)
+        const why = isUnreadable(entries) ? entries.unreadable : `${NAVIGATION_CONFIG_FILE} has no entry for ${route}`
+        // An added entry is held to its whole audience, an omitted rule being none; an alter to what it states.
+        const whole = entry.change.kind === 'add'
+        const properties: PlanPropertyStatus[] = []
+        if (entry.label !== undefined) properties.push(compare('label', entry.label, found?.label, why))
+        if (whole || entry.auth !== undefined) properties.push(compare('auth', entry.auth ?? 'any', found ? (found.auth ?? 'any') : undefined, why))
+        if (whole || entry.where !== undefined) {
+          const planned = whereKey(entry.where && Object.fromEntries(entry.where.map(({ field, value }) => [field, value])))
+          properties.push(compare('where', planned, found ? whereKey(found.where) : undefined, why))
+        }
+        if (entry.can) properties.push(this.navigationCan(entry.can, found, why))
+        else if (whole) properties.push(compare('can', 'none', found ? (found.can ? `${found.can.ability} ${found.can.model.className}` : 'none') : undefined, why))
+        return properties
+      },
+      // Nothing shares the entries until createApp() lists the definition.
+      mount: { verdict: () => this.entryMount('config', `${CONFIG_DIR}/navigation`), files: () => this.entryFiles() },
+    })
+  }
+
+  /** The ability and the model class, the class known by the file its import leads to, as the gate is handed it. */
+  /**
+   * The ability and the model class, the class known by the file model discovery declares it in, which is what the
+   * gate is handed; an import leading elsewhere (a re-export) is unconfirmed. The planned value names the root.
+   */
+  private navigationCan(can: NonNullable<PlanNavigation['can']>, found: NavigationFileEntry | undefined, why: string): PlanPropertyStatus {
+    const policy = this.plan.policies.find((candidate) => candidate.id === can.policy)
+    const model = policy ? this.modelsById.get(policy.model) : undefined
+    if (!model) return unknown('can', `${can.ability} ?`, 'the policy element names no model of the plan')
+    const planned = `${can.ability} ${model.module ? `${model.module}/` : ''}${model.name}`
+    if (!found) return unknown('can', planned, why)
+    if (!found.can) return differ('can', planned, 'none')
+    if (found.can.ability !== can.ability || found.can.model.className !== model.name) return differ('can', planned, `${found.can.ability} ${found.can.model.className}`)
+    const imported = found.can.model.module?.replaceAll('\\', '/')
+    if (imported === undefined) return unknown('can', planned, `${NAVIGATION_CONFIG_FILE} names ${model.name} with no import of a model file`)
+    const models = this.section('models')
+    if (isUnreadable(models)) return unknown('can', planned, `the models could not be read (${models.unreadable})`)
+    const leadsTo = (file: string): boolean => imported.endsWith(`/${file.replaceAll('\\', '/').replace(/\.[cm]?[jt]sx?$/u, '')}`)
+    // The longest file the import leads to, since `modules/blog/app/Models/Post` also ends in `app/Models/Post`.
+    const declaring = models
+      .filter((candidate) => candidate.className === model.name && leadsTo(candidate.file))
+      .sort((a, b) => b.file.length - a.file.length)[0]
+    if (declaring?.module === (model.module ?? null)) return match('can', planned)
+    if (declaring) return differ('can', planned, `${can.ability} ${declaring.module ? `${declaring.module}/` : ''}${model.name}`)
+    return unknown('can', planned, `${NAVIGATION_CONFIG_FILE} imports ${model.name} from a file that declares no such model, such as a re-export`)
   }
 
   private entryMount(list: 'providers' | 'config', file: string): PlanAppMount {

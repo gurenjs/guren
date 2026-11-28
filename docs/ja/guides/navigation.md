@@ -136,6 +136,26 @@ export default function JobsIndex() {
 
 ヘッダーの幅はどのページでも同じなので、ページを移ってもヘッダーの位置は変わりません。
 
+## 既存のアプリに入れる
+
+navigation モジュールより前に `guren add auth` を実行したアプリには、`config/navigation.ts` も、`navigation` prop を描画するレイアウトもありません。`guren add navigation` を実行すると、この 2 つが入ります。
+
+```bash
+bunx guren add navigation
+```
+
+`config/navigation.ts` が無ければ、`guren add auth` と同じ Home と Dashboard のエントリーを書き、`createApp()` の `config` 配列に足します。エントリーを書くのは、パラメーターの無い `GET` ルートにその名前（`home`、`dashboard`）が付いているものだけです。`config/navigation.ts` が既にあれば残し、`defineNavigation()` の定義であれば配線だけ行います。
+
+レイアウトを置き換えるのは、`resources/js/components/Layout.tsx` が以前の `guren add auth` が書いた版とバイト単位で同じときだけです（改行コードの違いは無視します）。リリースが出荷したすべての版をハッシュで覚えていて、`guren upgrade` が UI コンポーネントを見分けるのと同じ判定をします。`lang/en/layout.json` が無ければ、あわせて書きます。出荷した版でも、新しいレイアウトがそのアプリで動かない場合は残し、その理由を表示します。
+
+- `config/navigation.ts` が `defineNavigation()` の定義ではないので、リンクを共有するものがない。
+- 新しいレイアウトがリンクする `GET /login`、`GET /profile`、`POST /logout` をルートファイルが登録していない（初期のリリースのレイアウトは `/profile` 無しで動いていました）。または、確かめるためのルートファイルを読み込めなかった。
+- インストールされている `@guren/inertia-client` に、新しいレイアウトが import する `hasTranslation()` が無い。
+- 配線を試みた後も、`createApp()` が `config/navigation.ts` を並べていない。`config` がコマンドで書き足せない変数になっている場合などで、そのときは手で足す行を表示します。
+- レイアウトがシンボリックリンクで、書き込むとリンク先のファイルが変わってしまう。
+
+インストールされている `@guren/core` に `defineNavigation()` が無いときは、何も書きません。`config/navigation.ts` はアプリの起動時にそれを import するので、先にパッケージを上げてインストールしてください（`bunx guren upgrade --install`）。手を加えたレイアウトはそのまま残ります。`create-guren-app` がアプリ名を埋め込んで書く blog スターターのレイアウトも残ります。そのうえで、prop を描画するのに要る行を表示します。レイアウトが無いアプリにも、レイアウトを書く代わりに同じ行を表示します。`guren add auth` が書くレイアウトは `/login`、`/profile`、`/logout` へリンクしているためです。
+
 ## 起動時に隠れるエントリー
 
 アプリが起動すると、各エントリーがルートに結び付けられます。ルートが登録されていない、`GET` でない、パスのパラメーターを持つ、のどれかに当たるエントリーは隠れ、起動時にエントリーと理由を書いた警告が出ます。ほかのエントリーはそのまま描画されます。存在しないルート名をそのまま使うと、すべてのページが 500 を返してしまうためです。

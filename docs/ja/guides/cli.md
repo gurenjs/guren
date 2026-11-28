@@ -55,6 +55,7 @@ bunx guren --help
 | ブラウザテスト | `bunx guren add browser-tests` | [ブラウザテスト](./browser-tests.md) |
 | Change のレビューのワークフロー | `bunx guren add review` | [変更のレビュー](./change-review.md) |
 | UI コンポーネント | `bunx guren add ui` | [後述](#add-ui) |
+| navigation モジュールより前のアプリのナビ | `bunx guren add navigation` | [ナビゲーション](./navigation.md#既存のアプリに入れる) |
 
 まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリが育つのに合わせてほかの機能を足していってください。
 

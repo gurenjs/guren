@@ -13,6 +13,7 @@ import type { File, Node, Statement } from '@babel/types'
 
 import { memberKeyName, unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
 import { readEnvDeclarations, type EnvDeclaration } from '../env-declarations'
+import { readNavigationEntries, type NavigationFileEntry } from '../navigation-file'
 import { createAppListedFiles, createAppOptions, findModuleDescriptor, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
@@ -219,6 +220,8 @@ export interface PlanAppDetail {
   config?: PlanAppClassDetail[] | PlanAppUnreadable
   /** The keys the project root's `config/env.ts` declares, each with what its builder chain means (RFC 0040 §5). */
   env?: EnvDeclaration[] | PlanAppUnreadable
+  /** The entries of the project root's `config/navigation.ts` (RFC 0040 §5), for what a planned entry shows. */
+  navigation?: NavigationFileEntry[] | PlanAppUnreadable
   /** What the application entry's `providers` and `config` lists register (RFC 0040 §5): what a provider or config is wired by. */
   entryLists?: PlanAppEntryLists | PlanAppUnreadable
   /** Per kind, why an absent use proves nothing: a source file that did not parse, a scan that failed, `AutoDiscovery`. */
@@ -268,7 +271,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
   const { root } = input
   const cache = new ParseCache()
 
-  const [tables, models, pages, validatorRead, resources, resourcePayloads, policies, routeFiles, sideEffects, mounts, providers, config, entryLists, env] = await Promise.all([
+  const [tables, models, pages, validatorRead, resources, resourcePayloads, policies, routeFiles, sideEffects, mounts, providers, config, entryLists, env, navigation] = await Promise.all([
     tableDetail(root),
     modelDetail(root, input.models, input.modelReading),
     pageDetail(root, input.pages, input.pageReading),
@@ -283,6 +286,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     classDetail(root, (appRoot) => discoverEntryFiles(appRoot, CONFIG_DIR)),
     entryListDetail(root, cache),
     readEnvDeclarations(root),
+    readNavigationEntries(root),
   ])
 
   return {
@@ -303,6 +307,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     config,
     entryLists,
     env,
+    navigation,
   }
 }
 

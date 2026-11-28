@@ -25,7 +25,8 @@ import {
   type PlanAppUnreadable,
   VALIDATORS_ARE_A_LOWER_BOUND,
 } from './app-state'
-import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
+import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, navigationRouteName, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
+import { isParameterless } from '../utils'
 import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
 import { planCommandTargets, type PlanCommandTargetHit } from './command-targets'
 import { elementsAtPlannedEnd, judgeFreshness } from './freshness'
@@ -134,6 +135,7 @@ export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResul
   checkChangeConsistency(plan, results)
   checkEntryNames(plan, results)
   checkEnvDeclarations(plan, results)
+  checkNavigation(plan, app, results)
   checkAgainstApp(plan, app, results)
   checkInflectedNames(plan, results)
   checkRouteAuthorization(plan, index, results)
@@ -185,6 +187,8 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 /** The heading each key is grouped under; the renderer groups on `title`. */
 const TITLES: Record<string, string> = {
   'plan:duplicate-id': 'Plan element ids',
+  'plan:navigation-route': 'Plan navigation',
+  'plan:navigation-entry': 'Plan navigation',
   'plan:command': 'Plan commands',
   'plan:command-target': 'Plan commands',
   'plan:reference': 'Plan references',
@@ -465,6 +469,7 @@ function checkEntryNames(plan: PlanDraft, results: PlanCheckResult[]): void {
     { section: 'providers' as const, noun: 'provider class', entries: (plan.providers ?? []).map((entry) => ({ id: entry.id, name: entry.className })) },
     { section: 'config' as const, noun: 'config definition', entries: (plan.config ?? []).map((entry) => ({ id: entry.id, name: entry.name })) },
     { section: 'env' as const, noun: 'environment key', entries: (plan.env ?? []).map((entry) => ({ id: entry.id, name: entry.key })) },
+    { section: 'navigation' as const, noun: 'navigation entry for route', entries: (plan.navigation ?? []).map((entry) => ({ id: entry.id, name: navigationRouteName(plan, entry) })) },
   ]
   for (const { section, noun, entries } of lists) {
     const seen = new Map<string, string>()
@@ -478,6 +483,75 @@ function checkEntryNames(plan: PlanDraft, results: PlanCheckResult[]): void {
       const policy = section === 'providers' ? implied.get(entry.name) : undefined
       if (policy === undefined) continue
       results.push(finding('plan:provider-implied', 'fail', `The provider "${entry.name}" is the one the policy "${policy}" implies, which its scaffold writes and registers; leave it to the policy element.`, { elementId: entry.id, section }))
+    }
+  }
+}
+
+/**
+ * An entry links a parameterless `GET` that renders a page (RFC 0040 §5): a plan route is read off the plan, an
+ * application route by its name off the routes file (whether it renders a page is `guren check`'s). An entry the
+ * plan adds carries its label, and a `can` asks an ability its policy lists.
+ */
+function checkNavigation(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
+  const actions = new Map(plan.controllers.flatMap((controller) => controller.actions.map((action) => [action.id, action] as const)))
+  for (const entry of plan.navigation ?? []) {
+    const at = { elementId: entry.id, section: 'navigation' as const }
+    const fail = (key: string, message: string): void => void results.push(finding(key, 'fail', message, at))
+    if (entry.change.kind === 'add' && entry.label === undefined) fail('plan:navigation-entry', `The entry for "${entry.route}" is added with no label.`)
+    // defineNavigation() refuses a blank label, which NonEmptySchema lets through.
+    if (entry.label !== undefined && entry.label.trim() === '') fail('plan:navigation-entry', `The entry for "${entry.route}" has a blank label.`)
+    const fields = (entry.where ?? []).map(({ field }) => field)
+    const twice = fields.find((field, index) => fields.indexOf(field) !== index)
+    if (twice !== undefined) fail('plan:navigation-entry', `The entry for "${entry.route}" states the where field "${twice}" twice.`)
+    if (entry.can) {
+      const policy = plan.policies.find((candidate) => candidate.id === entry.can!.policy)
+      if (policy && !policy.abilities.some((ability) => ability.name === entry.can!.ability)) {
+        fail('plan:navigation-entry', `The entry for "${entry.route}" asks "${entry.can.ability}" of the policy "${policy.id}", which lists no such ability.`)
+      }
+    }
+    const byId = plan.routes.find((candidate) => candidate.id === entry.route)
+    const appNamed = isUnreadable(app.routes) ? [] : app.routes.filter((candidate) => candidate.name === entry.route)
+    if (byId && appNamed.length > 0 && byId.name !== entry.route) {
+      fail('plan:navigation-route', `"${entry.route}" is both the id of the plan's route "${byId.name}" and the name of a route the application registers; give the plan's route another id.`)
+    }
+    if (entry.change.kind === 'drop') continue
+    // Every plan route claiming the name, whichever comes first in the document: one that takes it away wins.
+    const claims = byId ? [] : plan.routes.filter((candidate) => candidate.name === entry.route || (candidate.change.kind === 'rename' && candidate.change.from === entry.route))
+    const dropped = claims.find((candidate) => candidate.change.kind === 'drop' && candidate.name === entry.route)
+    const renamed = claims.find((candidate) => candidate.change.kind === 'rename' && candidate.change.from === entry.route)
+    const added = claims.find((candidate) => candidate.change.kind === 'add')
+    if (dropped) {
+      fail('plan:navigation-route', `The entry links "${entry.route}", which the plan drops (${dropped.id}).`)
+      continue
+    }
+    if (renamed) {
+      fail('plan:navigation-route', `The entry links "${entry.route}", which the plan renames to "${renamed.name}"; link it by the id "${renamed.id}".`)
+      continue
+    }
+    if (added) {
+      fail('plan:navigation-route', `The entry names "${entry.route}", a route the plan adds; link it by the id "${added.id}".`)
+      continue
+    }
+    // The plan's own statement of the route, an `existing` or `alter` one by name included, is what it will be.
+    const route = byId ?? claims[0]
+    if (route) {
+      if (route.change.kind === 'drop') fail('plan:navigation-route', `The entry links the route "${route.id}", which the plan drops.`)
+      if (route.method !== 'GET' || !isParameterless(route.path)) fail('plan:navigation-route', `The entry links "${route.id}" (${route.method} ${route.path}); an entry links a GET route with no path parameter.`)
+      const action = actions.get(route.action)
+      const response = action?.response
+      if (response && response.kind !== 'inertia') fail('plan:navigation-route', `The entry links "${route.id}", whose action does not render a page.`)
+      const view = response?.kind === 'inertia' ? plan.views.find((candidate) => candidate.id === response.view) : undefined
+      if (action?.change.kind === 'drop' || view?.change.kind === 'drop') fail('plan:navigation-route', `The entry links "${route.id}", whose ${action?.change.kind === 'drop' ? 'action' : 'page'} the plan drops.`)
+      continue
+    }
+    if (isUnreadable(app.routes)) {
+      results.push(finding('plan:navigation-route', 'warn', `The routes could not be read (${app.routes.unreadable}), so the route "${entry.route}" the entry links was not confirmed.`, at))
+      continue
+    }
+    if (appNamed.length === 0) {
+      fail('plan:navigation-route', `The entry links "${entry.route}", which is neither the id of a route in the plan nor the name of one the application registers.`)
+    } else if (!appNamed.some((candidate) => candidate.method.toUpperCase() === 'GET' && isParameterless(candidate.path))) {
+      fail('plan:navigation-route', `The entry links "${entry.route}" (${appNamed.map((candidate) => `${candidate.method} ${candidate.path}`).join(', ')}); an entry links a GET route with no path parameter.`)
     }
   }
 }
@@ -618,8 +692,8 @@ function withSection<T>(
 function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
   const targets = namedTargets(plan)
   for (const appSection of NAMED_APP_SECTIONS) {
-    // A `defineEnv()` the reader cannot read whole is a legitimate shape, so it warns only a plan stating a key.
-    if (appSection === 'env' && !targets.some((target) => target.appSection === 'env')) continue
+    // A `defineEnv()` or navigation file the reader cannot read whole is a legitimate shape, so it warns only a plan stating one.
+    if ((appSection === 'env' || appSection === 'navigation') && !targets.some((target) => target.appSection === appSection)) continue
     withSection(appSection, app[appSection], results, (entries) => {
       for (const target of targets) {
         if (target.appSection !== appSection) continue

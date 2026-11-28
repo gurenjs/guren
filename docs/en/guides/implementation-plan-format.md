@@ -6,13 +6,14 @@ This page describes the plan file itself: its sections, element ids and changes,
 
 | Field | Holds |
 |---|---|
-| `planVersion` | `2`; a plan with no `providers`, `config` or `env` may keep `1` |
+| `planVersion` | `2`; a plan with no `providers`, `config`, `env` or `navigation` may keep `1` |
 | `title`, `summary`, `locale` | What the plan is about, and the language its prose is written in (`en`, `ja`), view labels excepted |
 | `scope` | `goals` and `nonGoals` |
 | `assumptions`, `questions` | What the plan decided without being told, and what it could not decide |
 | `models`, `validators`, `controllers`, `routes`, `views`, `resources`, `policies`, `sideEffects` | The design, one section per kind of element |
 | `providers`, `config` | What the change registers in `createApp()` (see [Providers and config](#providers-and-config)) |
 | `env` | The environment keys the change declares (see [Environment keys](#environment-keys)) |
+| `navigation` | The layout links the change adds, alters or drops (see [Navigation entries](#navigation-entries)) |
 | `flows` | How a request moves through what the plan adds, as nodes and edges |
 | `commands` | Commands such as `guren add attachments` the change needs first |
 | `tasks` | What each slice must achieve, and its acceptance behaviours |
@@ -184,6 +185,21 @@ A plan with an open question cannot be approved. Answer it by editing the plan: 
 - `guren change:lane` reads a key added to `defineEnv()` as `env-added`, and lowers it to `low` when one open plan adds an element of that key and the chain declares what the element states. A key changed or removed, a comment added or removed with it, or a directive such as `// @ts-expect-error` moved onto other code, keeps the file `source-edited`.
 - From the step that owns an added key, `plan:scaffold --entries` declares it in `config/env.ts` and lists it in `.env.example`, unless a command of the task declared it first.
 - Like the other two sections, `env` needs `planVersion` `2`.
+
+## Navigation entries
+
+`navigation` lists the entries of `config/navigation.ts` the change adds, alters or drops, one element per route ([Navigation](./navigation.md)):
+
+```json
+{ "id": "nav.jobs", "change": { "kind": "add" }, "route": "route.jobs.index", "label": "Jobs", "auth": "required", "can": { "ability": "viewAny", "policy": "policy.job" } }
+```
+
+- `route` is the id of a route in the plan or the name of a route the application registers. The plan's route must be a `GET` with no path parameter whose action renders a page, and neither the route, its action nor its page may be dropped. An application's route is checked for the method and the path, and `guren check` judges whether it renders a page. A name the plan drops, renames or adds fails: link a renamed or added route by its id. An id that is also the name of another application route fails too.
+- An added entry carries its `label`, written in the plan's locale. `auth` is `required`, `guest` or `any`, `where` lists the `{ "field", "value" }` pairs the user must match, each field once, and `can` names an ability the policy element lists. An entry is known by its route, so `change.kind` is `add`, `existing`, `alter` or `drop`: a link that moves to another route is a drop and an add.
+- The checks refuse two elements of one route, an `add` whose route `config/navigation.ts` already lists, and an `alter` or `drop` of a route it does not.
+- `plan:status` reads `config/navigation.ts` from source. An added entry is compared by its whole audience: its label, `auth` (`any` when omitted), `where` and `can` (none when omitted). An altered one is compared by the fields it states. `can` matches only the model class imported from that model's file. An entry is wired once `createApp()` lists `config/navigation`, and a dropped entry is done once the file has none for the route. An entry is accepted at approval on its step's verified run, as a command is.
+- An entry belongs to the task of the page its route renders, in that task's pages step; an entry for an application's route belongs to Foundation. No scaffold writes it: `guren nav:add` and `nav:remove` do.
+- `navigation` needs `planVersion` `2` too.
 
 ## Commands
 

@@ -16,6 +16,7 @@
   "sections.providers": "Providers",
   "sections.config": "Config",
   "sections.env": "Environment",
+  "sections.navigation": "Navigation",
   "sections.flows": "Flows",
   "sections.commands": "Commands",
   "sections.tasks": "Tasks & acceptance",
@@ -166,6 +167,10 @@
   "env.required": "Required",
   "env.secret": "Secret",
   "env.description": "Description",
+  "navigation.route": "Route",
+  "navigation.auth": "Shown to",
+  "navigation.where": "Where",
+  "navigation.can": "Ability",
 
   "tasks.entity": "Entity",
   "tasks.covers": "Covers",

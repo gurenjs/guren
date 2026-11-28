@@ -89,6 +89,7 @@ const SECTION_TITLES: Record<(typeof PLAN_STATUS_SECTIONS)[number], string> = {
   providers: 'Providers',
   config: 'Config',
   env: 'Environment',
+  navigation: 'Navigation',
   commands: 'Commands',
 }
 

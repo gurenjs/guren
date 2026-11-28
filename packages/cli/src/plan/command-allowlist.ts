@@ -78,6 +78,7 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'add schedule': 'generator',
   'add storage': 'generator',
   'add ui': 'generator',
+  'add navigation': 'generator',
   // These run the app's own drizzle-kit, which imports db/schema.ts: the app tree is trusted already.
   'make:auth': 'generator',
   'add auth': 'generator',
