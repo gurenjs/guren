@@ -1,6 +1,6 @@
 ---
 name: agent-interface
-description: Expose an existing route to AI agents as an MCP tool with `.agent()` metadata, render its result as a page inside Claude or another MCP Apps host with `.agent({ ui })`, or list the routes agents can already reach ("make an MCP tool", "expose this to agents", "MCP App", "show this page in Claude").
+description: Expose an existing route to AI agents as an MCP tool with `.agent()` metadata, render its result as a page inside Claude or another MCP Apps host with `.agent({ ui })`, publish a skill on the MCP endpoint that tells the agents of the app's users how to use those tools (`make:mcp-skill`), or list the routes agents can already reach ("make an MCP tool", "expose this to agents", "MCP App", "show this page in Claude", "MCP skill", "instructions for agents that call the app").
 ---
 
 # Agent Interface Skill
@@ -133,6 +133,44 @@ browser.
   open `http://localhost:3333/_guren/mcp-apps`, paste it, and call the tool.
   The page renders the view in a sandbox the way a web host does.
 
+## Publishing a skill for the agents that call the app
+
+A tool's description covers one call. What spans several calls (the steps of a
+refund, which of two similar tools comes first, what to do when a call is
+refused) goes in a skill: a directory with a `SKILL.md` that the MCP endpoint
+serves to the agents of the app's users. It is not one of the skills under
+`__SKILLS_DIR__/`, which are your own instructions; an app's skill lives in
+`resources/skills/` and is never written there.
+
+```bash
+bunx guren make:mcp-skill refunds --description "Process a refund per shop policy"
+bunx guren make:mcp-skill dunning --module billing    # modules/billing/resources/skills/dunning/SKILL.md
+bunx guren codegen                                    # packages the skills into .guren/mcp-skills.gen.ts
+```
+
+- Create the skill with the command, not by hand: it writes
+  `resources/skills/<name>/SKILL.md` with `name` equal to the directory,
+  which the endpoint requires, and both frontmatter values quoted, so a name
+  such as `no` or `123` stays a string. The name is lowercase letters and
+  digits with single hyphens, 64 characters at most.
+- `description` is the one line a calling agent reads to decide whether to
+  load the skill: say what it does and when it applies. Without
+  `--description` the command writes a placeholder; replace it.
+- In the body, name the tools as `bunx guren tool:list` prints them, in the
+  order to call them, and say what to do when one refuses. Supporting files go
+  beside `SKILL.md` and are referred to by relative path. Every regular file
+  below the directory is published; dotfiles and symlinks are not.
+- Serve: `mcpPlugin({ skills: { files: () => import('@/.guren/mcp-skills.gen') } })`.
+  `make:mcp-skill` prints this line when no `mcpPlugin()` call carries
+  `skills`; add it to the call the app already has.
+- Every token the endpoint accepts can read every skill, one with no tool
+  scope included. Keep credentials, internal URLs and customer data out of
+  the directory.
+- A skill grants nothing and enforces nothing. A rule the app depends on stays
+  in the route's policy or the token's scopes; the skill explains it.
+- After editing a skill, run `bunx guren codegen` (the Vite dev server does it
+  on each change), then `bunx guren check`.
+
 ## Check the wiring
 
 ```bash
@@ -144,6 +182,8 @@ bunx guren audit    # validation rules are stricter for agent-exposed routes
 
 For `ui` it **fails** on a page `.guren/pages.gen.ts` lacks (`agent-route-ui-page`), a malformed `ui` (`agent-route-ui-shape`) and `ui` beside `output` (`agent-route-ui-output`), and **warns** when the action never renders the page, passes a deferred prop, or `mcpPlugin()` has no `ui` option.
 
-`guren audit` warns when `destructiveHint: false` sits on an action that deletes, updates, or force-writes records, and treats an unverifiable body validation on an agent route as a failure rather than a warning. Suppress an audit finding you have judged safe by its exact key in `config/audit.ts`.
+For skills it **fails** on a skill the endpoint would leave out (`mcp-skill-frontmatter`), a manifest spelled anything but `SKILL.md` (`mcp-skill-manifest`), a `SKILL.md` below another skill or a root skill named after a module that has skills (`mcp-skill-namespace`), a skill over 512 files or 16 MiB (`mcp-skill-limit`) and a `.guren/mcp-skills.gen.ts` that is missing or older than the files (`mcp-skills-stale`; `bunx guren check --fix` regenerates it), and **warns** when skills exist and no `mcpPlugin()` call carries `skills` (`mcp-skills-unserved`). `bunx guren tool:list` prints the skills the endpoint would serve below the tools.
+
+`guren audit` scans the text files of every published skill for hardcoded credentials, warns when `destructiveHint: false` sits on an action that deletes, updates, or force-writes records, and treats an unverifiable body validation on an agent route as a failure rather than a warning. Suppress an audit finding you have judged safe by its exact key in `config/audit.ts`.
 
 Full routing reference: `__SKILLS_DIR__/guren-api/reference/routes-codegen.md`.
