@@ -36,9 +36,14 @@ export interface PlanAppTarget {
   endpoint?: string
 }
 
-/** The route name an entry links: the name of the plan's route its `route` is the id of, else `route` itself (RFC 0040 §5). */
-export function navigationRouteName(plan: Pick<PlanDraft, 'routes'>, entry: Pick<PlanNavigation, 'route'>): string {
-  return plan.routes.find((route) => route.id === entry.route)?.name ?? entry.route
+/**
+ * The route name an entry links (RFC 0040 §5): the name of the plan's route its `route` is the id of, else `route`
+ * itself. A dropped entry is the one the file holds now, so a route the plan renames is named as it was.
+ */
+export function navigationRouteName(plan: Pick<PlanDraft, 'routes'>, entry: Pick<PlanNavigation, 'route' | 'change'>): string {
+  const route = plan.routes.find((candidate) => candidate.id === entry.route)
+  if (!route) return entry.route
+  return entry.change.kind === 'drop' && route.change.kind === 'rename' ? route.change.from : route.name
 }
 
 /** How an endpoint is compared everywhere: `GET /posts`. */

@@ -63,6 +63,38 @@ describe('the navigation section of a plan (RFC 0040 §5)', () => {
     ])
   })
 
+  test('should refuse a link the plan takes away, and an id that is also another route\'s name', () => {
+    const withRoute = (route: Loose, navigation: Loose[]) => {
+      const plan = withIndex(navigation)
+      plan.routes.push({ id: 'route.posts.index', method: 'GET', path: '/posts', action: 'action.comments.index', middleware: [], bind: [], ...route })
+      return plan
+    }
+    expect(navigationFindings(withRoute({ change: { kind: 'rename', from: 'posts.index' }, name: 'articles.index' }, [POSTS]))).toEqual([
+      ['plan:navigation-route', 'fail', 'The entry links "posts.index", which the plan renames to "articles.index"; link it by the id "route.posts.index".'],
+    ])
+    expect(navigationFindings(withRoute({ change: { kind: 'drop', reason: 'Gone.' }, name: 'posts.index' }, [POSTS]))).toEqual([
+      ['plan:navigation-route', 'fail', 'The entry links "posts.index", which the plan drops (route.posts.index).'],
+    ])
+    expect(navigationFindings(withIndex([{ ...POSTS, route: 'comments.index' }]))).toEqual([
+      ['plan:navigation-route', 'fail', 'The entry names "comments.index", a route the plan adds; link it by the id "route.comments.index".'],
+    ])
+    // A dropped entry is the one the file holds, so a route the plan renames is found by its old name.
+    const dropRenamed = withRoute({ change: { kind: 'rename', from: 'posts.index' }, name: 'articles.index' }, [{ id: 'nav.old', change: { kind: 'drop', reason: 'Gone.' }, route: 'route.posts.index' }])
+    expect(navigationFindings(dropRenamed, planAppState({ navigation: ['posts.index'] }))).toEqual([])
+    const ambiguous = withIndex([{ ...POSTS, id: 'nav.admin' }])
+    ambiguous.routes.push({ id: 'posts.index', change: { kind: 'add' }, method: 'GET', path: '/admin/posts', name: 'admin.posts', action: 'action.comments.index', middleware: [], bind: [] })
+    expect(navigationFindings(ambiguous)).toEqual([
+      ['plan:navigation-route', 'fail', '"posts.index" is both the id of the plan\'s route "admin.posts" and the name of a route the application registers; give the plan\'s route another id.'],
+    ])
+  })
+
+  test('should refuse a blank label and a where field stated twice', () => {
+    expect(navigationFindings(withIndex([{ ...POSTS, label: ' ' }]))).toEqual([['plan:navigation-entry', 'fail', 'The entry for "posts.index" has a blank label.']])
+    expect(navigationFindings(withIndex([{ ...POSTS, where: [{ field: 'role', value: 'admin' }, { field: 'role', value: 'staff' }] }]))).toEqual([
+      ['plan:navigation-entry', 'fail', 'The entry for "posts.index" states the where field "role" twice.'],
+    ])
+  })
+
   test('should hold a can to an ability its policy lists', () => {
     const entry = { id: 'nav.comments', change: { kind: 'add' }, route: 'route.comments.index', label: 'Comments' }
     expect(navigationFindings(withIndex([{ ...entry, can: { ability: 'delete', policy: 'policy.comment' } }]))).toEqual([])
@@ -121,23 +153,26 @@ describe('plan:status on a navigation entry', () => {
       { id: 'nav.home', change: { kind: 'drop', reason: 'The brand links home.' }, route: 'home' },
     ],
   })
-  const judge = (entries: PlanAppDetail['navigation'], names: string[]) =>
-    judgePlan(plan, planAppState({ navigation: names, detail: { navigation: entries, unparsedModelFiles: [] } as unknown as PlanAppDetail }))
+  const judge = (entries: PlanAppDetail['navigation'], names: string[], entryLists?: PlanAppDetail['entryLists']) =>
+    judgePlan(plan, planAppState({ navigation: names, detail: { navigation: entries, unparsedModelFiles: [], ...(entryLists ? { entryLists } : {}) } as unknown as PlanAppDetail }))
       .elements.filter((element) => element.section === 'navigation')
       .map((element) => [element.id, element.state, element.properties.map((property) => [property.property, property.verdict])])
+  const can = (module?: string) => ({ ability: 'viewAny', model: { expression: 'Post', className: 'Post', ...(module ? { module } : {}) } })
+  const entry = { label: 'Posts', route: 'posts.index', auth: 'required' as const, can: can('/repo/app/Models/Post'), line: 7 }
 
-  test('should match what the entry shows, and read a dropped entry as done once it is gone', () => {
-    const entry = { label: 'Posts', route: 'posts.index', auth: 'required' as const, can: { ability: 'viewAny', model: { expression: 'Post', className: 'Post' } }, line: 7 }
-    expect(judge([entry], ['posts.index'])).toEqual([
-      ['nav.posts', 'present', [['label', 'match'], ['auth', 'match'], ['can', 'match']]],
-      ['nav.home', 'present', []],
-    ])
+  test('should match the whole audience of an added entry, wired once createApp() lists the definition, and read a dropped entry as done once gone', () => {
+    const matched = [['label', 'match'], ['auth', 'match'], ['where', 'match'], ['can', 'match']]
+    expect(judge([entry], ['posts.index'])).toEqual([['nav.posts', 'present', matched], ['nav.home', 'present', []]])
+    const lists = { file: 'src/app.ts', providers: { files: [], untraced: false }, config: { files: ['config/navigation'], untraced: false } }
+    expect(judge([entry], ['posts.index'], lists)[0]).toEqual(['nav.posts', 'wired', matched])
   })
 
-  test('should tell an entry that shows something else, and a dropped one still there', () => {
-    expect(judge([{ label: 'Blog', route: 'posts.index', line: 7 }, { label: 'Home', route: 'home', line: 8 }], ['home', 'posts.index'])).toEqual([
-      ['nav.posts', 'drifted', [['label', 'differ'], ['auth', 'differ'], ['can', 'differ']]],
+  test('should tell an entry that shows something else, a can on another root\'s class, and a dropped one still there', () => {
+    expect(judge([{ label: 'Blog', route: 'posts.index', where: { 'user.admin': true }, line: 7 }, { label: 'Home', route: 'home', line: 8 }], ['home', 'posts.index'])).toEqual([
+      ['nav.posts', 'drifted', [['label', 'differ'], ['auth', 'differ'], ['where', 'differ'], ['can', 'differ']]],
       ['nav.home', 'planned', []],
     ])
+    expect(judge([{ ...entry, can: can('/repo/modules/blog/app/Models/Post') }], ['posts.index'])[0]).toEqual(['nav.posts', 'drifted', [['label', 'match'], ['auth', 'match'], ['where', 'match'], ['can', 'differ']]])
+    expect(judge([{ ...entry, can: can() }], ['posts.index'])[0]).toEqual(['nav.posts', 'present', [['label', 'match'], ['auth', 'match'], ['where', 'match'], ['can', 'unknown']]])
   })
 })

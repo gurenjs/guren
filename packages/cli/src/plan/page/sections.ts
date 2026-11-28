@@ -347,7 +347,7 @@ function renderEnv(host: HTMLElement, { plan }: PlanPagePayload): void {
 
 function renderNavigation(host: HTMLElement, { plan }: PlanPagePayload): void {
   for (const entry of plan.navigation ?? []) {
-    const where = Object.entries(entry.where ?? {}).map(([field, value]) => field + ' = ' + JSON.stringify(value))
+    const where = (entry.where ?? []).map(({ field, value }) => field + ' = ' + JSON.stringify(value))
     let can: HTMLElement | undefined
     if (entry.can) {
       can = el('span')

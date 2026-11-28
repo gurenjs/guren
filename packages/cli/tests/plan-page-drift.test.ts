@@ -105,7 +105,7 @@ function everyBranch(): Loose[] {
     { id: 'env.queue', change: { kind: 'add' }, key: 'QUEUE_CONNECTION', type: 'enum', choices: ['sync', 'redis'], default: 'sync', required: false, secret: false, description: 'The queue driver.' },
   ]
   plan.navigation = [
-    { id: 'nav.comments', change: { kind: 'add' }, route: 'posts.index', label: 'Comments', auth: 'required', where: { 'user.admin': true }, can: { ability: 'delete', policy: 'policy.comment' } },
+    { id: 'nav.comments', change: { kind: 'add' }, route: 'posts.index', label: 'Comments', auth: 'required', where: [{ field: 'user.admin', value: true }], can: { ability: 'delete', policy: 'policy.comment' } },
   ]
   plan.flows = [
     {

@@ -574,7 +574,7 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     const route = plan.routes.find((candidate) => candidate.id === entry.route)
     const response = route ? actionsById.get(route.action)?.response : undefined
     const linked = response?.kind === 'inertia' ? owner.get(response.view) : route ? owner.get(route.id) : undefined
-    place(coveredOnce(entry.id) ?? linked ?? foundation, 'navigation', entry)
+    place(coveredOnce(entry.id) ?? linked ?? foundation, 'navigation', entry, { file: 'config/navigation.ts' })
   }
 
   /** Element id → the elements whose work it needs done first. An `existing` target is already there. */
@@ -597,6 +597,10 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
       if (modelById.get(reference.to)?.change.kind === 'drop') reads(reference.to, reference.from.id)
       else if (columnById.get(reference.from.id)?.change.kind !== 'drop') reads(reference.from.id, reference.to)
     }
+  }
+  // A link waits for the route it links, which may sit in another task than the page it renders.
+  for (const entry of plan.navigation ?? []) {
+    if (entry.change.kind !== 'drop') reads(entry.id, plan.routes.find((route) => route.id === entry.route)?.id)
   }
   // An action an intent took from its controller is written into the controller's file, so it waits for the class; a dropped one goes first.
   for (const controller of plan.controllers) {

@@ -50,7 +50,7 @@ import {
   type PlanSideEffect,
   type PlanView,
 } from './schema'
-import { NAVIGATION_CONFIG_FILE } from '../navigation-file'
+import { NAVIGATION_CONFIG_FILE, type NavigationFileEntry } from '../navigation-file'
 import { navigationRouteName } from './app-targets'
 import { derivePlanTasks, planLaterRelationships, type PlanLaterRelationship, type PlanTaskDerivation } from './tasks'
 
@@ -571,6 +571,12 @@ function hasIndex(table: SourcedSchemaTable, columns: ReadonlyArray<string>, kin
   if (table.constraints.some((constraint) => kinds.includes(constraint.kind) && sameColumns(constraint, columns))) return true
   const hidden = table.opaqueConstraints || table.constraints.some((constraint) => kinds.includes(constraint.kind) && constraint.opaqueColumns)
   return hidden ? undefined : false
+}
+
+/** A `where` as one comparable text, its fields in code-unit order. */
+function whereKey(where: Record<string, unknown>): string {
+  const fields = Object.keys(where).sort()
+  return fields.length === 0 ? 'none' : fields.map((field) => `${field} = ${JSON.stringify(where[field])}`).join(', ')
 }
 
 const CONSTRAINTS_HIDDEN = "the table's constraints are built where the static reader cannot follow"
@@ -1358,23 +1364,39 @@ class StatusContext {
         if (entry.change.kind === 'drop') return []
         const found = isUnreadable(entries) ? undefined : entries.find((candidate) => candidate.route === route)
         const why = isUnreadable(entries) ? entries.unreadable : `${NAVIGATION_CONFIG_FILE} has no entry for ${route}`
+        // An added entry is held to its whole audience, an omitted rule being none; an alter to what it states.
+        const whole = entry.change.kind === 'add'
         const properties: PlanPropertyStatus[] = []
         if (entry.label !== undefined) properties.push(compare('label', entry.label, found?.label, why))
-        if (entry.auth !== undefined) properties.push(compare('auth', entry.auth, found ? (found.auth ?? 'any') : undefined, why))
-        for (const [field, value] of Object.entries(entry.where ?? {})) {
-          const actual = found ? found.where?.[field] : undefined
-          properties.push(compare(`where ${field}`, JSON.stringify(value), found ? (actual === undefined ? 'absent' : JSON.stringify(actual)) : undefined, why))
+        if (whole || entry.auth !== undefined) properties.push(compare('auth', entry.auth ?? 'any', found ? (found.auth ?? 'any') : undefined, why))
+        if (whole || entry.where !== undefined) {
+          const planned = whereKey(Object.fromEntries((entry.where ?? []).map(({ field, value }) => [field, value])))
+          properties.push(compare('where', planned, found ? whereKey(found.where ?? {}) : undefined, why))
         }
-        if (entry.can) {
-          const policy = this.plan.policies.find((candidate) => candidate.id === entry.can!.policy)
-          const model = policy ? this.modelsById.get(policy.model)?.name : undefined
-          const planned = `${entry.can.ability} ${model ?? '?'}`
-          const actual = found ? (found.can ? `${found.can.ability} ${found.can.model.className}` : 'none') : undefined
-          properties.push(model === undefined ? unknown('can', planned, 'the policy element names no model of the plan') : compare('can', planned, actual, why))
-        }
+        if (entry.can) properties.push(this.navigationCan(entry.can, found, why))
+        else if (whole) properties.push(compare('can', 'none', found ? (found.can ? `${found.can.ability} ${found.can.model.className}` : 'none') : undefined, why))
         return properties
       },
+      // Nothing shares the entries until createApp() lists the definition.
+      mount: { verdict: () => this.entryMount('config', `${CONFIG_DIR}/navigation`), files: () => this.entryFiles() },
     })
+  }
+
+  /** The ability and the model class, the class known by the file its import leads to, as the gate is handed it. */
+  private navigationCan(can: NonNullable<PlanNavigation['can']>, found: NavigationFileEntry | undefined, why: string): PlanPropertyStatus {
+    const policy = this.plan.policies.find((candidate) => candidate.id === can.policy)
+    const model = policy ? this.modelsById.get(policy.model) : undefined
+    if (!model) return unknown('can', `${can.ability} ?`, 'the policy element names no model of the plan')
+    const planned = `${can.ability} ${model.name}`
+    if (!found) return unknown('can', planned, why)
+    if (!found.can) return differ('can', planned, 'none')
+    const actual = `${found.can.ability} ${found.can.model.className}`
+    if (actual !== planned) return differ('can', planned, actual)
+    const file = found.can.model.module?.replace(/\\/gu, '/')
+    if (file === undefined) return unknown('can', planned, `${NAVIGATION_CONFIG_FILE} names ${found.can.model.className} with no import of a model file`)
+    const root = model.module ? `/modules/${model.module}/` : '/'
+    const own = file.endsWith(`${root}app/Models/${model.name}`) && (model.module !== undefined || !file.includes('/modules/'))
+    return own ? match('can', planned) : differ('can', planned, `${actual} from ${file}`)
   }
 
   private entryMount(list: 'providers' | 'config', file: string): PlanAppMount {

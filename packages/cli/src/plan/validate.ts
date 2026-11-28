@@ -498,6 +498,11 @@ function checkNavigation(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
     const at = { elementId: entry.id, section: 'navigation' as const }
     const fail = (key: string, message: string): void => void results.push(finding(key, 'fail', message, at))
     if (entry.change.kind === 'add' && entry.label === undefined) fail('plan:navigation-entry', `The entry for "${entry.route}" is added with no label.`)
+    // defineNavigation() refuses a blank label, which NonEmptySchema lets through.
+    if (entry.label !== undefined && entry.label.trim() === '') fail('plan:navigation-entry', `The entry for "${entry.route}" has a blank label.`)
+    const fields = (entry.where ?? []).map(({ field }) => field)
+    const twice = fields.find((field, index) => fields.indexOf(field) !== index)
+    if (twice !== undefined) fail('plan:navigation-entry', `The entry for "${entry.route}" states the where field "${twice}" twice.`)
     if (entry.can) {
       const policy = plan.policies.find((candidate) => candidate.id === entry.can!.policy)
       if (policy && !policy.abilities.some((ability) => ability.name === entry.can!.ability)) {
@@ -507,10 +512,29 @@ function checkNavigation(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
     if (entry.change.kind === 'drop') continue
     const route = plan.routes.find((candidate) => candidate.id === entry.route)
     if (route) {
+      const named = isUnreadable(app.routes) ? undefined : app.routes.find((candidate) => candidate.name === entry.route)
+      if (named && route.name !== entry.route) fail('plan:navigation-route', `"${entry.route}" is both the id of the plan's route "${route.name}" and the name of a route the application registers; give the plan's route another id.`)
       if (route.change.kind === 'drop') fail('plan:navigation-route', `The entry links the route "${route.id}", which the plan drops.`)
       if (route.method !== 'GET' || !isParameterless(route.path)) fail('plan:navigation-route', `The entry links "${route.id}" (${route.method} ${route.path}); an entry links a GET route with no path parameter.`)
-      const response = actions.get(route.action)?.response
+      const action = actions.get(route.action)
+      const response = action?.response
       if (response && response.kind !== 'inertia') fail('plan:navigation-route', `The entry links "${route.id}", whose action does not render a page.`)
+      const view = response?.kind === 'inertia' ? plan.views.find((candidate) => candidate.id === response.view) : undefined
+      if (action?.change.kind === 'drop' || view?.change.kind === 'drop') fail('plan:navigation-route', `The entry links "${route.id}", whose ${action?.change.kind === 'drop' ? 'action' : 'page'} the plan drops.`)
+      continue
+    }
+    // The application's route by name, unless the plan takes that name away.
+    const replaced = plan.routes.find((candidate) => candidate.name === entry.route || (candidate.change.kind === 'rename' && candidate.change.from === entry.route))
+    if (replaced?.change.kind === 'drop') {
+      fail('plan:navigation-route', `The entry links "${entry.route}", which the plan drops (${replaced.id}).`)
+      continue
+    }
+    if (replaced?.change.kind === 'add') {
+      fail('plan:navigation-route', `The entry names "${entry.route}", a route the plan adds; link it by the id "${replaced.id}".`)
+      continue
+    }
+    if (replaced?.change.kind === 'rename' && replaced.change.from === entry.route) {
+      fail('plan:navigation-route', `The entry links "${entry.route}", which the plan renames to "${replaced.name}"; link it by the id "${replaced.id}".`)
       continue
     }
     if (isUnreadable(app.routes)) {

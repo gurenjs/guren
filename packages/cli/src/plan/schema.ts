@@ -303,8 +303,8 @@ export const PlanNavigationSchema = z.strictObject({
   route: NonEmptySchema,
   label: NonEmptySchema.optional(),
   auth: z.enum(PLAN_NAVIGATION_AUTH).optional(),
-  // The values `readNavigationFile()` reads a `where` field as.
-  where: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  // A list rather than a record, since a structured-output producer needs every object closed; the values are the ones `readNavigationFile()` reads.
+  where: z.array(z.strictObject({ field: NonEmptySchema, value: z.union([z.string(), z.number(), z.boolean(), z.null()]) })).optional(),
   can: z.strictObject({ ability: NonEmptySchema, policy: IdSchema }).optional(),
 })
 
