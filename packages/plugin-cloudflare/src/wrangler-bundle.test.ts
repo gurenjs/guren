@@ -252,18 +252,22 @@ function vendorClosure(
   }
 }
 
+/** The SDK entry points plugin-mcp's built files import. A wrangler alias matches one exact specifier, so each is stubbed by name. */
+const SDK_ENTRY_POINTS = ['@modelcontextprotocol/server', '@modelcontextprotocol/server/ext/skills']
+
 /**
- * The names plugin-mcp's built files import from the SDK root: the stub has to
- * export each one or the bundle fails to link, which reads as a failed build.
+ * The names plugin-mcp's built files import from one SDK entry point: the stub
+ * has to export each one or the bundle fails to link, which reads as a failed build.
  */
-function sdkRootImports(packageDir: string): string[] {
+function sdkImportNames(packageDir: string, specifier: string): string[] {
   const names = new Set<string>()
+  const pattern = new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*["']${specifier}["']`, 'g')
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name)
       if (entry.isDirectory()) walk(path)
       else if (entry.name.endsWith('.js')) {
-        for (const match of readFileSync(path, 'utf8').matchAll(/import\s*\{([^}]*)\}\s*from\s*["']@modelcontextprotocol\/server["']/g)) {
+        for (const match of readFileSync(path, 'utf8').matchAll(pattern)) {
           for (const part of match[1]!.split(',')) {
             const name = part.trim().split(/\s+as\s+/)[0]!.trim()
             if (name !== '' && !name.startsWith('type ')) names.add(name)
@@ -278,13 +282,14 @@ function sdkRootImports(packageDir: string): string[] {
 
 describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp', () => {
   let root: string
-  let sdkImports: string[]
+  let sdkStubs: StubbedModule[]
 
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), 'guren-wrangler-mcp-'))
 
     const closure = workspaceClosure('@guren/plugin-mcp')
-    sdkImports = sdkRootImports(closure.get('@guren/plugin-mcp')!.dir)
+    const packageDir = closure.get('@guren/plugin-mcp')!.dir
+    sdkStubs = SDK_ENTRY_POINTS.map((specifier) => ({ specifier, exportNames: sdkImportNames(packageDir, specifier) }))
 
     // Every third-party dependency of the closure, flattened to the top level.
     vendorClosure(root, 'mcp-bundle-probe', closure, {
@@ -348,15 +353,13 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
     () => {
       // Everything `cloudflare:build` stubs.
       const deployed = [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES]
-      expect(sdkImports).toContain('createMcpHandler')
+      expect(sdkStubs[0]!.exportNames).toContain('createMcpHandler')
+      expect(sdkStubs[1]!.exportNames).toContain('SkillsExtension')
       const served = bundleSize('sdk-served', deployed)
-      // And the same worker with the SDK v2 root stubbed under the names
+      // And the same worker with every SDK entry point stubbed under the names
       // plugin-mcp imports. "The bundle resolves" cannot tell the two apart, so
       // the size difference is the only proof the real SDK reached the worker.
-      const stubbed = bundleSize('sdk-stubbed', [
-        ...deployed,
-        { specifier: '@modelcontextprotocol/server', exportNames: sdkImports },
-      ])
+      const stubbed = bundleSize('sdk-stubbed', [...deployed, ...sdkStubs])
 
       console.log(
         `App MCP SDK costs ${((served - stubbed) / 1024).toFixed(1)} KiB gzipped `

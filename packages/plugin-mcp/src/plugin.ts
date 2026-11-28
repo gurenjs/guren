@@ -29,6 +29,7 @@ import { readExternalMcpAuth, type ExternalMcpAuth } from './external-auth'
 import { AgentRateLimiter, createRateLimitInterposition, type RateLimitConfig } from './rate-limit'
 import { uiAuthority, unbuiltPages, type AppMcpUi, type McpUiConfig } from './mcp-apps'
 import { APP_MCP_REQUEST, createAppMcpServer, type AppMcpServerOptions } from './server'
+import { loadSkills, type McpSkillsConfig } from './skills'
 
 export interface McpPluginConfig {
   /**
@@ -84,6 +85,12 @@ export interface McpPluginConfig {
    * @default undefined — no pages; every shared prop is withheld from tool calls
    */
   ui?: McpUiConfig
+  /**
+   * Agent skills (RFC 0042 §1): the `SKILL.md` directories `guren codegen` embeds, served through
+   * the MCP Skills extension. Every caller the endpoint authenticates can read every skill.
+   * @default undefined — no skills; the endpoint advertises no resources for them
+   */
+  skills?: McpSkillsConfig
 }
 
 /**
@@ -146,6 +153,9 @@ const factory = definePlugin<McpPluginConfig>({
         + "and pass ui: { pages: () => import('@/.guren/mcp-app/index.gen') } to mcpPlugin().",
       )
     }
+    // Built here and never in a module-level variable: two applications in one
+    // process, as under `bun test`, must not share a catalog.
+    const skills = await loadSkills(config.skills)
     // Per-token, in this process. An app's own rate-limit middleware keys on
     // `server.requestIP()`, which is null for the synthesized re-entrant request
     // and so collapses every MCP caller into one shared bucket; a global budget
@@ -156,7 +166,7 @@ const factory = definePlugin<McpPluginConfig>({
     // `authInfo.extra`: the SDK hands the legacy leg a clone of the request, so
     // nothing keyed on the `Request` object reaches the factory (RFC 0028 §3).
     const handler = createMcpHandler(
-      ({ authInfo }) => {
+      ({ authInfo, era }) => {
         // The SDK turns a throw here into a bare 500 and reports it only to
         // `onerror`, which also receives every rejected client request, so the
         // one failure that is this plugin's own is logged here instead.
@@ -165,7 +175,7 @@ const factory = definePlugin<McpPluginConfig>({
           if (!options) {
             throw new Error('App MCP: request reached the handler without an authenticated caller.')
           }
-          return createAppMcpServer(options)
+          return createAppMcpServer(options, era)
         } catch (error) {
           console.error('[@guren/plugin-mcp]', error)
           throw error
@@ -276,6 +286,7 @@ const factory = definePlugin<McpPluginConfig>({
         rateKey,
         ui,
         appOrigin: origin,
+        ...(skills ? { skills } : {}),
         onInvoked: (tool, args, status, durationMs) => {
           record(
             new AgentToolInvoked(

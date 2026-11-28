@@ -7,6 +7,7 @@ import { generateAgentTypes } from './agents-types'
 import { generateFormTypes } from './forms-types'
 import { generateChannelTypes } from './channel-types'
 import { generatePageTypes } from './pages-types'
+import { generateMcpSkills } from './mcp-skills'
 import type { WriterOptions } from './utils'
 
 export interface CodegenOptions {
@@ -25,12 +26,13 @@ export async function* runCodegen(options: CodegenOptions) {
   // default — including custom --out/--pages-out destinations. --force is
   // accepted for backward compatibility but is a no-op.
   const writerOptions: WriterOptions = { force: true }
-  // These three read disjoint inputs (pages, lang/, app/Models) and write
-  // disjoint artifacts, so they run concurrently.
+  // These four read disjoint inputs (pages, lang/, app/Models, resources/skills) and
+  // write disjoint artifacts, so they run concurrently.
   const [
     { outputPath: pagesOutputPath, plan: pagesPlan },
     { outputPath: translationsOutputPath, keyCount },
     { outputPath: attachmentsOutputPath, models: attachableModels, warnings: attachmentWarnings },
+    { outputPath: skillsOutputPath, skillCount, warnings: skillWarnings },
   ] = await Promise.all([
     generatePageTypes({
       appRoot: options.appRoot,
@@ -41,6 +43,7 @@ export async function* runCodegen(options: CodegenOptions) {
     }),
     generateTranslationTypes({ appRoot: options.appRoot, ...writerOptions }),
     generateAttachmentTypes({ appRoot: options.appRoot, ...writerOptions }),
+    generateMcpSkills({ appRoot: options.appRoot, ...writerOptions }),
   ])
   yield {
     stage: 'supporting' as const,
@@ -51,6 +54,9 @@ export async function* runCodegen(options: CodegenOptions) {
     attachmentsOutputPath,
     attachableModels,
     attachmentWarnings,
+    skillsOutputPath,
+    skillCount,
+    skillWarnings,
   }
 
   // Route/API artifacts default to routes/web.ts; skip only when no routes file exists.

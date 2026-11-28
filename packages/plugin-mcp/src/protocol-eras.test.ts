@@ -15,6 +15,11 @@ import { APP_MCP_REQUEST } from './server'
 
 type ProtocolEra = 'modern' | 'legacy'
 
+const SKILLS = {
+  files: { 'refunds/SKILL.md': '---\nname: refunds\ndescription: Process a refund\n---\n\n# Refunds\n' },
+  binary: {},
+}
+
 /**
  * The endpoint on both protocol eras (RFC 0028 §3). The SDK reaches the server
  * factory by a different path for each, and hands the legacy leg a clone of the
@@ -46,7 +51,10 @@ describe('mcpPlugin across protocol eras', () => {
   }
 
   beforeAll(async () => {
-    app = createApp({ routes: registerRoutes, providers: [EventServiceProvider, mcpPlugin({ rateLimit: false })] })
+    app = createApp({
+      routes: registerRoutes,
+      providers: [EventServiceProvider, mcpPlugin({ rateLimit: false, skills: { files: () => SKILLS } })],
+    })
     app.auth.useTokens(store)
     await app.boot()
 
@@ -84,6 +92,20 @@ describe('mcpPlugin across protocol eras', () => {
         const client = await connect(era, writer, 'acme')
 
         expect(client.getProtocolEra()).toBe(era)
+
+        await client.close()
+      })
+
+      // The Skills extension is specified against 2026-07-28 only (RFC 0042 §1.4);
+      // the file behind it is an ordinary resource on either era.
+      test('declares the Skills extension only on the era that specifies it', async () => {
+        const client = await connect(era, reader, 'acme')
+
+        const declared = client.getServerCapabilities()?.extensions?.['io.modelcontextprotocol/skills']
+        const { contents } = await client.readResource({ uri: 'skill://refunds/SKILL.md' })
+
+        expect(declared).toEqual(era === 'modern' ? {} : undefined)
+        expect((contents[0] as { text: string }).text).toContain('name: refunds')
 
         await client.close()
       })

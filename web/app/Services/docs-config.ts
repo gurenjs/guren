@@ -105,6 +105,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'agent-interface',
       'agent-tool-governance',
       'mcp-apps',
+      'mcp-skills',
       'ai-agents',
       'ai-agents-testing',
       'durable-agents',
