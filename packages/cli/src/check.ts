@@ -68,6 +68,8 @@ import { INTROSPECTION_UNAVAILABLE, INTROSPECTION_UNAVAILABLE_FIX, introspection
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { checkConfigWiring } from './config-check'
 import { checkNavigation } from './navigation-check'
+import { isMcpSkillInput } from './mcp-skills'
+import { checkMcpSkills } from './mcp-skills-check'
 import { runSpecCheck } from './spec-check'
 import { checkPlans, isPlanInput } from './plan-check'
 import { changesSource, getChangedFiles } from './changed-files'
@@ -583,6 +585,13 @@ async function collectCheckReport(options: RunCheckOptions): Promise<CheckReport
         ...check(`manifest:${manifest}`, manifest, 'warn', `${manifest} is missing.`, `Run: ${formatFixCommand(manifestFix)}`),
         fix: manifestFix,
       })
+    }
+
+    // 5.4. MCP skills (RFC 0042 §1.6): what the endpoint would serve of resources/skills/, and whether
+    // .guren/mcp-skills.gen.ts still matches. Content-activated. A --changed run reads it when a skill
+    // file or any source moved, since the serving rule reads the mcpPlugin() call.
+    if (sourceChanged || [...(changedFiles ?? [])].some(isMcpSkillInput)) {
+      checks.push(...(await checkMcpSkills({ cwd, cache, fix: manifestFix })))
     }
 
     // 5.5. The agent manifest cannot ride the loop above: codegen writes it only

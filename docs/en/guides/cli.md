@@ -469,7 +469,7 @@ Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (s
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `tool:list` | List the agent tools this application exposes | `bunx guren tool:list` |
+| `tool:list` | List the agent tools this application exposes, and below them the [skills](./mcp-skills.md) its MCP endpoint would serve | `bunx guren tool:list` |
 | `tool:inspect` | Show one tool's full derivation | `bunx guren tool:inspect posts.store` |
 | `tool:call` | Invoke one tool the way an agent would | `bunx guren tool:call posts.index` |
 | `tool:dev` | Serve the tools locally with a throwaway token | `bunx guren tool:dev` |
@@ -480,7 +480,7 @@ Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (s
 # authorization ability and MCP annotation hints
 bunx guren tool:list
 
-# The raw derivation, including any warnings
+# The raw derivation, including any warnings, with the skills under `skills`
 bunx guren tool:list --json
 
 # One tool: input fields, output schema, authorization,

@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { listSkills, loadSkills } from '../../plugin-mcp/src/skills'
-import { makeMcpSkill, MCP_SKILL_DESCRIPTION_PLACEHOLDER, MCP_SKILLS_OPTION, mcpSkillFile, mcpSkillServingHint } from '../src/make-mcp-skill'
-import { generateMcpSkills } from '../src/mcp-skills'
+import { makeMcpSkill, MCP_SKILL_DESCRIPTION_PLACEHOLDER, mcpSkillFile, mcpSkillServingHint } from '../src/make-mcp-skill'
+import { generateMcpSkills, MCP_SKILLS_OPTION } from '../src/mcp-skills'
 
 describe('make:mcp-skill', () => {
   let app: string

@@ -6,8 +6,10 @@ import { dirname, join } from 'node:path'
 import { listSkills, loadSkills, readSkillResource } from '../../plugin-mcp/src/skills'
 import { runCodegen } from '../src/codegen'
 import {
+  describeSkillProblem,
   discoverMcpSkills,
   generateMcpSkills,
+  type McpSkillProblem,
   MCP_SKILLS_MODULE,
   nestedSkillManifests,
   readMcpSkills,
@@ -82,10 +84,11 @@ describe('MCP skills codegen', () => {
 
     test('should name a manifest spelled in another case, and not publish its directory', async () => {
       await put('resources/skills/refunds/skill.md', skillMd('refunds'))
-      const warnings: string[] = []
+      const problems: McpSkillProblem[] = []
 
-      expect(await discoverMcpSkills(app, warnings)).toEqual([])
-      expect(warnings).toEqual(["resources/skills/refunds/skill.md is not published: a skill's manifest is named SKILL.md, in that case."])
+      expect(await discoverMcpSkills(app, problems)).toEqual([])
+      expect(problems).toEqual([{ kind: 'misnamed', file: 'resources/skills/refunds/skill.md' }])
+      expect(describeSkillProblem(problems[0]!)).toBe("resources/skills/refunds/skill.md is not published: a skill's manifest is named SKILL.md, in that case.")
     })
 
     test('should leave out dotfiles, dot directories and symlinks inside a skill', async () => {
