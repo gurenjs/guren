@@ -2,7 +2,8 @@
 
 **Author:** 7nohe
 **Date:** 2026-11-25
-**Status:** Draft
+**Status:** Accepted (2026-11-28; the deciding maintainer explicitly approved the
+proposal and shortened the standard discussion period before implementation.)
 
 ## Problem
 
