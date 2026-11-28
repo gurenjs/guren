@@ -37,6 +37,8 @@ import { derivePlanTasks, describePlanTask, listPlanSteps, planLaterRelationship
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
 import { readStepStart } from './plan/work'
+import { readNavigationEntries } from './navigation-file'
+import { planNavigationWork, type PlanNavigationWork } from './plan/navigation-commands'
 import { isRoutesFileMounted } from './routes-check'
 import { pathExists } from './utils'
 
@@ -100,6 +102,11 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
    * them (each provider an empty shell registered in `createApp()`, each key in `config/env.ts`), and what it writes.
    */
   entries?: { command: string; providers: string[]; env: string[] }
+  /**
+   * A step owning navigation entries still to write (RFC 0040 §5): per element the `nav:add` or `nav:remove`
+   * command, and what the commands cannot say, written by hand.
+   */
+  navigation?: PlanNavigationWork[]
   /**
    * An http step's: the added or renamed views its actions render. `pages.gen.ts` names a page only once
    * its file exists, and the task's last http step typechecks, so each is written here as a stub the pages step completes.
@@ -416,6 +423,9 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const mountable = mount && (await pathExists(resolve(root, mount.file))) && !(await isRoutesFileMounted(root, mount.file)) ? { mount } : {}
   // Named only while something is missing: a provider a command wrote, or a key it declared, is left to plan:status.
   const entries = approval ? await entriesOf(root, plan, step, planPath) : undefined
+  const navigation = (plan.navigation ?? []).some((entry) => step.elementIds.includes(entry.id))
+    ? planNavigationWork(plan, step.elementIds, await readNavigationEntries(root))
+    : []
 
   return {
     ...head,
@@ -437,6 +447,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       ...(scaffolded ? { scaffolded } : step.kind === 'scaffold' || step.kind === 'tests' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
       ...mountable,
       ...(entries ? { entries } : {}),
+      ...(navigation.length > 0 ? { navigation } : {}),
       ...pageStubsOf(plan, step),
     },
   }
@@ -611,6 +622,13 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     // A draft is never scaffolded (plan:scaffold refuses it), so it has nothing to mount.
     if (step.mount && report.plan.hash !== null) lines.push('', ...mountLines(step, step.mount, planArgument))
     if (step.entries) lines.push('', ...entriesLines(step, step.entries, planArgument))
+    if (step.navigation) {
+      lines.push('', 'Write the layout links through the navigation writer, not by editing config/navigation.ts:')
+      for (const work of step.navigation) {
+        if (work.command) lines.push(`  ${work.id}: ${work.command}`)
+        if (work.byHand) lines.push(`  ${work.command ? ' '.repeat(work.id.length + 2) : `${work.id}: `}${work.byHand}`)
+      }
+    }
     if (step.pageStubs) {
       lines.push(
         '',
