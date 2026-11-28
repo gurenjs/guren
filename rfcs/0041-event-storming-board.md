@@ -356,7 +356,9 @@ person's canvas edits are what it builds on, and passes operations on standard
 input, leaving no file in the tree for `plan:approve` to refuse. In a session
 nobody can answer in, it goes through the stages in one pass and stops at the
 board. Its hand-off runs `plan --from-board`, records the links, and checks
-them with `board:status --plan` before the person reviews the plan.
+them with `board:status --plan` before the person reviews the plan. The board
+is then committed, since `plan:approve` refuses a tree with changes outside the
+plan's own files and a board is not one of them.
 
 ### 3. From a board to a plan
 

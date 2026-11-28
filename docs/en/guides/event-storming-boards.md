@@ -97,7 +97,7 @@ The agent harness in a scaffolded app ships an `event-storming` skill for runnin
 3. the reactions that follow each event and the external systems they reach;
 4. a question note for each thing nobody has decided.
 
-When you say the board has settled, the skill hands it to the plan, as the next section describes.
+When you say the board has settled, the skill hands it to the plan, as the next section describes, and commits the board with its links before you approve the plan.
 
 ## From a board to a plan
 

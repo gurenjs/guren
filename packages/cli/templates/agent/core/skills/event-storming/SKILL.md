@@ -1,6 +1,6 @@
 ---
 name: event-storming
-description: "Run an event-storming session with the person on a board (`docs/boards/<slug>.board.json`, RFC 0041) before a plan exists, for a change whose shape is not settled yet (\"let's storm this\", \"map the events\", \"what happens when …\"). Works in four stages and stops for the person after each, then hands the board to plan-write."
+description: "Run an event-storming session with the person on a board (`docs/boards/<slug>.board.json`, RFC 0041) before a plan exists, for a change whose shape is not settled yet (\"let's storm this\", \"map the events\", \"what happens in the domain when …\"). Works in four stages and stops for the person after each, then hands the board to plan-write."
 ---
 
 # Event-Storming Skill
@@ -27,8 +27,8 @@ app's default locale, and `--locale ja` sets another. Tell the person where to
 see it: with the dev server running, `/_guren/boards/<slug>` on its port.
 
 You edit the board through `board:apply`, with the operations on standard
-input, so no file is left in the repository (`plan:approve` refuses a tree
-with an untracked file):
+input, so no operations file is left in the repository (`plan:approve` refuses
+a tree with an untracked file):
 
 ```bash
 bunx guren board:apply <slug> --ops - <<'EOF'
@@ -103,5 +103,9 @@ bunx guren board:status <slug> --plan docs/plans/<plan-slug>/plan.json
 Every link should read `planned` or `present`. A `missing` link names
 something the plan does not add: fix the link or the plan. Notes listed as
 leading nowhere either need a link or belong in the plan's non-goals. Actors
-and questions take no link. Once the person approves the plan, the board page
-shows the same result on each note.
+and questions take no link.
+
+Commit the board with its links before the person runs `plan:approve`, which
+refuses a tree with uncommitted changes outside the plan's own files; commit it
+again if they edit the canvas while reviewing. Once they approve the plan, the
+board page shows the same result as `board:status` on each note.
