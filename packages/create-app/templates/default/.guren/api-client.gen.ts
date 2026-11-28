@@ -12,7 +12,10 @@
  * `path` literal, the same string the server routes on.
  */
 export interface ApiRoutes {
-  // No named routes found
+  'home': {
+    method: 'GET'
+    path: '/'
+  }
 }
 
 export type ApiRouteName = keyof ApiRoutes
@@ -230,5 +233,5 @@ export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method
 }
 
 const routes: Record<string, { method: string; path: string }> = {
-
+  'home': { method: 'GET', path: '/' },
 }

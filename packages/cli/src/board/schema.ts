@@ -9,21 +9,13 @@ import { z } from 'zod'
 
 import { CliError } from '../cli-error'
 import { LocaleSchema } from '../plan/schema'
+import { BOARD_EXTENT, BOARD_GRID, BOARD_ID_PATTERN, lineProblem, BOARD_MAX_ARROWS, BOARD_MAX_NOTES, BOARD_MAX_SECTIONS, BOARD_NOTE_KINDS, NOTE_TEXT_MAX, SECTION_TITLE_MAX } from './geometry'
+
+export { compareIds, serializeBoard } from './canonical'
 
 export const BOARD_VERSION = 1
 
-export const BOARD_NOTE_KINDS = ['actor', 'view', 'command', 'aggregate', 'event', 'reaction', 'external', 'question'] as const
-export type BoardNoteKind = (typeof BOARD_NOTE_KINDS)[number]
-
 export const BOARD_LINK_KINDS = ['model', 'route', 'action', 'page', 'event', 'listener', 'job', 'mail', 'notification'] as const
-
-export const BOARD_MAX_NOTES = 500
-export const BOARD_MAX_SECTIONS = 100
-export const BOARD_MAX_ARROWS = 2000
-
-/** Board units. Every stored coordinate and size is a multiple of the grid inside the extent. */
-export const BOARD_GRID = 8
-export const BOARD_EXTENT = 16000
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 
@@ -55,8 +47,6 @@ export function boardFile(slug: string): string {
   return `docs/boards/${boardSlug(slug)}.board.json`
 }
 
-export const BOARD_ID_PATTERN = /^[a-z][a-z0-9_]{1,31}$/
-
 // `constructor` matches the pattern, and an object keyed by id would read the inherited function back.
 const BoardIdSchema = z
   .string()
@@ -68,8 +58,7 @@ function lineOfText(max: number) {
     .string()
     .min(1)
     .max(max)
-    // U+2028 and U+2029 are no control characters, and a reader of the outline may break a line at them.
-    .regex(/^[^\p{Cc}\u2028\u2029]*$/u, { message: 'must be one line with no control characters' })
+    .refine((text) => lineProblem(text, max) !== 'not-one-line', { message: 'must be one line with no control characters' })
     .refine((text) => text.trim() !== '', { message: 'must not be blank' })
 }
 
@@ -88,7 +77,7 @@ export const BoardLinkSchema = z
 export const BoardNoteSchema = z.strictObject({
   id: BoardIdSchema,
   kind: z.enum(BOARD_NOTE_KINDS),
-  text: lineOfText(280),
+  text: lineOfText(NOTE_TEXT_MAX),
   x: CoordinateSchema,
   y: CoordinateSchema,
   section: BoardIdSchema.optional(),
@@ -104,7 +93,7 @@ export const BoardArrowSchema = z.strictObject({
 
 export const BoardSectionSchema = z.strictObject({
   id: BoardIdSchema,
-  title: lineOfText(120),
+  title: lineOfText(SECTION_TITLE_MAX),
   x: CoordinateSchema,
   y: CoordinateSchema,
   width: SizeSchema,
@@ -126,7 +115,7 @@ function duplicates(values: readonly string[]): string[] {
 export const BoardSchema = z
   .strictObject({
     boardVersion: z.literal(BOARD_VERSION),
-    title: lineOfText(120),
+    title: lineOfText(SECTION_TITLE_MAX),
     locale: LocaleSchema,
     notes: z.array(BoardNoteSchema).max(BOARD_MAX_NOTES),
     arrows: z.array(BoardArrowSchema).max(BOARD_MAX_ARROWS),
@@ -158,46 +147,6 @@ export const BoardSchema = z
   })
 
 export type Board = z.infer<typeof BoardSchema>
-
-/** Code-unit order, so the file reads the same on every machine; `localeCompare` follows the host's locale. */
-export function compareIds(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
-function canonicalNote(note: BoardNote): BoardNote {
-  return {
-    id: note.id,
-    kind: note.kind,
-    text: note.text,
-    x: note.x,
-    y: note.y,
-    ...(note.section === undefined ? {} : { section: note.section }),
-    ...(note.about === undefined || note.about.length === 0 ? {} : { about: [...note.about].sort(compareIds) }),
-    ...(note.link === undefined
-      ? {}
-      : { link: { kind: note.link.kind, name: note.link.name, ...(note.link.module === undefined ? {} : { module: note.link.module }) } }),
-  }
-}
-
-/** Fixed key order, notes and sections by id, arrows by `from` then `to`: one board is one byte sequence. */
-export function canonicalBoard(board: Board): Board {
-  return {
-    boardVersion: BOARD_VERSION,
-    title: board.title,
-    locale: board.locale,
-    notes: board.notes.map(canonicalNote).sort((a, b) => compareIds(a.id, b.id)),
-    arrows: board.arrows
-      .map((arrow) => ({ from: arrow.from, to: arrow.to, ...(arrow.kind === undefined ? {} : { kind: arrow.kind }) }))
-      .sort((a, b) => compareIds(a.from, b.from) || compareIds(a.to, b.to)),
-    sections: board.sections
-      .map((section) => ({ id: section.id, title: section.title, x: section.x, y: section.y, width: section.width, height: section.height }))
-      .sort((a, b) => compareIds(a.id, b.id)),
-  }
-}
-
-export function serializeBoard(board: Board): string {
-  return `${JSON.stringify(canonicalBoard(board), null, 2)}\n`
-}
 
 export function emptyBoard(title: string, locale: string): Board {
   return { boardVersion: BOARD_VERSION, title, locale, notes: [], arrows: [], sections: [] }

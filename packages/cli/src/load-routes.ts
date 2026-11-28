@@ -8,6 +8,19 @@ import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, routesEntryOrDefault } from 
 
 type RouteRegistrar = (router: Router) => void | Promise<void>
 
+/** `Router.registeredBindingLookups()`, typed structurally, since the `@guren/server` an app resolves may predate it. */
+export type RouterBindingLookup = ({ key?: string; model?: unknown } | { resolver: unknown }) & { router?: { key?: string; model?: unknown } | { resolver: unknown } }
+
+/** Filled by {@link loadRouteDefinitions}: per definition, how each bound parameter is looked up, or `undefined` when the server cannot say. */
+export interface BindingLookupSink {
+  lookups?: ReadonlyArray<Record<string, RouterBindingLookup>>
+  /**
+   * Per parameter, the registrars that called `router.bind()` on it: `null` for the entry's, else the module directory.
+   * One map serves every route at request time, so which module's binding wins depends on `createApp({ modules })`.
+   */
+  binders?: ReadonlyMap<string, ReadonlySet<string | null>>
+}
+
 // Lives beside the registrar name contract, which the scaffolders need without
 // pulling in `@guren/core`; re-exported so route-resolving commands find it.
 export { DEFAULT_ROUTES_FILE } from './route-registrar'
@@ -143,6 +156,7 @@ export async function loadRouteDefinitions(
   appRoot: string,
   moduleWarnings?: string[],
   moduleProvenance?: Array<string | null>,
+  bindingLookups?: BindingLookupSink,
 ): Promise<RouteDefinition[]> {
   const moduleExports = await import(importUrl(routesFile)) as Record<string, unknown>
   const registrar = resolveRegistrar(moduleExports)
@@ -154,6 +168,16 @@ export async function loadRouteDefinitions(
   }
 
   const router = new Router()
+  const binders = new Map<string, Set<string | null>>()
+  let binding: string | null = null
+  if (bindingLookups) {
+    const bind = router.bind.bind(router)
+    router.bind = ((param, model) => {
+      const registrars = binders.get(param) ?? new Set<string | null>()
+      binders.set(param, registrars.add(binding))
+      return bind(param, model)
+    }) as typeof router.bind
+  }
   // `routeCount` is absent from a `@guren/server` older than 2.27.0, which the CLI's range admits.
   const countRoutes = (): number => (router as { routeCount?: number }).routeCount ?? router.definitions().length
   await registrar(router)
@@ -164,6 +188,7 @@ export async function loadRouteDefinitions(
   for (const directory of await listModuleNames(appRoot)) {
     const gurenModule = await loadGurenModule(appRoot, directory, moduleWarnings)
     if (gurenModule) {
+      binding = directory
       await mountModuleRoutes(router, gurenModule)
       const mounted = countRoutes()
       moduleProvenance?.push(...Array.from({ length: mounted - definitionCount }, () => directory))
@@ -172,6 +197,11 @@ export async function loadRouteDefinitions(
     }
   }
 
+  if (bindingLookups) {
+    const read = (router as { registeredBindingLookups?: () => ReadonlyArray<Record<string, RouterBindingLookup>> }).registeredBindingLookups
+    bindingLookups.lookups = typeof read === 'function' ? read.call(router) : undefined
+    bindingLookups.binders = binders
+  }
   return withModuleNames(router.definitions(), moduleNames)
 }
 

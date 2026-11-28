@@ -173,6 +173,31 @@ elements and arrows as SVG, with no dependency. A person can:
 The page's own words come from an `en` and `ja` dictionary held to key parity,
 as the plan page's are.
 
+**Amended in implementation (M2b):** the rest of the Dev Center is English and
+has no language switch, so the canvas picks its dictionary from the board's own
+`locale` (Japanese for `ja`, English otherwise). The `ja` table is typed by the
+`en` keys, so a missing key does not compile, and a test holds the placeholders
+alike. The canvas shows an edit before the server answers by running the same
+`applyBoardOps()` the server runs. So that the canvas's own code bundles no
+schema, the applier, placement, the canonical form and the board's sizes and
+rules (`liesIn`, the id pattern, the one-line rule) moved to modules that import
+zod only as types (`board/apply.ts`, `board/canonical.ts`, `board/geometry.ts`),
+and the page and the server judge a note's section by one function. (The Dev
+Center's page bundle already carries zod through the MCP Apps view; the move
+keeps the board's schema modules out of it, not zod's bytes.) One request is in
+flight at a time, and edits made meanwhile wait in a queue (`board-queue.ts`,
+which has no DOM and is tested on its own). Undo replays operations that put
+back only what the edit touched and nobody has changed since, read from the
+board before it and the board at undo time, so an agent's edit made in between
+survives an undo; a failed save empties the undo history
+with the edits it threw away.
+
+The keyboard reaches notes and sections: Tab moves between notes and section
+titles, arrow keys move what is selected, Enter edits or renames, Delete
+removes, and C starts an arrow that Enter on another note finishes. ~~do all of
+it from the keyboard~~ Selecting an arrow, selecting several notes and resizing
+a section still need a pointer.
+
 **The write.** The canvas saves with `POST /_guren/boards/<slug>/ops`. RFC 0032
 calls the plan feedback route "the Dev Center's only write" and gives the
 reason: "The Dev Center cannot tell the person from the agent's browser that
@@ -535,9 +560,17 @@ plan written from a board is an ordinary plan.
 4. **One board across modules.** A link carries `module`, so a board can span
    modules. Whether a section should be able to name the module its notes
    default to is not decided.
-5. **The ceiling of 500 notes.** It is a guess. The canvas should be measured
+5. ~~**The ceiling of 500 notes.** It is a guess. The canvas should be measured
    with a board of that size before M2 ships, and the number set from the
-   result.
+   result.~~
+   **Resolved in implementation (M2b), the ceiling stays at 500.** Measured in
+   the Dev Center on a board of 500 notes, 499 arrows and 10 sections (Chromium
+   in the desktop app's browser pane, Apple silicon): the board document read in
+   26 ms; a pointer move during a drag took 0.02 ms on average and 0.2 ms at
+   most, since it only sets CSS transforms; releasing a drag, which runs
+   `applyBoardOps()` over the whole board and redraws it, took 14.8 ms; a refresh
+   including the fetch took 20 ms. Every interaction stays within one frame, so
+   nothing measured argues for a lower ceiling.
 6. **Whether a board is a node in the docs graph.** `docs:graph` could draw a
    board with edges to the entities its notes link to and to the plan made
    from it. Nothing in this RFC needs it.

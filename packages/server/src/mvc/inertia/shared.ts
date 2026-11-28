@@ -34,6 +34,8 @@ export const INERTIA_SHARED_PROPS_BINDING = 'inertia.sharedProps'
  * keys — no matter which registry each one landed in.
  */
 let registrationSequence = 0
+/** Below every registration's number, so defaults resolve first and anything registered overrides them. */
+const DEFAULTS_SEQUENCE = -1
 
 interface OrderedResolver {
   seq: number
@@ -60,6 +62,11 @@ export class SharedInertiaPropsRegistry {
    */
   share<Props extends Record<string, unknown>>(resolverFn: SharedInertiaPropsResolver<Props>): void {
     this.resolvers.push(orderedResolver(resolverFn))
+  }
+
+  /** Props merged under every other registration, whichever registry or order it registered in. */
+  shareDefaults<Props extends Record<string, unknown>>(resolverFn: SharedInertiaPropsResolver<Props>): void {
+    this.resolvers.unshift({ seq: DEFAULTS_SEQUENCE, resolve: resolverFn as SharedInertiaPropsResolver<ResolvedSharedInertiaProps> })
   }
 
   /** The resolvers registered in this scope, ordered by registration. */
@@ -174,6 +181,14 @@ export function shareInertiaProps<Props extends Record<string, unknown>>(
 ): void {
   const registry = container ? ensureSharedInertiaPropsRegistry(container) : globalRegistry
   registry.share(resolverFn)
+}
+
+/** @internal Framework defaults an app's own shared props override, the global ones included. */
+export function shareInertiaDefaultProps<Props extends Record<string, unknown>>(
+  resolverFn: SharedInertiaPropsResolver<Props>,
+  container: SharedPropsContainer,
+): void {
+  ensureSharedInertiaPropsRegistry(container).shareDefaults(resolverFn)
 }
 
 /**

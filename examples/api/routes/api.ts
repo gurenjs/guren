@@ -47,8 +47,25 @@ const userRateLimit = createRateLimitMiddleware({
   },
 })
 
+// Any valid token, so a scoped one can still read which abilities it holds (`GET /api/auth/user`).
 const requireAuth = createBearerTokenMiddleware({
   store: getTokenStore(),
+})
+
+// A `*` token passes every one of these, so register and login tokens keep full access.
+const requireTasksRead = createBearerTokenMiddleware({
+  store: getTokenStore(),
+  abilities: ['tasks:read'],
+})
+
+const requireTasksWrite = createBearerTokenMiddleware({
+  store: getTokenStore(),
+  abilities: ['tasks:write'],
+})
+
+const requireTokensManage = createBearerTokenMiddleware({
+  store: getTokenStore(),
+  abilities: ['tokens:manage'],
 })
 
 export function registerApiRoutes(router: Router): void {
@@ -84,27 +101,27 @@ export function registerApiRoutes(router: Router): void {
       name: 'auth.tokens.index',
       output: TokenListResponseSchema,
       summary: 'List API tokens',
-      description: 'Returns the active API tokens for the authenticated user.',
+      description: 'Returns the active API tokens for the authenticated user. Requires the `tokens:manage` ability.',
       tags: ['Tokens'],
-      middlewares: [requireAuth, userRateLimit],
+      middlewares: [requireTokensManage, userRateLimit],
     }, [TokenController, 'index'])
     auth.post('/tokens', {
       name: 'auth.tokens.store',
       body: CreateTokenSchema,
       output: CreateTokenResponseSchema,
       summary: 'Create an API token',
-      description: 'Creates a personal access token for the authenticated user.',
+      description: 'Creates a personal access token for the authenticated user. Requires a `*` token; the new token expires no later than the one that created it.',
       tags: ['Tokens'],
-      middlewares: [requireAuth, userRateLimit],
+      middlewares: [requireTokensManage, userRateLimit],
     }, [TokenController, 'store'])
     auth.delete('/tokens/:id', {
       name: 'auth.tokens.destroy',
       params: TokenIdParamSchema,
       output: MessageResponseSchema,
       summary: 'Revoke an API token',
-      description: 'Revokes a token that belongs to the authenticated user.',
+      description: 'Revokes a token that belongs to the authenticated user. Requires the `tokens:manage` ability.',
       tags: ['Tokens'],
-      middlewares: [requireAuth, userRateLimit],
+      middlewares: [requireTokensManage, userRateLimit],
     }, [TokenController, 'destroy'])
   })
 
@@ -114,27 +131,27 @@ export function registerApiRoutes(router: Router): void {
       query: ListTasksQuerySchema,
       output: TaskListResponseSchema,
       summary: 'List tasks',
-      description: 'Returns paginated tasks for the authenticated user.',
+      description: 'Returns paginated tasks for the authenticated user. Requires the `tasks:read` ability.',
       tags: ['Tasks'],
-      middlewares: [requireAuth, userRateLimit],
+      middlewares: [requireTasksRead, userRateLimit],
     }, [TaskController, 'index'])
     tasks.post('/', {
       name: 'tasks.store',
       body: CreateTaskSchema,
       output: TaskDetailResponseSchema,
       summary: 'Create a task',
-      description: 'Creates a new task for the authenticated user.',
+      description: 'Creates a new task for the authenticated user. Requires the `tasks:write` ability.',
       tags: ['Tasks'],
-      middlewares: [requireAuth, userRateLimit],
+      middlewares: [requireTasksWrite, userRateLimit],
     }, [TaskController, 'store'])
     tasks.get('/:id', {
       name: 'tasks.show',
       params: TaskIdParamSchema,
       output: TaskDetailResponseSchema,
       summary: 'Fetch a task',
-      description: 'Returns a single task owned by the authenticated user.',
+      description: 'Returns a single task owned by the authenticated user. Requires the `tasks:read` ability.',
       tags: ['Tasks'],
-      middlewares: [requireAuth, userRateLimit],
+      middlewares: [requireTasksRead, userRateLimit],
     }, [TaskController, 'show'])
     tasks.put('/:id', {
       name: 'tasks.update',
@@ -142,18 +159,18 @@ export function registerApiRoutes(router: Router): void {
       body: UpdateTaskSchema,
       output: TaskDetailResponseSchema,
       summary: 'Update a task',
-      description: 'Updates a task owned by the authenticated user.',
+      description: 'Updates a task owned by the authenticated user. Requires the `tasks:write` ability.',
       tags: ['Tasks'],
-      middlewares: [requireAuth, userRateLimit],
+      middlewares: [requireTasksWrite, userRateLimit],
     }, [TaskController, 'update'])
     tasks.delete('/:id', {
       name: 'tasks.destroy',
       params: TaskIdParamSchema,
       output: MessageResponseSchema,
       summary: 'Delete a task',
-      description: 'Deletes a task owned by the authenticated user.',
+      description: 'Deletes a task owned by the authenticated user. Requires the `tasks:write` ability.',
       tags: ['Tasks'],
-      middlewares: [requireAuth, userRateLimit],
+      middlewares: [requireTasksWrite, userRateLimit],
     }, [TaskController, 'destroy'])
   })
 }

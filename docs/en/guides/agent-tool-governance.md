@@ -129,6 +129,16 @@ one: a tool outside the grant is absent from `tools/list`, and
 [`guren_preflight`](./agent-interface.md#rehearsing-a-call-over-mcp) refuses it too. Read the name from `bunx guren tool:list` and
 re-authorize with `tool:<name>`.
 
+A token calls only the tools its own `scope` names. A client can narrow one
+by sending `scope` on the token request (the authorization code exchange or a
+refresh), and the token keeps the granted entries that request names, compared
+as written. A refresh that sends the advertised `tools:read` against a grant
+stored as `tool:<name>` entries therefore keeps none.
+`@cloudflare/workers-oauth-provider` 1.2.0 and later refuse that request with
+`invalid_scope`; an older provider returns `scope: ""` and a token that can call
+nothing. To refresh without losing what the
+user consented to, send no `scope`, or the one the token response returned.
+
 ## Approval-gated tools
 
 Some actions should not happen because an agent asked. Mark the route, and a
@@ -220,10 +230,14 @@ through an interface it cannot see.
 
 - **An approval is bound to the arguments.** Approving `posts.destroy {id: 5}`
   does not authorize `{id: 9}`. Key order and nesting do not change the match;
-  types do, so `{id: 5}` and `{id: '5'}` are different calls. The match is a
-  SHA-256 of a canonical form of the **raw** arguments: the stored record
-  carries the hash and the [*redacted*](#redaction) copy of the arguments, so the queue never
-  becomes a second place your secrets live.
+  types do, so `{id: 5}` and `{id: '5'}` are different calls. The match is an
+  HMAC-SHA256 of a canonical form of the **raw** arguments, under a key derived
+  from `APP_KEY`: the stored record carries the fingerprint and the
+  [*redacted*](#redaction) copy of the arguments, and without the key nobody
+  reading the store can test guesses for a masked value against it. An app with
+  no valid `APP_KEY` falls back to a plain SHA-256, which still matches calls
+  but leaves a low-entropy masked value (a PIN, a short password) guessable
+  from the store.
 - **An approval is single-use, and it expires.** One call goes through; the
   next is a fresh request. Past `expiresAt` the record authorizes nothing.
 - **An approval is bound to the caller.** Another principal's approval
@@ -236,6 +250,17 @@ through an interface it cannot see.
 - **A rejected call is not re-asked.** The refusal says `"status": "rejected"`,
   so an agent can tell it from a wait worth polling. After the record expires,
   asking again is a new question.
+
+### Rotating `APP_KEY`
+
+A new record's fingerprint is always taken under the current `APP_KEY`. The
+gate also looks a call up under each key in `APP_PREVIOUS_KEYS` and under the
+plain SHA-256, so a request filed before a rotation still matches after it. Put
+the old key in `APP_PREVIOUS_KEYS` when you rotate, and keep it there until the
+longest `ttlMs` has passed. Rotating or removing `APP_KEY` without listing the
+old key leaves every live approval unmatched: an approved call queues again as
+a fresh request, and one still pending can be approved but never spent. Each
+listed key costs one more `findMatch` on a call the store has no record for.
 
 ### `guren_approval_status`
 

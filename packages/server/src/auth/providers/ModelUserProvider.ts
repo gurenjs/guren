@@ -4,7 +4,7 @@ import { resolveModelHasher } from '../password/configured-hasher'
 import { looksLikePasswordHash } from '../password/hash-format'
 import { capabilityOf } from '../model-capability'
 import type { AuthCredentials, Authenticatable } from '../types'
-import { hashToken } from '../utils'
+import { generateToken, hashToken } from '../utils'
 import { BaseUserProvider } from './UserProvider'
 
 interface CredentialColumnSource {
@@ -22,6 +22,21 @@ function passwordHashWriter(model: typeof Model): PasswordHashWriter | null {
 
 function credentialColumnSource(model: typeof Model): CredentialColumnSource | null {
   return capabilityOf<CredentialColumnSource>(model, 'resolvePasswordHashField', 'resolveRememberTokenField')
+}
+
+// Per hasher: a dummy from another hasher would throw in verify() or cost something else.
+const dummyHashes = new WeakMap<PasswordHasher, Promise<string>>()
+
+function dummyHashFor(hasher: PasswordHasher): Promise<string> {
+  const known = dummyHashes.get(hasher)
+  if (known) return known
+
+  const pending = hasher.hash(generateToken(16))
+  dummyHashes.set(hasher, pending)
+  pending.catch(() => {
+    if (dummyHashes.get(hasher) === pending) dummyHashes.delete(hasher)
+  })
+  return pending
 }
 
 export interface ModelUserProviderOptions {
@@ -104,6 +119,15 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     }
 
     return this.hasher.verify(hashed, plain)
+  }
+
+  /** The verify a known address pays, against a hash no password opens. */
+  async verifyMissingUser(credentials: AuthCredentials): Promise<void> {
+    const plain = credentials[this.credentialsPasswordField]
+    // validateCredentials() refuses a non-string password without hashing, so this does too.
+    if (typeof plain !== 'string') return
+
+    await this.hasher.verify(await dummyHashFor(this.hasher), plain)
   }
 
   override getId(user: User): unknown {

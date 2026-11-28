@@ -89,6 +89,24 @@ describe('codegen resolves against appRoot rather than process.cwd()', () => {
     expect(existsSync(join(appRoot, '.guren/routes.gen.ts'))).toBe(true)
   })
 
+  it('lists the navigation route names only beside the app root\'s config/navigation.ts', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      'routes/web.ts':
+        "import type { Router } from '@guren/core'\n\n"
+        + 'export function registerWebRoutes(router: Router): void {\n'
+        + "  router.get('/posts', [Object as never, 'index']).name('posts.index')\n"
+        + '}\n',
+    })
+    const routesModule = join(appRoot, '.guren/routes.gen.ts')
+
+    await generateRouteTypes({ appRoot, force: true })
+    expect(await readFile(routesModule, 'utf8')).not.toContain('GurenNavigationRoutes')
+
+    await writeWorkspaceFiles(appRoot, { 'config/navigation.ts': 'export default []\n' })
+    await generateRouteTypes({ appRoot, force: true })
+    expect(await readFile(routesModule, 'utf8')).toContain("interface GurenNavigationRoutes {\n    'posts.index': true\n  }")
+  })
+
   it('leaves no generated output in the directory the process is actually in', async () => {
     await writeWorkspaceFiles(appRoot, {
       'resources/js/pages/posts/Index.tsx': 'export default function Index() { return null }\n',

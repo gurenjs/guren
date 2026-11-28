@@ -18,9 +18,18 @@ export interface TicketSummary {
 export const STALE_DAYS = 7
 
 /**
+ * `APP_PREVIOUS_KEYS` entries the sweep is sized for. The approval gate tries
+ * one `findMatch` per fingerprint before filing a request: the current key's,
+ * each previous key's, and the unkeyed hash.
+ */
+export const MAX_PREVIOUS_APP_KEYS = 1
+
+/** D1 queries one fresh ask costs: every `findMatch` the gate tries, then `create`. */
+export const QUERIES_PER_ASK = 1 + MAX_PREVIOUS_APP_KEYS + 1 + 1
+
+/**
  * Fresh asks per sweep. D1 allows 50 queries per Worker invocation on the Free
- * plan and a sweep is one invocation: the index call is 1, and each new ask
- * costs `findMatch` + `create`, so 1 + 2 × 10 = 21.
+ * plan and a sweep is one invocation: the index call is 1, so 1 + 4 × 10 = 41.
  */
 export const MAX_ASKS_PER_SWEEP = 10
 

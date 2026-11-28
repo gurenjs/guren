@@ -17,9 +17,26 @@
 export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu
 
 /**
+ * No parameter (a `:` opening a segment, as {@link PATH_PARAM_PATTERN} reads one) and
+ * no `*` anywhere; `isParameterless()` in the CLI's `browser-map.ts` is the same test.
+ */
+export function isParameterlessPath(path: string): boolean {
+  return !/(?:^|\/):|\*/u.test(path)
+}
+
+/**
  * Param labels in path order, exactly as Hono registers them: constraints
  * dropped, a trailing `*` kept (part of the name), a trailing `?` dropped.
  */
 export function extractPathParamNames(path: string): string[] {
   return Array.from(path.matchAll(PATH_PARAM_PATTERN), (match) => match[2]!)
+}
+
+/**
+ * `path` with every parameter's label dropped and its constraint, `*` and `?` kept, so
+ * `/posts/:id{[0-9]+}` and `/posts/:postId{[0-9]+}` read alike and a changed constraint does not.
+ */
+export function routePathShape(path: string): string {
+  return path.replace(PATH_PARAM_PATTERN, (match, lead: string, name: string) =>
+    `${lead}:${name.endsWith('*') ? '*' : ''}${match.slice(lead.length + 1 + name.length)}`)
 }

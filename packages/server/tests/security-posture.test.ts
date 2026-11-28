@@ -281,6 +281,32 @@ describe('security posture: cookieless-auth CSRF exemptions', () => {
     expect(response.status).toBe(403)
   })
 
+  it('verifies a declared path that an application pattern route answers ahead of the endpoint', async () => {
+    const app = new Application({ auth: {} })
+    app.router.post('/:slug', () => 'slug')
+    await app.boot()
+    app.hono.post('/declared', () => new Response('ok'))
+    app.declareCookielessAuthPath('/declared')
+
+    const response = await app.fetch(new Request('http://example.com/declared', { method: 'POST' }))
+
+    expect(response.status).toBe(403)
+  })
+
+  it('keeps a declared path exempt past a per-method middleware added straight to Hono', async () => {
+    const app = new Application({ auth: {} })
+    await app.boot()
+    app.hono.post('*', async (_c, next) => {
+      await next()
+    })
+    app.hono.post('/declared', () => new Response('ok'))
+    app.declareCookielessAuthPath('/declared')
+
+    const response = await app.fetch(new Request('http://example.com/declared', { method: 'POST' }))
+
+    expect(response.status).toBe(200)
+  })
+
   it('keeps a declaration that collides with an application route out of the set', async () => {
     const app = new Application()
     app.router.post('/collides', () => 'ok')

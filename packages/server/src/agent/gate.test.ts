@@ -1,19 +1,24 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test'
 
 import {
+  agentApprovalFingerprint,
   buildAgentApprovalRequest,
+  type AgentApprovalKeys,
   type AgentApprovalMatch,
   type AgentApprovalRequest,
   type AgentApprovalStore,
 } from './approval'
 import { deriveAgentTools, type DerivedAgentTool } from './derive'
 import {
+  AGENT_APPROVAL_KEY_PURPOSE,
+  agentApprovalKeysFromEnv,
   DEFAULT_SCOPE_SUBJECT,
   gateApproval,
   gatePreflight,
   gateToolCall,
   notifyApprovers,
 } from './gate'
+import { deriveAppKey, generateAppKey, parseAppKey } from '../encryption/app-key'
 import { Router } from '../mvc/Router'
 
 const NOW = new Date('2026-09-01T12:00:00.000Z')
@@ -218,6 +223,116 @@ describe('gateApproval', () => {
     expect(verdict.allowed).toBe(false)
     expect(store.records).toEqual([])
     expect(notified).toEqual([])
+  })
+})
+
+describe('gateApproval fingerprints', () => {
+  const CURRENT = new Uint8Array(32).fill(1)
+  const PREVIOUS = new Uint8Array(32).fill(2)
+  const USER = { kind: 'user', id: 7 } as const
+
+  function context(store: MemoryApprovalStore, keys: AgentApprovalKeys) {
+    return {
+      store,
+      principal: USER,
+      keys,
+      now: () => NOW,
+      redact: (args: Record<string, unknown>) => args,
+      notify: () => {},
+    }
+  }
+
+  async function approvedUnder(store: MemoryApprovalStore, key?: Uint8Array) {
+    const request = buildAgentApprovalRequest(
+      {
+        tool: 'posts.destroy',
+        input: { id: 5 },
+        fingerprint: await agentApprovalFingerprint({ id: 5 }, key),
+        principal: USER,
+      },
+      NOW,
+    )
+    store.records.push({ ...request, status: 'approved' })
+  }
+
+  test('should file a new request under the current key, not the bare hash', async () => {
+    const store = new MemoryApprovalStore()
+
+    await gateApproval(tools().approval, { id: 5 }, context(store, { current: CURRENT, previous: [] }))
+
+    expect(store.records).toHaveLength(1)
+    expect(store.records[0]!.fingerprint).toBe(await agentApprovalFingerprint({ id: 5 }, CURRENT))
+    expect(store.records[0]!.fingerprint).not.toBe(await agentApprovalFingerprint({ id: 5 }))
+  })
+
+  test('should file under the bare hash when the app has no key', async () => {
+    const store = new MemoryApprovalStore()
+
+    await gateApproval(tools().approval, { id: 5 }, context(store, { previous: [] }))
+
+    expect(store.records[0]!.fingerprint).toBe(await agentApprovalFingerprint({ id: 5 }))
+  })
+
+  test('should spend an approval filed under a previous key after a rotation', async () => {
+    const store = new MemoryApprovalStore()
+    await approvedUnder(store, PREVIOUS)
+
+    const verdict = await gateApproval(
+      tools().approval,
+      { id: 5 },
+      context(store, { current: CURRENT, previous: [PREVIOUS] }),
+    )
+
+    expect(verdict).toEqual({ allowed: true })
+    expect(store.records).toHaveLength(1)
+  })
+
+  test('should spend an approval filed before fingerprints were keyed', async () => {
+    const store = new MemoryApprovalStore()
+    await approvedUnder(store)
+
+    const verdict = await gateApproval(tools().approval, { id: 5 }, context(store, { current: CURRENT, previous: [] }))
+
+    expect(verdict).toEqual({ allowed: true })
+  })
+
+  test('should not match a record under a key no longer listed', async () => {
+    // The documented cost of rotating without APP_PREVIOUS_KEYS: the old
+    // approval is stranded and the call queues afresh.
+    const store = new MemoryApprovalStore()
+    await approvedUnder(store, PREVIOUS)
+
+    const verdict = await gateApproval(tools().approval, { id: 5 }, context(store, { current: CURRENT, previous: [] }))
+
+    expect(verdict.allowed).toBe(false)
+    expect(store.records).toHaveLength(2)
+  })
+})
+
+describe('agentApprovalKeysFromEnv', () => {
+  test('should derive the current and previous keys for the approval purpose', () => {
+    const appKey = generateAppKey()
+    const previousKey = generateAppKey()
+
+    const keys = agentApprovalKeysFromEnv({ APP_KEY: appKey, APP_PREVIOUS_KEYS: previousKey })
+
+    expect(keys.current).toEqual(deriveAppKey(parseAppKey(appKey), AGENT_APPROVAL_KEY_PURPOSE))
+    expect(keys.previous).toEqual([deriveAppKey(parseAppKey(previousKey), AGENT_APPROVAL_KEY_PURPOSE)])
+    expect(keys.current).not.toEqual(parseAppKey(appKey))
+  })
+
+  test('should leave fingerprints unkeyed without a valid APP_KEY', () => {
+    expect(agentApprovalKeysFromEnv({})).toEqual({ current: undefined, previous: [] })
+    expect(agentApprovalKeysFromEnv({ APP_KEY: 'not-a-key' })).toEqual({ current: undefined, previous: [] })
+  })
+
+  test('should skip a previous key that does not parse rather than refuse every call', () => {
+    const previousKey = generateAppKey()
+
+    const keys = agentApprovalKeysFromEnv({ APP_PREVIOUS_KEYS: `garbage, ${previousKey}` })
+
+    expect(keys.current).toBeUndefined()
+    expect(keys.previous).toEqual([deriveAppKey(parseAppKey(previousKey), AGENT_APPROVAL_KEY_PURPOSE)])
   })
 })
 

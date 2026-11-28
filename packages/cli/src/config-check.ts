@@ -103,7 +103,8 @@ async function readListings(cwd: string, cache: ParseCache, entryPath: string): 
 function judge(entry: ResolvedConfigEntry, read: readonly Lister[], unmounted: readonly Lister[], entryPath: string, listings: Listings): CheckResult | null {
   const title = 'Config wiring'
   if (read.length === 0) {
-    if (entry.problem) return null
+    // An unvalidated environment leaves the key known, and whether anything lists the file is not the environment's.
+    if (entry.problem && entry.problem !== 'unverified-env') return null
     const declares = `${entry.file} declares the "${entry.key}" config`
     const consequence = 'Nothing reads it, so the defaults apply instead.'
     const module = moduleNameFromRelPath(entry.file)

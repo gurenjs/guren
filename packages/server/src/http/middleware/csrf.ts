@@ -7,9 +7,10 @@ import { defaultCookieSecure, getSessionFromContext, type Session } from './sess
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key'
 import { MessageSigner } from '../../encryption/MessageSigner'
 import { secureCompare } from '../../encryption/Hash'
-import { isDevCenterWriteRequest, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '../../mcp/endpoint'
+import { devCenterWriteRoute, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '../../mcp/endpoint'
 import { hasBearerHeader } from '../../auth/api-token'
 import { readAgentPrincipal } from '../../internal/agent-principal'
+import { routerRouteAnswersAhead } from '../../internal/router-route-ahead'
 
 export const CSRF_TOKEN_KEY = '_csrf_token'
 export const CSRF_HEADER_NAME = 'X-CSRF-TOKEN'
@@ -129,9 +130,16 @@ function isExcluded(path: string, excludePatterns: string[]): boolean {
  * MCP clients POST JSON-RPC without a preceding GET, so they never pick up an
  * `XSRF-TOKEN`. Nothing is exempted in production or without `GUREN_MCP=1` —
  * the route does not exist there, and the endpoint guards local-only access.
+ * The endpoint mounts after the app's routes, so a Router route matching the path answers first and is verified.
  */
-function isMcpEndpointRequest(path: string): boolean {
-  return path === MCP_ENDPOINT_PATH && isMcpEndpointEnabled()
+function isMcpEndpointRequest(ctx: Context, path: string): boolean {
+  return path === MCP_ENDPOINT_PATH && isMcpEndpointEnabled() && !routerRouteAnswersAhead(ctx, MCP_ENDPOINT_PATH)
+}
+
+/** Exempt on the MCP endpoint's terms; the route requires the request's own `Origin` instead. */
+function isDevCenterWriteRequest(ctx: Context, path: string): boolean {
+  const route = devCenterWriteRoute(path)
+  return route !== undefined && !routerRouteAnswersAhead(ctx, route)
 }
 
 /**
@@ -150,10 +158,11 @@ export type CookielessAuthEndpoints = () => ReadonlySet<string>
  * literal route, and a pattern here would be an escape hatch.
  */
 function isCookielessAuthEndpoint(
+  ctx: Context,
   path: string,
   declared: CookielessAuthEndpoints | undefined,
 ): boolean {
-  return declared !== undefined && declared().has(path)
+  return declared !== undefined && declared().has(path) && !routerRouteAnswersAhead(ctx, path)
 }
 
 /**
@@ -374,10 +383,9 @@ export function createCsrfMiddleware(
     // cookie-less bearer terms, their no-cookie invariant asserted above.
     if (
       isExcluded(path, exclude)
-      || isMcpEndpointRequest(path)
-      // Exempt on the MCP endpoint's terms; the route requires the request's own `Origin` instead.
-      || isDevCenterWriteRequest(path)
-      || isCookielessAuthEndpoint(path, cookielessAuthEndpoints)
+      || isMcpEndpointRequest(ctx, path)
+      || isDevCenterWriteRequest(ctx, path)
+      || isCookielessAuthEndpoint(ctx, path, cookielessAuthEndpoints)
       || isBearerRequestWithoutCookies(ctx)
       || isSeamPrincipalRequest(ctx)
     ) {

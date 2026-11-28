@@ -117,6 +117,55 @@ pre.refusal{margin:6px 0;padding:8px 10px;border:1px solid var(--g-line);border-
 .mcp-log li{padding:4px 0;border-top:1px solid var(--g-line)}
 .mcp-log pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0}
 @media(max-width:700px){.g-topbar{padding:10px 20px}.layout,.step,.ui-row{grid-template-columns:1fr}main{padding:20px}}
+.board-tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:12px 0}
+.board-tools [hidden],.board-menu[hidden]{display:none}
+.board-tools .g-btn,.board-zoom .g-btn{padding:5px 11px;font-size:13px}
+.board-tools .g-btn:disabled,.board-zoom .g-btn:disabled{opacity:.45;cursor:not-allowed}
+.board-tools .board-on{outline:2px solid var(--g-accent-text)}
+.board-tool-context{display:flex;gap:6px;margin-left:4px;padding-left:10px;border-left:1px solid var(--g-line)}
+.board-undo{margin-left:auto}
+.board-add{position:relative}
+.board-caret{font-size:10px;color:var(--g-muted)}
+.board-menu{position:absolute;z-index:5;top:calc(100% + 4px);left:0;display:flex;flex-direction:column;min-width:180px;padding:4px;background:var(--g-panel);border:1px solid var(--g-line-strong);border-radius:var(--g-r-ctl);box-shadow:0 6px 20px rgba(0,0,0,.12)}
+.board-menu-item{display:flex;align-items:center;gap:10px;padding:6px 10px;border:0;border-radius:4px;background:none;color:var(--g-text);font:500 13px/1.4 var(--g-font-sans);text-align:left;cursor:pointer}
+.board-menu-item:hover{background:color-mix(in srgb,var(--g-text) 7%,transparent)}
+.board-menu-item:focus-visible{background:color-mix(in srgb,var(--g-text) 7%,transparent);outline:2px solid var(--g-accent);outline-offset:-2px}
+.board-swatch{flex:none;width:12px;height:12px;border-radius:3px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
+.board-stage{position:relative}
+.board-zoom{position:absolute;right:12px;bottom:12px;display:flex;gap:2px;padding:3px;background:var(--g-panel);border:1px solid var(--g-line);border-radius:var(--g-r-ctl);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.board-zoom .g-btn{border-color:transparent;background:none}
+.board-zoom .g-btn:hover{background:color-mix(in srgb,var(--g-text) 7%,transparent)}
+.board-viewport{position:relative;height:70vh;min-height:420px;overflow:hidden;border:1px solid var(--g-line-strong);border-radius:var(--g-r-card);background:var(--g-raised);background-image:radial-gradient(var(--g-line) 1px,transparent 1px);background-size:16px 16px;touch-action:none;cursor:grab}
+.board-viewport:focus-visible{outline:2px solid var(--g-accent-text);outline-offset:2px}
+.board-viewport.board-panning{cursor:grabbing}
+.board-world{position:absolute;left:0;top:0;width:16000px;height:16000px;transform-origin:0 0}
+.board-layer{position:absolute;inset:0;pointer-events:none}
+.board-layer>*{pointer-events:auto}
+.board-arrows{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+.board-arrow{cursor:pointer}
+.board-arrow-hit{stroke:transparent;stroke-width:14;pointer-events:stroke}
+.board-arrow-line{stroke:var(--g-text-2);stroke-width:2;pointer-events:none}
+.board-async .board-arrow-line{stroke-dasharray:7 5}
+.board-arrow.board-selected .board-arrow-line{stroke:var(--g-accent-text);stroke-width:3}
+.board-head{fill:var(--g-text-2)}
+.board-tether{stroke:#dc2626;stroke-width:1.5;stroke-dasharray:2 4}
+.board-section{position:absolute;border:1.5px dashed var(--g-line-strong);border-radius:10px;background:color-mix(in srgb,var(--g-panel) 55%,transparent);user-select:none}
+.board-section.board-selected{border-color:var(--g-accent-text);border-style:solid}
+.board-section-title{position:absolute;left:0;right:0;top:0;height:32px;padding:6px 12px;font-weight:700;color:var(--g-heading);cursor:move;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.board-section-resize{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--g-line-strong) 50%);border-bottom-right-radius:10px}
+.board-note{position:absolute;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:6px;color:#1a1212;box-shadow:0 1px 2px rgba(0,0,0,.18);cursor:grab;overflow:hidden;user-select:none}
+.board-note:focus-visible{outline:2px solid var(--g-accent-text);outline-offset:2px}
+.board-note.board-selected{box-shadow:0 0 0 3px var(--g-accent-text)}
+.board-note.board-source{box-shadow:0 0 0 3px #2563eb}
+.board-note-kind{font:600 10.5px/1.3 var(--g-font-mono);text-transform:uppercase;letter-spacing:.04em;opacity:.7}
+.board-note-text{font-size:13px;line-height:1.35;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.board-note-link{font-size:10.5px;opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.board-kind-actor{background:#fde68a}.board-kind-view{background:#bbf7d0}.board-kind-command{background:#bfdbfe}.board-kind-aggregate{background:#fef9c3}
+.board-kind-event{background:#fdba74}.board-kind-reaction{background:#ddd6fe}.board-kind-external{background:#fbcfe8}.board-kind-question{background:#fca5a5}
+.board-input{position:absolute;z-index:2;min-width:0;padding:6px 8px;font-size:13px}
+.board-status{min-height:1.6em;margin-top:6px}
+.board-outline{margin:12px 0}
+.board-outline summary{cursor:pointer;color:var(--g-text-2)}
 </style></head><body>
 <header class="g-topbar"><a class="brand" href="/_guren"><svg viewBox="0 0 299 516" width="13" height="22" fill="none" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M120.853 0C169.647 25.1364 195.255 83.7877 184.353 136.5C175.756 178.065 136.039 208.749 137.372 253.138C138.729 298.251 168.879 330.194 161.353 377.5C181.444 352.982 200.458 332.078 208.353 300.5C214.367 261.839 179.943 229.848 190.898 190.72C194.731 177.22 208.153 147.3 231.353 136.5C218.919 181.573 237.455 211.003 266.353 245C300.243 280.246 308.266 343.188 284.853 386C253.141 442.376 189.378 465.573 149.853 515.5C121.558 476.749 77.5264 459.842 48.8528 424C-12.4118 347.419 -19.5127 245.133 47.3528 169C80.8397 130.872 165.348 59.327 120.853 0Z" fill="url(#flame)"/><defs><linearGradient id="flame" x1="149.117" y1="0" x2="149.117" y2="515.5" gradientUnits="userSpaceOnUse"><stop stop-color="#FF3C28"/><stop offset="1" stop-color="#8B0000"/></linearGradient></defs></svg><b>Guren</b><span>Dev Center</span></a><nav aria-label="Developer tools"><a href="/_guren/ui">Components</a><a href="/_guren/mcp-apps">MCP Apps</a><a href="/_guren/docs">Docs &amp; plans</a><a href="/_guren/graph.json">Graph JSON</a></nav></header>
 <main><div id="home"><section aria-labelledby="plans-title"><h1 id="plans-title" class="g-title">Plans</h1><p class="lede">Plans not closed at their current hash. The ones waiting on a person come first: an approval, a stall, or a close.</p><div class="toolbar"><button id="refresh-plans" class="g-btn g-btn-secondary" type="button">Refresh plans</button><span id="plans-status" role="status"></span></div><div id="plans" class="plans"></div><ul id="plans-unreadable" class="meta"></ul></section><section aria-labelledby="boards-title"><h2 id="boards-title" class="g-title section-gap">Boards</h2><p class="lede">Event-storming boards under <code class="mono">docs/boards/</code>: the notes, arrows and open questions found before a plan is written.</p><div class="toolbar"><button id="refresh-boards" class="g-btn g-btn-secondary" type="button">Refresh boards</button><span id="boards-status" role="status"></span></div><div id="boards" class="plans"></div></section><h2 class="g-title section-gap">Application graph</h2><p class="lede">Inspect registered routes and source relationships. Coverage describes what the readers can establish.</p>
@@ -128,7 +177,7 @@ pre.refusal{margin:6px 0;padding:8px 10px;border:1px solid var(--g-line);border-
 <p class="foot">Enable the existing docs and plan viewer with <code class="mono">GUREN_DOCS=1</code>. Graph and plan reads do not run verification commands.</p></div>
 <div id="plan-view" hidden><p class="meta"><a href="/_guren">All plans</a></p><h1 id="plan-title" class="g-title">Plan</h1><div class="toolbar"><button id="refresh-plan" class="g-btn g-btn-secondary" type="button">Refresh plan</button><span id="plan-status" role="status"></span></div><div id="plan-body"></div><p class="foot">Read from the plan files, <code class="mono">.guren/plans/</code>, <code class="mono">.guren/browser/</code> and this dev server's retained runtime errors only. A step <code class="mono">plan:next</code> holds because the application changed since approval is reported by <code class="mono">plan:next</code>, not here.</p></div>
 <div id="boards-view" hidden><p class="meta"><a href="/_guren">Dev Center</a></p><h1 class="g-title">Boards</h1><p class="lede">Event-storming boards under <code class="mono">docs/boards/</code>: the notes, arrows and open questions found before a plan is written.</p><div class="toolbar"><button id="refresh-boards-page" class="g-btn g-btn-secondary" type="button">Refresh boards</button><span id="boards-page-status" role="status"></span></div><div id="boards-page" class="plans"></div></div>
-<div id="board-view" hidden><p class="meta"><a href="/_guren/boards">All boards</a></p><h1 id="board-title" class="g-title">Board</h1><div class="toolbar"><button id="refresh-board" class="g-btn g-btn-secondary" type="button">Refresh board</button><span id="board-status" class="meta mono" role="status"></span></div><div id="board-body"></div><p class="foot">Read from the board file only. Coordinates are not shown here and carry no meaning: every reader takes a board's meaning from its notes, arrows, sections and what each question is about.</p></div>
+<div id="board-view" hidden><p class="meta"><a href="/_guren/boards">All boards</a></p><h1 id="board-title" class="g-title">Board</h1><div class="toolbar"><button id="refresh-board" class="g-btn g-btn-secondary" type="button">Refresh board</button><span id="board-status" class="meta mono" role="status"></span></div><div id="board-body"></div><p class="foot">Every edit is saved to the board file as you make it, and the page reads the file again when you come back to the window. Positions only arrange the canvas: an agent reads the board's meaning from its notes, arrows, sections and what each question is about.</p></div>
 <div id="mcp-view" hidden><p class="meta"><a href="/_guren">Dev Center</a></p><h1 class="g-title">MCP Apps</h1><p class="lede">Each tool that declares <code class="mono">.agent({ ui })</code>, called through the App MCP endpoint with your token and rendered the way an MCP Apps host renders it: through a sandbox proxy on another origin, under the view&#39;s own CSP.</p><div id="mcp-body"></div><p class="foot">The preview is a host for one view at a time. Links the view asks to open and messages it drafts for the conversation are listed under Messages, never opened or sent. Permissions a view declares (camera, microphone, location, clipboard) are not granted here. The sandbox's origin is the app itself on 127.0.0.1: it keeps the view away from this page and your token, not from the app, so origins on this machine are left out of the view's CSP.</p></div>
 <div id="ui-view" hidden><p class="meta"><a href="/_guren">Dev Center</a></p><h1 class="g-title">Components</h1><p class="lede">The components <code class="mono">guren add ui</code> copies into the app, each compared with the template this CLI ships by the rule <code class="mono">guren upgrade</code> applies, then rendered with the app's own stylesheet in every variant and state the shipped props allow.</p><div class="toolbar"><button id="refresh-ui" class="g-btn g-btn-secondary" type="button">Refresh components</button><span id="ui-status" role="status"></span></div><div id="ui-body"></div><p class="foot">An edited copy renders with the shipped examples only: a variant added to the copy has no example here.</p></div>
 </main><script>__GUREN_DEV_CENTER_SCRIPT__</script></body></html>

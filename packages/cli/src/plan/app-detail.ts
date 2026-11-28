@@ -16,6 +16,7 @@ import { readEnvDeclarations, type EnvDeclaration } from '../env-declarations'
 import { createAppListedFiles, createAppOptions, findModuleDescriptor, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
+import type { RouterBindingLookup } from '../load-routes'
 import { blankCommentsAndStrings, literalAbilities, VALIDATE_CALL_PATTERN, type ControllerMethodScan } from '../controller-methods'
 import {
   CONFIG_DIR,
@@ -48,6 +49,7 @@ import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../rou
 import { importsByLocal, specifierBase, withoutExtension } from '../schema-binding'
 import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
 import { answersMethod, registeredBefore, routePathCovers } from '../test-requests'
+import { extractPathParamNames } from '../utils'
 import { discoverSectionFiles } from './discovery'
 import { isUnreadable } from './unreadable'
 import type { PlanAppScope, PlanAppUnreadable } from './app-state'
@@ -69,6 +71,8 @@ export interface PlanAppRouteDetail {
   hasInlineMiddleware: boolean
   /** Route parameter → bound model class. */
   bindings: Record<string, string>
+  /** Route parameter → its lookup column, for every parameter the router binds; absent when nothing read them. */
+  bindingKeys?: Record<string, PlanAppBindingKey>
   agent?: { toolName?: string; readOnly?: boolean }
   /** Still answered by its prototype fixture (RFC 0021), so no controller action serves it. */
   prototype?: true
@@ -85,6 +89,9 @@ export interface PlanAppRouteDetail {
   /** Why a route registered before it may answer its requests; absent when none can. */
   shadowed?: Exclude<PlanAppMount, 'mounted'>
 }
+
+/** A bound parameter's lookup column: `null` for the model's primary key, or why it is not read. */
+export type PlanAppBindingKey = string | null | { unread: string }
 
 export interface PlanAppModelDetail {
   className: string
@@ -226,6 +233,10 @@ export interface PlanAppDetailInput {
   routes: ContextRoute[] | PlanAppUnreadable
   /** The definitions `routes` was rendered from, in the same order, for the live contract schemas. */
   definitions: RouteDefinition[] | undefined
+  /** `Router.registeredBindingLookups()` in the same order; `undefined` when the server has no such method. */
+  bindingLookups?: ReadonlyArray<Record<string, RouterBindingLookup>>
+  /** Which registrars called `router.bind()` on each parameter: `null` for the entry's, else the module directory. */
+  bindingBinders?: ReadonlyMap<string, ReadonlySet<string | null>>
   provenance: Array<string | null>
   moduleWarnings: string[]
   controllers: ControllerMethodScan | PlanAppUnreadable
@@ -319,6 +330,44 @@ function contractSchemaObjects(definitions: RouteDefinition[] | undefined): Set<
   return objects
 }
 
+const NO_BINDING_LOOKUPS = 'the installed @guren/server has no Router.registeredBindingLookups(), so a lookup column is not read: upgrade @guren/core'
+
+/**
+ * Each path parameter's lookup column, as a request runs it: only a controller action resolves bindings, and only for a
+ * parameter its path declares. A custom resolver is a function this does not read; a parameter bound at both levels runs
+ * both lookups; and a router-level binding a module sets, or one two registrars set, serves every route through one map,
+ * so which wins depends on the modules `createApp()` lists and their order, which this reading does not follow.
+ */
+function bindingKeys(
+  route: ContextRoute,
+  lookups: Record<string, RouterBindingLookup> | undefined,
+  binders: ReadonlyMap<string, ReadonlySet<string | null>> | undefined,
+  scope: string | null,
+): Record<string, PlanAppBindingKey> {
+  const keys: Record<string, PlanAppBindingKey> = Object.create(null)
+  if (!route.controller) return keys
+  for (const parameter of extractPathParamNames(route.path)) {
+    if (lookups === undefined) {
+      keys[parameter] = { unread: NO_BINDING_LOOKUPS }
+      continue
+    }
+    if (!Object.hasOwn(lookups, parameter)) continue
+    const lookup = lookups[parameter]!
+    const routerLevel = 'model' in lookup || 'resolver' in lookup ? lookup : lookup.router
+    const registrars = binders?.get(parameter)
+    if (routerLevel && registrars && !(registrars.size === 1 && (registrars.has(null) || registrars.has(scope)))) {
+      keys[parameter] = { unread: `router.bind() sets the parameter in ${describeBinders(registrars)}, and one binding serves every route, so which one a request runs depends on the modules createApp() lists and their order` }
+    } else if ('resolver' in lookup) keys[parameter] = { unread: 'the parameter is bound to a custom resolver, whose lookup is not read' }
+    else if (lookup.router) keys[parameter] = { unread: 'the parameter is bound at both the route and the router level, and both lookups run' }
+    else keys[parameter] = lookup.key ?? null
+  }
+  return keys
+}
+
+function describeBinders(registrars: ReadonlySet<string | null>): string {
+  return [...registrars].map((registrar) => (registrar === null ? 'the entry registrar' : `modules/${registrar}`)).join(' and ')
+}
+
 function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanAppDetail['routes'] {
   const routes = input.routes
   if (!Array.isArray(routes)) return routes
@@ -332,6 +381,7 @@ function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanApp
       middleware: route.middleware ?? [],
       hasInlineMiddleware: route.hasInlineMiddleware === true,
       bindings: route.bindings ?? {},
+      bindingKeys: bindingKeys(route, input.bindingLookups === undefined ? undefined : input.bindingLookups[index] ?? {}, input.bindingBinders, input.provenance[index] ?? null),
       ...(route.agent ? { agent: { toolName: route.agent.toolName, readOnly: route.agent.readOnlyHint } } : {}),
       ...(route.prototype ? { prototype: true as const } : {}),
       module: input.provenance[index] ?? null,

@@ -124,6 +124,7 @@ export default defineCacheConfig((env) => ({
 | `defineQueueConfig` | `queue` | a `QueueConfig` |
 | `defineStorageConfig` | `storage` | a `StorageConfig` |
 | `defineOAuthConfig` | `oauth` | `providers` and an optional `stateStore` |
+| `defineNavigation(entries)` | `navigation` | the layout's links (see [Navigation](./navigation.md)) |
 
 `createApp()` registers a `ConfigServiceProvider` ahead of your providers. In its `register()` it validates the env and binds every definition's manager; in its `boot()` it runs the definitions' boot work (the database connection) before any other provider boots. So a provider can resolve `cache` or `mail` in its own `register()`, and the order of the `config` array does not matter.
 
@@ -204,7 +205,7 @@ const database = createPostgresDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
   connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL
-    ?? 'postgres://guren:guren@localhost:54322/guren',
+    ?? 'postgres://guren:guren@127.0.0.1:54322/guren',
 })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database

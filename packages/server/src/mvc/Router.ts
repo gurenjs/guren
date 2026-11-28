@@ -8,7 +8,13 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
-import { markRouterRouteEntry, readDispatchedToolRoute } from '../internal/dispatched-request'
+import {
+  claimsRegisteredRoute,
+  isClaimedRoute,
+  markRouterRouteEntry,
+  readAgentRouteHeader,
+  readDispatchedToolRoute,
+} from '../internal/dispatched-request'
 import { refuseMisroutedToolCall } from '../agent/dispatched-route-guard'
 import { trimSlashes } from '../support/trim-slashes'
 import { extractPathParamNames, PATH_PARAM_PATTERN } from '../internal/route-path'
@@ -83,7 +89,18 @@ interface ModelBinding {
 interface RegisteredBinding {
   resolve: ModelBindingResolver
   model?: BindableModel
+  /** The model's lookup column; `undefined` means its primary key. */
+  key?: string
 }
+
+/** How a bound parameter is looked up: a model by `key` (absent: its primary key), or a custom resolver as registered. */
+export type BindingLookup = { key?: string; model?: BindableModel } | { resolver: ModelBindingResolver }
+
+/**
+ * A route's lookup of one parameter: its route-level `bind`, else the router-level one. A parameter bound at both levels
+ * runs both (the route's model for `this.model()`, the router's value positionally), so the router's is under `router`.
+ */
+export type RouteBindingLookup = BindingLookup & { router?: BindingLookup }
 
 function normalizeModelBinding(binding: RouteModelBinding): ModelBinding {
   if (Array.isArray(binding)) {
@@ -465,6 +482,7 @@ export class Router<in M extends string = never> {
     const binding = normalizeModelBinding(modelOrResolver as RouteModelBinding)
     this.modelBindings.set(param, {
       model: binding.model,
+      ...(binding.key === undefined ? {} : { key: binding.key }),
       resolve: (value) => resolveModelBinding(binding, value),
     })
     return this
@@ -753,7 +771,7 @@ export class Router<in M extends string = never> {
       if (preflightMiddleware) chain.push(preflightMiddleware)
       chain.push(handler)
       // Wrapped, not prepended: each Hono handler is a route entry of its own.
-      chain[0] = markRouterRouteEntry(guardDispatchedRoute(route, chain[0]!))
+      chain[0] = markRouterRouteEntry(guardDispatchedRoute(route, chain[0]!, this.registry))
       return { route, chain }
     })
     for (const { route, chain } of prepared) {
@@ -831,6 +849,29 @@ export class Router<in M extends string = never> {
         if (model) result[parameter] = model
       }
       for (const [parameter, binding] of bindings ?? []) result[parameter] = binding.model
+      return result
+    })
+  }
+
+  /**
+   * How each bound parameter is looked up, indexed like definitions (RFC 0040 §3): what `registeredModelBindings()`
+   * names a model of, by its lookup column, a router-level model with its class, and a custom resolver, which it leaves out.
+   * Only a controller action resolves bindings, so an inline or prototype handler's route looks nothing up.
+   */
+  registeredBindingLookups(): ReadonlyArray<Record<string, RouteBindingLookup>> {
+    return this.registry.map(({ path, bindings, handler }) => {
+      const result: Record<string, RouteBindingLookup> = Object.create(null)
+      if (!isControllerAction(handler)) return result
+      const routerLevel = new Map<string, BindingLookup>()
+      for (const parameter of extractPathParamNames(path)) {
+        const registered = this.modelBindings.get(parameter)
+        if (registered) routerLevel.set(parameter, registered.model ? { model: registered.model, ...(registered.key === undefined ? {} : { key: registered.key }) } : { resolver: registered.resolve })
+      }
+      for (const [parameter, lookup] of routerLevel) result[parameter] = lookup
+      for (const [parameter, binding] of bindings ?? []) {
+        const router = routerLevel.get(parameter)
+        result[parameter] = { ...(binding.key === undefined ? {} : { key: binding.key }), ...(router ? { router } : {}) }
+      }
       return result
     })
   }
@@ -1421,13 +1462,23 @@ function throwOnInvalid<T>(schema: ValidationSchema<T>, data: unknown): T {
  * The refusal calls neither `first` nor `next()`, which would run this route's rest. Any
  * other request reaches `first` as Hono called it; `length` and `name` are kept for `hono/dev`.
  */
-function guardDispatchedRoute(route: RegisteredRoute, first: MiddlewareHandler): MiddlewareHandler {
+function guardDispatchedRoute(
+  route: RegisteredRoute,
+  first: MiddlewareHandler,
+  registry: readonly RegisteredRoute[],
+): MiddlewareHandler {
   const guarded = function (this: unknown, c: Context, next: Next): Promise<Response | void> {
     const target = readDispatchedToolRoute(c.req.raw)
-    if (
-      target === undefined
-      || (target.method === route.method.toUpperCase() && target.path === route.path && target.name === route.name)
-    ) {
+    if (target === undefined) {
+      // Off a socket the mark is gone; the header refuses only a route it names on neither
+      // name nor shape, and nothing when it names no route at all (a page from before a deploy).
+      const claimed = readAgentRouteHeader(c.req.raw)
+      if (claimed === undefined || isClaimedRoute(claimed, route) || !claimsRegisteredRoute(claimed, registry)) {
+        return first.call(this, c, next)
+      }
+      return Promise.resolve(refuseMisroutedToolCall(c, claimed, { fromHeader: true }))
+    }
+    if (target.method === route.method.toUpperCase() && target.path === route.path && target.name === route.name) {
       return first.call(this, c, next)
     }
     return Promise.resolve(refuseMisroutedToolCall(c, target))

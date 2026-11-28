@@ -319,8 +319,8 @@ async function scaffoldEnvFiles(destination: string): Promise<void> {
 }
 
 export const DATABASE_DEFAULTS = {
-  postgres: { url: 'postgres://guren:guren@localhost:54322/guren', dialect: 'postgresql', dep: { postgres: '^3.4.3' } },
-  mysql:    { url: 'mysql://guren:guren@localhost:33306/guren',    dialect: 'mysql',      dep: { mysql2: '^3.11.3' } },
+  postgres: { url: 'postgres://guren:guren@127.0.0.1:54322/guren', dialect: 'postgresql', dep: { postgres: '^3.4.3' } },
+  mysql:    { url: 'mysql://guren:guren@127.0.0.1:33306/guren',    dialect: 'mysql',      dep: { mysql2: '^3.11.3' } },
   sqlite:   { url: './data/guren.db',                              dialect: 'sqlite',     dep: null },
 } as const satisfies Record<
   DatabaseDriver,
@@ -441,7 +441,7 @@ function generateDockerCompose(driver: DatabaseDriver): string | null {
   postgres:
     image: postgres:17-alpine
     ports:
-      - '54322:5432'
+      - '127.0.0.1:54322:5432'
     environment:
       POSTGRES_USER: guren
       POSTGRES_PASSWORD: guren
@@ -459,7 +459,7 @@ volumes:
   mysql:
     image: mysql:8.4
     ports:
-      - '33306:3306'
+      - '127.0.0.1:33306:3306'
     environment:
       MYSQL_ROOT_PASSWORD: guren
       MYSQL_USER: guren

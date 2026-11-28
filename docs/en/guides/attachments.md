@@ -348,6 +348,15 @@ Other rules that hold everywhere:
   uploads over your own domain, make sure it sends correct `Content-Type`
   and `X-Content-Type-Options: nosniff` headers itself — an inline SVG
   served as a same-origin page is a script.
+- **A declared type that renders as a page is not written to the object.**
+  When the bytes are not read as an image, the stored object takes the
+  type the client declared, and S3 and R2 serve that as its
+  `Content-Type`. A declared HTML, XML (SVG and XHTML included) or XSL
+  type, `multipart/x-mixed-replace`, a type a browser sniffs
+  (`unknown/unknown`, `*/*`), a list of several types or a malformed one is
+  written to the object as `application/octet-stream` instead, so a public
+  or direct URL to it downloads. The row's `contentType` keeps the declared
+  type, and the object key keeps the uploaded extension.
 
 ## Variants
 

@@ -124,6 +124,7 @@ export default defineCacheConfig((env) => ({
 | `defineQueueConfig` | `queue` | `QueueConfig` |
 | `defineStorageConfig` | `storage` | `StorageConfig` |
 | `defineOAuthConfig` | `oauth` | `providers` と、任意で `stateStore` |
+| `defineNavigation(entries)` | `navigation` | レイアウトのリンク（[ナビゲーション](./navigation.md) を参照） |
 
 `createApp()` は、アプリのプロバイダより前に `ConfigServiceProvider` を登録します。このプロバイダは `register()` で env を検証して各定義のマネージャをバインドし、`boot()` ではほかのどのプロバイダよりも先に、定義の起動処理（データベース接続）を実行します。そのため、アプリのプロバイダは自分の `register()` の中で `cache` や `mail` を解決できますし、`config` 配列の並び順を気にする必要もありません。
 
@@ -206,7 +207,7 @@ const database = createPostgresDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
   connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL
-    ?? 'postgres://guren:guren@localhost:54322/guren',
+    ?? 'postgres://guren:guren@127.0.0.1:54322/guren',
 })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database

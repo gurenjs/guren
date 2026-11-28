@@ -14,32 +14,47 @@ bunx guren --help
 
 Commands follow a subcommand pattern such as `bunx guren make:controller UserController`.
 
+## Find a Command
+
+| To | Run | Details |
+|----|-----|---------|
+| Add a feature the starter app has (auth, queue, mail, …) | `add <feature>` | [High-Level Scaffolds](#high-level-scaffolds) |
+| Generate one file (controller, model, policy, …) | `make:*` | [Core Commands](#core-commands) |
+| Find out whether a change is done | `gate` | [`gate`](#gate) |
+| Check wiring, security and project health | `check`, `audit`, `doctor` | [Inspection & Audit Commands](#inspection-audit-commands) |
+| Judge a pull request's review lane | `change:*` | [Change Review](./change-review.md) |
+| Test pages in a real browser | `add browser-tests`, `browser:map` | [Browser Tests](./browser-tests.md) |
+| Design a change before writing it | `plan`, `plan:*` | [Implementation Plans](./implementation-plans.md) |
+| See and call the tools agents get | `tool:*` | [Agent Tool Commands](#agent-tool-commands) |
+| Migrate and seed the database | `db:*` | [Database Commands](#database-commands) |
+| Write deploy files | `deploy` | [Deployment Recipes](#deployment-recipes) |
+
 ## High-Level Scaffolds
 
 `bunx guren add <feature>` adds a feature the way the starter app has it: it creates the provider, config and runtime files and patches `src/app.ts` to use them. Reach for it before the lower-level `make:*` generators.
 
-```bash
-bunx guren add auth
-bunx guren add admin
-bunx guren add resource posts --fields "title:string,body:text,published:boolean"
-bunx guren add queue
-bunx guren add mail
-bunx guren add events
-bunx guren add cache
-bunx guren add notifications
-bunx guren add storage
-bunx guren add attachments
-bunx guren add session
-bunx guren add broadcasting
-bunx guren add schedule
-bunx guren add lint
-bunx guren add prototype
-bunx guren add ai --provider anthropic
-bunx guren add oauth
-bunx guren add browser-tests
-bunx guren add review
-bunx guren add ui
-```
+| Feature | Command | Guide |
+|---------|---------|-------|
+| Authentication | `bunx guren add auth` | [Authentication](./authentication.md) |
+| Admin dashboard | `bunx guren add admin` | [below](#add-admin) |
+| A CRUD resource | `bunx guren add resource posts --fields "title:string,body:text,published:boolean"` | [below](#add-resource) |
+| Job queue | `bunx guren add queue` | [Queue](./queue.md) |
+| Mail | `bunx guren add mail` | [Mail](./mail.md) |
+| Events and listeners | `bunx guren add events` | [Events](./events.md) |
+| Cache | `bunx guren add cache` | [Cache](./cache.md) |
+| Notifications | `bunx guren add notifications` | [Notifications](./notifications.md) |
+| File storage | `bunx guren add storage` | [Storage](./storage.md) |
+| File attachments on models | `bunx guren add attachments` | [Attachments](./attachments.md) |
+| Database-backed sessions | `bunx guren add session` | [Sessions](./sessions.md) |
+| Broadcasting | `bunx guren add broadcasting` | [Broadcasting](./broadcasting.md) |
+| Task scheduling | `bunx guren add schedule` | [Scheduling](./scheduling.md) |
+| oxlint with the Guren rules | `bunx guren add lint` | [below](#add-lint) |
+| Prototype mode | `bunx guren add prototype` | [below](#add-prototype) |
+| In-process AI agents | `bunx guren add ai --provider anthropic` | [below](#add-ai) |
+| OAuth sign-in | `bunx guren add oauth` | [OAuth](./oauth.md) |
+| Browser tests | `bunx guren add browser-tests` | [Browser Tests](./browser-tests.md) |
+| The Change review workflow | `bunx guren add review` | [Change Review](./change-review.md) |
+| UI components | `bunx guren add ui` | [below](#add-ui) |
 
 Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
 
@@ -87,40 +102,22 @@ table to.
 
 ### `add prototype`
 
-`add prototype` installs prototype mode ([Prototype First](./prototype-first.md)): a
-fixture under `resources/js/prototype/` that answers Inertia visits from seed data, the
-`dev:prototype` and `build:prototype` scripts, and the two loader lines in
-`resources/js/app.tsx` and `src/app.ts`. `--remove` takes the scripts and the loaders
-back out. `make:feature <Entity> --fields "…" --prototype` then writes the visible half
-of a feature only, pages, validator, a page-data type and fixture entries, and prints the
-routes to register on the `prototype` handler. Run the same command without the flag
-once that page-data type exists (`resources/js/types/<Entity>.ts`) and it promotes the
-feature: model, Resource and controller, with the Resource typed against the page-data
-type, and the pages and validator left as they are. `bun run build:prototype` runs `check --prototype` before Vite, so a route with
-no fixture entry fails the build rather than the customer's click.
+`add prototype` installs prototype mode: a fixture under `resources/js/prototype/` that answers Inertia visits from seed data, the `dev:prototype` and `build:prototype` scripts, and the two loader lines in `resources/js/app.tsx` and `src/app.ts`. `--remove` takes the scripts and the loaders back out.
+
+`make:feature <Entity> --fields "…" --prototype` then writes the visible half of a feature, and the same command without the flag promotes it. `bun run build:prototype` runs `check --prototype` before Vite, so a route with no fixture entry fails the build. [Prototype First](./prototype-first.md) walks through it.
 
 ### `add ai`
 
-`add ai` sets up in-process AI agents with `@guren/plugin-ai`. It writes `config/ai.ts`
-for one provider (`--provider anthropic`, `openai` or `gateway`), declares that
-provider's API key in `config/env.ts` and the env files, and registers the config and
-`aiPlugin()` in `createApp()`. It then runs `bun add` for the plugin, `ai` and the
-provider package (`gateway` needs none); `--no-install` prints the command instead. The key is optional, so
-the app boots without it and the first prompt fails. The command needs a
-`config/env.ts`. In an app with a `db/schema.ts`, it also adds the
-`ai_conversations` and `ai_messages` tables, generates their migration, and
-configures `config/ai.ts` to keep conversations in them; `--no-conversations` skips
-that. The tables hold each transcript as the model saw it, tool results included, so
-treat them as sensitive data. `make:ai-agent <Name>` then writes an agent class to
-`app/Ai/Agents`. `--tools` hands it the named agent tools after checking that a route
-derives each one, `--output` adds a structured-output schema stub, and `--test` writes
-a test that scripts the model with `app.fakeAi()`. `--chat` also writes a streaming chat page with its
-controller and routes. [AI Agents](./ai-agents.md) covers
-the rest: scopes, conversations, streaming and queueing.
+`add ai` sets up in-process AI agents with `@guren/plugin-ai`: `config/ai.ts` for one provider (`--provider anthropic`, `openai` or `gateway`), the provider's API key in `config/env.ts`, `aiPlugin()` in `createApp()`, and, in an app with a `db/schema.ts`, the conversation tables (`--no-conversations` skips them). It needs a `config/env.ts`, and `--no-install` prints the `bun add` command instead of running it. `make:ai-agent <Name>` then writes an agent class to `app/Ai/Agents`. [AI Agents](./ai-agents.md#install) lists what each step writes.
 
 ### `add lint`
 
-Apps scaffolded by `create-guren-app` 1.12 or later already carry this setup; `add lint` is for apps created before that. It touches no application code: it writes `.oxlintrc.json` (oxlint with the Guren rules from `@guren/cli/oxlint`: `guren/await-async-assertion` as an error, `guren/no-unvalidated-env-read` as an error in `app/`, `config/`, `routes/`, `src/` and `modules/`, `guren/no-raw-color` as an error in `resources/js/` once the app has `resources/css/guren.css`, the `guren/comment-*` rules as warnings), adds `lint` and `lint:fix` scripts, and adds `oxlint` as a dev dependency on a tilde range (patch updates only: oxlint's JS plugin API is alpha); run `bun install` afterwards. `bunx oxlint` runs under Bun, so no Node install is needed. In an app created before `config/env.ts`, the rule also reports the `process.env` reads in its own `config/database.ts` and `src/app.ts` until they move to a schema or carry a disable.
+Apps scaffolded by `create-guren-app` 1.12 or later already carry this setup; `add lint` is for apps created before that. It touches no application code:
+
+- It writes `.oxlintrc.json`: oxlint with the Guren rules from `@guren/cli/oxlint`. `guren/await-async-assertion` is an error, `guren/no-unvalidated-env-read` an error in `app/`, `config/`, `routes/`, `src/` and `modules/`, `guren/no-raw-color` an error in `resources/js/` once the app has `resources/css/guren.css`, and the `guren/comment-*` rules are warnings.
+- It adds `lint` and `lint:fix` scripts, and `oxlint` as a dev dependency on a tilde range (patch updates only: oxlint's JS plugin API is alpha). Run `bun install` afterwards.
+
+`bunx oxlint` runs under Bun, so no Node install is needed. In an app created before `config/env.ts`, the rule also reports the `process.env` reads in its own `config/database.ts` and `src/app.ts` until they move to a schema or carry a disable.
 
 ### `add ui`
 
@@ -137,110 +134,15 @@ A re-run writes only the components that are missing and lists the ones it left 
 
 ### `add review`
 
-`add review` installs the Change workflow, which runs `bunx guren change:evidence` on every pull request and every push to `main`. It is for an application at the root of its repository, since GitHub reads workflows from there alone, and it refuses one below it. The command writes six files once (eight for an app whose harness includes Cursor, with `APPROVAL_POLICY.md` and `.cursor/BUGBOT.md`), and a re-run leaves each one that exists alone unless you pass `--force`, which replaces every one but `REVIEW.md`:
-
-- `guren.review.ts`, the review policy (below).
-- `REVIEW.md`, which Claude Code Review reads: your rules for a reviewer, and a block `bunx guren change:policy` generates from the application (what `change:lane` always puts at `high`, the models with sensitive columns, the routes that change data with the middleware and the policies their action names, which says where to look rather than that a policy is enforced, and the routes agents can call on the surfaces they are exposed to). Once it exists, only its generated block is rewritten, by `change:policy`. It is not written when the application does not load, since a block describing nothing would read as current.
-- `.github/workflows/change.yml` checks out the pull request's head commit (not GitHub's merge commit) with its full history, fetches a base no branch keeps (after a force push), runs the evidence again when a pull request is retargeted to another base, downloads the record a push run on the default branch stored for the merge base and passes it as `--base-record` (with `actions: read`, and only from such a run, since a pull request writes none of them), adds `evidence.md` to the job summary, and uploads `record.json` as `guren-record-<head sha>`. The job fails only when the gate fails: the summary and the record are kept when it does, and a failed upload does not fail it. Add `--no-deps` to the evidence step if the runner cannot reach the npm registry.
-- `.github/pull_request_template.md` asks for the issue and the plan, and asks the reviewer, in text the pull request shows, for one `lane:` label: the review the change needed in their own judgement, whatever floor the workflow printed. The job summary repeats the request, since a pull request opened with `gh pr create --body` never uses the template.
-- `.github/ISSUE_TEMPLATE/feature.md` and `defect.md`.
-- For an app whose agent harness includes Cursor (`bunx guren agent:init --target cursor`), `APPROVAL_POLICY.md`, which Cursor's PR Routing & Approval reads: approve only a pull request whose Change evidence reads `eligible for low`. `change:policy` then also keeps `.cursor/BUGBOT.md`, which Bugbot includes on every review, with the same block, cut to what is always read by a person when the whole file, your rules included, would pass the 30,000 characters Bugbot reads; one that passes it even so is refused, and neither file is written.
-
-The labels have to exist before a reviewer can pick one, so the command prints the three `gh label create` lines. The Change workflow runs the same gate as the scaffolded `ci.yml`, and the command says so when that file still has its `bunx guren gate` step, which can go once the Change workflow has passed on a pull request.
-
-Run `bunx guren change:policy` after a change to routes, policies, models, lessons or `guren.review.ts`; `--check` writes nothing and exits 1 while the block is stale, and both exit 1 without writing when the application cannot be read. The block describes the application as it registers without its env files (`.env` and the rest Bun would load, which a machine keeps out of git), so it reads the same on your machine and in CI: whatever an env file in the application or in the directory you run from sets, under any `NODE_ENV`, is left out, and a variable your shell exports at another value still applies, unless an env file builds its value from another variable (`${PORT}`), which is left out whatever it expands to. `change:evidence` runs the same check where `REVIEW.md` exists and holds the change while its block is stale (`review-doc-stale`) or the application cannot be read for it (`review-doc-unchecked`), without failing the workflow. `change:lane` reads any edit to `REVIEW.md` as `high` (and to a `BUGBOT.md`, an `APPROVAL_POLICY.md` or `.cursor/approval-policies/`), the generated block included: the reviewer reads the whole file, and nothing in a change checks the block against the application.
-
-#### The review policy
-
-`guren.review.ts` changes the lane `change:lane` and `change:evidence` give a change:
-
-```ts manual
-import { defineReviewPolicy } from '@guren/cli/review'
-
-export default defineReviewPolicy({
-  approvals: { low: 0, medium: 1, high: 2 },
-  paths: { high: ['app/Billing/**', 'config/session.ts'], medium: 'config/**' },
-  facts: { 'agent-tool': 'high', 'schema-changed': 'low' },
-  identities: 'auto',
-  merge: { low: 'person' },
-})
-```
-
-- `paths` sets the floor of a change that touches a matching path, relative to the application root. `*` matches within one segment and `**` across any number, and a glob with neither names a file or a directory, as in CODEOWNERS. Any other glob syntax (an empty, `.` or `..` segment, braces, brackets, `?`, an extglob such as `@(a|b)`) makes the policy unreadable rather than match nothing. Each glob that matches is a `review-path` fact.
-- `facts` sets the lane of a fact. Any fact can be raised. Only a fact a plan could declare can be lowered, and only as far as a declaration would take it: `schema-changed`, `migration`, `file-added` (an added source file, or an edit read as the plan's addition, which a raise set for `source-edited` still reaches), `policy-added`, `file-removed` (a deletion a plan declares, which a raise set for `source-removed` still reaches), the route facts (`route-added`, `route-changed`, `route-removed`, `agent-tool`) the application entry's list facts (`provider-added`, `config-added`) and `env-added` to `low`, `policy-changed` and `dependencies-changed` no lower than `medium`. The facts that are always high (a gate input, a destructive migration, an edited acceptance test, an audit failure) and the other edits to existing source cannot be lowered, and neither can an added file that is not source or a function inside a schema's tables and code beside them. The report prints `lowered by guren.review.ts` or `raised by guren.review.ts` beside each fact the policy set.
-- `approvals`, `review`, `identities` and `merge` describe how a change of each lane is to be approved and merged. Nothing enforces them yet: `evidence.md` prints the approvals the floor would need.
-
-The policy that applies is the one at the merge base, so a pull request that edits `guren.review.ts` is judged by the policy it started from, and the edit (a gate input, so `high`) takes effect once merged. The file is read as data and never run, so every value has to be written in place: a variable, a spread or a function call inside it, a key the policy does not know, or a lowering it does not allow makes the whole file unreadable. An unreadable policy is applied not at all, and the change is held at `high` with the reason under "Not judged", since a raise it holds would otherwise not show.
+`add review` installs the Change workflow, which runs `bunx guren change:evidence` on every pull request and every push to `main`, and writes `guren.review.ts`, `REVIEW.md` and the pull request and issue templates. [Change Review](./change-review.md) lists every file it writes, the review policy and the `change:*` commands.
 
 ### `add browser-tests`
 
-`add browser-tests` sets up Playwright browser tests. They start your app through `bunx guren browser:serve`, which refuses production and any database it cannot show is local. The command writes `playwright.browser.config.ts`, which starts the app on `127.0.0.1:4317` and its Vite dev server from port 4318 (`browser:serve` sets `GUREN_VITE_PORT` to the port after the app's unless you set it), and `tests/browser/support.ts`, then runs `bunx guren browser:map`, which from then on keeps two kinds of spec under `tests/browser/generated/`:
-
-- `smoke.browser.ts`, one test per feature in the browser map: the feature's first page without a path parameter must answer 200 with the component its route renders;
-- `plans/<plan>.browser.ts` for each approved plan with views: every form label and action name the plan gives a view must be visible on the first page without a path parameter that renders it.
-
-The config sets Playwright's `locale` to the app's default locale, read from `createApp({ i18n })` (the `fallback`, else the first `supported` locale; `en`, with a warning, when the command cannot read one), because plan labels are written in that locale and the server would otherwise pick one from the browser's `Accept-Language`. The setup project clears the `locale` cookie before saving the signed-in session, and each plan spec checks that `_i18n.locale` on the page equals `_i18n.fallbackLocale` before it looks for a label, so a page rendered in another locale fails with a message naming the config line rather than as missing labels. When the app's default locale changes, change `LOCALE` in `playwright.browser.config.ts`.
-
-A page the specs cannot open (every route to it takes a parameter, no route renders it yet, or it needs a signed-in user the app cannot provide) becomes a `test.fixme` that says why, so it shows up as skipped rather than passing. Run `bunx guren browser:map` again after approving a plan; `--check` exits 1 while a generated spec is out of date. It removes a generated spec no feature or plan produces any more, and refuses to overwrite a file under `tests/browser/generated/` that lacks the generated header, so put specs of your own beside that directory.
-
-When the app signs in with a password (the `users` table `make:auth` writes and a `POST /login` route), the command also writes a setup project, `tests/browser/auth.setup.ts`, and a seeder, `db/seeders/browser-account.ts`. The seeder creates `browser@example.test` with the password in `BROWSER_TEST_PASSWORD` while `browser:serve` runs the app, and does nothing in any other run or in production. Set `BROWSER_TEST_PASSWORD` in `.env` before the first run. The seeder runs through boot-time seeding, so `config/database.ts` has to pass `seedOnBoot` to `defineDatabaseConfig()`; the command warns when it does not.
-
-It adds a `test:browser` script (`playwright test -c playwright.browser.config.ts`) and the `@playwright/test` dev dependency (`--no-install` prints the `bun add` command instead), and adds `test-results/`, `playwright-report/` and `tests/browser/.auth/` to `.gitignore`. A `test:browser` script that runs something else makes the command stop before writing anything; `--force` replaces it. Install a browser with `bunx playwright install chromium`, then run `bun run test:browser`. Playwright runs under Node, so Node 20.12 or later has to be on `PATH`.
-
-Spec files end in `.browser.ts`, because `bun test` collects `*.spec.ts`. `guren gate` does not run browser tests.
+`add browser-tests` sets up Playwright browser tests that start your app through `bunx guren browser:serve`, and `bunx guren browser:map` keeps the generated specs current. [Browser Tests](./browser-tests.md) walks through them and lists [every file and option](./browser-tests.md#reference-add-browser-tests).
 
 ### Behaviour specs
 
-`add browser-tests --behaviours --agent claude-code` sets up tests that perform an approved plan's behaviours in the browser. A test opens the page the behaviour starts on, waits for the network to go quiet so that the page has hydrated, and performs the behaviour. Where the plan names every control it touches (each input a labelled text, number, checkbox or select field of the form, and an action for the route), the test fills the fields and taps the action with ordinary locators, which needs no model. Otherwise it hands your coding agent one instruction built from the plan (`set "Title" to {title}, then submit the form`). Either way it then checks the outcome with ordinary locators: the redirect, the labels and actions of the page it lands on, and `aria-invalid` on each field the plan expects an error for. The tests run on the [e2e](https://github.com/e2e-inc/e2e) runner, which records what the agent did in each step. A recorded step replays without calling a model, so your agent's login is used only the first time a step runs and after the page has changed under its recording.
-
-`--agent` is required and has no default: it names the agent whose login runs the steps, `claude-code` or `codex`. A recording made under one replays under the other. `--agent none` sets up the runner with no agent: only `e2e` and `@e2e-dev/web` are installed, the behaviours the plan names every control of run as locator steps with no login and nothing to record, and a behaviour that would need an agent step is a skipped test that says so. To change agents later, run the command again with `--force`, which rewrites the config and keeps `given.ts` and the recordings. Switching to `--agent none` this way also removes `@e2e-dev/acp` and the agent's adapter (`--no-install` prints the `bun remove` command instead). `browser:map` writes an agent step only while `e2e.browser.config.ts` imports an executor from `@e2e-dev/acp` and the app declares that package. The command writes these files once:
-
-- `e2e.browser.config.ts`, which starts the app through `bunx guren browser:serve` on `127.0.0.1:4319` and never attaches to a server that is already running;
-- `tests/browser/behaviours/given.ts`, which is yours to edit (see below);
-- `tests/browser/behaviours/auth.setup.e2e.ts`, only when the app signs in with a password. It signs in as the seeded account the Playwright setup uses and saves the session the tests run under.
-
-It adds the `test:behaviours` and `test:behaviours:ci` scripts, installs `e2e`, `@e2e-dev/web` and `@e2e-dev/acp` at exact versions with the chosen agent's adapter (`--no-install` prints the `bun add` command instead), and adds `.e2e/*` and `!.e2e/cache/` to `.gitignore`. From then on `bunx guren browser:map` keeps `tests/browser/behaviours/generated/<plan>.e2e.ts`, with one test per behaviour.
-
-A behaviour becomes a test when its kind is `success` or `validation`, its route is not a `GET`, and a view of the plan submits its form to that route or has an action for it. Every other behaviour becomes a skipped test whose title says why: a kind only `TestApp` can pin (a guest, a user without permission, a missing record), a behaviour that leaves nothing for a browser to check, or a validation input the form's own control stops before a request is sent. A behaviour whose start page takes a path parameter (`/posts/:id/edit`) needs an entry in `given.ts` that creates the record and returns the parameter's value. Without one the test is skipped when it runs, and the reason names the missing entry.
-
-```ts
-export const given: Record<string, (fixtures: GivenFixtures) => Promise<Record<string, string> | void>> = {
-  'AC-posts-update-1': async ({ browser }) => {
-    await browser.goto('/posts/create', { waitUntil: 'networkidle' })
-    await browser.locator('input[name="title"]').fill('Given post')
-    await browser.locator('button[type="submit"]').tap()
-    await browser.waitForURL(/\/posts\/\d+$/u)
-    return { id: new URL(await browser.url()).pathname.split('/').at(-1)! }
-  },
-}
-```
-
-Two scripts run the tests:
-
-```bash
-bun run test:behaviours       # replays recorded steps, runs the others on the model and records them
-bun run test:behaviours:ci    # replays only (--strict-cache)
-```
-
-Run `bun run test:behaviours` after approving a plan or changing a page, and commit `.e2e/cache/`. A recording is test data, so its diff belongs in the commit that changed the page. Measured on a small app, a step run on the model took about ten seconds and 41,000 tokens with Claude Code (`sonnet`), and about 17 seconds and 65,000 tokens with Codex; over 85% of the tokens were cache reads either way. Four recorded tests replayed in seven seconds. The first run downloads the Chromium build the runner pins, beside the one Playwright installed.
-
-A test that `browser:map` regenerates gets a new title, so it records anew and its old recording stays in `.e2e/cache/`: the runner has no command that removes only the recordings of tests that are gone. To drop them, run `bunx e2e cache clear` and then `bun run test:behaviours`, which runs every agent step on the model again and records it. A test performed with locator steps has no recording, so it leaves none behind.
-
-Make recordings against an empty database, which is what CI starts from. A recording also holds what the page showed when its step ended. One made while a list held rows from earlier runs went stale against an empty database (`REPLAY_STALE`), and one made against an empty database replayed against both. To keep these runs out of your development database, give them a database of their own: add `'--database-url', './data/behaviours.db'` (or the URL of any other local database) to `args` in `e2e.browser.config.ts`, and migrate it with `DATABASE_URL=./data/behaviours.db bunx guren db:migrate`. Before recording, delete that database and migrate it again.
-
-CI runs `bun run test:behaviours:ci`, which needs no login and no API key. A recording made on macOS replays on Linux (measured in a Debian container). On a slim Linux image, install Chromium's system libraries first with `bunx playwright-core install-deps chromium`; without them the browser does not start and the run exits 3. The exit code says what happened:
-
-| Exit code | Meaning | What to do |
-|-----------|---------|------------|
-| 0 | Every step replayed | Nothing |
-| 1 | A test failed | A check after the step did not hold: the page does something other than what the plan says |
-| 2 | `REPLAY_STALE`: a recording no longer matches the page | Run `bun run test:behaviours` on your machine. If it passes, commit the new recording. If it fails, the page no longer does what the plan says. The failed run deletes the recording that no longer matched, so leave `.e2e/cache/` uncommitted until the page or the plan is corrected |
-| 2 | `MODEL_UNAVAILABLE`: a test has an agent step and the config names no agent | Run `bunx guren browser:map`, which writes that behaviour as a skipped test while `e2e.browser.config.ts` imports no executor from `@e2e-dev/acp`. If the config still imports one but has no `agents` entry, run `bunx guren add browser-tests --behaviours --agent <agent> --force` to name the agent again, or `--agent none --force` to take it out |
-| 3 | A step could not run | A step with no recording tried to call the model and found no login (`MODEL_PROVIDER_FAILED`). Run `bun run test:behaviours` on your machine and commit the recording. A test that `browser:map` regenerated after its plan changed has a new title, and so has no recording yet. The same code means the app did not start |
-
-The agent gets the step's own tools and nothing else: no shell, no files, no MCP servers. Across 65 steps of the generated shape run on the model with Claude Code and 52 with Codex, the agent was never refused a tool of its own (`POLICY_DENIED`), which puts the rate under 4.6% and 5.8% at 95% confidence. The config passes every variable your env files set to the agent as an empty string, `BROWSER_TEST_PASSWORD` included, because Bun would otherwise load those files into the agent's process too. An `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `.env` is emptied with the rest, and the agent still ran under its own login. The runner types the password itself, and the agent never receives it. A variable that only your shell exports does reach the agent, so export no secret in the shell you run these tests from. What the agent's process reads after it has started was not checked.
-
-With `BROWSER_TEST_PASSWORD` unset, the sign-in setup fails with a message naming the variable, and the tests that need a signed-in user are skipped. `--force` rewrites the config and the setup, never `given.ts`. When the installed `@playwright/test` is older than the `playwright-core` the runner pins, `tests/browser/generated/a11y.browser.ts` can stop typechecking; the command warns about it and prints the `bun add` command that raises the version. `guren gate` does not run these tests either.
+`add browser-tests --behaviours --agent claude-code` also sets up tests that perform an approved plan's behaviours in the browser, recorded once and replayed in CI. See [Perform a Plan's Behaviours](./browser-tests.md#perform-a-plans-behaviours) and the [reference](./browser-tests.md#reference-behaviour-specs), which has the exit codes and how to give these runs a database of their own.
 
 ### On an API-only app
 
@@ -290,7 +192,7 @@ re-run to repair a partial install (`add session`, `add cache`, `add schedule`,
 | `make:policy <Name>` | Generates an authorization policy in `app/Policies`: a signed-in user may list, view and create, and only the owner (matched on `userId`) may update or delete | `bunx guren make:policy Post` |
 | `make:validator <Name>` | Generates Zod validation schemas (route params, list query, payload) in `app/Http/Validators`; `--fields` uses the same syntax as `make:feature` | `bunx guren make:validator Post --fields "title:string,body:text"` |
 | `make:adr "<Title>"` | Records an architecture decision as a numbered file under `docs/adr/` with linkable frontmatter; `--entity <Model>` prefills the `entities:`/`related:` links, `--issue <ref>` (comma-separated for several) the `issues:` link to a GitHub issue or PR | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412` |
-| `make:lesson "<Title>"` | Records a lesson as a numbered file under `docs/lessons/` with one rule line in its frontmatter (`rule:`, the title when `--rule` is omitted). It starts as `status: draft`, which reaches nobody; once a person merges it as `stable`, `guren context <Entity>` prints its rule under Lessons for each entity it names. `--entity` fills `entities:`, `--paths` the globs a lesson without an entity governs, and `--from <commit\|pr>` records where it came from (`source:`, with `--kind`: `review-finding`, `escaped-defect`, `revert`, `stall`, `waiver` or `declined-finding`). Once a check catches it, name it with `--enforced-by <file>#<name>` (or add `enforcedBy:` by hand). With `--from <commit>`, the commit that removed the defect, the command runs that test at the commit and at its parent and records `reproduced`: `true` when a test titled with `[<name>]` fails at the parent and passes at the commit, `false` when it passes at the parent, and `not-run` otherwise (with the reason in `reproducedBecause`; `--no-reproduce` skips the run). It runs the application's tests under the current environment. `guren check --docs` fails a rule past 160 characters or an `enforcedBy` the file does not hold, and warns once the `review:` date has passed | `bunx guren make:lesson "Load a comment through its post" --entity Comment --from 412` |
+| `make:lesson "<Title>"` | Records a lesson as a numbered file under `docs/lessons/`, starting as `status: draft`; see [Lessons](./change-review.md#lessons) for its flags | `bunx guren make:lesson "Load a comment through its post" --entity Comment --from 412` |
 | `make:seeder <Name>` | Generates a database seeder file | `bunx guren make:seeder UserSeeder` |
 | `make:job <Name>` | Generates a queueable job class, its `jobName` pinned to the class name | `bunx guren make:job SendEmail` |
 | `make:event <Name>` | Generates an event class | `bunx guren make:event UserRegistered` |
@@ -320,11 +222,9 @@ Validate your app before shipping. These commands are also designed for AI codin
 | `docs:graph` | The OKF docs relation graph: documents, entities, and code paths as nodes, verified relations as edges. `--entity <Model>` or `--path <file>` narrows to a neighborhood — ask "what governs this?" before renaming | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
 | `deps:why <name>` | Every installed version of a package, read from `bun.lock`, with the path each direct dependency brings it in by and whether `bun install --production` installs it. Exits 1 when the app does not have the package or the lockfile cannot be read in full | `bunx guren deps:why hono` |
 | `deps:exposure` | For each installed package, the app files importing it or the direct dependency bringing it in, where those files run (server, client, SSR, build, test), and the routes that reach them through the Application Graph. A package only `@guren` packages bring in is reported once as `framework`. `--package <name>` narrows the output and `--json` prints the versioned document. The output ends with what the results rest on without checking (`trustBoundary` in the JSON); exits 1 while any reader is incomplete | `bunx guren deps:exposure --package marked` |
-| `change:lane` | The facts of a change between two commits and the review lane they set as a floor (`low`, `medium` or `high`). The facts are read from git objects and never from the working tree: gate inputs, plan records, migrations, schema tables, acceptance tests, policies and dependencies. `--base` and `--head` take commit SHAs, and the change is read from their merge base. It also audits both sides of the change and reports what the base did not have: an audit failure, a sensitive column in a response, a CSRF exemption, a security default switched off, a model rule's warning (`mass-assignment`, `owner-fillable`, `hidden-columns`) new on a model the change edits, or naming a column the base's did not, a suppressed finding. For that it exports each commit to a temporary directory and runs `guren audit` there with the install on disk, which loads the application's code under the environment of the shell that ran the command. The audit is not taken when a commit's lockfile is not the one installed, when nothing is installed, when a package is installed from the repository itself (a workspace member, a `link:` or `file:` dependency), or when a commit tracks a symlink inside the application; `--no-audit` skips the step. A fact an approved plan declares takes the lane the declaration gives: while a plan is approved at its current hash and not closed, and the change writes no plan record, an added source file that `plan:scaffold` writes for an element the plan adds and an added table of a model the plan adds are `low`, with the plan and the element beside the fact (`declared by docs/plans/comments/plan.json#model.comment`). The file is at that path and exports the names the scaffold's own output exports; a policy's provider must be the one the scaffold writes, a policy or controller file must hold nothing but imports, types and the class, which extends the base the scaffold imports and has no member but the planned abilities or actions. The table must be declared as the scaffold writes it into that schema, columns, defaults, keys and indexes included; the code inside it that the schema reader does not follow (a `sql` default, the index callback) is then the scaffold's own and no longer keeps `db/schema.ts` at `medium`, and neither does listing it in an object of tables, while a table dropped from such an object does. An added migration is `low` too when it does nothing but create the tables the plan adds, in the statements drizzle-kit writes, read both as a whole and as drizzle's migrator cuts it at `--> statement-breakpoint`: each `CREATE TABLE` has exactly the planned columns, each with the type, nullability, keys and default the scaffold's builders give it, every planned unique, index and foreign key (with its delete rule) is stated once, after its table, and nothing else is, its folder holds `migration.sql` and `snapshot.json` and nothing else, and the snapshot is the previous migration's plus what the SQL creates. When both sides' security records are compared (below), a route the head registers with no counterpart at the base is `route-added`, a base route no head route matches is `route-removed`, a matched route whose record differs in anything is `route-changed`, and a route gaining, changing or losing `.agent()` is `agent-tool`, each `medium`. An added route is `low` when the plan adds it in the project root with the same method, path and name, and its record holds what the plan states: the planned controller action as the scaffold's controller file exports it, exactly the planned middleware by name (an `auth` that requires a user), the planned bindings by model file and export, the planned agent metadata, each contract as the planned validator's export from a plan model's validator file, rendered with the planned keys, types, requiredness and rules as `plan:status` judges them, and an `authorize()` call of the planned policy ability on the policy's model, `[Model, record]` where every route to the action binds one record and otherwise that or the bare class, awaited as a statement of the action's body, in a controller that imports that model under its own name from its file and binds the name nowhere else. A route whose name another registered route has is not declared. Since `--mount` registers the scaffold's routes first, a route is not declared while a route registered after it that the change does not add, of the same method or `ALL`, has a path some request could match too. A planned binding with a lookup column is not declared, and an unplanned one is not seen, since the manifest names a binding's model and not its column. The routes file the scaffold writes is `low` when it is that file as the scaffold writes it against the head's model and validator files, and the edit to the routes entry no longer keeps the change at `medium` when it is exactly what `plan:scaffold --mount` writes, the mounted file is still what the scaffold wrote, and every route fact of the change is a declared addition of that file's routes, each once, unless an alias the mounted file sets is one another route uses, directly or through a group, and no top-level statement of the entry's registrar sets it on its router after the call. The `authorize()` call must be one the action awaits as a statement of its own body, with no statement before it that may return; the entry is read as written, so an entry statement that does not run reads the same, which the report says beside a declared route. A file or table a second open plan also claims stays where it was. An edit to the application entry (`src/app.ts`, else `app.ts`) that only adds entries to the `providers` and `config` arrays of its `createApp()` literal (the factory imported from `@guren/core`, called at the top level), each a name, with the import binding it, is a `provider-added` or `config-added` fact per entry, `medium`. Anything else in the file keeps it `source-edited`, and so does a literal holding a spread, a computed key or `__proto__`, a method or accessor named after a list, or an added import of a name the rest of the file reads. A provider is `low` when the entry is exactly what `plan:scaffold` writes for one scaffold step's providers, and the provider and the policy it registers hold what the plan declares (the provider whole, the policy its planned abilities). A declared file with a twin of another extension beside it (a `P.js` beside `P.ts`, which Bun runs in its place) is not declared. An entry an open plan's `providers` or `config` element adds is `low` when the entry is a default import of the element's file (`app/Providers/<className>`, `config/<name>`) and one plan alone adds it ([Providers and config](./implementation-plan-format.md#providers-and-config)). A key added to `defineEnv()` in `config/env.ts` is `env-added`, `medium`, and `low` when an open plan's `env` element adds it and its builder chain declares what the element states ([Environment keys](./implementation-plan-format.md#environment-keys)). An added file that one open plan's `make:*` command writes is `low` while it is what the generator writes, or, where an element the plan adds in the command's module owns its class, while it passes that element's check; a provider and a routes file are always held to what the generator writes ([Commands](./implementation-plan-format.md#commands)). A route changed or removed beyond what an open plan's `alter` or `drop` route states, a migration that does anything else, an altered table, a removed file no `drop` element of an open plan owns, what a blueprint or a generator writing several files writes, and an edited policy stay `medium` for now. An edit to a model or controller file an earlier task of the plan added is read as that plan's addition when the commit that added the plan's approvals did not have the file and every route's security record was compared. When the merge base has a `guren.review.ts`, the facts are then raised or lowered as [the review policy](#the-review-policy) says. When the change touches dependencies, it also runs `bun audit` on both sides of the `bun.lock` that governs each changed file (nothing is installed, the registry the base's `.npmrc` names is asked with no registry override from the environment, and both sides are read against today's advisories), and reports each advisory the head has and the base does not as `dependency-advisory`, always `high`; `--no-deps` skips it. A manifest whose `bun.lock` did not change, a binary `bun.lockb`, a base with dependencies but no `bun.lock`, and a scan `bun audit` warned about (a registry it skipped) are listed as not judged. Any `.npmrc` is a gate input, since it names the registry an install asks. In the same two exports it reads each route's security record (`guren change:records`) and compares base and head route by route, matched by controller action and then by method and path: a guard gone from the middleware chain, an `authorize()`/`can()` call or an `auth.userOrFail()` gone from the action, or an `authorize()` that no longer runs whenever the action does (now under a condition, after a statement that may return, in a `try`, behind `void` or `.catch()`, or in a helper) is `authorization-removed`, and one that never did is compared by the whole action, since a later statement may call it or act on its denial, and a contract schema or a validate call gone is `validation-removed`, both always `high`. A record it cannot order against the base (a reordered chain, a middleware with no capability removed, another ability or subject (a subject's class is followed through imports and re-exports to the file declaring it, so a class of the same name from another file is another subject), a validator replaced by another, a schema that lost a key or a bound, a schema an action validates with whose declaration changed, an action it could not read) is listed as not judged at `high`, as is a head the change made unreadable; one that only gained guards or bounds gives no fact. A call it cannot name (an ability built at request time, a gate asked by hand, a schema written in place) is compared by a digest of the action's body and of the declarations its arguments reach, so it is incomparable only when that source changed. An argument that names a local of the action widens the digest to everything the body names, and an inherited action is compared by its class statements along `extends`, so a change to either can read as incomparable though no guard moved; a schema or ability an inherited action names in another file is not followed. An import through an alias other than `./` or `@/` is compared by its specifier alone. The body of an inline route handler is not read. Where the base cannot be rebuilt from this install, `--base-record <file>` takes the `record.json` an earlier run of `change:evidence` wrote for the merge base and compares its records with the head's, read alone; a record of another commit, format, deploy target or `NODE_ENV` is not compared and is listed as not judged with the run that would write a comparable one, and a record written by another version of `@guren/cli` or of the framework is compared and named beside the result. What it does not read (the records when the base cannot be rebuilt from this install and no stored record stands in, advisories it could not scan, a side it could not audit) is listed under "Not judged" and keeps the floor at `medium` or above. It exits 0 whatever the lane, and `--json` prints the versioned report | `bunx guren change:lane --base 9f2c1ab --head 4e7d0c3` |
-| `change:evidence` | What CI runs in place of the bare gate: it runs `guren gate --deps`, judges the change as `change:lane` does, and writes `evidence.json`, a compact `record.json` and `evidence.md` (a job summary) into the application's `.guren/evidence/` or `-o <dir>` (from where the command runs). It fails exactly when the gate fails: a file it cannot write is reported on stderr and changes no exit code. What the evidence could not establish is a hold: a failed gate, a checkout that is not at `--head`, moved while the gate ran, or has uncommitted changes to tracked files, committed files the gate's codegen rewrote, a change it could not read (a shallow clone) or that holds no commit (a head behind its base), and, in this version, plan evidence while any plan at the head is not closed and browser evidence for a change to a page, and, where `REVIEW.md` exists, a block `change:policy --check` finds stale or an application it cannot read for that check, a routes file or a translation catalog. A change is eligible for low when its floor is low and nothing holds it. Credentials a failing command printed (a URL's user information, a secret-named `NAME=value`) are masked in every file. `--routes` is the gate's, `--base-record` is `change:lane`'s, and `--no-deps` and `--no-audit` skip the dependency scans (the gate's and the advisories of both sides) and the audit of both sides. With the audit on, `record.json` carries the head's security records whatever the change touched, which is what a later change reads as its base record; the workflow `guren add review` writes downloads the one a push run on the default branch stored for the merge base and passes it, so a pull request stacked on another branch has none to read | `bunx guren change:evidence --base 9f2c1ab --head 4e7d0c3` |
-| `change:records` | Prints each route's security record, the input `change:lane` compares: the middleware on its chain with the capabilities each declares (authentication, authorization), its contract schemas with the validator exports they are, its bindings and `.agent()` metadata, and the `authorize()`, `can()`, `auth.userOrFail()` and validate calls of its action. It introspects the application without its env files, so the application's code runs, and reads nothing when a provider threw; what introspection skipped (a `createApp({ boot })` callback, a provider's `introspect()` hook) is listed beside the records, and `change:lane` reports it at `medium` while still comparing the routes both sides list; `--json` prints the versioned form, and it exits 1 when the application cannot be read | `bunx guren change:records --json` |
-| `change:policy` | Regenerates the block of `REVIEW.md` that lists what a reviewer must read, from the application as registered (it introspects the app, as `browser:map` does), and creates `REVIEW.md` when there is none. A stable lesson that names `paths` and no entity is listed there too, and written into a `lessons` rule for each installed agent (`.claude/rules/lessons.md`, `.agents/rules/lessons.md`, `.cursor/rules/lessons.mdc`, `.github/instructions/lessons.instructions.md`), scoped to the lessons' globs (relative to the application root, a module's lessons included; a `{a,b}` brace is expanded for Cursor and Copilot, whose lists are comma-joined) and removed once none stands; a file of that name it did not write is refused, and left alone while no lesson needs it. Text outside the `guren:review` markers is yours and is kept; markers it cannot rewrite safely refuse the run with nothing written. `--check` writes nothing and exits 1 when a file it keeps is missing or stale | `bunx guren change:policy --check` |
 | `spec:generate` | Regenerates the derived spec views in `docs/spec/` (ER diagram, domain model, screens, module map) — see [Spec-Anchored Development](./spec-anchored.md) | `bunx guren spec:generate` |
+
+The review commands, `change:lane`, `change:evidence`, `change:records` and `change:policy`, are described in [Change Review](./change-review.md).
 
 `audit` recognizes routes wrapped in named middleware (for example `router.middleware('auth').group(...)`) as protected, and leaves guest flows such as `/login` and `/register` out of its authentication checks.
 
@@ -359,38 +259,11 @@ path the agent harness's [edit hook](./agent-harness.md#hooks) uses.
 
 ### Regenerating with `--fix`
 
-Some findings clear by regenerating files: a missing `.guren/*.gen.ts`
-manifest (`guren codegen`) and a drifted `docs/spec/` view
-(`guren spec:generate`). `check --json` gives each of these a `fix`
-field, `{ "kind": "command", "args": ["codegen"] }`, holding the
-arguments after `guren`. `--fix` runs every distinct fix once, then
-checks again and reports that second run, with what it ran under
-`fixes`. It exits non-zero when one of the commands fails, or exits 0
-while the findings it was meant to clear are still reported. `--fix`
-is refused under `--ci`: a gate that regenerated the drift it checks
-for would always pass, so run it locally and commit what it writes. A
-finding that needs a code change or a decision has no `fix`, only the
-`suggestion` text.
+`check --fix` runs the commands that clear the findings regenerating files can fix (`guren codegen`, `guren spec:generate`), then checks again; it is refused under `--ci`. `doctor --fix` does the same for the generated files doctor reports. [Regenerating Generated Files](./cli-checks.md#regenerating-generated-files) has the details.
 
 ```bash
 bunx guren check --fix          # regenerate what the findings name, then check again
-bunx guren check --spec --fix   # the same, limited to the spec views
-```
-
-`doctor --fix` regenerates the missing or stale generated manifests reported
-by doctor, then runs doctor again in a fresh process. It selects the app's
-route entry, including `routes/api.ts`, and runs each distinct generator once.
-`doctor --json` exposes these repairs as `repair: { kind: 'command', args }`;
-with `--fix`, the final report also includes `fixes`. A failed command or a
-repair finding that does not pass recheck makes the command exit nonzero.
-An unavailable recheck also counts as failure. Other warnings remain in the
-report; `--strict` makes those warnings and failures set the exit code.
-Configuration autofixes marked `canAutofix` still belong to `guren upgrade`.
-This flag only rewrites generated files.
-
-```bash
 bunx guren doctor --fix --next
-bunx guren doctor --fix --json
 ```
 
 ### `gate`
@@ -651,7 +524,7 @@ bunx guren tool:call posts.index --as user:42 --json
 
 The command exits non-zero when the call comes back as an error result, so a 422 or a 403 is not read as a success by a script. See [Agent Interface — Calling a tool yourself](./agent-interface.md#calling-a-tool-yourself).
 
-If the application it boots has an [audit trail](./agent-tool-governance.md#the-audit-trail) configured, the call is recorded in it as `surface: 'cli'` (the same file, the same masking, alongside the MCP records). A call from here runs as whoever `--as` names, with nothing verified, so it is worth being able to see later. An application with no trail configured records nothing and the call is unaffected.
+When the application has an [audit trail](./agent-tool-governance.md#the-audit-trail) configured, the call is recorded in it as `surface: 'cli'`.
 
 `tool:dev` serves the application's *own* endpoint, so it requires
 [`@guren/plugin-mcp`](./agent-interface.md) to be installed and registered, and
@@ -872,8 +745,6 @@ The command boots your application (honouring `src/main.ts` and registered provi
 - `reloadModels()` refreshes the discovered model list if you add a new class while the console is running.
 - `:load path/to/script.ts` executes the contents of a file inside the current session.
 - Need the plain Bun REPL? Run `bun repl` for a minimal prompt or `bun repl --inspect` to pair with DevTools.
-
-These patterns deliver the same iterative mode of operation you’d expect from a future `guren repl`, without waiting for a dedicated CLI wrapper.
 
 ## Application graph and runtime errors
 

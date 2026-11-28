@@ -396,6 +396,12 @@ describe('tool execution', () => {
     expect(new URL(request.url).searchParams.get('page')).toBe('2')
     expect(request.headers.get('Accept')).toBe('application/json')
     expect(request.headers.get('X-Guren-Agent-Surface')).toBe('webmcp')
+    // What the server's misroute guard judges the call by once the in-process mark is gone.
+    expect(JSON.parse(decodeURIComponent(request.headers.get('X-Guren-Agent-Route')!))).toEqual({
+      method: 'GET',
+      path: '/posts',
+      name: 'posts.index',
+    })
     // A safe method carries no token even with the cookie present.
     expect(request.headers.get('X-XSRF-TOKEN')).toBeNull()
     expect(result.isError).toBeUndefined()

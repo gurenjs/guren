@@ -10,16 +10,18 @@
  */
 import {
   agentApprovalExpiredAt,
-  agentApprovalFingerprint,
+  agentApprovalFingerprints,
   agentApprovalPrincipalKey,
   agentApprovalStatusAt,
   agentApprovalUsableAt,
   buildAgentApprovalRequest,
+  type AgentApprovalKeys,
   type AgentApprovalRequest,
   type AgentApprovalStore,
 } from './approval'
 import type { DerivedAgentTool } from './derive'
 import type { AgentPrincipal, AgentToolDenialReason } from './events'
+import { deriveAppKey, parseAppKey } from '../encryption/app-key'
 import { keepAlive, type Deferrer } from '../support/keep-alive'
 import { APPROVAL_STATUS_TOOL_NAME } from './meta-tools'
 import { scopesAllowTool } from './scopes'
@@ -84,6 +86,8 @@ export interface ApprovalGateContext {
   principal: AgentPrincipal | null
   /** How long a new pending record stays answerable. */
   ttlMs?: number
+  /** What fingerprints are keyed under. Defaults to {@link agentApprovalKeysFromEnv}. */
+  keys?: AgentApprovalKeys
   now: () => Date
   /**
    * `redactAgentArguments(args, tool.redact)`, passed in so this module runs
@@ -97,6 +101,34 @@ export interface ApprovalGateContext {
    * past the response where the runtime needs telling; see {@link notifyApprovers}.
    */
   notify(request: AgentApprovalRequest): void
+}
+
+/** The key purpose fingerprints derive under, apart from every other `APP_KEY` use. */
+export const AGENT_APPROVAL_KEY_PURPOSE = 'agent-approval'
+
+/**
+ * The app keyring, derived for {@link AGENT_APPROVAL_KEY_PURPOSE}. An unset or
+ * invalid `APP_KEY` leaves new fingerprints unkeyed, so an app without one keeps
+ * working. A previous key that does not parse is skipped: previous keys only
+ * widen the lookup, so dropping one can cost a match and never grant a call.
+ */
+export function agentApprovalKeysFromEnv(
+  env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env,
+): AgentApprovalKeys {
+  const derive = (raw: string): Uint8Array | undefined => {
+    try {
+      return deriveAppKey(parseAppKey(raw), AGENT_APPROVAL_KEY_PURPOSE)
+    } catch {
+      return undefined
+    }
+  }
+  const previous = (env.APP_PREVIOUS_KEYS ?? '')
+    .split(',')
+    .map((raw) => raw.trim())
+    .filter(Boolean)
+    .map(derive)
+    .filter((key): key is Uint8Array => key !== undefined)
+  return { current: derive(env.APP_KEY ?? ''), previous }
 }
 
 /**
@@ -163,7 +195,7 @@ export function gateToolCall(
 }
 
 /**
- * The approval half (RFC 0016 §5.4 item 4). One lookup on tool + *raw* arguments'
+ * The approval half (RFC 0016 §5.4 item 4). A lookup on tool + *raw* arguments'
  * fingerprint + principal: a pending or rejected match refuses without a second
  * record or notification (polling by re-calling would page approvers per poll);
  * a rejection blocks only while its record is live. Consumed *before* dispatch,
@@ -189,11 +221,20 @@ export async function gateApproval(
     }
   }
 
-  const fingerprint = await agentApprovalFingerprint(args)
+  const [fingerprint, ...older] = await agentApprovalFingerprints(
+    args,
+    context.keys ?? agentApprovalKeysFromEnv(),
+  )
   const principalKey = agentApprovalPrincipalKey(context.principal)
   const now = context.now()
 
-  const existing = await context.store.findMatch({ tool: tool.toolName, fingerprint, principalKey })
+  // One query per fingerprint until one matches, the current one first: a
+  // record filed since the last rotation answers in a single lookup.
+  let existing = await context.store.findMatch({ tool: tool.toolName, fingerprint, principalKey })
+  for (const candidate of older) {
+    if (existing) break
+    existing = await context.store.findMatch({ tool: tool.toolName, fingerprint: candidate, principalKey })
+  }
 
   if (existing) {
     if (agentApprovalUsableAt(existing, now)) {

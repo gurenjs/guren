@@ -58,6 +58,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'frontend',
       'inertia',
       'views',
+      'navigation',
     ],
   },
   {
@@ -89,13 +90,14 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
   },
   {
     title: { en: 'Testing & Deployment', ja: 'テストとデプロイ' },
-    slugs: ['testing', 'deployment', 'serverless', 'cloudflare', 'operations'],
+    slugs: ['testing', 'browser-tests', 'deployment', 'serverless', 'cloudflare', 'operations'],
   },
   {
     title: { en: 'AI-Native Development', ja: 'AIネイティブ開発' },
     slugs: [
       'spec-anchored',
       'prototype-first',
+      'event-storming-boards',
       'implementation-plans',
       'implementation-plan-format',
       'implementation-plan-scaffolding',
@@ -119,6 +121,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'troubleshoot',
       'cli',
       'cli-checks',
+      'change-review',
       'plugins',
       'support-matrix',
       'upgrading',

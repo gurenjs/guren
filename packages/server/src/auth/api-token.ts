@@ -11,6 +11,7 @@ import { AuthenticationException } from '../errors/exceptions/AuthenticationExce
 import { grantsOnlyAgentTools } from '../agent/scopes'
 import { isAgentDispatch } from '../internal/agent-principal'
 import { tryGetRequestContainer } from '../http/request-container'
+import { routerRouteAnswersAhead } from '../internal/router-route-ahead'
 
 /**
  * API token data stored in the backing store.
@@ -245,7 +246,8 @@ export function tokenAuthenticatesRequest(
   if (!grantsOnlyAgentTools(verified.abilities)) return true
   if (isAgentDispatch(ctx.req.raw)) return true
   const path = requestPathname(ctx)
-  return path !== undefined && (agentEndpoints?.().has(path) ?? false)
+  // A Router route matching the path (`POST /:slug`) mounts first and answers there, judging no tool scope.
+  return path !== undefined && (agentEndpoints?.().has(path) ?? false) && !routerRouteAnswersAhead(ctx, path)
 }
 
 // The pathname CSRF matches declared paths against, so both judge one path alike.

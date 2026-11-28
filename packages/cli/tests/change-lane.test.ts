@@ -879,6 +879,9 @@ export class CommentPolicy extends Policy {
     expect(edited(await laneOf(stamped.repo, added, head))).toEqual([['source-edited', 'medium', undefined]])
     const skipped = { ...noRoutes, skipped: ['the createApp({ boot }) callback'] }
     expect(edited(await laneRecorded(stamped.repo, added, head, { base: skipped, head: skipped }))).toEqual([['source-edited', 'medium', undefined]])
+    // A route whose lookups the records could not read (a custom resolver, an older server) may use the edited model.
+    const looked = { ...noRoutes, routes: [{ method: 'GET', path: '/tokens/:token', module: null, middleware: [], contracts: {}, handler: { authenticates: false, authorizes: [], validates: [] }, bindings: { token: 'resolver' }, bindingLookups: 'unread' as const }] }
+    expect(edited(await laneRecorded(stamped.repo, added, head, { base: looked, head: looked }))).toEqual([['source-edited', 'medium', undefined]])
     const inline: RouteSecurityRecord = { method: 'POST', path: '/comments', module: null, middleware: [], contracts: {}, handler: { unread: 'an inline handler' } }
     const unread = { ...noRoutes, routes: [inline] }
     expect(edited(await laneRecorded(stamped.repo, added, head, { base: unread, head: unread }))).toEqual([['source-edited', 'medium', undefined]])
@@ -1234,6 +1237,20 @@ describe('judgeChangeLane with per-route security records', () => {
     expect(report.facts).toContainEqual(expect.objectContaining({ code: 'authorization-removed', files: ['config/app.ts'] }))
   })
 
+  test('should hold a change to a route file at medium where the records could not read how parameters are looked up', async () => {
+    const unread = { ...route([auth]), bindings: { id: 'app/Models/Post.ts#Post' }, bindingLookups: 'unread' as const }
+    const report = await laneWith(controller, { base: records(unread), head: records(unread) })
+    expect(security(report)).toEqual(['medium'])
+    // The reason names the route and, for a server that did not say, the upgrade that fixes it.
+    expect(report.unjudged.find((entry) => entry.reader === 'security-records')?.reason).toBe('the installed @guren/core does not say how PUT /posts/:id look up their parameters (upgrade @guren/core with @guren/cli), so what they look up was not compared')
+    const resolver = { ...route([auth]), path: '/t/:token', bindings: { token: 'resolver' }, bindingLookups: 'unread' as const }
+    const resolved = await laneWith(controller, { base: records(resolver), head: records(resolver) })
+    expect(resolved.unjudged.find((entry) => entry.reader === 'security-records')?.reason).toBe('PUT /t/:token bind a parameter through a custom resolver, whose body is not read, so what they look up was not compared')
+    expect(security(await laneWith(controller, { base: records(route([auth])), head: records(route([auth])) }))).toEqual([])
+    // A resolver's body may sit outside the route surface, in a model or the app entry, so those edits are held too.
+    expect(security(await laneWith({ 'app/Models/Post.ts': 'export class Post {}\n' }, { base: records(resolver), head: records(resolver) }))).toEqual(['medium'])
+  })
+
   test('should hold a registrar only the head skipped at high, and one both sides skipped at medium', async () => {
     const skipped = (...names: string[]) => ({ ...records(route([auth])), skipped: names })
     expect(security(await laneWith({ 'src/app.ts': 'export default {}\n' }, { base: records(route([auth])), head: skipped('the createApp({ boot }) callback') }))).toEqual(['high'])
@@ -1427,6 +1444,15 @@ describe('judgeChangeLane with an alter or drop route in an open plan', () => {
     })
 
     expect(report.facts.map((fact) => [fact.code, fact.lane])).toEqual([['source-edited', 'medium'], ['route-added', 'low'], ['route-added', 'low'], ['route-removed', 'low']])
+  })
+
+  test('should hold a planned lookup column to the record, and refuse a record whose columns are unread', async () => {
+    const bySlug = (plan: RoutePlan): void => { plan.routes.find((route) => route.id === 'route.posts.update')!.bind = [{ param: 'post', model: 'model.post', key: 'slug' }] }
+    const bound = (value: string, unread = false): RouteSecurityRecord => ({ ...update('/posts/:post'), bindings: { post: value }, ...(unread ? { bindingLookups: 'unread' as const } : {}) })
+
+    expect(routeFacts(await laneWith({ base: records(update('/posts/:post')), head: records(bound('app/Models/Post.ts#Post@slug')) }, bySlug))).toEqual([['route-changed', 'low', 'docs/plans/comments/plan.json#route.posts.update']])
+    expect(routeFacts(await laneWith({ base: records(update('/posts/:post')), head: records(bound('app/Models/Post.ts#Post')) }, bySlug))).toEqual([['route-changed', 'medium', undefined]])
+    expect(routeFacts(await laneWith({ base: records(update('/posts/:post')), head: records(bound('app/Models/Post.ts#Post@slug', true)) }, bySlug))).toEqual([['route-changed', 'medium', undefined]])
   })
 
   test("should declare a route's agent tool with its change only as the element states it", async () => {

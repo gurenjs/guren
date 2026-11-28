@@ -179,6 +179,15 @@ A planned `body`, `params` or `query` validator counts as matched when the actio
 
 A validator's `fields` are read off the exported zod schema, a resource's from the payload type `guren codegen` reads, and a policy's abilities from its member names. A missing key or ability, a field whose type or `required` differs from the plan, and a bound tighter than the planned one read `differ`, and `plan:verify` reports the step `incomplete`. Whatever the reader cannot be sure of, such as a field behind a transform, a refinement or a union, reads `unknown` rather than a guess, and `--json` gives the reason on the property. The per-construct rules are in the field-reader and policy-ability amendments to §6 of [RFC 0030](https://github.com/gurenjs/guren/blob/main/rfcs/0030-implementation-plans.md).
 
+A route's `bind` is read off the router: each parameter names the model it binds and the column it looks the record up by. The planned `key` is compared with that column. A binding with no `key` looks the record up by `id`, the column `findOrFail()` reads by default, on both sides, so a route that looks the parameter up by another column reads `differ` even when the plan states none. A bound model that no lookup runs, because the route is served by an inline handler or its path does not declare the parameter, reads `differ` too.
+
+The column reads `unknown` where the reading cannot name the one column a request runs:
+
+- a parameter bound to a custom resolver
+- one bound both on the route and with `router.bind()` (both lookups run)
+- a `router.bind()` that a module sets, or that two registrars set, when the route is not that module's own: one binding serves every route, so which one wins depends on the modules `createApp()` lists and their order
+- an application whose `@guren/core` predates the reading
+
 ## Freshness
 
 For an approved plan, `plan:status` also compares each referenced element with the hash stamped at approval:
