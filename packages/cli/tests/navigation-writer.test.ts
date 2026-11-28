@@ -96,7 +96,7 @@ describe('the navigation writer', () => {
   })
 
   test('should keep line ends, and a comment an empty list holds', () => {
-    const crlf = `${HEAD.replace('\n', '\r\n')}\r\nexport default defineNavigation([\r\n  { label: 'Home', route: 'home' }, // the start\r\n])\r\n`
+    const crlf = `${HEAD.replaceAll('\n', '\r\n')}\r\nexport default defineNavigation([\r\n  { label: 'Home', route: 'home' }, // the start\r\n])\r\n`
     const written = appendNavigationEntry(crlf, GUARDED, workspace.dir)
     expect(written.replace(/\r\n/gu, '')).not.toContain('\n')
     expect(written).toContain("// the start\r\n  { label: 'Post a job\\'s'")
