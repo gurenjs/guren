@@ -1,5 +1,42 @@
 # @guren/core
 
+## 1.28.1
+
+### Patch Changes
+
+- 9f7acba: An attachment whose bytes are not read as an image no longer writes a client-declared type that a browser renders as a page onto the stored object. A declared HTML, XML (SVG and XHTML included) or XSL type, `multipart/x-mixed-replace`, a type a browser sniffs (`unknown/unknown`, `application/unknown`, `*/*`), a comma-separated list of types or a malformed one is written to the object as `application/octet-stream`, so on an S3 or R2 disk a public URL or a direct `temporaryUrl()` to it downloads instead of rendering in the bucket's origin. The row's `contentType`, `inspectAttachment()`'s result, the signed delivery route, the object key and every other declared type are unchanged. Objects stored before this release keep the type they were written with.
+- Updated dependencies [9f7acba]
+- Updated dependencies [8cf0438]
+- Updated dependencies [9f7acba]
+- Updated dependencies [fc0ea39]
+- Updated dependencies [9f7acba]
+- Updated dependencies [8cf0438]
+- Updated dependencies [9f7acba]
+- Updated dependencies [c3e1d94]
+- Updated dependencies [ed8fa34]
+- Updated dependencies [5552b06]
+- Updated dependencies [0c73849]
+- Updated dependencies [61d24b6]
+- Updated dependencies [5d5cce7]
+- Updated dependencies [9f7acba]
+- Updated dependencies [9f7acba]
+- Updated dependencies [9f7acba]
+- Updated dependencies [5ffa35f]
+- Updated dependencies [d72b416]
+- Updated dependencies [4c658dd]
+- Updated dependencies [52fdccb]
+- Updated dependencies [23e81b5]
+- Updated dependencies [1510b67]
+- Updated dependencies [c4846c5]
+- Updated dependencies [aa7ab4f]
+- Updated dependencies [9f7acba]
+- Updated dependencies [fc0ea39]
+- Updated dependencies [9f7acba]
+- Updated dependencies [9f7acba]
+  - @guren/server@2.39.0
+  - @guren/cli@2.40.0
+  - @guren/orm@2.17.1
+
 ## 1.28.0
 
 ### Minor Changes

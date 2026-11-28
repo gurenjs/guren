@@ -1,5 +1,13 @@
 # @guren/plugin-agents
 
+## 0.2.6
+
+### Patch Changes
+
+- 9f7acba: An agent's principal is now built from the name its Durable Object was addressed by, the one the route authorizer approved, rather than from the SDK's decoded `Agent.name`. A root object routed by a name the SDK decodes as `cf-agents:v2:…` could otherwise act as another instance's principal.
+- Updated dependencies [9f7acba]
+  - @guren/core@1.28.1
+
 ## 0.2.5
 
 ### Patch Changes

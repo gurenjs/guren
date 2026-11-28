@@ -1,5 +1,18 @@
 # @guren/plugin-mcp
 
+## 0.8.0
+
+### Minor Changes
+
+- 3fda348: The App MCP endpoint can serve agent skills through the MCP Skills extension (`io.modelcontextprotocol/skills`, RFC 0042 §1). `mcpPlugin({ skills: { files } })` takes a module of `{ files, binary }`, paths under the skill namespace to contents, and builds the catalog once at boot with the SDK's own `SkillsExtension.load()`, so digests, sizes and frontmatter come from the reference implementation. On a `2026-07-28` request the endpoint declares the extension and answers `skills/list` (100 per page) and `skills/get`; on both protocol eras each `SKILL.md` is listed in `resources/list` and every file of a skill is readable through `resources/read` at `skill://<path>`. Every caller the endpoint authenticates sees every skill, a `2026-07-28` result carries `ttlMs: 0` and `cacheScope: 'private'`, and each read is taken from the caller's read budget unless `rateLimit` is off. A file is served as text when its bytes are lossless UTF-8 and as a base64 blob otherwise. A skill the catalog refuses is skipped with a warning naming its file; a module of another shape, a path with an empty, `.` or `..` segment, or a `SKILL.md` inside another skill's directory fails the boot. An app that passes no `skills` advertises exactly what it did before.
+
+  `@modelcontextprotocol/server` is now required at `^2.4.0`, the first release with `./ext/skills`. `createAppMcpServer()` takes the protocol era as a second argument, `'legacy'` when omitted.
+
+### Patch Changes
+
+- Updated dependencies [9f7acba]
+  - @guren/core@1.28.1
+
 ## 0.7.0
 
 ### Minor Changes
