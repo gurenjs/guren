@@ -199,8 +199,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
     if (options.announce !== false) {
       announcePrototypeFeature({ created, overwritten, patchedFixture, singular, routeName, routeVar, withAuth })
-      announceFrame(frame)
-      if (existsSync(resolve(appRoot, NAVIGATION_FILE))) consola.info('Navigation: the run that promotes this prototype adds its entry.')
+      if (existsSync(resolve(appRoot, NAVIGATION_FILE))) {
+        announceFrame(frame)
+        consola.info('Navigation: the run that promotes this prototype adds its entry.')
+      }
     }
     return created
   }
@@ -242,8 +244,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
   announceWrittenFiles(created, overwritten)
   announceKeptFiles(kept)
-  announceFrame(frame)
   if (navigation.status !== 'absent') {
+    announceFrame(frame)
     const line = navigationLine(navigation, routeName, collection)
     if (navigation.status === 'failed' || (navigation.status === 'added' && navigation.unverified)) consola.warn(line)
     else consola.info(line)
@@ -650,7 +652,7 @@ async function addFeatureNavigationEntry(
   feature: { label: string; routeName: string; model: string; withPolicy: boolean; moduleName: string | undefined },
 ): Promise<FeatureNavigation> {
   if (!existsSync(resolve(appRoot, NAVIGATION_FILE))) return { status: 'absent' }
-  if (feature.moduleName) return { status: 'skipped', reason: `a module's model cannot be a can model yet` }
+  if (feature.moduleName && feature.withPolicy) return { status: 'skipped', reason: `the policy's model is the module's, which a can entry cannot name yet` }
   try {
     const { unverified } = await addNavigationEntryFile(appRoot, {
       label: feature.label,

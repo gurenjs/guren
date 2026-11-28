@@ -765,7 +765,19 @@ describe('makeFeature and the navigation module (RFC 0040 §5)', () => {
     }
   })
 
-  it('adds no entry for a module feature and names the command that would', async () => {
+  it('adds a module feature\'s entry, the route names being the same under the module\'s prefix', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-nav-module-public-')
+    try {
+      await seedNavigationApp(workspace.dir)
+      await makeFeature('Invoice', { fields: 'title:string', root: 'billing' })
+
+      expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toContain("  { label: 'Invoices', route: 'invoices.index' },\n])")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('adds no entry for a module feature with a policy and names the command that would', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-nav-module-')
     try {
       await seedNavigationApp(workspace.dir)
@@ -773,7 +785,7 @@ describe('makeFeature and the navigation module (RFC 0040 §5)', () => {
       const infos = await captureInfos(() => makeFeature('Invoice', { fields: 'title:string', root: 'billing', withPolicy: true }))
 
       expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toBe(before)
-      expect(infos).toContain('Navigation: no entry added, since a module\'s model cannot be a can model yet. Add one with: bunx guren nav:add "Invoices" --route invoices.index')
+      expect(infos).toContain('Navigation: no entry added, since the policy\'s model is the module\'s, which a can entry cannot name yet. Add one with: bunx guren nav:add "Invoices" --route invoices.index')
     } finally {
       await workspace.cleanup()
     }

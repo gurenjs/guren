@@ -175,7 +175,7 @@ bunx guren agent:sync --prune   # Also delete managed-directory files that left 
 # Code generation
 bunx guren guidelines           # Auto-generate project-specific coding guidelines
 bunx guren guidelines -o .claude/rules/project-guidelines.md  # Write to file
-bunx guren make:feature Post --fields "title:string,body:text,published:boolean"  # CRUD scaffold (store/update require auth by default); with config/navigation.ts, adds the index page's entry through `appendNavigationEntry()` (`can: ['viewAny', Post]` with --policy; none for --module or --prototype, and a refusal is a warning after the files are written), and frames the four pages in `resources/js/components/Layout.tsx` when its props declare `children` and `wide` (`featurePageFrame()`), the index page `wide`
+bunx guren make:feature Post --fields "title:string,body:text,published:boolean"  # CRUD scaffold (store/update require auth by default); with config/navigation.ts, adds the index page's entry through `appendNavigationEntry()` (`can: ['viewAny', Post]` with --policy; none for --prototype or for --module with --policy, and a refusal is a warning after the files are written), and frames the four pages in `resources/js/components/Layout.tsx` when its props declare `children` and `wide` (`featurePageFrame()`), the index page `wide`
 bunx guren make:feature Post --fields "title:string,body:text" --test  # With a controller test (tests/controllers/PostController.test.ts)
 bunx guren make:feature Post --fields "title:string" --factory  # Also generate a model factory in db/factories
 bunx guren make:feature Post --fields "title:string" --public  # Skip auth checks in mutating actions
