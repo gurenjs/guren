@@ -91,6 +91,10 @@ export const toolCallCommand = defineCommand({
       type: 'boolean',
       description: 'Ask for a verdict instead of an execution — the handler does not run',
     },
+    confirm: {
+      type: 'boolean',
+      description: 'Run a tool that asks its caller to confirm, without being asked (a terminal is asked otherwise)',
+    },
     // No `--routes`: this command dispatches into the booted application, so its
     // tools come from the graph that app actually serves — see `tool-call.ts`.
     app: {
@@ -108,6 +112,7 @@ export const toolCallCommand = defineCommand({
       input: args.input,
       as: args.as,
       preflight: Boolean(args.preflight),
+      confirm: Boolean(args.confirm),
       appRoot: args.app,
       json: Boolean(args.json),
     })

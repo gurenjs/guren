@@ -362,6 +362,7 @@ function renderTool(tool: DerivedAgentTool, enrichment: ResourceEnrichment | und
   fields.push(`annotations: ${renderLiteral(tool.annotations, '    ')}`)
   if (tool.authorization) fields.push(`authorization: ${renderLiteral(tool.authorization, '    ')}`)
   if (tool.approval) fields.push(`approval: ${JSON.stringify(tool.approval)}`)
+  if (tool.confirm) fields.push(`confirm: ${renderLiteral(tool.confirm, '    ')}`)
   if (tool.redact) fields.push(`redact: ${renderLiteral(tool.redact, '    ')}`)
   fields.push(`expose: ${renderLiteral(tool.expose, '    ')}`)
   if (tool.ui) fields.push(`ui: ${renderLiteral(tool.ui, '    ')}`)

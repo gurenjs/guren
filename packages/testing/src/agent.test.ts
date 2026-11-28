@@ -34,6 +34,11 @@ class PostController extends Controller {
   async origin() {
     return this.json({ origin: new URL(this.request.url).origin })
   }
+
+  async purge() {
+    const removed = created.splice(0).length
+    return this.json({ removed })
+  }
 }
 
 function routes(router: Router): void {
@@ -64,6 +69,8 @@ function routes(router: Router): void {
     .post('/drafts', () => Response.json({ ok: true }, { status: 201 }))
     .name('drafts.store')
     .agent({})
+
+  router.delete('/posts', [PostController, 'purge']).name('posts.purge').agent({ confirm: true })
 }
 
 async function freshApp(options: { auth?: Record<string, unknown> } = {}): Promise<TestApp> {
@@ -76,7 +83,7 @@ describe('TestApp.agent()', () => {
     const app = await freshApp()
     const names = (await app.agent().tools()).map((tool) => tool.toolName).sort()
 
-    expect(names).toEqual(['drafts.store', 'posts.index', 'posts.store', 'secret.show'])
+    expect(names).toEqual(['drafts.store', 'posts.index', 'posts.purge', 'posts.store', 'secret.show'])
   })
 
   it('dispatches a read tool and exposes its structured result', async () => {
@@ -168,6 +175,25 @@ describe('TestApp.agent()', () => {
     expect(verdict.validated).toEqual(['body'])
     expect(verdict.unverified).toEqual(['authorization'])
     expect(created).toHaveLength(0)
+  })
+
+  it('refuses a confirm tool unless the test calls it as a caller who agreed', async () => {
+    const app = await freshApp()
+    await app.agent().call('posts.store', { title: 'Kept until agreed' })
+
+    // Wrapped: the pending call is a thenable, and `rejects` wants a promise.
+    await expect(Promise.resolve(app.agent().call('posts.purge'))).rejects.toThrow('Pass { confirm: true }')
+    expect(created).toHaveLength(1)
+
+    const result = await app.agent().call('posts.purge', {}, { confirm: true })
+
+    expect(result.json<{ removed: number }>()).toEqual({ removed: 1 })
+  })
+
+  it('rehearses a confirm tool without the option, since a rehearsal runs nothing', async () => {
+    const app = await freshApp()
+
+    await app.agent().call('posts.purge', {}, { preflight: true }).assertOk()
   })
 
   it('composes with withCsrf() so a mutating call survives CSRF middleware', async () => {

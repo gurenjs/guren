@@ -80,6 +80,8 @@ function fixtureDefinitions(): RouteDefinition[] {
     },
     [PostController, 'index'],
   )
+  router
+    .delete('/posts', { name: 'posts.purge', agent: { confirm: { message: 'This deletes every post.' } } }, [PostController, 'index'])
   router.get('/hidden', [PostController, 'index']).name('hidden.index')
   return router.definitions()
 }
@@ -120,6 +122,17 @@ describe('buildAgentToolsContent', () => {
     expect(content).toContain('ability": "create-post"')
     expect(content).toContain('approval: "required"')
     expect(content).toContain('"token"')
+  })
+
+  test('carries the confirmation a tool asks for, and keeps that tool off WebMCP', () => {
+    const { tools } = deriveAgentTools(fixtureDefinitions())
+    const content = buildAgentToolsContent(tools, { resources })
+    const purge = content.slice(content.indexOf("'posts.purge': {"))
+
+    expect(purge).toContain('"message": "This deletes every post."')
+    expect(purge).toMatch(/confirm: \{\s*"message"/)
+    expect(purge).toMatch(/"webMcp": false/)
+    expect(content.match(/\bconfirm: /g)).toHaveLength(1)
   })
 
   test('carries the merge inverse a client needs to rebuild the request', () => {

@@ -50,6 +50,29 @@ describe('checkAgentRoutes', () => {
     expect(result?.message).toContain('Nothing here validates the derived tools themselves')
   })
 
+  describe('confirmation', () => {
+    it('warns, advisory, when a confirm route also asks for WebMCP exposure', async () => {
+      const results = await run([
+        route({ path: '/posts', name: 'posts_purge', method: 'DELETE', agent: { readOnlyHint: true, confirm: true, expose: { webMcp: true } }, schemas: OUTPUT }),
+      ])
+      const finding = results.find((result) => result.key === 'agent-route-confirm-webmcp:DELETE:/posts')
+
+      expect(finding?.status).toBe('warn')
+      expect(finding?.advisory).toBe(true)
+      expect(finding?.message).toContain('never registered over WebMCP')
+    })
+
+    it('says nothing about confirm alone, or beside an exposure that is already off', async () => {
+      const results = await run([
+        route({ path: '/posts', name: 'posts_purge', method: 'DELETE', agent: { readOnlyHint: true, confirm: true }, schemas: OUTPUT }),
+        route({ path: '/drafts', name: 'drafts_purge', method: 'DELETE', agent: { readOnlyHint: true, confirm: true, expose: { webMcp: false } }, schemas: OUTPUT }),
+        route({ path: '/notes', name: 'notes_index', agent: { expose: { webMcp: true } }, schemas: OUTPUT }),
+      ])
+
+      expect(keys(results).filter((key) => key.startsWith('agent-route-confirm-webmcp:'))).toEqual([])
+    })
+  })
+
   describe('tool identity', () => {
     it('fails when an agent route has no name', async () => {
       const results = await run([route({ path: '/posts', agent: {}, schemas: OUTPUT })])

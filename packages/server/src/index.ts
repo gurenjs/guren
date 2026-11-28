@@ -88,6 +88,7 @@ export type {
 // from the contracts routes already carry. Consumed by the CLI's
 // `.guren/agents.gen.ts` and by protocol adapters, which must not derive twice.
 export { deriveAgentToolUi, deriveAgentTools } from './agent/derive'
+export { readAgentConfirm } from './internal/agent-confirm'
 export type {
   AgentToolInputSource,
   AgentToolSchema,
