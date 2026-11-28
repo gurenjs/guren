@@ -19,16 +19,18 @@ pages), skip the board and use `plan-write`.
 
 ```bash
 bunx guren board:show <slug>     # an existing board
-bunx guren board:new "<title>"   # a new one; a title with no ASCII letters needs --slug
+bunx guren board:new "<title>"   # a new one; a title with no ASCII letters or digits needs --slug
 ```
 
-Write the notes in the language the person writes in; `board:new` takes the
-app's default locale, and `--locale ja` sets another. Tell the person where to
-see it: with the dev server running, `/_guren/boards/<slug>` on its port.
+Write the notes in the language the person writes in. `board:new` records the
+app's default locale, else `en`; pass `--locale ja` when the person writes in
+another. Tell the person where to see it: with `bun run dev` running (it
+enables the Dev Center), `/_guren/boards/<slug>` on the app's port.
 
 You edit the board through `board:apply`. Write the operations as a JSON
 file outside the repository (your scratchpad or a temp directory), since
-`plan:approve` refuses a tree with an untracked file, and pass its path.
+`plan:approve` refuses to approve a plan the first time while the tree holds
+an untracked file, and pass its path.
 Create the file with your file-writing tool, not a shell heredoc: a shell
 command holding JSON braces and quotes is refused by some agents' checks.
 
@@ -52,6 +54,9 @@ bunx guren board:apply <slug> --ops <path to the file>
 - An operation that cannot apply (a note the person removed meanwhile) is
   reported as dropped while the rest apply. Read what was dropped and decide
   again; do not resend it unchanged.
+- A file that is not JSON, an operation of the wrong shape, or a list that
+  would leave the board invalid is refused whole, and nothing is written.
+  Fix what the error names and send the list again.
 
 ## The stages
 
@@ -68,13 +73,15 @@ next stage. Apply their corrections first.
 2. **Commands, actors, records and pages.** Before each event, the `command`
    that causes it ("Publish a post") and the `actor` who issues it. Beside
    the command, the `aggregate` it changes and the `view` the actor uses.
-   Connect them in reading order: actor to command, command to aggregate,
-   aggregate to event.
+   Connect them in reading order: actor to view, view to command, command to
+   aggregate, aggregate to event (`{ "op": "connect", "from": …, "to": … }`).
+   The plan is written from the arrows, not from where notes sit, so a note
+   with no arrow leaves the planner to guess.
 3. **Reactions and external systems.** After each event, the `reaction`
    that follows it ("When published, tell subscribers") and any `external`
-   system it reaches. A step the caller does not wait for, such as a queued
-   job or a mail, gets an async arrow: `{ "op": "connect", "from": …, "to": …,
-   "kind": "async" }`.
+   system it reaches, each connected from the note before it. A step the
+   caller does not wait for, such as a queued job or a mail, gets an async
+   arrow: add `"kind": "async"` to the `connect`.
 4. **Questions.** One `question` note per thing nobody has decided, with
    `about` naming the notes it concerns ("Notify for a saved draft too?").
    Ask; do not decide for the person. A question the person answers becomes
@@ -94,22 +101,27 @@ bunx guren plan --from-board <slug> --print-prompt
 Add the person's own request in quotes when they gave one. Follow the prompt
 as the `plan-write` skill describes, from its step 0: it maps each note to
 plan elements and asks the board's open questions. The plan never mentions
-the board.
+the board. If step 0 or the prompt ends with no plan, stop there; the board
+stays as it is, with no links.
 
 Once `plan:render` reports no failed check, record which note became which
-element with `link` operations, then check them against the plan before the
-person reviews it:
+element with `link` operations (its prompt has a section on them), then check
+them against the plan before the person reviews it:
 
 ```bash
 bunx guren board:status <slug> --plan docs/plans/<plan-slug>/plan.json
 ```
 
 Every link should read `planned` or `present`. A `missing` link names
-something the plan does not add: fix the link or the plan. Notes listed as
-leading nowhere either need a link or belong in the plan's non-goals. Actors
-and questions take no link.
+something the plan does not add: fix the link or the plan. An `unknown` link
+means the app or the plan did not read: fix what its reason names and run the
+command again. Leave actors and questions unlinked. A note listed as leading
+nowhere needs a link, unless the change does not need it: then it is in the
+plan's non-goals and stays listed, and you tell the person why.
 
-Commit the board with its links before the person runs `plan:approve`, which
-refuses a tree with uncommitted changes outside the plan's own files; commit it
-again if they edit the canvas while reviewing. Once they approve the plan, the
-board page shows the same result as `board:status` on each note.
+Commit the board with its links before the person runs `plan:approve`: its
+first approval of a plan refuses a tree with uncommitted changes outside the
+plan's own files. Commit it again if they edit the canvas before approving.
+Once the plan is approved, the board page marks each linked note as
+`board:status` does without `--plan`, across every approved plan still open;
+**Refresh board** checks again.

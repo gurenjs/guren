@@ -10,7 +10,7 @@ A board carries no authority. No check fails because of one, nothing approves it
 bunx guren board:new "Post notifications"
 ```
 
-The board is written to `docs/boards/post-notifications.board.json`, and you commit it with the rest of your work. The slug comes from the title. A title with no ASCII letters needs one of its own:
+The board is written to `docs/boards/post-notifications.board.json`, and you commit it with the rest of your work. The slug comes from the title. A title with no ASCII letters or digits needs one of its own:
 
 ```bash
 bunx guren board:new "投稿の公開通知" --slug post-notifications
@@ -152,7 +152,7 @@ Lead nowhere (2):
 
 `present` means your app has the element, `planned` that a plan adds it, and `missing` that neither does. `unknown` means part of your app or a plan could not be read, so the command cannot tell. **Lead nowhere** lists the missing links and the notes with no link that could have one, so actors and questions are left out. Without `--plan`, the command reads the plans that are approved and not yet closed. With it, it reads that one plan whether or not it is approved, which is how your agent checks its links before you review the plan. The command reads your app as `plan:status` does, so it loads `db/schema.ts` and your validators. It only reports: once the board and the plan are read, it exits 0.
 
-The board page in the Dev Center shows the same result on the notes. Each linked note carries a badge, **In the app**, **Planned**, **Missing** or **Unknown**, and the line under the canvas counts them and names the plans it read. The page checks when you open the board, when you press **Refresh board**, and when you come back to the window, at most once every 15 seconds. It reads the approved plans that are not yet closed, as `board:status` does without `--plan`. A note whose link changed since the last check shows no badge until the next one.
+The board page in the Dev Center shows the same result on the notes. Each linked note carries a badge, **In the app**, **Planned**, **Missing** or **Unknown**, and the line under the canvas counts them and names the plans it read. The page checks when you open the board and when you press **Refresh board**. It also checks when you come back to the window, if 15 seconds have passed since the last check. It reads the approved plans that are not yet closed, as `board:status` does without `--plan`. A note whose link changed since the last check shows no badge until the next one.
 
 ## Limits
 
