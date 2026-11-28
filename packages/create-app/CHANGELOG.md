@@ -1,5 +1,12 @@
 # create-guren-app
 
+## 1.22.3
+
+### Patch Changes
+
+- 9f7acba: The `docker-compose.yml` scaffolded for `--db postgres` and `--db mysql` now publishes the database port on `127.0.0.1` only (`127.0.0.1:54322` and `127.0.0.1:33306`), so the shared `guren`/`guren` credentials are no longer reachable from other machines on the network. The default `DATABASE_URL` in `.env`, `config/database.ts` and `drizzle.config.ts` addresses `127.0.0.1` to match. A client on the same machine that connects over IPv6 loopback (`[::1]`, or a `localhost` that resolves only to `::1`) is refused; point it at `127.0.0.1`. Apps scaffolded before this release keep their existing compose file; add `127.0.0.1:` in front of the host port there to get the same binding.
+- 52fdccb: `guren add auth` writes `config/navigation.ts` (Home, and Dashboard for signed-in users) and lists it in `createApp({ config })`, and the layout it writes renders the `navigation` prop instead of hard-coded links. The layout marks the current entry, wraps on a narrow screen, keeps Sign in, the profile link and Log out, reads their labels from `lang/en/layout.json`, and takes `wide` for a page that needs the wide measure. Its brand shows the new `app` shared prop, which the server sends once `config/env.ts` declares `APP_NAME`; an app sharing its own `app` prop keeps it. An existing `config/navigation.ts` or `lang/en/layout.json` is never replaced, though an existing navigation definition is still listed in `createApp({ config })`, and the Home entry is left out unless the routes file registers a parameterless `GET` route named `home`. The starter's `/` route is now named `home`.
+
 ## 1.22.2
 
 ### Patch Changes
