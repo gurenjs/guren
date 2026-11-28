@@ -43,7 +43,7 @@ export interface BoardStatusReport {
   reportVersion: typeof BOARD_STATUS_REPORT_VERSION
   board: { slug: string; file: string; title: string }
   plans: BoardStatusPlan[]
-  /** Plans and plan directories that would not read, so a link they add reads `missing`. */
+  /** Plans and plan directories that would not read, so a link they add reads `unknown`. */
   unreadPlans: Array<{ file: string; reason: string }>
   notes: BoardNoteStatus[]
   /** A note no element answers: a `missing` link, or no link on a note of a kind an element can stand for. */

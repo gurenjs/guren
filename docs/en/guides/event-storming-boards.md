@@ -143,6 +143,8 @@ Lead nowhere (2):
 
 `present` means your app has the element, `planned` that a plan adds it, and `missing` that neither does. `unknown` means part of your app or a plan could not be read, so the command cannot tell. **Lead nowhere** lists the missing links and the notes with no link that could have one, so actors and questions are left out. Without `--plan`, the command reads the plans that are approved and not yet closed. With it, it reads that one plan whether or not it is approved, which is how your agent checks its links before you review the plan. The command reads your app as `plan:status` does, so it loads `db/schema.ts` and your validators. It only reports: once the board and the plan are read, it exits 0.
 
+The board page in the Dev Center shows the same result on the notes. Each linked note carries a badge, **In the app**, **Planned**, **Missing** or **Unknown**, and the line under the canvas counts them and names the plans it read. The page checks when you open the board, when you press **Refresh board**, and when you come back to the window, at most once every 15 seconds. It reads the approved plans that are not yet closed, as `board:status` does without `--plan`. A note whose link changed since the last check shows no badge until the next one.
+
 ## Limits
 
 A board holds at most 500 notes, 2,000 arrows and 100 sections, and a note's text is one line of at most 280 characters. The canvas stays responsive at 500 notes: dragging a note moves it without delay, and releasing it redraws the board in about 15 milliseconds, before the save reaches the server.

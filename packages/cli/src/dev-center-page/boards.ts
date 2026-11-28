@@ -1,9 +1,11 @@
 import type { Board } from '../board/schema'
 import type { BoardOverview, BoardSummary } from '../board/store'
-import { boardJsonPath, boardPagePath, BOARDS_JSON_PATH } from '../dev-center-links'
+import type { BoardStatusReading } from '../dev-center-board'
+import { boardJsonPath, boardPagePath, BOARDS_JSON_PATH, boardStatusPath } from '../dev-center-links'
 import { commandRow, el } from '../docs-viewer-page/dom'
 import { gurenCommandLine } from '../shell-quote'
 import { mountBoardCanvas, type BoardCanvas } from './board-canvas'
+import type { LinkReading } from './board-links'
 import { boardWords } from './board-words'
 import { card } from './dom'
 
@@ -81,11 +83,42 @@ async function readBoardPayload(slug: string): Promise<BoardPayload> {
   return payload
 }
 
+/** What the status route answered, read for the canvas; a 404 that is no board's is a CLI that predates the route. */
+export async function readBoardLinks(slug: string, read: (path: string) => Promise<Response> = (path) => fetch(path, { cache: 'no-store', redirect: 'error' })): Promise<LinkReading> {
+  let response: Response
+  try {
+    response = await read(boardStatusPath(slug))
+  } catch (error) {
+    return { kind: 'unavailable', message: error instanceof Error ? error.message : 'Read failed' }
+  }
+  const payload = (await response.json().catch(() => undefined)) as (BoardStatusReading & { error?: { message?: string } }) | undefined
+  if (response.status === 404 && payload?.error === undefined) {
+    return { kind: 'unavailable', message: 'this dev server\'s @guren/cli predates the status route. Upgrade both @guren packages together.' }
+  }
+  if (!response.ok || !payload) return { kind: 'unavailable', message: payload?.error?.message ?? `HTTP ${response.status}` }
+  if (payload.schemaVersion !== 1) return { kind: 'unavailable', message: 'Unsupported status payload' }
+  if (payload.status === 'ready' && payload.report) return { kind: 'ready', report: payload.report }
+  return { kind: 'unavailable', message: payload.message ?? 'No report came.' }
+}
+
 let canvas: BoardCanvas | undefined
 let watching = false
+/** A check loads the application in a child, so a window focus starts one only this long after the last. */
+const FOCUS_RECHECK_MS = 15_000
+let linkCheck: Promise<void> | undefined
+let linkCheckedAt = 0
+
+function checkLinks(slug: string, force: boolean): void {
+  if (!canvas || linkCheck) return
+  if (!force && Date.now() - linkCheckedAt < FOCUS_RECHECK_MS) return
+  const target = canvas
+  linkCheckedAt = Date.now()
+  target.showLinks({ kind: 'checking' })
+  linkCheck = readBoardLinks(slug).then((reading) => target.showLinks(reading)).finally(() => { linkCheck = undefined })
+}
 
 /** One board on its canvas, with the outline `guren board:show` prints folded below it. */
-export async function loadBoard(slug: string, status: HTMLElement, title: HTMLElement, body: HTMLElement, button: HTMLButtonElement): Promise<void> {
+export async function loadBoard(slug: string, status: HTMLElement, title: HTMLElement, body: HTMLElement, button: HTMLButtonElement, trigger: 'open' | 'focus' = 'open'): Promise<void> {
   button.disabled = true
   status.textContent = 'Reading the board…'
   status.className = ''
@@ -117,11 +150,12 @@ export async function loadBoard(slug: string, status: HTMLElement, title: HTMLEl
         return reread.board
       }, (text) => { pre.textContent = text })
     }
+    checkLinks(slug, trigger === 'open')
     // An agent may have edited the file while the window was elsewhere; waiting edits are never overwritten.
     if (!watching) {
       watching = true
       window.addEventListener('focus', () => {
-        if (canvas && !canvas.busy()) void loadBoard(slug, status, title, body, button)
+        if (canvas && !canvas.busy()) void loadBoard(slug, status, title, body, button, 'focus')
       })
     }
   } catch (error) {

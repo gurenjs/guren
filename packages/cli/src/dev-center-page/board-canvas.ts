@@ -14,6 +14,7 @@ import type { Board, BoardArrow, BoardNote, BoardSection } from '../board/schema
 import { boardOpsPath } from '../dev-center-links'
 import { el } from '../docs-viewer-page/dom'
 import { borderPoint, svgEl } from '../plan/page/svg'
+import { linkCounts, linkStateOf, LINK_STATES, noteLinkStates, type LinkReading, type NoteLinkState } from './board-links'
 import { aboutOps, arrowEnds, arrowKey, besideNote, dragOps, freeSpot, newId, noteUnder } from './board-model'
 import { createBoardQueue, type PostResult, type QueueStatus } from './board-queue'
 import { boardWords, kindWord, type BoardWords } from './board-words'
@@ -32,6 +33,8 @@ export interface BoardCanvas {
   /** Whether edits are waiting to be saved. */
   busy(): boolean
   stamp(): number
+  /** Draws what `board:status` reported on the notes; `checking` keeps the last report drawn. */
+  showLinks(reading: LinkReading): void
 }
 
 /** One request to the ops route, read into what the queue needs. */
@@ -67,6 +70,7 @@ export function mountBoardCanvas(
   // A rebuild mid-gesture would replace the node holding the pointer capture, so it waits.
   let gesturing = false
   let stale = false
+  let linkStates = new Map<string, NoteLinkState>()
 
   const tools = el('div', 'board-tools')
   const status = el('p', 'board-status meta')
@@ -85,7 +89,9 @@ export function mountBoardCanvas(
   const zoomBar = el('div', 'board-zoom')
   const stage = el('div', 'board-stage')
   stage.append(viewport, zoomBar)
-  root.replaceChildren(tools, stage, status, el('p', 'meta', words('help')))
+  const links = el('p', 'board-links meta')
+  links.setAttribute('aria-live', 'polite')
+  root.replaceChildren(tools, stage, status, links, el('p', 'meta', words('help')))
 
   const say = (text: string, tone: '' | 'warning' | 'error' = '') => {
     status.textContent = text
@@ -473,10 +479,20 @@ export function mountBoardCanvas(
     const node = el('div', `board-note board-kind-${note.kind}`)
     node.tabIndex = 0
     node.setAttribute('role', 'button')
-    node.setAttribute('aria-label', words('aria.note', { kind: kindWord(words, note.kind), text: note.text }))
+    const judged = linkStateOf(note, linkStates)
+    const label = { kind: kindWord(words, note.kind), text: note.text }
+    node.setAttribute('aria-label', judged ? words('aria.noteState', { ...label, state: words(`state.${judged.state}`) }) : words('aria.note', label))
     node.dataset.id = note.id
     Object.assign(node.style, { left: `${note.x}px`, top: `${note.y}px`, width: `${NOTE_SIZE.width}px`, height: `${NOTE_SIZE.height}px` })
-    node.append(el('span', 'board-note-kind', kindWord(words, note.kind)), el('span', 'board-note-text', note.text))
+    const head = el('span', 'board-note-head')
+    head.append(el('span', 'board-note-kind', kindWord(words, note.kind)))
+    if (judged) {
+      const badge = el('span', `board-note-state board-state-${judged.state}`, words(`state.${judged.state}`))
+      const detail = judged.plannedIn ? words('state.plannedIn', { plans: judged.plannedIn.join(', ') }) : judged.reason
+      if (detail) badge.title = detail
+      head.append(badge)
+    }
+    node.append(head, el('span', 'board-note-text', note.text))
     if (note.link) node.append(el('span', 'board-note-link mono', `${note.link.kind} ${note.link.name}`))
     node.addEventListener('pointerdown', (event) => pressNote(event, note))
     node.addEventListener('dblclick', (event) => { event.stopPropagation(); editNote(note) })
@@ -699,6 +715,31 @@ export function mountBoardCanvas(
     }
   })
 
+  const showLinks = (reading: LinkReading) => {
+    links.className = 'board-links meta'
+    if (reading.kind === 'checking') {
+      links.textContent = words('links.checking')
+      return
+    }
+    if (reading.kind === 'unavailable') {
+      linkStates = new Map()
+      links.textContent = words('links.unavailable', { reason: reading.message })
+      links.className = 'board-links meta warning'
+    } else {
+      const { report } = reading
+      linkStates = noteLinkStates(report)
+      const counts = linkCounts(report)
+      const parts = LINK_STATES.filter((state) => counts[state] > 0).map((state) => words(`links.${state}`, { count: counts[state] }))
+      const lines = [parts.length ? words('links.counts', { counts: parts.join(' · ') }) : words('links.none')]
+      if (counts.leadNowhere > 0) lines.push(words('links.nowhere', { count: counts.leadNowhere }))
+      lines.push(report.plans.length ? words('links.plans', { plans: report.plans.map((plan) => plan.file).join(', ') }) : words('links.noPlans'))
+      if (report.unreadPlans.length) lines.push(words('links.unread', { files: report.unreadPlans.map((plan) => plan.file).join(', ') }))
+      links.textContent = lines.join(words('links.join'))
+    }
+    if (gesturing) stale = true
+    else render()
+  }
+
   render()
   applyView()
   requestAnimationFrame(fit)
@@ -711,5 +752,6 @@ export function mountBoardCanvas(
     },
     busy: () => queue.busy(),
     stamp: () => queue.stamp(),
+    showLinks,
   }
 }

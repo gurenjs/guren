@@ -36,11 +36,11 @@ export const BOARDS_PAGE_PATH = '/_guren/boards'
 export const BOARDS_JSON_PATH = '/_guren/boards.json'
 const BOARD_PAGE = /^\/_guren\/boards\/([^/]+)$/
 // `endpoint.ts` in @guren/server spells the ops path for its CSRF rule.
-const BOARD_RESOURCE = /^\/_guren\/boards\/([^/]+)\/(board\.json|ops)$/
+const BOARD_RESOURCE = /^\/_guren\/boards\/([^/]+)\/(board\.json|ops|status)$/
 
 export interface BoardRoute {
   slug: string
-  resource: 'board' | 'ops'
+  resource: 'board' | 'ops' | 'status'
 }
 
 export function boardPagePath(slug: string): string {
@@ -56,6 +56,11 @@ export function boardOpsPath(slug: string): string {
   return `${boardPagePath(slug)}/ops`
 }
 
+/** What `guren board:status` reports for the board, which the canvas draws on its notes (RFC 0041 §3). */
+export function boardStatusPath(slug: string): string {
+  return `${boardPagePath(slug)}/status`
+}
+
 /** The slug a board page path names, decoded, which the handler still has to judge as a slug. */
 export function boardSlugFromPath(pathname: string): string | undefined {
   const match = BOARD_PAGE.exec(pathname)
@@ -67,7 +72,7 @@ export function boardSlugFromPath(pathname: string): string | undefined {
 export function boardRoute(pathname: string): BoardRoute | undefined {
   const match = BOARD_RESOURCE.exec(pathname)
   if (!match) return undefined
-  try { return { slug: decodeURIComponent(match[1]!), resource: match[2] === 'ops' ? 'ops' : 'board' } } catch { return undefined }
+  try { return { slug: decodeURIComponent(match[1]!), resource: match[2] === 'board.json' ? 'board' : match[2] as 'ops' | 'status' } } catch { return undefined }
 }
 
 const PLAN_PAGE = /^\/_guren\/plans\/([^/]+)$/
