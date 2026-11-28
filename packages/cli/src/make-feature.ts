@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
@@ -17,7 +19,7 @@ import { validatorFile } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
 import { ensureUiComponents, uiComponentsImportedBy, type UiComponentName } from './guren-css'
 import { assertClientExportsForms, formIdentifier } from './forms-types'
-import { ParseCache } from './parse-cache'
+import { ParseCache, parseSourceFile } from './parse-cache'
 import { findDeclaredTable, moduleSchemaAggregateName, schemaPathFor } from './schema-parser'
 import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
 import {
@@ -30,6 +32,10 @@ import {
 import { fileExists, toPosixRelative } from './discovery'
 import { moduleDescriptorOrScaffold } from './app-entry'
 import { MODULE_ROUTES_FILE, moduleRoutesEntryFile } from './import-resolution'
+import type { Statement } from '@babel/types'
+import { readNavigationFile, type NavigationFileEntry } from './navigation-file'
+import { NAVIGATION_FILE, addNavigationEntryFile } from './navigation-writer'
+import { readPagePropMembers } from './page-props-extractor'
 
 /**
  * The alternative the API-only refusal names, shared with the resource
@@ -71,6 +77,11 @@ export interface MakeFeatureOptions extends WriterOptions {
    * `announce: false` needs it: announcing prints them.
    */
   kept?: string[]
+  /**
+   * Receives what became of the index page's navigation entry. `false` leaves the entry to the
+   * caller, as `add resource` does once it knows the routes it registers.
+   */
+  navigation?: { outcome?: FeatureNavigation } | false
 }
 
 export async function makeFeature(name: string, options: MakeFeatureOptions = {}): Promise<string[]> {
@@ -155,23 +166,24 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     : `import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'`
 
   const validator = validatorFile(singular, { ...writerOptions, fields })
+  const frame = await featurePageFrame(appRoot)
 
   const pageFiles = [
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/Index.tsx`,
-      contents: generateIndexPage(singular, collection, routeName, variableName, fields, resourceImport),
+      contents: generateIndexPage(singular, collection, routeName, variableName, fields, resourceImport, frame),
     },
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/Show.tsx`,
-      contents: generateShowPage(singular, routeName, variableName, fields, resourceImport),
+      contents: generateShowPage(singular, routeName, variableName, fields, resourceImport, frame),
     },
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/New.tsx`,
-      contents: generateNewPage(singular, routeName, fields),
+      contents: generateNewPage(singular, routeName, fields, frame),
     },
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/Edit.tsx`,
-      contents: generateEditPage(singular, routeName, variableName, fields),
+      contents: generateEditPage(singular, routeName, variableName, fields, frame),
     },
   ]
 
@@ -192,6 +204,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
     if (options.announce !== false) {
       announcePrototypeFeature({ created, overwritten, patchedFixture, singular, routeName, routeVar, withAuth })
+      if (existsSync(resolve(appRoot, NAVIGATION_FILE))) {
+        announceFrame(frame)
+        consola.info('Navigation: the run that promotes this prototype adds its entry.')
+      }
     }
     return created
   }
@@ -224,6 +240,9 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   await ensureUiComponents(appRoot, uiComponentsImportedBy(pageFiles))
   const kept = keptFiles.map((file) => resolve(appRoot, file.path))
   options.kept?.push(...kept)
+  const navigationTarget = { label: collection, routeName, model: singular, withPolicy, moduleName }
+  const navigation: FeatureNavigation = options.navigation === false ? { status: 'absent' } : await addFeatureNavigationEntry(appRoot, navigationTarget)
+  if (options.navigation) options.navigation.outcome = navigation
 
   if (options.announce === false) {
     return created
@@ -231,6 +250,13 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
   announceWrittenFiles(created, overwritten)
   announceKeptFiles(kept)
+  if (navigation.status !== 'absent') {
+    // A promotion that kept every page wrote none in this frame.
+    if (pageFiles.some((file) => !keptFiles.includes(file))) announceFrame(frame)
+    const line = navigationLine(navigation, navigationTarget)
+    if (navigationNeedsAttention(navigation)) consola.warn(line)
+    else consola.info(line)
+  }
 
   const schemaPath = schemaPathFor(moduleName)
   const routesPath = moduleName ? await moduleRoutesPath(appRoot, moduleName) : 'routes/web.ts'
@@ -567,6 +593,172 @@ ${destroyGuard}${destroyPurge}    await ${singular}.delete({ id: ${variableName}
   })
 }
 
+/** Where the pages a feature writes take their frame from: their own `<main>`, or the app's `Layout`. */
+export type FeaturePageFrame =
+  | { kind: 'layout' }
+  | { kind: 'standalone'; why?: string }
+
+export const FEATURE_LAYOUT_FILE = 'resources/js/components/Layout.tsx'
+const FEATURE_LAYOUT_SPECIFIER = '@/resources/js/components/Layout'
+// What the extensionless import may resolve to ahead of Layout.tsx.
+const LAYOUT_TWINS = ['.ts', '.js', '.jsx', '.mjs', '.mts']
+const OPTIONAL_BOOLEAN = new Set([undefined, 'boolean', 'boolean | undefined', 'undefined | boolean'])
+
+/**
+ * The app's `Layout` frames the pages only when the props its default export function takes
+ * are read whole and fit both calls the pages make, `<Layout>` and `<Layout wide>`: `children`,
+ * an optional boolean `wide`, nothing else required (RFC 0040 §5, the layout `guren add auth` writes).
+ */
+export async function featurePageFrame(appRoot: string): Promise<FeaturePageFrame> {
+  const file = resolve(appRoot, FEATURE_LAYOUT_FILE)
+  if (!existsSync(file)) return { kind: 'standalone' }
+  const keep = (why: string): FeaturePageFrame => ({ kind: 'standalone', why: `${FEATURE_LAYOUT_FILE} ${why}, so the pages keep their own <main>` })
+  const twin = LAYOUT_TWINS.find((extension) => existsSync(file.replace(/\.tsx$/u, extension)))
+  if (twin) return keep(`sits beside Layout${twin}, which the pages' import may resolve to instead`)
+  let source: string
+  try {
+    source = await readFile(file, 'utf8')
+  } catch {
+    return keep('cannot be read')
+  }
+  const ast = parseSourceFile(source, file)
+  if (ast === null) return keep('does not parse')
+  const component = ast.program.body.find((node) => node.type === 'ExportDefaultDeclaration')
+  if (component?.declaration.type !== 'FunctionDeclaration') return keep('has no default export function this can read')
+  // readPagePropMembers() takes a file's `Props` ahead of the component's own parameter.
+  const param = component.declaration.params[0]
+  const annotation = param && 'typeAnnotation' in param && param.typeAnnotation?.type === 'TSTypeAnnotation' ? param.typeAnnotation.typeAnnotation : undefined
+  const takesProps = annotation?.type === 'TSTypeReference' && annotation.typeName.type === 'Identifier' && annotation.typeName.name === 'Props'
+  if (!takesProps && declaresType(ast.program.body, 'Props')) return keep('declares a Props type its component does not take')
+  const read = readPagePropMembers(ast, source)
+  if (read.status !== 'members') return keep(read.status === 'unreadable' ? `has props this cannot read (${read.reason})` : 'declares no props')
+  if (read.open) return keep(`has props this cannot read whole (${read.open})`)
+  if (!read.members.has('children')) return keep('declares no children prop')
+  const wide = read.members.get('wide')
+  if (!wide) return keep('declares no wide prop')
+  if (!wide.acceptsUndefined || !OPTIONAL_BOOLEAN.has(wide.type)) return keep('declares wide as something other than an optional boolean')
+  const required = [...read.members.values()].find((member) => member.name !== 'children' && !member.acceptsUndefined)
+  if (required) return keep(`requires a ${required.name} prop the pages do not pass`)
+  return { kind: 'layout' }
+}
+
+function declaresType(body: readonly Statement[], name: string): boolean {
+  return body.some((node) => {
+    const declaration = node.type === 'ExportNamedDeclaration' ? node.declaration : node
+    return (declaration?.type === 'TSInterfaceDeclaration' || declaration?.type === 'TSTypeAliasDeclaration') && declaration.id.name === name
+  })
+}
+
+function announceFrame(frame: FeaturePageFrame): void {
+  if (frame.kind === 'layout') consola.info(`Pages: framed by ${FEATURE_LAYOUT_FILE}, the index page with wide.`)
+  else if (frame.why) consola.info(`Pages: ${frame.why}.`)
+}
+
+/** The opening and closing lines around a page's content, and the import the frame needs. */
+function pageFrameLines(frame: FeaturePageFrame, title: string, spacing: boolean, wide = false): { importLine: string; open: string; close: string } {
+  if (frame.kind === 'layout') {
+    return {
+      importLine: `import Layout from '${FEATURE_LAYOUT_SPECIFIER}'\n`,
+      open: `    <Layout${wide ? ' wide' : ''}>\n      <Head title="${title}" />\n      <div${spacing ? ' className="space-y-6"' : ''}>`,
+      close: '      </div>\n    </Layout>',
+    }
+  }
+  return {
+    importLine: '',
+    open: `    <main className="min-h-screen bg-g-page font-sans text-g-text">\n      <Head title="${title}" />\n      <div className="mx-auto max-w-3xl ${spacing ? 'space-y-6 ' : ''}px-6 py-12">`,
+    close: '      </div>\n    </main>',
+  }
+}
+
+/** The feature an index page's navigation entry is for. */
+export interface FeatureNavigationTarget {
+  label: string
+  routeName: string
+  model: string
+  withPolicy: boolean
+  moduleName: string | undefined
+}
+
+/** What became of the index page's entry in `config/navigation.ts`. */
+export type FeatureNavigation =
+  | { status: 'added'; unverified?: string }
+  | { status: 'absent' }
+  /** `ungated`: the run writes the policy and the entry the file holds asks no `viewAny` of it. */
+  | { status: 'listed'; ungated: boolean }
+  | { status: 'skipped'; reason: string; command: string }
+  | { status: 'failed'; reason: string }
+
+const navAddCommand = (feature: FeatureNavigationTarget, can: boolean): string =>
+  `bunx guren nav:add "${feature.label}" --route ${feature.routeName}.index${can ? ` --can viewAny:${feature.model}` : ''}`
+
+/**
+ * The index page's entry, through the one writer (RFC 0040 §5), with `viewAny` when the
+ * feature writes the policy. Called after the files are written, so a refusal is reported,
+ * never thrown: the feature is on disk either way.
+ */
+export async function addFeatureNavigationEntry(appRoot: string, feature: FeatureNavigationTarget): Promise<FeatureNavigation> {
+  if (!existsSync(resolve(appRoot, NAVIGATION_FILE))) return { status: 'absent' }
+  const route = `${feature.routeName}.index`
+  if (feature.moduleName && feature.withPolicy) {
+    return { status: 'skipped', reason: `the policy's model is the module's, which a can entry cannot name yet; this command adds the entry with no can`, command: navAddCommand(feature, false) }
+  }
+  // The entry imports the model, which imports its table: an export the schema lacks fails the app's start.
+  if (feature.withPolicy && !(await findDeclaredTable(appRoot, schemaIdentifierFor(feature.model)).catch(() => undefined))) {
+    return { status: 'skipped', reason: `${schemaPathFor(null)} does not export ${schemaIdentifierFor(feature.model)} yet, and the entry's model imports it when the app starts; run this once the table is added`, command: navAddCommand(feature, true) }
+  }
+  const listed = await listedEntry(appRoot, route)
+  if (listed) {
+    const gated = listed.can?.ability === 'viewAny' && listed.can.model.className === feature.model
+    return { status: 'listed', ungated: feature.withPolicy && !gated }
+  }
+  try {
+    const { unverified } = await addNavigationEntryFile(appRoot, {
+      label: feature.label,
+      route,
+      ...(feature.withPolicy ? { can: { ability: 'viewAny', model: feature.model } } : {}),
+    })
+    return { status: 'added', ...(unverified === undefined ? {} : { unverified }) }
+  } catch (error) {
+    return { status: 'failed', reason: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** The entry the file already holds for `route`; a file that does not read leaves the writer to say why. */
+async function listedEntry(appRoot: string, route: string): Promise<NavigationFileEntry | undefined> {
+  const file = resolve(appRoot, NAVIGATION_FILE)
+  try {
+    const ast = parseSourceFile(await readFile(file, 'utf8'), file)
+    const reading = ast ? readNavigationFile(ast, { cwd: appRoot, file }) : undefined
+    return reading?.status === 'read' ? reading.entries.find((entry) => entry.route === route) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Whether the line is a warning: the entry is missing or does not do what this run asked of it. */
+export function navigationNeedsAttention(outcome: FeatureNavigation): boolean {
+  return outcome.status === 'failed' || (outcome.status === 'added' && outcome.unverified !== undefined) || (outcome.status === 'listed' && outcome.ungated)
+}
+
+/** One line on the entry, naming the command that adds it by hand when this run did not. */
+export function navigationLine(outcome: FeatureNavigation, feature: Pick<FeatureNavigationTarget, 'label' | 'routeName' | 'model'>): string {
+  const route = `${feature.routeName}.index`
+  switch (outcome.status) {
+    case 'added':
+      return `Navigation: added ${route} to ${NAVIGATION_FILE}${outcome.unverified ? ` (${outcome.unverified})` : ''}.`
+    case 'absent':
+      return `Navigation: ${NAVIGATION_FILE} does not exist, so no entry was added.`
+    case 'listed':
+      return outcome.ungated
+        ? `Navigation: ${NAVIGATION_FILE} already lists ${route} with no can ['viewAny', ${feature.model}], so the policy does not hide it: add show: { can: ['viewAny', ${feature.model}] } to that entry.`
+        : `Navigation: ${NAVIGATION_FILE} already lists ${route}.`
+    case 'skipped':
+      return `Navigation: no entry added, since ${outcome.reason}: ${outcome.command}`
+    case 'failed':
+      return `Navigation: no entry added: ${outcome.reason}`
+  }
+}
+
 function generateIndexPage(
   singular: string,
   collection: string,
@@ -574,7 +766,9 @@ function generateIndexPage(
   variableName: string,
   fields: FieldDefinition[],
   resourceImport: string,
+  frame: FeaturePageFrame,
 ): string {
+  const shell = pageFrameLines(frame, collection, true, true)
   // A json column is an object, which React cannot render as a child — and it
   // would make a poor list heading anyway. Skip to the next usable field.
   const displayFields = fields.filter((f) => f.type !== 'json')
@@ -583,16 +777,14 @@ function generateIndexPage(
 
   return `import { Head, Link } from '@inertiajs/react'
 import type { PaginatedPageProps } from '@guren/core'
-${resourceImport}
+${shell.importLine}${resourceImport}
 import { route } from '@/.guren/routes.gen'
 ${uiImports(['Button', 'Card', 'Pagination'], { Button: 'buttonClass' })}
 interface Props extends PaginatedPageProps<${singular}ResourceData> {}
 
 export default function ${collection}Index({ data, pagination }: Props) {
   return (
-    <main className="min-h-screen bg-g-page font-sans text-g-text">
-      <Head title="${collection}" />
-      <div className="mx-auto max-w-3xl space-y-6 px-6 py-12">
+${shell.open}
         <div className="flex items-center justify-between">
           <h1 className="flex items-center gap-3 text-3xl font-bold text-g-heading">
             <span aria-hidden className="h-7 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
@@ -609,8 +801,7 @@ ${summaryField ? `              <p className="mt-2 text-sm text-g-text-2">{${var
           ))}
         </div>
         <Pagination links={pagination.links} />
-      </div>
-    </main>
+${shell.close}
   )
 }
 `
@@ -622,7 +813,9 @@ function generateShowPage(
   variableName: string,
   fields: FieldDefinition[],
   resourceImport: string,
+  frame: FeaturePageFrame,
 ): string {
+  const shell = pageFrameLines(frame, singular, true)
   const fieldRenders = fields.map((f) => {
     if (f.type === 'boolean') {
       return `        <p><strong>${f.name}:</strong> {${variableName}.${f.name} ? 'Yes' : 'No'}</p>`
@@ -635,7 +828,7 @@ function generateShowPage(
   }).join('\n')
 
   return `import { Head, Link } from '@inertiajs/react'
-${resourceImport}
+${shell.importLine}${resourceImport}
 import { route } from '@/.guren/routes.gen'
 ${uiImports(['Button'], { Button: 'buttonClass' })}
 interface Props {
@@ -644,9 +837,7 @@ interface Props {
 
 export default function ${singular}Show({ ${variableName} }: Props) {
   return (
-    <main className="min-h-screen bg-g-page font-sans text-g-text">
-      <Head title="${singular}" />
-      <div className="mx-auto max-w-3xl space-y-6 px-6 py-12">
+${shell.open}
         <Link href={route('${routeName}.index')} className="text-sm text-g-accent-text transition hover:underline">Back</Link>
 ${fieldRenders}
         <div className="flex items-center gap-4">
@@ -661,8 +852,7 @@ ${fieldRenders}
             Delete
           </Link>
         </div>
-      </div>
-    </main>
+${shell.close}
   )
 }
 `
@@ -686,27 +876,26 @@ function generateNewPage(
   singular: string,
   routeName: string,
   fields: FieldDefinition[],
+  frame: FeaturePageFrame,
 ): string {
+  const shell = pageFrameLines(frame, `New ${singular}`, false)
   const contract = formIdentifier(`${routeName}.store`)
   const defaults = fields.map((f) => `${f.name}: ${initialFormValue(f)}`).join(', ')
   const state = generateFormState(fields, 'form')
 
   return `import { Head } from '@inertiajs/react'
-${state.imports}import { useRouteForm } from '@guren/inertia-client/forms'
+${shell.importLine}${state.imports}import { useRouteForm } from '@guren/inertia-client/forms'
 import { ${contract} } from '@/.guren/forms.gen'
 ${uiImports(formComponents(fields))}
 export default function New${singular}() {
   const form = useRouteForm(${contract}, { ${defaults} })
 ${state.hooks}  return (
-    <main className="min-h-screen bg-g-page font-sans text-g-text">
-      <Head title="New ${singular}" />
-      <div className="mx-auto max-w-3xl px-6 py-12">
+${shell.open}
         <form method="post" action={${contract}.path} className="space-y-4" onSubmit={form.handleSubmit}>
 ${fields.map((f) => generateFormField(f, 'form')).join('\n')}
           <Button type="submit" disabled={form.processing}>Create</Button>
         </form>
-      </div>
-    </main>
+${shell.close}
   )
 }
 `
@@ -717,13 +906,15 @@ function generateEditPage(
   routeName: string,
   variableName: string,
   fields: FieldDefinition[],
+  frame: FeaturePageFrame,
 ): string {
+  const shell = pageFrameLines(frame, `Edit ${singular}`, false)
   const contract = formIdentifier(`${routeName}.update`)
   const defaults = fields.map((f) => `${f.name}: ${editFormValue(f, variableName)}`).join(', ')
   const state = generateFormState(fields, 'form')
 
   return `import { Head } from '@inertiajs/react'
-${state.imports}import { resolveRouteUrl, useRouteForm } from '@guren/inertia-client/forms'
+${shell.importLine}${state.imports}import { resolveRouteUrl, useRouteForm } from '@guren/inertia-client/forms'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import { ${contract} } from '@/.guren/forms.gen'
 import type { RouteBody } from '@guren/inertia-client/typed-forms'
@@ -735,15 +926,12 @@ interface Props {
 export default function Edit${singular}({ ${variableName} }: Props) {
   const form = useRouteForm(${contract}, { ${defaults} }, { params: { id: ${variableName}.id } })
 ${state.hooks}  return (
-    <main className="min-h-screen bg-g-page font-sans text-g-text">
-      <Head title="Edit ${singular}" />
-      <div className="mx-auto max-w-3xl px-6 py-12">
+${shell.open}
         <form method="post" action={resolveRouteUrl(${contract}.path, { id: ${variableName}.id })} className="space-y-4" onSubmit={form.handleSubmit}>
 ${fields.map((f) => generateFormField(f, 'form')).join('\n')}
           <Button type="submit" disabled={form.processing}>Save</Button>
         </form>
-      </div>
-    </main>
+${shell.close}
   )
 }
 `

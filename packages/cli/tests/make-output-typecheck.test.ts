@@ -150,6 +150,8 @@ interface FeatureCombo {
   options: Omit<MakeFeatureOptions, 'fields' | 'announce'>
   /** Files the combo must have written: the branch it exists to reach. */
   expectedWrites: string[]
+  /** Seed the auth layout and an empty `config/navigation.ts`, so the pages take the layout and the entry types against the route names codegen lists. */
+  navigation?: boolean
 }
 
 const featureCombos: FeatureCombo[] = [
@@ -174,6 +176,14 @@ const featureCombos: FeatureCombo[] = [
     fields: 'title:string,caption:text?',
     options: { attach: 'cover:one,images:many' },
     expectedWrites: ['app/Models/Photo.ts', 'app/Http/Controllers/PhotoController.ts'],
+  },
+  {
+    label: 'policy, framed by the auth layout, with a navigation entry',
+    singular: 'Job',
+    fields: 'title:string,body:text?',
+    options: { withPolicy: true },
+    expectedWrites: ['app/Policies/JobPolicy.ts', 'resources/js/pages/jobs/Index.tsx'],
+    navigation: true,
   },
 ]
 
@@ -206,10 +216,20 @@ describe('rendered make:feature output typechecks', () => {
           if (!combo.options.root) {
             await writeWorkspaceFiles(workspace.dir, { 'routes/web.ts': routesSource(feature, 'registerWebRoutes', '../app') })
           }
+          if (combo.navigation) {
+            await writeWorkspaceFiles(workspace.dir, {
+              'config/navigation.ts': "import { defineNavigation } from '@guren/core'\n\nexport default defineNavigation([])\n",
+              'resources/js/components/Layout.tsx': await readFile(join(cliRoot, 'templates/scaffold/auth/resources/js/components/Layout.tsx'), 'utf8'),
+            })
+          }
 
           const created = relativeToCwd(await makeFeature(combo.singular, { ...combo.options, fields: combo.fields, announce: false, force: true }))
           for (const path of combo.expectedWrites) {
             expect(created).toContain(path)
+          }
+          if (combo.navigation) {
+            expect(await readFile(join(workspace.dir, 'config/navigation.ts'), 'utf8')).toContain(`can: ['viewAny', ${combo.singular}]`)
+            expect(await readFile(join(workspace.dir, `resources/js/pages/${routeName}/Index.tsx`), 'utf8')).toContain('<Layout wide>')
           }
 
           await runRouteCodegen(workspace.dir)

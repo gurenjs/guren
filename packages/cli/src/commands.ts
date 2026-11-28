@@ -1256,7 +1256,7 @@ const addResourceCommand = defineCommand({
   },
   async run({ args }) {
     const overwritten: string[] = []
-    const { created, kept, schemaUpdated, routesUpdated } = await addResource({
+    const { created, kept, schemaUpdated, routesUpdated, navigation } = await addResource({
       name: String(args.name),
       fields: typeof args.fields === 'string' ? args.fields : undefined,
       attach: typeof args.attach === 'string' ? args.attach : undefined,
@@ -1275,6 +1275,8 @@ const addResourceCommand = defineCommand({
     consola.info(routesUpdated
       ? 'Registered the route group in routes/web.ts.'
       : 'routes/web.ts already registers these routes: left unchanged.')
+    if (navigation?.warn) consola.warn(navigation.line)
+    else if (navigation) consola.info(navigation.line)
     consola.info('Next steps:')
     if (schemaUpdated) {
       consola.info('  • Run `bun run db:make` to generate the migration')

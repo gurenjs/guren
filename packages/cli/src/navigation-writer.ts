@@ -2,7 +2,7 @@
  * The one writer of `config/navigation.ts` (RFC 0040 §5): `appendNavigationEntry()` and its
  * counterpart, edits to the source text that `readNavigationFile()` must read back as exactly the
  * entries before plus or minus one, else nothing is written. `guren nav:add` and `nav:remove`
- * call them; `make:feature` and a plan's `commands` are to go through them too.
+ * call them, as does `make:feature` for its index page; a plan's `commands` go through them too.
  */
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
