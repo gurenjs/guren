@@ -9,7 +9,7 @@
  */
 
 import { realpath } from 'node:fs/promises'
-import { basename, resolve } from 'node:path'
+import { basename, relative, resolve } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { runGit } from './changed-files'
@@ -37,6 +37,8 @@ import { derivePlanTasks, describePlanTask, listPlanSteps, planLaterRelationship
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
 import { readStepStart } from './plan/work'
+import { NAVIGATION_CONFIG_FILE, readNavigationEntries } from './navigation-file'
+import { planNavigationWork, type PlanNavigationWork } from './plan/navigation-commands'
 import { isRoutesFileMounted } from './routes-check'
 import { pathExists } from './utils'
 
@@ -100,6 +102,12 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
    * them (each provider an empty shell registered in `createApp()`, each key in `config/env.ts`), and what it writes.
    */
   entries?: { command: string; providers: string[]; env: string[] }
+  /**
+   * A step of an approved plan owning navigation entries still to write (RFC 0040 §5): per element the `nav:add` or
+   * `nav:remove` command, and what the commands cannot say, written by hand. `blocked` says why no command is named:
+   * the file is absent or the writer cannot read it.
+   */
+  navigation?: { work: PlanNavigationWork[]; blocked?: string }
   /**
    * An http step's: the added or renamed views its actions render. `pages.gen.ts` names a page only once
    * its file exists, and the task's last http step typechecks, so each is written here as a stub the pages step completes.
@@ -416,6 +424,8 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const mountable = mount && (await pathExists(resolve(root, mount.file))) && !(await isRoutesFileMounted(root, mount.file)) ? { mount } : {}
   // Named only while something is missing: a provider a command wrote, or a key it declared, is left to plan:status.
   const entries = approval ? await entriesOf(root, plan, step, planPath) : undefined
+  // As the entries' command, named for an approved plan only: a draft's entry may yet fail the plan's checks.
+  const navigation = approval ? await navigationOf(root, plan, step, log.waived) : undefined
 
   return {
     ...head,
@@ -437,6 +447,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       ...(scaffolded ? { scaffolded } : step.kind === 'scaffold' || step.kind === 'tests' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
       ...mountable,
       ...(entries ? { entries } : {}),
+      ...(navigation ? { navigation } : {}),
       ...pageStubsOf(plan, step),
     },
   }
@@ -475,6 +486,21 @@ function mountOf(plan: PlanDraft, derivation: PlanTaskDerivation, task: PlanDeri
     scaffolded: step.elementIds.filter((id) => written.has(id)),
     byHand: step.elementIds.filter((id) => !written.has(id)),
   }
+}
+
+async function navigationOf(root: string, plan: PlanDraft, step: PlanDerivedStep, waived: ReadonlySet<string>): Promise<PlanNextStep['navigation']> {
+  const ids = step.elementIds.filter((id) => !waived.has(id))
+  if (!(plan.navigation ?? []).some((entry) => ids.includes(entry.id))) return undefined
+  if (!(await pathExists(resolve(root, NAVIGATION_CONFIG_FILE)))) {
+    return { work: [], blocked: `${NAVIGATION_CONFIG_FILE} does not exist: run bunx guren add navigation first, then plan:next again` }
+  }
+  const entries = await readNavigationEntries(root)
+  if (!Array.isArray(entries)) return { work: [], blocked: `${entries.unreadable}, which the writer refuses too: make it readable first` }
+  // The writer edits the app it runs in, so a command for another app's file goes there first.
+  const from = relative(await realpath(process.cwd()).catch(() => process.cwd()), await realpath(root).catch(() => root))
+  const cd = from === '' ? '' : `cd ${/^[A-Za-z0-9_./-]+$/u.test(from) ? from : `'${from.replaceAll("'", "'\\''")}'`} && `
+  const work = planNavigationWork(plan, ids, entries, { cd })
+  return work.length > 0 ? { work } : undefined
 }
 
 async function entriesOf(root: string, plan: PlanDraft, step: PlanDerivedStep, planArgument: string): Promise<PlanNextStep['entries']> {
@@ -611,6 +637,15 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     // A draft is never scaffolded (plan:scaffold refuses it), so it has nothing to mount.
     if (step.mount && report.plan.hash !== null) lines.push('', ...mountLines(step, step.mount, planArgument))
     if (step.entries) lines.push('', ...entriesLines(step, step.entries, planArgument))
+    if (step.navigation?.blocked) {
+      lines.push('', `The layout links of this step go through the navigation writer, which cannot run yet: ${step.navigation.blocked}.`)
+    } else if (step.navigation) {
+      lines.push('', 'Write the layout links with these commands, and by hand only what a line says to:')
+      for (const work of step.navigation.work) {
+        if (work.command) lines.push(`  ${work.id}: ${work.command}`)
+        if (work.byHand) lines.push(`  ${work.command ? ' '.repeat(work.id.length + 2) : `${work.id}: `}${work.byHand}`)
+      }
+    }
     if (step.pageStubs) {
       lines.push(
         '',
