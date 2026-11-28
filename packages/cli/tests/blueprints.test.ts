@@ -307,6 +307,43 @@ export default registerWebRoutes
     expect(await readFile('db/schema.ts', 'utf8')).toBe(schemaAfterFirst)
   })
 
+  it('adds the index page to config/navigation.ts and returns the line the command prints', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+    await writeWorkspaceFiles(workspace.dir, { 'config/navigation.ts': "import { defineNavigation } from '@guren/core'\n\nexport default defineNavigation([])\n" })
+
+    const result = await addResource({ name: 'Post' })
+
+    expect(result.navigation).toEqual({ line: 'Navigation: added posts.index to config/navigation.ts.', warn: false })
+    expect(await readFile('config/navigation.ts', 'utf8')).toContain("{ label: 'Posts', route: 'posts.index' }")
+  })
+
+  it('adds no entry when the routes file already answered the collection without naming its index route', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE, `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', () => 'posts')
+}
+
+export default registerWebRoutes
+`)
+    const navigation = "import { defineNavigation } from '@guren/core'\n\nexport default defineNavigation([])\n"
+    await writeWorkspaceFiles(workspace.dir, { 'config/navigation.ts': navigation })
+
+    const result = await addResource({ name: 'Post' })
+
+    expect(result.routesUpdated).toBe(false)
+    expect(result.navigation).toEqual({
+      line: 'Navigation: no entry added, since routes/web.ts already registered /posts without naming posts.index; name the index route, then run: bunx guren nav:add "Posts" --route posts.index',
+      warn: false,
+    })
+    expect(await readFile('config/navigation.ts', 'utf8')).toBe(navigation)
+  })
+
+  it('returns no navigation line for an app without config/navigation.ts', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+    expect((await addResource({ name: 'Post' })).navigation).toBeUndefined()
+  })
+
   // A promotion keeps the prototype's validator and pages; `add resource` passes
   // announce: false, so the command is what reports them, after the written files.
   it('announces the prototype files a promotion kept after the files it wrote', async () => {
